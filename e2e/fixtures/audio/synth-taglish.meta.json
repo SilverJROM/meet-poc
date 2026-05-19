@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "11111111-2222-4333-8444-555555555555",
+  "roomId": "abc123abc123",
+  "recordingStartedAtIso": "2026-05-19T00:00:00.000Z",
+  "recordingDurationMs": 13740,
+  "participants": [
+    {
+      "clientId": "speaker-one",
+      "displayName": "Ari",
+      "isHost": true,
+      "joinedAtMs": 0,
+      "leftAtMs": null
+    },
+    {
+      "clientId": "speaker-two",
+      "displayName": "Bela",
+      "isHost": false,
+      "joinedAtMs": 0,
+      "leftAtMs": null
+    }
+  ],
+  "segments": [
+    {
+      "startMs": 0,
+      "endMs": 4096,
+      "clientId": "speaker-one",
+      "source": "active-speaker-rms"
+    },
+    {
+      "startMs": 4097,
+      "endMs": 9332,
+      "clientId": "speaker-two",
+      "source": "active-speaker-rms"
+    },
+    {
+      "startMs": 9333,
+      "endMs": 13740,
+      "clientId": "speaker-one",
+      "source": "active-speaker-rms"
+    }
+  ]
+}

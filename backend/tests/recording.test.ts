@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import request from 'supertest';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
 import { openSession } from '../src/modules/sessions/store.js';
@@ -33,12 +33,19 @@ function insertUser(db: ReturnType<typeof createTestDb>, email: string): void {
 
 afterEach(() => {
   delete process.env.MEET_RECORDINGS_DIR;
+  delete process.env.MEET_TRANSCRIBE_DISABLED;
+  delete process.env.MEET_TRANSCRIBE_PYTHON;
+  delete process.env.MEET_TRANSCRIBE_SCRIPT;
   for (const dir of recordingDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
 describe('recording API', () => {
+  beforeEach(() => {
+    process.env.MEET_TRANSCRIBE_DISABLED = '1';
+  });
+
   it('S2.1 upload requires a session cookie', async () => {
     const db = createTestDb();
     seedUser(db);
@@ -258,6 +265,81 @@ describe('recording API', () => {
     expect(fs.existsSync(path.join(dir, bogusRoom))).toBe(true);
   });
 
+  it('FIX-B4 transcript endpoint returns an owned transcript sidecar when present', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-05-19T06-00-00-000Z_aaa111aaa111_Mine_111111.webm';
+    const transcript = {
+      schemaVersion: 1,
+      audioFile: filename,
+      language: 'en',
+      lines: [{ startMs: 0, endMs: 1000, clientId: 'host', name: 'Host', text: 'hello', confidence: 0.9 }],
+      words: [{ startMs: 0, endMs: 500, text: 'hello', clientId: 'host', name: 'Host', confidence: 0.9 }],
+    };
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(5));
+    fs.writeFileSync(path.join(dir, `${filename}.transcript.json`), JSON.stringify(transcript));
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    const res = await request(createApp(db)).get(`/api/recordings/${filename}/transcript`).set('Cookie', cookie).expect(200);
+
+    expect(res.body).toEqual(transcript);
+  });
+
+  it('FIX-B4 manual transcribe spawns the configured worker', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-05-19T06-01-00-000Z_aaa111aaa111_Mine_222222.webm';
+    const filepath = path.join(dir, filename);
+    const fakeWorker = path.join(dir, 'fake-worker.cjs');
+    fs.writeFileSync(filepath, Buffer.alloc(5));
+    fs.writeFileSync(
+      fakeWorker,
+      [
+        "const fs = require('node:fs');",
+        'const file = process.argv[2];',
+        "fs.writeFileSync(`${file}.transcript.json`, JSON.stringify({ schemaVersion: 1, audioFile: require('node:path').basename(file), lines: [], words: [] }));",
+        'process.exit(0);',
+      ].join('\n'),
+    );
+    delete process.env.MEET_TRANSCRIBE_DISABLED;
+    process.env.MEET_TRANSCRIBE_PYTHON = process.execPath;
+    process.env.MEET_TRANSCRIBE_SCRIPT = fakeWorker;
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db))
+      .post(`/api/recordings/${filename}/transcribe`)
+      .set('Cookie', cookie)
+      .send({ force: true })
+      .expect(200, { ok: true, status: 'started' });
+
+    await waitForFile(path.join(dir, `${filename}.transcript.json`));
+    expect(fs.existsSync(path.join(dir, `${filename}.transcribe.lock`))).toBe(false);
+  });
+
+  it('FIX-B4 bulk-delete removes transcript and lock sidecars', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-05-19T06-02-00-000Z_aaa111aaa111_Mine_333333.webm';
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(5));
+    fs.writeFileSync(path.join(dir, `${filename}.meta.json`), '{}');
+    fs.writeFileSync(path.join(dir, `${filename}.transcript.json`), '{}');
+    fs.writeFileSync(path.join(dir, `${filename}.transcribe.lock`), '{}');
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db)).post('/api/recordings/bulk-delete').set('Cookie', cookie).send({ filenames: [filename] }).expect(200);
+
+    expect(fs.existsSync(path.join(dir, filename))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${filename}.meta.json`))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${filename}.transcript.json`))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${filename}.transcribe.lock`))).toBe(false);
+  });
+
   it('FIX-B3 bulk-delete rejects a missing filenames array', async () => {
     const db = createTestDb();
     seedUser(db);
@@ -401,3 +483,12 @@ describe('recording API', () => {
     expect(plain).toMatchObject({ hasMetadata: false, speakerCount: null });
   });
 });
+
+async function waitForFile(filepath: string): Promise<void> {
+  const deadline = Date.now() + 3000;
+  while (Date.now() < deadline) {
+    if (fs.existsSync(filepath)) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${filepath}`);
+}
