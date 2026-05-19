@@ -16,6 +16,13 @@ Live state of the fix run. Codex appends callbacks in `## Callbacks log`.
 |-------|-------|------|------------|----------|-----------|---------|
 | FIX-B1 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | FIX-B2 | QUEUED | — | — | — | — | — |
+| FIX-B3 | QUEUED | — | — | — | — | — |
+
+**FIX-B2 scope:** Transcript speaker-tagging — stable clientId per peer, ActiveSpeakerService 8Hz timeline export, sidecar `<recording>.meta.json` with `{participants, segments:[{startMs,endMs,clientId,name}]}`. Future transcription pipeline maps transcript timestamps → names.
+
+**FIX-B3 scope (added 2026-05-19 after FIX-B1 PASS):** Recordings batch-delete — mirror the rooms-bulk-delete pattern I shipped earlier today. Per-row checkbox + Select all on page + Delete selected (N) action bar on `/app/recordings`. New `POST /api/recordings/bulk-delete` endpoint accepting filenames or IDs, ownership-gated. Source: JROM ask verbatim "a folder or tab on the ui shows these and can ba batch deleted as well".
+
+**Dispatch order:** FIX-B3 first (lower-risk, mirrors known-good pattern, user-visible feature JROM just asked for) → FIX-B2 second (transcript tagging is a real feature, more design work).
 
 ## Callbacks log
 
