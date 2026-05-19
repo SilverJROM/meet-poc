@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
-import { createRoom, deleteRoom, getRoom, isOwnerOf, listOwnedRooms, listOwnedRoomsPage } from './store.js';
+import { bulkDeleteOwnedRooms, createRoom, deleteRoom, getRoom, isOwnerOf, listOwnedRooms, listOwnedRoomsPage } from './store.js';
 
 function hasPaginationQuery(query: Record<string, unknown>): boolean {
   return query.page != null || query.pageSize != null;
@@ -47,6 +47,15 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
     if (!isOwnerOf(room.id, authed.user.email, database)) return res.status(403).json({ error: 'forbidden' });
     deleteRoom(room.id, database);
     return res.json({ ok: true });
+  });
+
+  router.post('/rooms/bulk-delete', auth, (req, res) => {
+    const authed = req as AuthenticatedRequest;
+    const raw = (req.body && Array.isArray(req.body.ids)) ? req.body.ids : null;
+    if (!raw) return res.status(400).json({ error: 'ids array required' });
+    const ids = raw.map((v: unknown) => String(v)).slice(0, 200);
+    const result = bulkDeleteOwnedRooms(ids, authed.user.email, database);
+    return res.json({ ok: true, ...result });
   });
 
   router.get('/rooms/:id/exists', (req, res) => {

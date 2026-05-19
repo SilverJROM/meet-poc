@@ -35,6 +35,14 @@ export class RoomsPage implements OnDestroy {
   readonly newTitle = signal('');
   readonly origin = window.location.origin;
   readonly hasRooms = computed(() => this.rooms().length > 0);
+  readonly selectedIds = signal<ReadonlySet<string>>(new Set());
+  readonly selectedCount = computed(() => this.selectedIds().size);
+  readonly allOnPageSelected = computed(() => {
+    const ids = this.rooms();
+    if (ids.length === 0) return false;
+    const selected = this.selectedIds();
+    return ids.every((r) => selected.has(r.id));
+  });
 
   constructor() {
     addIcons({ clipboardOutline, trashOutline, videocamOutline });
@@ -101,6 +109,53 @@ export class RoomsPage implements OnDestroy {
     if (!window.confirm(`Delete "${room.title}"?`)) return;
     await this.roomsService.delete(room.id);
     await this.refreshRooms();
+  }
+
+  isSelected(id: string): boolean {
+    return this.selectedIds().has(id);
+  }
+
+  toggleSelection(id: string): void {
+    const next = new Set(this.selectedIds());
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    this.selectedIds.set(next);
+  }
+
+  toggleSelectAllOnPage(): void {
+    const ids = this.rooms().map((r) => r.id);
+    const selected = this.selectedIds();
+    const allOn = ids.length > 0 && ids.every((id) => selected.has(id));
+    const next = new Set(selected);
+    if (allOn) {
+      for (const id of ids) next.delete(id);
+    } else {
+      for (const id of ids) next.add(id);
+    }
+    this.selectedIds.set(next);
+  }
+
+  clearSelection(): void {
+    this.selectedIds.set(new Set());
+  }
+
+  async bulkDeleteSelected(): Promise<void> {
+    const ids = Array.from(this.selectedIds());
+    if (ids.length === 0) return;
+    const noun = ids.length === 1 ? 'room' : 'rooms';
+    if (!window.confirm(`Delete ${ids.length} ${noun}? This cannot be undone.`)) return;
+    this.busy.set(true);
+    this.error.set(null);
+    try {
+      const { deleted } = await this.roomsService.bulkDelete(ids);
+      this.copyStatus.set(`Deleted ${deleted} ${deleted === 1 ? 'room' : 'rooms'}`);
+      this.clearSelection();
+      await this.refreshRooms();
+    } catch {
+      this.error.set('Bulk delete failed');
+    } finally {
+      this.busy.set(false);
+    }
   }
 
   async goToPage(page: number): Promise<void> {

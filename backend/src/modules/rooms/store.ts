@@ -81,3 +81,17 @@ export function createRoom(titleInput: unknown, email: string, database: Databas
 export function deleteRoom(id: string, database: Database.Database = getDb()): boolean {
   return database.prepare('DELETE FROM rooms WHERE id = ?').run(id).changes > 0;
 }
+
+export function bulkDeleteOwnedRooms(
+  ids: string[],
+  email: string,
+  database: Database.Database = getDb(),
+): { deleted: number; requested: number } {
+  const unique = Array.from(new Set(ids.filter((id) => typeof id === 'string' && id.length > 0)));
+  if (unique.length === 0) return { deleted: 0, requested: 0 };
+  const placeholders = unique.map(() => '?').join(',');
+  const result = database
+    .prepare(`DELETE FROM rooms WHERE owner_email = ? AND id IN (${placeholders})`)
+    .run(email, ...unique);
+  return { deleted: result.changes, requested: unique.length };
+}

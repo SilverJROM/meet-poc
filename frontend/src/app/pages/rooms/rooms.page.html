@@ -34,9 +34,36 @@
     } @else if (!hasRooms()) {
       <p class="empty">No rooms yet. Create one above to get a shareable join link.</p>
     } @else {
+      <div class="bulk-bar" [class.active]="selectedCount() > 0">
+        <label class="bulk-select-all">
+          <input
+            type="checkbox"
+            [checked]="allOnPageSelected()"
+            (change)="toggleSelectAllOnPage()"
+            [attr.aria-label]="'Select all rooms on this page'"
+          >
+          <span>Select all on page</span>
+        </label>
+        @if (selectedCount() > 0) {
+          <span class="bulk-count">{{ selectedCount() }} selected</span>
+          <button type="button" class="secondary-btn" (click)="clearSelection()" [disabled]="busy()">Clear</button>
+          <button type="button" class="danger-btn" (click)="bulkDeleteSelected()" [disabled]="busy()">
+            <ion-icon name="trash-outline"></ion-icon>
+            Delete selected ({{ selectedCount() }})
+          </button>
+        }
+      </div>
       <ul class="room-list">
         @for (room of rooms(); track room.id) {
-          <li class="room-row">
+          <li class="room-row" [class.selected]="isSelected(room.id)">
+            <label class="room-select">
+              <input
+                type="checkbox"
+                [checked]="isSelected(room.id)"
+                (change)="toggleSelection(room.id)"
+                [attr.aria-label]="'Select ' + room.title"
+              >
+            </label>
             <div class="room-main">
               <h3>{{ room.title }}</h3>
               <p>Created {{ room.createdAt | date: 'medium' }}</p>

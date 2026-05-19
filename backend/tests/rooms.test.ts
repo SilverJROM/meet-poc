@@ -96,6 +96,41 @@ describe('rooms API', () => {
     expect(list.body.rooms).toEqual([]);
   });
 
+  it('bulk-delete removes owned rooms and ignores non-owned ids in the same call', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    db.prepare('INSERT INTO users (email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+      'other@silverjrom.app',
+      '00:00',
+      Date.now(),
+      Date.now(),
+    );
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('aaa111aaa111', 'Mine A', 'jrom@silverjrom.app', 1);
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('bbb222bbb222', 'Mine B', 'jrom@silverjrom.app', 2);
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('ccc333ccc333', 'Mine C', 'jrom@silverjrom.app', 3);
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('zzz999zzz999', 'Other', 'other@silverjrom.app', 4);
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    const res = await request(app)
+      .post('/api/rooms/bulk-delete')
+      .set('Cookie', cookie)
+      .send({ ids: ['aaa111aaa111', 'bbb222bbb222', 'zzz999zzz999', 'does-not-exist'] })
+      .expect(200);
+    expect(res.body).toEqual({ ok: true, deleted: 2, requested: 4 });
+
+    const remaining = await request(app).get('/api/rooms').set('Cookie', cookie).expect(200);
+    expect(remaining.body.rooms.map((r: { id: string }) => r.id)).toEqual(['ccc333ccc333']);
+
+    // Other user's room is untouched
+    const otherCookie = `session=${createSession('other@silverjrom.app', db)}`;
+    const otherList = await request(app).get('/api/rooms').set('Cookie', otherCookie).expect(200);
+    expect(otherList.body.rooms.map((r: { id: string }) => r.id)).toEqual(['zzz999zzz999']);
+
+    // 400 on missing ids field
+    await request(app).post('/api/rooms/bulk-delete').set('Cookie', cookie).send({}).expect(400);
+  });
+
   it('S2.5 exposes public room existence with title', async () => {
     const db = createTestDb();
     seedUser(db);

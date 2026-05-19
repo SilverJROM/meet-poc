@@ -41,6 +41,13 @@ export class RoomsService {
     await firstValueFrom(this.http.delete<{ ok: true }>(`/api/rooms/${encodeURIComponent(id)}`));
   }
 
+  async bulkDelete(ids: string[]): Promise<{ deleted: number; requested: number }> {
+    const res = await firstValueFrom(
+      this.http.post<{ ok: true; deleted: number; requested: number }>('/api/rooms/bulk-delete', { ids }),
+    );
+    return { deleted: res.deleted, requested: res.requested };
+  }
+
   async exists(id: string): Promise<{ exists: boolean; title?: string }> {
     return firstValueFrom(this.http.get<{ exists: boolean; title?: string }>(`/api/rooms/${encodeURIComponent(id)}/exists`));
   }
