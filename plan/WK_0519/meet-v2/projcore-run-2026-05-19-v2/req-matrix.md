@@ -52,7 +52,7 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R8.6 | Non-host meeting-ended toast + 5s auto-dismiss + nav | B8 | — | ASSIGNED |
 | R8.7 | Active-speaker highlight via Web Audio RMS at 8Hz | B8 | — | ASSIGNED |
 
-**Totals after v2-B7 implementation callback (2026-05-19):** 38 VERIFIED / 6 ASSIGNED / 0 PARTIAL / 0 FAIL.
+**Totals after v2-B7 PASS (2026-05-19):** 38 VERIFIED / 6 ASSIGNED / 0 PARTIAL / 0 FAIL.
 
 **Verification trail:**
 - 2026-05-19 — v2-B1 PASS — R1.1-R1.6 except R1.3 PARTIAL. Live smoke: WS join TEST_ROOM01 → real SQLite row (uuidv4 id, ended_reason=host-disconnect-empty, admitted_peak=1, 623ms duration → correctly excluded from past via 10s filter). 15/31 vitest green. 2 decisions logged. See `validation/batch-1.md`.
