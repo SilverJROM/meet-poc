@@ -75,6 +75,43 @@ describe('rooms API', () => {
     expect(page2.body.rooms).toHaveLength(5);
   });
 
+  it('bulk-delete cascades meeting_sessions to satisfy FK constraint', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('aaa111aaa111', 'Mine A', 'jrom@silverjrom.app', 1);
+    // Seed historical meeting_sessions for that room (the real prod-DB scenario that caused the FK error)
+    db.prepare('INSERT INTO meeting_sessions (id, room_id, host_email, started_at, ended_at, admitted_peak) VALUES (?, ?, ?, ?, ?, ?)').run('sess1', 'aaa111aaa111', 'jrom@silverjrom.app', 100, 200, 1);
+    db.prepare('INSERT INTO meeting_sessions (id, room_id, host_email, started_at, ended_at, admitted_peak) VALUES (?, ?, ?, ?, ?, ?)').run('sess2', 'aaa111aaa111', 'jrom@silverjrom.app', 300, 400, 1);
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    const res = await request(app)
+      .post('/api/rooms/bulk-delete')
+      .set('Cookie', cookie)
+      .send({ ids: ['aaa111aaa111'] })
+      .expect(200);
+    expect(res.body).toEqual({ ok: true, deleted: 1, requested: 1 });
+
+    // Sessions cleaned up; rooms gone
+    const sessionsLeft = db.prepare('SELECT COUNT(*) AS c FROM meeting_sessions WHERE room_id = ?').get('aaa111aaa111') as { c: number };
+    expect(sessionsLeft.c).toBe(0);
+    const roomsLeft = db.prepare('SELECT COUNT(*) AS c FROM rooms WHERE id = ?').get('aaa111aaa111') as { c: number };
+    expect(roomsLeft.c).toBe(0);
+  });
+
+  it('single delete also cascades meeting_sessions', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('aaa111aaa111', 'Mine', 'jrom@silverjrom.app', 1);
+    db.prepare('INSERT INTO meeting_sessions (id, room_id, host_email, started_at, ended_at, admitted_peak) VALUES (?, ?, ?, ?, ?, ?)').run('sess1', 'aaa111aaa111', 'jrom@silverjrom.app', 100, 200, 1);
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    await request(app).delete('/api/rooms/aaa111aaa111').set('Cookie', cookie).expect(200, { ok: true });
+    const sessionsLeft = db.prepare('SELECT COUNT(*) AS c FROM meeting_sessions WHERE room_id = ?').get('aaa111aaa111') as { c: number };
+    expect(sessionsLeft.c).toBe(0);
+  });
+
   it("S2.4 deletes owned rooms and returns 403 for another user's room", async () => {
     const db = createTestDb();
     seedUser(db);

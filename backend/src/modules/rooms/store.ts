@@ -79,7 +79,11 @@ export function createRoom(titleInput: unknown, email: string, database: Databas
 }
 
 export function deleteRoom(id: string, database: Database.Database = getDb()): boolean {
-  return database.prepare('DELETE FROM rooms WHERE id = ?').run(id).changes > 0;
+  const tx = database.transaction((roomId: string) => {
+    database.prepare('DELETE FROM meeting_sessions WHERE room_id = ?').run(roomId);
+    return database.prepare('DELETE FROM rooms WHERE id = ?').run(roomId).changes;
+  });
+  return tx(id) > 0;
 }
 
 export function bulkDeleteOwnedRooms(
@@ -90,8 +94,13 @@ export function bulkDeleteOwnedRooms(
   const unique = Array.from(new Set(ids.filter((id) => typeof id === 'string' && id.length > 0)));
   if (unique.length === 0) return { deleted: 0, requested: 0 };
   const placeholders = unique.map(() => '?').join(',');
-  const result = database
-    .prepare(`DELETE FROM rooms WHERE owner_email = ? AND id IN (${placeholders})`)
-    .run(email, ...unique);
-  return { deleted: result.changes, requested: unique.length };
+  const tx = database.transaction(() => {
+    database
+      .prepare(`DELETE FROM meeting_sessions WHERE room_id IN (SELECT id FROM rooms WHERE owner_email = ? AND id IN (${placeholders}))`)
+      .run(email, ...unique);
+    return database
+      .prepare(`DELETE FROM rooms WHERE owner_email = ? AND id IN (${placeholders})`)
+      .run(email, ...unique).changes;
+  });
+  return { deleted: tx(), requested: unique.length };
 }
