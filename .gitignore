@@ -6,6 +6,7 @@ data/
 backend/dist/
 backend/node_modules/
 frontend/dist/
+frontend/.angular/
 frontend/node_modules/
 e2e/node_modules/
 e2e/test-results/
