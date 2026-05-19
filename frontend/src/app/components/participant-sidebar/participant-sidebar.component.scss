@@ -1,7 +1,10 @@
+@use 'breakpoints' as bp;
+
 .participant-sidebar {
   width: 0;
   max-width: 0;
   min-height: calc(100vh - 86px);
+  min-height: calc(100dvh - 86px);
   overflow: hidden;
   border-left: 0 solid transparent;
   background: #181b22;
@@ -187,9 +190,19 @@ h3 {
   white-space: nowrap;
 }
 
-@media (max-width: 760px) {
+@include bp.max(760px) {
   .participant-sidebar.open {
     width: 100%;
     max-width: none;
+  }
+
+  .kebab {
+    width: 48px;
+    height: 48px;
+  }
+
+  .action-menu button,
+  .waiting-list button {
+    min-height: 48px;
   }
 }

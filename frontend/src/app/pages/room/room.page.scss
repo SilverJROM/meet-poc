@@ -1,5 +1,8 @@
+@use 'breakpoints' as bp;
+
 .room-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   background: var(--page-bg);
 }
 
@@ -77,6 +80,7 @@ h1 {
 
 .call-panel {
   min-height: 100vh;
+  min-height: 100dvh;
   max-width: 1400px;
   margin: 0 auto;
   padding: 0 16px;
@@ -200,10 +204,11 @@ h1 {
   grid-template-columns: 1fr 1fr 1fr;
   grid-auto-rows: minmax(0, 1fr);
   max-height: calc(100vh - 200px);
+  max-height: calc(100dvh - 200px);
   overflow-y: auto;
 }
 
-@media (max-width: 640px) {
+@include bp.max(640px) {
   .lobby-panel {
     transform: translateY(7vh);
   }
@@ -225,9 +230,18 @@ h1 {
   .call-content.sidebar-open {
     grid-template-columns: 1fr;
   }
+
+  .check-row {
+    min-height: 48px;
+  }
+
+  .check-row input {
+    width: 24px;
+    height: 24px;
+  }
 }
 
-@media (min-width: 641px) and (max-width: 1024px) {
+@include bp.between(641px, 1024px) {
   .tiles-grid[data-count="3"],
   .tiles-grid[data-count="4"],
   .tiles-grid[data-count="5"],

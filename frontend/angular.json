@@ -24,6 +24,9 @@
                 "output": "."
               }
             ],
+            "stylePreprocessorOptions": {
+              "includePaths": ["src/styles"]
+            },
             "styles": ["src/styles.scss"]
           },
           "configurations": {

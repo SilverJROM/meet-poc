@@ -1,3 +1,5 @@
+@use 'breakpoints' as bp;
+
 .lobby-preview {
   display: grid;
   gap: 14px;
@@ -64,8 +66,12 @@
   padding: 0 10px;
 }
 
-@media (max-width: 560px) {
+@include bp.max(560px) {
   .device-grid {
     grid-template-columns: 1fr;
+  }
+
+  .device-select {
+    min-height: 48px;
   }
 }

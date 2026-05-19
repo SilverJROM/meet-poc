@@ -1,3 +1,5 @@
+@use 'breakpoints' as bp;
+
 .controls-bar {
   min-height: 62px;
   display: grid;
@@ -144,7 +146,7 @@
   background: rgba(127, 29, 29, 0.32);
 }
 
-@media (max-width: 760px) {
+@include bp.max(760px) {
   .controls-bar {
     grid-template-columns: 1fr;
   }
@@ -155,6 +157,9 @@
 
   .control-btn,
   .leave-btn {
-    flex: 0 0 46px;
+    flex: 0 0 48px;
+    width: 48px;
+    min-width: 48px;
+    min-height: 48px;
   }
 }

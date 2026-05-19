@@ -12,8 +12,10 @@ import { TileComponent } from '../../components/tile/tile.component';
 import { ActiveSpeakerService } from '../../services/active-speaker.service';
 import { AuthService } from '../../services/auth.service';
 import { MediaError, MediaService } from '../../services/media.service';
+import { PlatformService } from '../../services/platform.service';
 import { RecorderService } from '../../services/recorder.service';
 import { RoomsService } from '../../services/rooms.service';
+import { ViewportService } from '../../services/viewport.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
 import { WebrtcService } from '../../services/webrtc.service';
 
@@ -52,6 +54,8 @@ export class RoomPage implements OnDestroy {
   readonly recorder = inject(RecorderService);
   readonly webrtc = inject(WebrtcService);
   readonly activeSpeaker = inject(ActiveSpeakerService);
+  private readonly platform = inject(PlatformService);
+  private readonly viewport = inject(ViewportService);
 
   readonly roomId = this.route.snapshot.paramMap.get('id') ?? '';
   readonly state = signal<RoomState>('checking');
@@ -116,6 +120,9 @@ export class RoomPage implements OnDestroy {
         activeSpeakerAnalyzerCount: this.activeSpeaker.analyzerCount(),
         activeSpeakerLastMaxRms: this.activeSpeaker.lastMaxRms(),
         activeSpeakerContextState: this.activeSpeaker.contextState(),
+        isMobile: () => this.viewport.isMobile(),
+        isIOS: () => this.platform.isIOS(),
+        isAndroid: () => this.platform.isAndroid(),
       };
       if (window.location.hostname === 'localhost') {
         debug.injectActiveSpeakerStream = (id: string, stream: MediaStream) => this.activeSpeaker.injectDebugStream(id, stream);
@@ -611,6 +618,9 @@ declare global {
       activeSpeakerAnalyzerCount?: number;
       activeSpeakerLastMaxRms?: number;
       activeSpeakerContextState?: string;
+      isMobile?: () => boolean;
+      isIOS?: () => boolean;
+      isAndroid?: () => boolean;
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
     };
   }

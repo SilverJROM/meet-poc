@@ -1,5 +1,8 @@
+@use 'breakpoints' as bp;
+
 .app-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr);
   background: var(--page-bg);
@@ -12,6 +15,7 @@
 
 .sidebar {
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -123,6 +127,7 @@
 .app-main {
   min-width: 0;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .app-topbar {
@@ -171,7 +176,7 @@
   padding: 24px 18px 48px;
 }
 
-@media (max-width: 720px) {
+@include bp.max(720px) {
   .app-shell,
   .app-shell.is-collapsed {
     grid-template-columns: 56px minmax(0, 1fr);

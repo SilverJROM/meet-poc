@@ -1,3 +1,5 @@
+@use 'breakpoints' as bp;
+
 .panel {
   border: 1px solid var(--line-soft);
   border-radius: 8px;
@@ -66,7 +68,7 @@ h2 {
   font-weight: 700;
 }
 
-@media (max-width: 860px) {
+@include bp.max(860px) {
   .session-row {
     grid-template-columns: 1fr;
   }

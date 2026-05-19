@@ -1,3 +1,5 @@
+@use 'breakpoints' as bp;
+
 .panel {
   border: 1px solid var(--line-soft);
   border-radius: 8px;
@@ -69,7 +71,7 @@ h3 {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 720px) {
+@include bp.max(720px) {
   .session-row {
     grid-template-columns: 1fr;
   }

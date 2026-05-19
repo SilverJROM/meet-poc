@@ -1,3 +1,5 @@
+@use 'breakpoints' as bp;
+
 .rooms-page {
   display: grid;
   gap: 18px;
@@ -103,7 +105,7 @@ h3 {
   font-size: 13px;
 }
 
-@media (max-width: 720px) {
+@include bp.max(720px) {
   .create-form,
   .room-row {
     grid-template-columns: 1fr;

@@ -1,3 +1,5 @@
+@use 'breakpoints' as bp;
+
 :root {
   color-scheme: dark;
   --page-bg: #0f1115;
@@ -136,4 +138,22 @@ a {
 
 .muted {
   color: var(--muted);
+}
+
+@include bp.mobile {
+  .icon-btn {
+    inline-size: 48px;
+    block-size: 48px;
+  }
+
+  .primary-btn,
+  .secondary-btn,
+  .danger-btn {
+    min-height: 48px;
+    padding-inline: 16px;
+  }
+
+  .field input {
+    min-height: 48px;
+  }
 }

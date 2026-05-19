@@ -1,5 +1,8 @@
+@use 'breakpoints' as bp;
+
 .login-shell {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 24px;
@@ -56,4 +59,10 @@ p {
 
 .submit-btn {
   width: 100%;
+}
+
+@include bp.mobile {
+  .password-field {
+    grid-template-columns: 1fr 48px;
+  }
 }
