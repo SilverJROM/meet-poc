@@ -117,7 +117,26 @@ Legacy files were moved to `legacy-poc/` during B1 and deleted during B6 per JRO
 | rooms | CRUD routes, `getRoom(id)` helper | `db`, `auth.assertSession` |
 | signaling | `/ws` endpoint, knock/admit protocol | `db`, `auth` (cookie parse), `rooms.getRoom`, `sessions` lifecycle helpers |
 | sessions | meeting session store + `/api/meeting-sessions` route | `db`, `auth.requireAuth` |
-| recording | `/upload` route, recordings list | `db` (or filesystem only), `auth.assertSession` |
+| recording | authenticated `/upload` route, recordings list/download | `db`, `auth.requireAuth`, `rooms`, `sessions.getOpenSessionFor` |
+
+## 5.1 Meeting wire protocol
+
+Existing v1 messages remain supported: `join`, `signal`, `admit`, `reject`, `admitted`, `knocking`, `knock`, `pending-list`, `peer-joined`, `peer-left`, `knock-cancelled`, `signal`, `rejected`, `error`.
+
+v2 backend host-authority messages:
+- Client to server: `recording-state {state:'started'|'stopped'}`, `meeting-ended-by-host`, `mute-target {clientId}`, `remove-peer {clientId}`.
+- Server to clients: `recording-started {clientId, sessionId}`, `recording-stopped {clientId, sessionId}`, `meeting-ended {reason}`, `mute-request {from}`, `peer-removed {reason}`.
+- Host commands are validated server-side against room ownership. Non-host commands are no-ops with info-level stdout logging.
+
+## 5.2 Recording persistence
+
+`POST /upload` requires a valid session cookie, room ownership, and an open `meeting_session` for the room. New recording filenames embed the session id:
+
+`<ISO-ts>_<sessionId>_<roomId>_<roomTitleSlug>_<rand6>.webm`
+
+The recording parser remains backward-compatible with v1 files:
+
+`<ISO-ts>_<roomId>_<roomTitleSlug>_<rand6>.webm`
 
 A cross-module import must be one of the above; otherwise it's a Gate-7 standing-rule check fail.
 
