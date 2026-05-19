@@ -23,12 +23,12 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R3.2 | /dashboard redirects to /app/rooms | B3 | B3 /dashboard → /app/rooms redirect; S3.2 + live curl https://voice.silverjrom.app/dashboard | VERIFIED |
 | R3.3 | Layout: persistent collapsible sidebar + topbar + active state | B3 | B3 collapsible sidebar with 6 nav links + topbar + active state via routerLinkActive; localStorage memory; 4 screenshots | VERIFIED |
 | R3.4 | Auth guard at /app/** | B3 | B3 authGuard moved to /app parent; S3.4 verifies /app/rooms + /app/ongoing both redirect to /login when unauthed | VERIFIED |
-| R4.1 | Rooms tab paginated, /api/rooms?page=&pageSize= backward-compat | B4 | — | ASSIGNED |
-| R4.2 | Ongoing tab polls active sessions every 5s | B4 | — | ASSIGNED |
-| R4.3 | Past tab paginated with duration formatting | B4 | — | ASSIGNED |
-| R4.4 | Recordings tab promoted to /app/recordings | B4 | — | ASSIGNED |
-| R4.5 | Create-room form remains on Rooms tab | B4 | — | ASSIGNED |
-| R4.6 | All paginated tabs persist ?page= in URL | B4 | — | ASSIGNED |
+| R4.1 | Rooms tab paginated, /api/rooms?page=&pageSize= backward-compat | B4 | B4 backend ?page=&pageSize= backward-compat; shared <app-pagination>; live curl confirms both shapes | VERIFIED |
+| R4.2 | Ongoing tab polls active sessions every 5s | B4 | B4 Ongoing page 5s poll via interval(5000); S4.3 11.4s test (insert session, wait, verify pickup) | VERIFIED |
+| R4.3 | Past tab paginated with duration formatting | B4 | B4 Past paginated; duration formatting mm:ss/h:mm:ss; recordingsCount via FS-scan join | VERIFIED |
+| R4.4 | Recordings tab promoted to /app/recordings | B4 | B4 Recordings paginated; S4.5 + screenshot | VERIFIED |
+| R4.5 | Create-room form remains on Rooms tab | B4 | B4 S4.2 (create-room form stays on Rooms tab; carried from B3) | VERIFIED |
+| R4.6 | All paginated tabs persist ?page= in URL | B4 | B4 Rooms+Past+Recordings persist ?page=N in URL via Router.navigate queryParamsHandling:merge | VERIFIED |
 | R5.1 | Lobby pre-grants getUserMedia on mount (Pattern X) | B5 | — | ASSIGNED |
 | R5.2 | Mic level meter + device selector dropdowns | B5 | — | ASSIGNED |
 | R5.3 | Device-change re-acquires getUserMedia with new deviceId | B5 | — | ASSIGNED |
