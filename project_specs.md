@@ -218,6 +218,16 @@ Ended session rows include `recordingsCount`, computed by scanning owned recordi
   - unknown: blocking retryable diagnostic message
 - Mid-call microphone loss listens to local audio track `onmute`/`onended`, flips local mic state false, broadcasts `media-state`, and shows a non-blocking notice.
 
+### 6.6 v2 Participant Sidebar, Leave UX, And Active Speaker
+
+- `<app-participant-sidebar>` replaces the old waiting-room panel. It is a collapsible right-side call panel, closed by default, with an admitted participant count and waiting badge in the controls bar.
+- The sidebar's "In the call" section lists all admitted peers with avatar, name, HOST badge, and mic/camera state. Hosts get kebab actions on non-self rows only: Mute participant and Remove from meeting.
+- The "Waiting to join" section is rendered for hosts only and contains Admit / Reject controls for knockers.
+- Host Leave opens `<app-leave-dialog>` with End meeting for everyone, Leave but keep meeting going, and Cancel. Non-host Leave remains direct.
+- End meeting for everyone is client-orchestrated: stop/upload active recording with 8s timeouts, send `meeting-ended-by-host`, wait briefly, close, and navigate to `/app/rooms`.
+- Non-hosts receiving `meeting-ended` see `<app-meeting-ended-toast>` with OK and a 5-second auto-dismiss before navigation.
+- Active speaker is sampled at 8 Hz. `ActiveSpeakerService` uses Web Audio RMS at a -40 dBFS floor with browser fallbacks for remote-track sampling gaps. The active remote tile receives `.is-speaking`; local peer is not highlighted.
+
 ## 7. Testing expectations
 
 - **E2E:** Playwright via `e2e/playwright.config.ts`. baseURL = consolidated dev URL (TBD in B1, likely 4710). Headless chromium with fake-media-stream flags for WebRTC.
@@ -323,7 +333,7 @@ Filled in as batches close. Empty at run start.
 | frontend/past page | Codex | v2-B4 | DONE |
 | frontend/transcripts/settings stubs | Codex | v2-B3 | DONE |
 | frontend/room page (lobby) | Codex | B4/v2-B5 | DONE |
-| frontend/room page (call) | — | B4 | PENDING |
+| frontend/room page (call) | Codex | B4/v2-B6/v2-B7/v2-B8 | DONE |
 | infra/coturn | — | B6 | PENDING |
 
 ## 12. Changelog (rule changes)

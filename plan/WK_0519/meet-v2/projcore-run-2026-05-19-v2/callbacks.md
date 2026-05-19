@@ -5,3 +5,4 @@
 [projcore callback] v2-batch-5 DONE — lobby device preview + mic meter + stream carry-forward
 [projcore callback] v2-batch-6 DONE — grid + per-tile overlays + media-state + clock; live comparison screenshot captured
 [projcore callback] v2-batch-7 DONE — controls polish + host-only Record + recording banner + device failure UX
+[projcore callback] v2-batch-8 DONE — sidebar + host actions + leave UX + active-speaker; Run 1 ready for Phase 2 acceptance

@@ -44,15 +44,15 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R7.3 | "Host is recording" banner visible to ALL with duration counter | B7 | B7 S7.3 two-context recording banner test + screenshot | VERIFIED |
 | R7.4 | Permission denied + no-devices error UI | B7 | B7 S7.4 denied/no-devices tests + screenshots; mid-call notice implemented | VERIFIED |
 | R7.5 | Camera-off renders avatar (not black video) | B7 | B7 self-camera-off-avatar test + B6 remote avatar regression | VERIFIED |
-| R8.1 | Collapsible right-side participant sidebar with In-call + Waiting-to-join | B8 | — | ASSIGNED |
-| R8.2 | Host kebab actions: Mute participant, Remove from meeting | B8 | — | ASSIGNED |
-| R8.3 | Host's own row: kebab disabled | B8 | — | ASSIGNED |
-| R8.4 | Leave confirm dialog (host only): End for all / Just leave | B8 | — | ASSIGNED |
-| R8.5 | End-meeting-for-all client-orchestrated flush-recorder-then-broadcast | B8 | — | ASSIGNED |
-| R8.6 | Non-host meeting-ended toast + 5s auto-dismiss + nav | B8 | — | ASSIGNED |
-| R8.7 | Active-speaker highlight via Web Audio RMS at 8Hz | B8 | — | ASSIGNED |
+| R8.1 | Collapsible right-side participant sidebar with In-call + Waiting-to-join | B8 | B8 <app-participant-sidebar>; S8.1/S8.2; host/non-host screenshots | VERIFIED |
+| R8.2 | Host kebab actions: Mute participant, Remove from meeting | B8 | B8 S8.3/S8.4 host actions through B2 WS commands | VERIFIED |
+| R8.3 | Host's own row: kebab disabled | B8 | B8 sidebar renders no kebab for own row; S8.1 DOM coverage | VERIFIED |
+| R8.4 | Leave confirm dialog (host only): End for all / Just leave | B8 | B8 <app-leave-dialog>; S8.5; leave-dialog-visible.png | VERIFIED |
+| R8.5 | End-meeting-for-all client-orchestrated flush-recorder-then-broadcast | B8 | B8 S8.7 active recording stop/upload before meeting-ended-by-host; file exists assertion | VERIFIED |
+| R8.6 | Non-host meeting-ended toast + 5s auto-dismiss + nav | B8 | B8 <app-meeting-ended-toast>; S8.7/S8.8; meeting-ended-toast.png | VERIFIED |
+| R8.7 | Active-speaker highlight via Web Audio RMS at 8Hz | B8 | B8 ActiveSpeakerService; S8.9 .is-speaking + __meetDebug.activeSpeakerHz in [6,10] | VERIFIED |
 
-**Totals after v2-B7 PASS (2026-05-19):** 38 VERIFIED / 6 ASSIGNED / 0 PARTIAL / 0 FAIL.
+**Totals after v2-B8 callback (2026-05-19):** 44 VERIFIED / 0 ASSIGNED / 0 PARTIAL / 0 FAIL.
 
 **Verification trail:**
 - 2026-05-19 — v2-B1 PASS — R1.1-R1.6 except R1.3 PARTIAL. Live smoke: WS join TEST_ROOM01 → real SQLite row (uuidv4 id, ended_reason=host-disconnect-empty, admitted_peak=1, 623ms duration → correctly excluded from past via 10s filter). 15/31 vitest green. 2 decisions logged. See `validation/batch-1.md`.
@@ -62,3 +62,4 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 - 2026-05-19 — v2-B5 PASS — R5.1-R5.5 VERIFIED. Pattern X pre-grant on lobby mount; <app-lobby-preview> + <app-mic-meter> 8Hz; reacquire on device change; stream-carries-into-call; permission-denied placeholder. 19 Playwright in 11.7s live. 3 decisions (test-mic-deferred, mic-meter-threshold, retry-preflight). See `validation/batch-5.md`.
 - 2026-05-19 — v2-B6 PASS — R6.1-R6.5 VERIFIED. Dynamic grid + tile overlays + media-state relay + elapsed clock. 17/43 backend. Same commit-process gap as v1-B4: codex needed correction to commit before STATUS: DONE; closed in ~15min with 4 grouped commits. B4 ongoing-tab flaky in parallel (passed solo). JROM-comparison screenshot at batch-6/screenshots/jrom-comparison-live-call.png captures the new live look. JROM screenshot complaint closed at visual level. 4 decisions logged. See `validation/batch-6.md`.
 - 2026-05-19 — v2-B7 callback — R7.1-R7.5 implemented and self-verified. Icon-state controls, host-only Record DOM gate, shared recording banner, polished denied/no-device UX, mid-call mic-loss notice, local camera-off avatar. 43 backend tests, full build, 6 B7 Playwright, 32 B3-B7 Playwright sweep with `--workers=1`, PM2 restart, and public live smoke green. Pending /projcore independent verdict.
+- 2026-05-19 — v2-B8 callback — R8.1-R8.7 implemented and self-verified. Participant sidebar replaces waiting-room panel; host mute/remove actions; host leave dialog; end-for-all recording flush; non-host meeting-ended toast; active-speaker 8Hz highlight. 43 backend tests, full build, 8 B8 Playwright, 40 B3-B8 Playwright sweep with `--workers=1`, PM2 restart, and public live screenshot green. Pending /projcore independent verdict.

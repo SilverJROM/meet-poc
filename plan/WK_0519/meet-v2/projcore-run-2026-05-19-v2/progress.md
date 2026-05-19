@@ -32,7 +32,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 | B5 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B6 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS (commit-process correction repeated; ~15min to close) |
 | B7 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS (commit-before-DONE rule honored after B6 reminder) |
-| B8 | PENDING | — | — | — | — | — |
+| B8 | DONE | 1 | 2026-05-19 | 2026-05-19 | pending /projcore | callback posted |
 
 ## Callbacks log
 
@@ -53,3 +53,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 [projcore verdict] v2-batch-6 PASS — R6.1-R6.5 VERIFIED. Dynamic grid + tile overlays + media-state + clock. 17/43 backend, 26 Playwright (with 1 flaky parallel race on B4 ongoing-tab, passed solo). 9 screenshots incl jrom-comparison-live-call.png. 4 decisions logged. JROM "trash UI" complaint closed at visual level. Matrix: 33/44 VERIFIED. See validation/batch-6.md.
 [projcore callback] v2-batch-7 DONE — controls polish + host-only Record + recording banner + device failure UX
 [projcore verdict] v2-batch-7 PASS — R7.1-R7.5 VERIFIED. Icon-state controls w/ aria-pressed + 46px touch targets (mobile prep) + Record host-only-in-DOM + <app-recording-banner> w/ duration + polished device-failure (denied/no-devices/video-denied-audio-ok/unknown/mid-call). 32/32 Playwright (B3-B7) w/ --workers=1 in 38s, 17/43 backend. 4 decisions logged. Commit-process gap CLOSED — codex committed before STATUS: DONE this time (hard-reminder injection worked). Matrix: 38/44 VERIFIED. See validation/batch-7.md.
+[projcore callback] v2-batch-8 DONE — sidebar + host actions + leave UX + active-speaker; 8 B8 + 40 B3-B8 Playwright green; backend 43/43; live screenshot captured

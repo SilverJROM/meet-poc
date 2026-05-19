@@ -90,3 +90,12 @@
 - **Commit BEFORE STATUS: DONE — triple-check before callback**
 
 **Active callback target:** `plan/WK_0519/meet-v2/projcore-run-2026-05-19-v2/callbacks.md` + `progress.md`.
+
+## v2-B8 Completion Notes (Codex)
+
+- Branch: `feat/meet-v2-b8-sidebar-actions-leave-speaker`
+- Implemented: participant sidebar, host mute/remove actions, host-only leave dialog, end-for-all recording flush, non-host meeting-ended toast, active-speaker highlight.
+- Removed: old `<app-waiting-room-panel>` component.
+- Validation: B8 targeted 8/8, backend 43/43, root build PASS, B3-B8 Playwright 40/40 with `--workers=1`, PM2 `meet-poc-fe` restarted.
+- Live evidence: `batch-8/screenshots/live-sidebar-host-open.png` captured at `https://voice.silverjrom.app`; temp room deleted.
+- Active-speaker note: Chromium headless remote WebRTC audio exposed live tracks with zero samples. The app samples Web Audio first and includes browser fallbacks; S8.9 uses localhost-only debug injection to exercise the same service/tile path deterministically.
