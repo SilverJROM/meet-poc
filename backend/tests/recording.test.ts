@@ -305,4 +305,99 @@ describe('recording API', () => {
     expect(fs.existsSync(path.join(dir, owned))).toBe(false);
     expect(fs.existsSync(path.join(dir, otherOwned))).toBe(true);
   });
+
+  it('FIX-B2 upload-metadata writes a sidecar for an owned recording', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-05-19T05-00-00-000Z_aaa111aaa111_Mine_111111.webm';
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(5));
+    const metadata = {
+      schemaVersion: 1,
+      sessionId: 'session-1',
+      roomId: 'aaa111aaa111',
+      recordingStartedAtIso: '2026-05-19T05:00:00.000Z',
+      recordingDurationMs: 1200,
+      participants: [{ clientId: 'host', displayName: 'Host', isHost: true, joinedAtMs: 0, leftAtMs: null }],
+      segments: [{ startMs: 0, endMs: 500, clientId: 'host', source: 'active-speaker-rms' }],
+    };
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    const res = await request(createApp(db))
+      .post('/api/recordings/upload-metadata')
+      .set('Cookie', cookie)
+      .send({ filename, metadata })
+      .expect(200);
+
+    expect(res.body).toMatchObject({ ok: true, metaFile: `${filename}.meta.json`, bytes: expect.any(Number) });
+    expect(JSON.parse(fs.readFileSync(path.join(dir, `${filename}.meta.json`), 'utf8'))).toEqual(metadata);
+  });
+
+  it('FIX-B2 upload-metadata rejects traversal, missing recordings, non-owners, and bad schema', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    insertUser(db, 'other@silverjrom.app');
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    insertRoom(db, 'bbb222bbb222', 'Other', 'other@silverjrom.app');
+    const dir = createRecordingDir();
+    const owned = '2026-05-19T05-01-00-000Z_aaa111aaa111_Mine_222222.webm';
+    const otherOwned = '2026-05-19T05-02-00-000Z_bbb222bbb222_Other_333333.webm';
+    fs.writeFileSync(path.join(dir, owned), Buffer.alloc(5));
+    fs.writeFileSync(path.join(dir, otherOwned), Buffer.alloc(6));
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+    const metadata = { schemaVersion: 1 };
+
+    await request(app)
+      .post('/api/recordings/upload-metadata')
+      .set('Cookie', cookie)
+      .send({ filename: '../etc/passwd', metadata })
+      .expect(400, { error: 'invalid filename' });
+    await request(app)
+      .post('/api/recordings/upload-metadata')
+      .set('Cookie', cookie)
+      .send({ filename: '2026-05-19T05-03-00-000Z_aaa111aaa111_Mine_444444.webm', metadata })
+      .expect(404, { error: 'recording not found' });
+    await request(app)
+      .post('/api/recordings/upload-metadata')
+      .set('Cookie', cookie)
+      .send({ filename: otherOwned, metadata })
+      .expect(403, { error: 'forbidden' });
+    await request(app)
+      .post('/api/recordings/upload-metadata')
+      .set('Cookie', cookie)
+      .send({ filename: owned, metadata: { schemaVersion: 2 } })
+      .expect(400, { error: 'invalid metadata' });
+  });
+
+  it('FIX-B2 list enrichment reports sidecar presence and speaker count', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const withMeta = '2026-05-19T05-04-00-000Z_aaa111aaa111_Mine_555555.webm';
+    const withoutMeta = '2026-05-19T05-05-00-000Z_aaa111aaa111_Mine_666666.webm';
+    fs.writeFileSync(path.join(dir, withMeta), Buffer.alloc(5));
+    fs.writeFileSync(path.join(dir, withoutMeta), Buffer.alloc(6));
+    fs.writeFileSync(
+      path.join(dir, `${withMeta}.meta.json`),
+      JSON.stringify({
+        schemaVersion: 1,
+        participants: [
+          { clientId: 'host', displayName: 'Host', isHost: true, joinedAtMs: 0, leftAtMs: null },
+          { clientId: 'guest', displayName: 'Guest', isHost: false, joinedAtMs: 100, leftAtMs: 900 },
+        ],
+        segments: [],
+      }),
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    const res = await request(createApp(db)).get('/api/recordings').set('Cookie', cookie).expect(200);
+
+    const enriched = res.body.recordings.find((recording: { filename: string }) => recording.filename === withMeta);
+    const plain = res.body.recordings.find((recording: { filename: string }) => recording.filename === withoutMeta);
+    expect(enriched).toMatchObject({ hasMetadata: true, speakerCount: 2 });
+    expect(plain).toMatchObject({ hasMetadata: false, speakerCount: null });
+  });
 });
