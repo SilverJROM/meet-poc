@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en" data-beasties-container>
+  <head>
+    <meta charset="utf-8">
+    <title>meet-poc</title>
+    <base href="/">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>:root{color-scheme:dark;--page-bg:#0f1115;--panel-bg:#181b22;--panel-soft:#1f232c;--line:#2c313c;--line-soft:#262a33;--text:#e6e6e6;--muted:#9aa3b2;--muted-2:#6b7280;--blue:#3b82f6;--blue-strong:#2563eb;--green:#16a34a;--red:#dc2626}*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--page-bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif}body{min-width:320px}</style><link rel="stylesheet" href="styles-RQXDT3CU.css" media="print" onload="this.media='all'"><noscript><link rel="stylesheet" href="styles-RQXDT3CU.css"></noscript></head>
+  <body>
+    <app-root></app-root>
+  <link rel="modulepreload" href="chunk-BCEIOQIZ.js"><link rel="modulepreload" href="chunk-5UTLWNI5.js"><link rel="modulepreload" href="chunk-IQ36KIPF.js"><link rel="modulepreload" href="chunk-6W5BZQ3X.js"><link rel="modulepreload" href="chunk-6H6FJGCH.js"><link rel="modulepreload" href="chunk-KXAFOQ7X.js"><link rel="modulepreload" href="chunk-KNXTUT3E.js"><link rel="modulepreload" href="chunk-KSLJWWZ5.js"><link rel="modulepreload" href="chunk-YQA2WRLS.js"><link rel="modulepreload" href="chunk-Y2WIHXPJ.js"><script src="polyfills-IA5XWQYN.js" type="module"></script><script src="main-URYTZBWA.js" type="module"></script></body>
+</html>

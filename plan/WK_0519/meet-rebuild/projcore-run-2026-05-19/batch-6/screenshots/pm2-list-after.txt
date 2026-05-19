@@ -1,0 +1,17 @@
+┌────┬────────────────────────────┬─────────────┬─────────┬─────────┬──────────┬────────┬──────┬───────────┬──────────┬──────────┬──────────┬──────────┐
+│ id │ name                       │ namespace   │ version │ mode    │ pid      │ uptime │ ↺    │ status    │ cpu      │ mem      │ user     │ watching │
+├────┼────────────────────────────┼─────────────┼─────────┼─────────┼──────────┼────────┼──────┼───────────┼──────────┼──────────┼──────────┼──────────┤
+│ 0  │ agjassist                  │ default     │ 0.1.0   │ fork    │ 966134   │ 24D    │ 0    │ online    │ 0%       │ 85.0mb   │ agjrom   │ disabled │
+│ 5  │ faceapp-prototype-https    │ default     │ N/A     │ fork    │ 0        │ 0      │ 0    │ stopped   │ 0%       │ 0b       │ agjrom   │ disabled │
+│ 3  │ gymboy                     │ default     │ N/A     │ fork    │ 967821   │ 24D    │ 0    │ online    │ 0%       │ 37.8mb   │ agjrom   │ disabled │
+│ 8  │ hris-be                    │ default     │ N/A     │ fork    │ 0        │ 0      │ 117  │ stopped   │ 0%       │ 0b       │ agjrom   │ disabled │
+│ 9  │ hris-fe                    │ default     │ N/A     │ fork    │ 1841246  │ 2D     │ 16   │ online    │ 0%       │ 70.3mb   │ agjrom   │ disabled │
+│ 11 │ lokalcamp-be               │ default     │ N/A     │ fork    │ 2341734  │ 10m    │ 31   │ online    │ 0%       │ 63.8mb   │ agjrom   │ disabled │
+│ 12 │ lokalcamp-fe               │ default     │ N/A     │ fork    │ 2341746  │ 10m    │ 40   │ online    │ 0%       │ 62.1mb   │ agjrom   │ disabled │
+│ 14 │ meet-poc-be                │ default     │ N/A     │ fork    │ 2365917  │ 61s    │ 0    │ online    │ 0%       │ 63.2mb   │ agjrom   │ disabled │
+│ 15 │ meet-poc-fe                │ default     │ 0.1.0   │ fork    │ 2366237  │ 57s    │ 0    │ online    │ 0%       │ 52.0mb   │ agjrom   │ disabled │
+│ 10 │ receiptbot                 │ default     │ N/A     │ fork    │ 2142276  │ 98m    │ 35   │ online    │ 0%       │ 11.8mb   │ agjrom   │ disabled │
+│ 7  │ receiptbot-eval            │ default     │ N/A     │ fork    │ 0        │ 0      │ 16   │ stopped   │ 0%       │ 0b       │ agjrom   │ disabled │
+│ 1  │ tphoto-bot                 │ default     │ 0.1.0   │ fork    │ 966177   │ 24D    │ 0    │ online    │ 0%       │ 100.8mb  │ agjrom   │ disabled │
+│ 2  │ tphoto-miniapp             │ default     │ 0.1.0   │ fork    │ 966239   │ 24D    │ 0    │ online    │ 0%       │ 92.3mb   │ agjrom   │ disabled │
+└────┴────────────────────────────┴─────────────┴─────────┴─────────┴──────────┴────────┴──────┴───────────┴──────────┴──────────┴──────────┴──────────┘
