@@ -37,3 +37,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 ## Callbacks log
 
 (codex appends here)
+[projcore callback] v2-batch-1 DONE — meeting_sessions + API + 8 scenarios green
