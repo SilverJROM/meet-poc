@@ -4,8 +4,8 @@ Status legend: `PENDING` / `IN_PROGRESS` / `VALIDATING` / `PASS` / `FAIL` / `BLO
 
 | # | Batch | Branch | Status | Requirements covered |
 |---|---|---|---|---|
-| 0 | DISCUSSION | (no branch) | IN_PROGRESS | meta — align on plan before any build |
-| 1 | FIXC1 — camera-light fix | `fix/meet-fixc1-camera-light` | PENDING | R-C-3 |
+| 0 | DISCUSSION | (no branch) | PASS | meta — align on plan before any build |
+| 1 | FIXC1 — camera-light fix | `fix/meet-fixc1-camera-light` | **PASS** | R-C-3 |
 | 2 | FIXC2 — device modal + in-call dialog | `fix/meet-fixc2-device-modal` | PENDING | R-C-1, R-C-2 |
 | 3 | FIXC3 — screen-share reflow | `fix/meet-fixc3-share-reflow` | PENDING | R-C-4 |
 | 4 | FIXC4 — transcript delete + .txt download | `fix/meet-fixc4-transcript-tools` | PENDING | R-C-5, R-C-6, R-C-7 |

@@ -16,4 +16,11 @@
 
 ## Batch log
 
-(empty — first batch dispatch after discussion-phase alignment)
+### FIXC1 — Camera-light bug fix — **VERIFIED PASS** (2026-05-19, codex wall time 12m 17s)
+
+- Branch: `fix/meet-fixc1-camera-light`
+- Commits: a3b5b9a docs seed, 6e305f6 fix(frontend), b0e962e docs evidence
+- Backend: 59/59, FIXC1 e2e: 4/4, Run 1 regression: **49/49** (R8.1 → 11 consecutive)
+- Live URL HTTP 200, public smoke PASS, TEST_ROOM01 preserved
+- R-C-3 → VERIFIED (browser-side); JROM hardware smoke is the final proof
+- See `batch-fixc1/independent-validation.md`

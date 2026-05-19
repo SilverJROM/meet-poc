@@ -6,7 +6,7 @@ Status legend: `OPEN` / `IN_BATCH` / `IMPLEMENTED` / `VERIFIED`
 |---|---|---|---|---|
 | R-C-1 | Pre-join device test modal (cam preview + mic VU + speaker test + dropdowns + custom permission overlay) | FIXC2 | OPEN | — |
 | R-C-2 | In-call device dialog from gear icon — hot-swap mid-call | FIXC2 | OPEN | — |
-| R-C-3 | Camera-light fix — `.stop()` every local track on leave | FIXC1 | OPEN | — |
+| R-C-3 | Camera-light fix — `.stop()` every local track on leave | FIXC1 | **VERIFIED** | batch-fixc1/independent-validation.md — backend 59/59, e2e 4/4, R1 49/49 |
 | R-C-4 | Screen-share reflow — right strip, scroll, speaker-float + pulse, collapsible | FIXC3 | OPEN | — |
 | R-C-5 | Transcript download as subtitle-style `.txt` | FIXC4 | OPEN | — |
 | R-C-6 | Transcript delete independent of audio | FIXC4 | OPEN | — |
