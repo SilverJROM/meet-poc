@@ -32,7 +32,8 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 | B5 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B6 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS (commit-process correction repeated; ~15min to close) |
 | B7 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS (commit-before-DONE rule honored after B6 reminder) |
-| B8 | DONE | 1 | 2026-05-19 | 2026-05-19 | pending /projcore | callback posted |
+| B8 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
+| Phase 2 | DONE | 1 | 2026-05-19 | (Agent) | 2026-05-19 | ACCEPT — 44/44 VERIFIED |
 
 ## Callbacks log
 
@@ -54,3 +55,6 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 [projcore callback] v2-batch-7 DONE — controls polish + host-only Record + recording banner + device failure UX
 [projcore verdict] v2-batch-7 PASS — R7.1-R7.5 VERIFIED. Icon-state controls w/ aria-pressed + 46px touch targets (mobile prep) + Record host-only-in-DOM + <app-recording-banner> w/ duration + polished device-failure (denied/no-devices/video-denied-audio-ok/unknown/mid-call). 32/32 Playwright (B3-B7) w/ --workers=1 in 38s, 17/43 backend. 4 decisions logged. Commit-process gap CLOSED — codex committed before STATUS: DONE this time (hard-reminder injection worked). Matrix: 38/44 VERIFIED. See validation/batch-7.md.
 [projcore callback] v2-batch-8 DONE — sidebar + host actions + leave UX + active-speaker; 8 B8 + 40 B3-B8 Playwright green; backend 43/43; live screenshot captured
+[projcore correction] v2-batch-8 — false-alarm commit-correction (I misread post-rm-stall M/D as uncommitted; codex's 3 atomic commits 4402a08+207fc74+5210993 already landed). Codex politely refuted; learning logged.
+[projcore verdict] v2-batch-8 PASS — R8.1-R8.7 VERIFIED. <app-participant-sidebar> replaces waiting-room-panel; host kebab Mute/Remove; leave-dialog End-for-all client-orchestrated flush; non-host meeting-ended toast; active-speaker service 8Hz w/ __meetDebug.activeSpeakerHz. 40/40 Playwright + 43/43 backend. 5 decisions logged (incl watcher-pane-blindspot). Matrix: 44/44 VERIFIED.
+[Phase 2 ACCEPT] fresh-context Opus validator confirmed 44 PASS / 0 FAIL against voice.silverjrom.app via curl + 3 ws probes + raw SQLite + source-file reads. Run 1 complete. See validation/phase-2-final-acceptance.md.

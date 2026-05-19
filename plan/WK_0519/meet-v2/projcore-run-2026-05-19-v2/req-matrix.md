@@ -44,15 +44,17 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R7.3 | "Host is recording" banner visible to ALL with duration counter | B7 | B7 S7.3 two-context recording banner test + screenshot | VERIFIED |
 | R7.4 | Permission denied + no-devices error UI | B7 | B7 S7.4 denied/no-devices tests + screenshots; mid-call notice implemented | VERIFIED |
 | R7.5 | Camera-off renders avatar (not black video) | B7 | B7 self-camera-off-avatar test + B6 remote avatar regression | VERIFIED |
-| R8.1 | Collapsible right-side participant sidebar with In-call + Waiting-to-join | B8 | B8 <app-participant-sidebar>; S8.1/S8.2; host/non-host screenshots | VERIFIED |
-| R8.2 | Host kebab actions: Mute participant, Remove from meeting | B8 | B8 S8.3/S8.4 host actions through B2 WS commands | VERIFIED |
-| R8.3 | Host's own row: kebab disabled | B8 | B8 sidebar renders no kebab for own row; S8.1 DOM coverage | VERIFIED |
-| R8.4 | Leave confirm dialog (host only): End for all / Just leave | B8 | B8 <app-leave-dialog>; S8.5; leave-dialog-visible.png | VERIFIED |
-| R8.5 | End-meeting-for-all client-orchestrated flush-recorder-then-broadcast | B8 | B8 S8.7 active recording stop/upload before meeting-ended-by-host; file exists assertion | VERIFIED |
-| R8.6 | Non-host meeting-ended toast + 5s auto-dismiss + nav | B8 | B8 <app-meeting-ended-toast>; S8.7/S8.8; meeting-ended-toast.png | VERIFIED |
-| R8.7 | Active-speaker highlight via Web Audio RMS at 8Hz | B8 | B8 ActiveSpeakerService; S8.9 .is-speaking + __meetDebug.activeSpeakerHz in [6,10] | VERIFIED |
+| R8.1 | Collapsible right-side participant sidebar with In-call + Waiting-to-join | B8 | B8 <app-participant-sidebar> with In-call + Waiting-to-join (host-only); toggle in controls bar; S8.1+S8.2 | VERIFIED |
+| R8.2 | Host kebab actions: Mute participant, Remove from meeting | B8 | B8 host kebab → Mute participant + Remove from meeting; S8.3 + S8.4 | VERIFIED |
+| R8.3 | Host's own row: kebab disabled | B8 | B8 host own row: kebab not rendered (verified via S8.1+S8.3) | VERIFIED |
+| R8.4 | Leave confirm dialog (host only): End for all / Just leave | B8 | B8 <app-leave-dialog> host-only: End for all / Just leave / Cancel; non-host = direct leave; S8.5 | VERIFIED |
+| R8.5 | End-meeting-for-all client-orchestrated flush-recorder-then-broadcast | B8 | B8 end-for-all client-orchestrated: stop recorder + upload (8s timeout) → send meeting-ended-by-host → close + navigate; S8.7 | VERIFIED |
+| R8.6 | Non-host meeting-ended toast + 5s auto-dismiss + nav | B8 | B8 <app-meeting-ended-toast> w/ 5s countdown + OK; S8.8 | VERIFIED |
+| R8.7 | Active-speaker highlight via Web Audio RMS at 8Hz | B8 | B8 active-speaker.service.ts setInterval(125) 8Hz RMS; __meetDebug.activeSpeakerHz in [6,10]; S8.9 | VERIFIED |
 
-**Totals after v2-B8 callback (2026-05-19):** 44 VERIFIED / 0 ASSIGNED / 0 PARTIAL / 0 FAIL.
+**Totals after v2-B8 PASS + Phase 2 ACCEPT (2026-05-19):** **44/44 VERIFIED — Run 1 COMPLETE**. 0 ASSIGNED / 0 PARTIAL / 0 FAIL.
+
+**Phase 2 final acceptance:** fresh-context Opus validator confirmed 44 PASS / 0 FAIL against voice.silverjrom.app via independent live probes (curl + 3 ws probes + raw SQLite + source-file reads). Three minor non-blocking observations surfaced in `validation/phase-2-final-acceptance.md`.
 
 **Verification trail:**
 - 2026-05-19 — v2-B1 PASS — R1.1-R1.6 except R1.3 PARTIAL. Live smoke: WS join TEST_ROOM01 → real SQLite row (uuidv4 id, ended_reason=host-disconnect-empty, admitted_peak=1, 623ms duration → correctly excluded from past via 10s filter). 15/31 vitest green. 2 decisions logged. See `validation/batch-1.md`.
