@@ -45,6 +45,45 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.error-text {
+  margin: -4px 0 14px;
+  color: var(--danger, #d94b4b);
+  font-size: 13px;
+}
+
+.bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--page-bg);
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.bulk-bar.active {
+  border-color: var(--accent, #4a8df8);
+  background: var(--selected-tint);
+}
+
+.bulk-select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.bulk-count {
+  font-size: 13px;
+  color: var(--text, #e6e9ef);
+  margin-left: auto;
+}
+
 .recording-list {
   list-style: none;
   display: grid;
@@ -55,13 +94,34 @@ h3 {
 
 .recording-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 14px;
   align-items: center;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: var(--page-bg);
   padding: 14px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.recording-row.selected {
+  border-color: var(--accent, #4a8df8);
+  background: var(--selected-tint);
+}
+
+.recording-select {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+}
+
+.recording-select input,
+.bulk-select-all input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent, #4a8df8);
+  cursor: pointer;
 }
 
 .recording-main {
@@ -78,8 +138,40 @@ h3 {
   overflow-wrap: anywhere;
 }
 
+.recording-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.recording-status {
+  min-height: 18px;
+  margin-top: 12px;
+  color: var(--green);
+  font-size: 13px;
+}
+
 @include bp.max(720px) {
   .recording-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: auto 1fr;
+  }
+
+  .recording-row .recording-actions {
+    grid-column: 1 / -1;
+    justify-content: stretch;
+  }
+
+  .recording-actions > * {
+    flex: 1;
+  }
+
+  .bulk-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .bulk-count {
+    margin-left: 0;
   }
 }

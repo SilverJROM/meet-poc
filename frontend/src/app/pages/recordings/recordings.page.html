@@ -8,23 +8,62 @@
     <p class="filter-note">Filtered to meeting session {{ sessionId() }}</p>
   }
 
+  @if (error()) {
+    <p class="error-text">{{ error() }}</p>
+  }
+
   @if (loading()) {
     <p class="empty">Loading recordings...</p>
   } @else if (!hasRecordings()) {
     <p class="empty">No recordings yet.</p>
   } @else {
+    <div class="bulk-bar" [class.active]="selectedCount() > 0">
+      <label class="bulk-select-all">
+        <input
+          type="checkbox"
+          [checked]="allOnPageSelected()"
+          (change)="toggleSelectAllOnPage()"
+          [attr.aria-label]="'Select all recordings on this page'"
+        >
+        <span>Select all on page</span>
+      </label>
+      @if (selectedCount() > 0) {
+        <span class="bulk-count">{{ selectedCount() }} selected</span>
+        <button type="button" class="secondary-btn" (click)="clearSelection()" [disabled]="busy()">Clear</button>
+        <button type="button" class="danger-btn" (click)="bulkDeleteSelected()" [disabled]="busy()">
+          <ion-icon name="trash-outline"></ion-icon>
+          Delete selected ({{ selectedCount() }})
+        </button>
+      }
+    </div>
     <ul class="recording-list">
       @for (recording of recordings(); track recording.filename) {
-        <li class="recording-row">
+        <li class="recording-row" [class.selected]="isSelected(recording.filename)">
+          <label class="recording-select">
+            <input
+              type="checkbox"
+              [checked]="isSelected(recording.filename)"
+              (change)="toggleSelection(recording.filename)"
+              [attr.aria-label]="'Select ' + recording.filename"
+            >
+          </label>
           <div class="recording-main">
             <h3>{{ recording.roomTitle }}</h3>
             <p>{{ recording.filename }}</p>
             <span>{{ recordingSize(recording) }} · {{ recording.uploadedAtIso | date: 'medium' }}</span>
           </div>
-          <a class="secondary-btn" [href]="recordingsService.downloadUrl(recording)">Download</a>
+          <div class="recording-actions">
+            <a class="secondary-btn" [href]="recordingsService.downloadUrl(recording)">Download</a>
+            <button type="button" class="danger-btn" (click)="deleteRecording(recording)" [disabled]="busy()">
+              <ion-icon name="trash-outline"></ion-icon>
+              Delete
+            </button>
+          </div>
         </li>
       }
     </ul>
     <app-pagination [page]="page()" [pageSize]="pageSize()" [total]="total()" (pageChange)="goToPage($event)"></app-pagination>
   }
+
+  <div class="recording-status" role="status">{{ status() || '' }}</div>
 </section>

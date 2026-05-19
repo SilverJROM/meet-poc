@@ -38,4 +38,15 @@ export class RecordingsService {
   downloadUrl(recording: Recording): string {
     return `/api/recordings/${encodeURIComponent(recording.filename)}/download`;
   }
+
+  async delete(filename: string): Promise<void> {
+    await firstValueFrom(this.http.delete<{ ok: true }>(`/api/recordings/${encodeURIComponent(filename)}`));
+  }
+
+  async bulkDelete(filenames: string[]): Promise<{ deleted: number; requested: number }> {
+    const res = await firstValueFrom(
+      this.http.post<{ ok: true; deleted: number; requested: number }>('/api/recordings/bulk-delete', { filenames }),
+    );
+    return { deleted: res.deleted, requested: res.requested };
+  }
 }
