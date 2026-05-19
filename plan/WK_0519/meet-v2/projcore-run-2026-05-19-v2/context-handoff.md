@@ -2,58 +2,75 @@
 
 ---
 
-## Pre-B5 handoff (post-B4 PASS — backend layer + app shell + tabs complete)
+## Pre-B6 handoff (post-B5 PASS)
 
-**HEAD:** `feat/meet-v2-b4-tabs-pagination` (`cf00ed0 docs: append v2 batch 4 callback`)
-**Branch for B5:** `feat/meet-v2-b5-lobby-preview` — off the B4 HEAD.
+**HEAD:** `feat/meet-v2-b5-lobby-preview` (`fb6b341 docs: append v2 batch 5 callback`)
+**Branch for B6:** `feat/meet-v2-b6-grid-overlays-clock` — off B5 HEAD.
 
-**Post-B4 state:**
-- Backend: 5 modules, 16 vitest / 42 tests green. Pagination + recordingsCount complete. No further BE changes expected B5-B8 (B5 is purely frontend lobby work).
-- Frontend `/app/*` shell live with 4 real tabs (Rooms paginated, Ongoing 5s poll, Past paginated w/ duration, Recordings paginated). Transcripts + Settings stubs (Run 2).
-- `/room/:id` page unchanged from rebuild — has lobby state (name + camera checkbox) and call state (controls bar + tiles grid). NO device preview, NO mic level meter, NO device selector. **B5 lands all of these in the lobby.**
-- Existing `MediaService` (`frontend/src/app/services/media.service.ts`) — handles `getUserMedia` + `getDisplayMedia` + mic/cam/screen toggles. Mic acquire happens on Join click, not on lobby mount.
-- Existing `room.page.ts` state machine: `checking → lobby → connecting → knocking → in-call → rejected/error/left`. Lobby is the target state for B5 changes.
+**Post-B5 state:**
+- Backend: stable. 16 vitest / 42 tests green.
+- Frontend: app shell + 4 real tabs + lobby device preview all live. MediaDevices plumbing complete.
+- Existing call-UI surface (the thing in JROM's screenshot complaint):
+  - `pages/room/room.page.html` lines 56-60: `<div class="tiles-grid" aria-label="Participants">` rendering `<app-tile [peer]="peer" />` for each peer
+  - `pages/room/room.page.scss` line 72-77: `.tiles-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; padding: 16px; }` — **this is the bug**: with 1 peer, the single tile stretches full-width via `auto-fit` and the `aspect-ratio: 16/9` (in tile component) makes the letterbox look wrong
+  - `<app-tile>` currently renders: video element + name label corner + LOCAL/state corner. No mute icon, no camera-off avatar, no host badge.
+  - Controls bar shows Mute/Unmute/Camera/Screen/Record/Leave as text-flipping buttons.
+  - No meeting clock anywhere.
 
-**What B5 must produce — Pattern X (pre-grant on lobby mount):**
+**WS protocol available (post-B2):** all v2 messages live. **B6 introduces ONE new message:** `media-state {clientId, mic, cam}` — clients broadcast their own mic/cam state changes.
 
-- **Extend `MediaService`**:
-  - New method `preflight({audio:true, video:bool})` — calls `navigator.mediaDevices.getUserMedia(...)` and returns the stream. Handles permission states: granted → returns stream; denied → throws typed `MediaError` with code `'denied'`; no-devices → throws with code `'no-devices'`; other → throws with code `'unknown'`.
-  - `enumerateDevices()` — wraps `navigator.mediaDevices.enumerateDevices()`, returns `{audioInputs, videoInputs}`.
-  - `reacquire({audioDeviceId, videoDeviceId, video:bool})` — releases old stream, calls `getUserMedia` with the new deviceId constraint. Updates the active stream.
-  - `getMicLevel(stream)` — sets up an `AnalyserNode` on the audio track. Returns an `Observable<number>` (or signal) emitting 0-1 RMS at 8 Hz (NOT 60 fps — explicit `setInterval(125)` per og-requirements R8.7 throttle precedent, applied here for consistency).
-  - Cleanup: stop tracks + close AudioContext on `reset()`.
+**What B6 must produce — closes JROM's #2 screenshot complaint:**
 
-- **New components**:
-  - `frontend/src/app/components/mic-meter/mic-meter.component.{ts,html,scss}` — visual mic level meter. Props: `level` (0-1 signal). Renders 8 vertical bars, each lights up based on threshold (bar N visible if level > N/8). Smooth via CSS transition.
-  - `frontend/src/app/components/lobby-preview/lobby-preview.component.{ts,html,scss}` — composite. Props: `stream` (MediaStream | null), `audioInputs`, `videoInputs`, `selectedAudioId`, `selectedVideoId`. Outputs: `audioDeviceChange`, `videoDeviceChange`. Renders the video preview tile (camera-on or "Camera off" placeholder), the mic-meter, two device selector dropdowns.
+- **`pages/room/room.page.scss`** — replace the broken `auto-fit minmax` grid with **count-driven dynamic grid**:
+  - `<main class="tiles-grid" [attr.data-count]="peers().length">` (already has the binding scaffold ready)
+  - CSS: `.tiles-grid[data-count="1"] { grid-template-columns: minmax(0, 720px); justify-content: center; }` — single tile centered, capped width
+  - `.tiles-grid[data-count="2"] { grid-template-columns: 1fr 1fr; }`
+  - `.tiles-grid[data-count="3"], .tiles-grid[data-count="4"] { grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; }` — 2x2
+  - `.tiles-grid[data-count="5"], ..., [data-count="9"] { grid-template-columns: 1fr 1fr 1fr; }` — 3x3
+  - `.tiles-grid[data-count^="1"]:not([data-count="1"]) { ... }` OR a fallback rule for 10+ (won't happen at 8-cap but document) — scrollable 3-column
+  - Centered max-width container (~1400px) at outer level + responsive media queries (one breakpoint for <1024 → 2 cols max, one for <640 → 1 col stack)
 
-- **Extend `room.page.ts` lobby state**:
-  - On entering `lobby` state: call `MediaService.preflight({audio:true, video:cameraRequested()})`. On success: store the stream in a signal `localStream = signal<MediaStream|null>(null)`. On `denied` error → set `permissionError = signal<'denied'|'no-devices'|null>(null)` to surface the UI message (per R7.4 — full handling lands in B7, B5 just sets the signal).
-  - Call `enumerateDevices()` after first stream acquisition (devices labels only populate after permission granted).
-  - Render `<app-lobby-preview>` between the room title and the join form. Props bound to `localStream`, devices, selected IDs.
-  - On device selector change: call `reacquire(...)` → update `localStream`.
-  - On Join click: pass the pre-acquired stream forward via `MediaService` (don't re-call getUserMedia). The existing `state = connecting` → admitted flow consumes the stream as already-set.
-  - `__meetDebug.localStream = stream` window hook (existing pattern in B4) updated to reflect the pre-acquired stream so S5.1 + S5.5 can verify.
+- **`<app-tile>` per-tile overlays** (R6.2):
+  - **Muted icon overlay**: render a small mic-off icon in the bottom-right when `peer.micEnabled === false`. Use Ionicons (mic-off or similar). Position via absolute + corner padding.
+  - **Camera-off avatar**: when `peer.camEnabled === false` (NOT just an absent video track — explicit state), render the tile content as a centered circle with peer name's first letter (uppercase). Background color hash-derived from name (e.g. `hash(name) % 360` for HSL hue, fixed saturation/lightness for dark-theme readability). Hide the `<video>` element.
+  - **Host badge**: render "HOST" pill in the bottom-left ONLY if the peer is the host. The peer object needs an `isHost: boolean` field — derive from `peer.id === hostClientId()` signal in `room.page.ts`.
 
-- **Frontend tests** `e2e/tests/v2-b5-lobby/`:
-  - `lobby-preflight.spec.ts` — S5.1: navigate to `/room/<id>` lobby, `__meetDebug.localStream.getAudioTracks().length > 0` within 2s (Playwright launches with fake media + auto-grant)
-  - `lobby-mic-meter.spec.ts` — S5.2: observe meter for 2s, at least 1 bar has `.is-active` class (fake mic emits beep tone)
-  - `lobby-device-selector.spec.ts` — S5.3: open mic selector dropdown, >= 1 option visible (the fake virtual device)
-  - `lobby-permission-denied.spec.ts` — S5.4: launch chromium with `permissions: []` override (no auto-grant); lobby shows permission-denied error UI + Retry button
-  - `lobby-stream-carries.spec.ts` — S5.5: click Join, state transitions to `in-call`. Verify `__meetDebug.localStream` track IDs in lobby === track IDs in call (same stream, not re-acquired).
+- **`media-state` broadcast** (R6.3):
+  - Backend `signaling/index.ts` extension: handle `{type:'media-state', mic, cam}` from any admitted peer; relay to all OTHER admitted peers as `{type:'media-state', clientId, mic, cam}`.
+  - Frontend `MediaService` extensions: on `toggleMic()` / `toggleCamera()` / camera-off-during-call → broadcast new state via `WsService.send({type:'media-state', mic:bool, cam:bool})`.
+  - Frontend `WebrtcService` or `room.page.ts`: subscribe to incoming `media-state` events and update the relevant peer's `micEnabled` / `camEnabled` signals.
+  - Local peer's own tile updates from local signals (no round-trip).
+  - This is the SAME pattern as legacy state-flip; just made explicit via signaling instead of inferred from track-enabled state (which doesn't propagate over RTP reliably).
+
+- **Meeting clock** (R6.4):
+  - Add a topbar element above the controls-bar (or inside it): `<span class="meeting-clock">{{ elapsed() }}</span>`
+  - `room.page.ts`: when entering `in-call` state, start a `setInterval(1000)` that updates an `elapsedSec` signal. Format: `M:SS` under 60min, `H:MM:SS` over.
+  - Cleanup interval when leaving / state changes.
+
+- **Centered max-width container** (R6.5):
+  - Wrap `tiles-grid` in a centered max-width container (~1400px) at the call-panel level. Smaller viewports (mobile prep for Run 3) cap at 100% with padding.
+
+**Tests** `e2e/tests/v2-b6-grid/`:
+- `grid-1-peer.spec.ts` (S6.1): owner alone in call, tile clientWidth <= 720, horizontally centered
+- `grid-2-peer.spec.ts` (S6.2): two-context — owner + admitted guest, two tiles side-by-side
+- `mute-icon.spec.ts` (S6.3): two-context — guest mutes, owner's view of guest's tile shows mute icon within 2s
+- `camera-off-avatar.spec.ts` (S6.4): two-context — guest camera off, owner's view shows initials avatar on guest tile
+- `host-badge.spec.ts` (S6.5): two-context — owner sees "HOST" pill on own tile, no badge on guest tile
+- `meeting-clock.spec.ts` (S6.6): owner enters call, clock shows `0:00`, after 2s shows `0:02` (±1s)
 
 **Standing flags:**
 - Commit BEFORE STATUS: DONE
-- §1.15 decisions/2026-05-19-v2-b5-<slug>.md for: test-mic playback (R5.4 — optional; codex may skip with logged reason), threshold for "active" mic bars (e.g. > 5% RMS), how `permission-denied` Retry actually retries (re-call preflight, or full page reload)
-- §2.10 real DOM
-- Hygiene: tests use seeded room (TEST_ROOM01 OK to reuse since R5.x is about lobby state, not room state)
+- §1.15 decisions for: avatar color hash function, exact grid breakpoints, clock format edge cases (>9:59:59?)
+- §2.10 real DOM + real two-context
+- Hygiene: tests clean up rooms/sessions
 
 **Decisions locked:**
-- Pattern X — pre-grant on mount (not deferred to button)
-- Mic level meter throttled at 8 Hz
-- Camera defaults to OFF (existing behavior); checkbox controls request
-- Device selector dropdowns are simple `<select>` for now (Ionic component is fine if it doesn't add too much)
+- Dynamic grid via `data-count` attribute selector (not Angular structural directive)
+- Mute icon visible when peer.micEnabled=false (signal-driven)
+- Camera-off renders avatar (NOT black video element)
+- Host badge derived from `hostClientId` (added in B6)
+- Clock starts at in-call state entry; resets on reconnect (acceptable drift)
 
-**Live service:** PM2 NODE_ENV=production. Codex rebuilds + restarts `meet-poc-fe`.
+**Live service:** PM2 NODE_ENV=production. Rebuild + restart meet-poc-fe (FE) + tsx-watch handles BE.
 
 **Active callback target:** `plan/WK_0519/meet-v2/projcore-run-2026-05-19-v2/callbacks.md` + `progress.md`.

@@ -29,7 +29,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 | B2 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B3 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B4 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
-| B5 | PENDING | — | — | — | — | — |
+| B5 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B6 | PENDING | — | — | — | — | — |
 | B7 | PENDING | — | — | — | — | — |
 | B8 | PENDING | — | — | — | — | — |
@@ -47,3 +47,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 [projcore verdict] v2-batch-4 PASS — R4.1-R4.6 VERIFIED. Backend ?page=&pageSize= backward-compat + recordingsCount on ended sessions. Frontend shared pagination + real Ongoing (5s poll) + real Past + Recordings/Rooms paginated + URL ?page=N persistence. 13 Playwright tests green (B3+B4) in 12s live. Backend 16/42. Hygiene clean (rooms=1, sessions=0, recordings=0). 3 decisions logged. Matrix: 23/44 VERIFIED. See validation/batch-4.md.
 [projcore callback] v2-batch-4 DONE — tabs pagination + ongoing/past + recordingsCount
 [projcore callback] v2-batch-5 DONE — lobby device preview + mic meter + stream carry-forward
+[projcore verdict] v2-batch-5 PASS — R5.1-R5.5 VERIFIED. Pattern X pre-grant on lobby mount; MediaService preflight + enumerateDevices + reacquire + getMicLevel 8Hz. <app-lobby-preview> + <app-mic-meter>. Stream carries into call (track IDs match). Permission-denied placeholder with Retry (B7 polish). 19 Playwright tests green (B3+B4+B5) in 11.7s live. 3 decisions logged. Hygiene clean. Matrix: 28/44 VERIFIED. See validation/batch-5.md.
