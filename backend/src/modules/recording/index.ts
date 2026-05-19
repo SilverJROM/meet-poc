@@ -6,10 +6,12 @@ import express from 'express';
 import { getDb, getRepoRoot } from '../../db.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
 import { getRoom, isOwnerOf } from '../rooms/store.js';
+import { getOpenSessionFor } from '../sessions/store.js';
 
 export type RecordingEntry = {
   filename: string;
   sizeBytes: number;
+  sessionId: string | null;
   roomId: string;
   roomTitle: string;
   uploadedAtIso: string;
@@ -34,15 +36,20 @@ export function ensureRecordingsDir(): string {
 export function recordingRouter(database: Database.Database = getDb()): express.Router {
   const router = express.Router();
 
-  router.post('/upload', express.raw({ type: '*/*', limit: '200mb' }), (req, res) => {
+  router.post('/upload', requireAuth(database), express.raw({ type: '*/*', limit: '200mb' }), (req, res) => {
     const dir = ensureRecordingsDir();
+    const authReq = req as AuthenticatedRequest;
     const ext = sanitizeExt(req.header('X-Ext'));
     const roomId = sanitizeRoomId(req.header('X-Room'));
     const room = getRoom(roomId, database);
-    const roomSlug = sanitizeSlug(room?.title || roomId || 'unknown');
+    if (!room) return res.status(404).json({ error: 'room not found' });
+    if (room.ownerEmail !== authReq.user.email) return res.status(403).json({ error: 'forbidden' });
+    const session = getOpenSessionFor(room.id, authReq.user.email, database);
+    if (!session) return res.status(409).json({ error: 'no open meeting session' });
+    const roomSlug = sanitizeSlug(room.title);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const rand = crypto.randomBytes(3).toString('hex');
-    const filename = `${stamp}_${roomId || 'unknown'}_${roomSlug}_${rand}.${ext}`;
+    const filename = `${stamp}_${session.id}_${room.id}_${roomSlug}_${rand}.${ext}`;
     const filepath = path.join(dir, filename);
     const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
 
@@ -95,6 +102,7 @@ export function listRecordingsForUser(email: string, database: Database.Database
       return {
         filename,
         sizeBytes: stat.size,
+        sessionId: parsed.sessionId,
         roomId: room.id,
         roomTitle: room.title,
         uploadedAtIso: new Date(stat.mtimeMs).toISOString(),
@@ -106,12 +114,16 @@ export function listRecordingsForUser(email: string, database: Database.Database
     .map(({ mtimeMs: _mtimeMs, ...entry }) => entry);
 }
 
-export function parseRecordingFilename(filename: string): { roomId: string } | null {
+export function parseRecordingFilename(filename: string): { sessionId: string | null; roomId: string } | null {
   if (!isSafeFilename(filename)) return null;
-  const parts = filename.split('_');
-  const roomId = parts[1] || '';
-  if (!/^[a-f0-9]{12}$/.test(roomId)) return null;
-  return { roomId };
+  const withoutExt = filename.replace(/\.webm$/i, '');
+  const newShape = withoutExt.match(
+    /^\d{4}-.*_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_([a-f0-9]{12})_.+_([a-f0-9]{6})$/i,
+  );
+  if (newShape) return { sessionId: newShape[1], roomId: newShape[2] };
+  const oldShape = withoutExt.match(/^\d{4}-.*_([a-f0-9]{12})_.+_([a-f0-9]{6})$/i);
+  if (oldShape) return { sessionId: null, roomId: oldShape[1] };
+  return null;
 }
 
 function sanitizeExt(value: string | undefined): string {
