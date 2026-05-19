@@ -1,9 +1,11 @@
 node_modules/
 recordings/
 logs/
+tmp/
 data.json
 data/
 backend/dist/
+backend/.venv-transcribe/
 backend/node_modules/
 frontend/dist/
 frontend/.angular/
