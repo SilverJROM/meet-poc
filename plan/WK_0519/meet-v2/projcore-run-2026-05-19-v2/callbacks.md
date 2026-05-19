@@ -4,3 +4,4 @@
 [projcore callback] v2-batch-4 DONE — tabs pagination + ongoing/past + recordingsCount
 [projcore callback] v2-batch-5 DONE — lobby device preview + mic meter + stream carry-forward
 [projcore callback] v2-batch-6 DONE — grid + per-tile overlays + media-state + clock; live comparison screenshot captured
+[projcore callback] v2-batch-7 DONE — controls polish + host-only Record + recording banner + device failure UX

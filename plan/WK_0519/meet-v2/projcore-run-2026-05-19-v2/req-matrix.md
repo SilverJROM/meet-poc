@@ -39,11 +39,11 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R6.3 | media-state WS broadcast for mic/cam state | B6 | B6 backend media-state relay (admitted-only, no echo); frontend broadcasts on toggle; signaling-media-state.test.ts | VERIFIED |
 | R6.4 | Meeting elapsed-time clock in topbar | B6 | B6 meeting clock signal m:ss/h:mm:ss; tick interval; cleanup on leave; clock-0-05.png screenshot | VERIFIED |
 | R6.5 | tiles-grid centered max-width container + responsive fallbacks | B6 | B6 .call-panel max-width 1400px centered; responsive @media <1024 + <640 fallbacks | VERIFIED |
-| R7.1 | Icon-state controls with aria-pressed | B7 | — | ASSIGNED |
-| R7.2 | Record button visible only to host | B7 | — | ASSIGNED |
-| R7.3 | "Host is recording" banner visible to ALL with duration counter | B7 | — | ASSIGNED |
-| R7.4 | Permission denied + no-devices error UI | B7 | — | ASSIGNED |
-| R7.5 | Camera-off renders avatar (not black video) | B7 | — | ASSIGNED |
+| R7.1 | Icon-state controls with aria-pressed | B7 | B7 controls-bar icon buttons + S7.5 aria-pressed Playwright | VERIFIED |
+| R7.2 | Record button visible only to host | B7 | B7 S7.1/S7.2 two-context test; non-host Record toHaveCount(0) | VERIFIED |
+| R7.3 | "Host is recording" banner visible to ALL with duration counter | B7 | B7 S7.3 two-context recording banner test + screenshot | VERIFIED |
+| R7.4 | Permission denied + no-devices error UI | B7 | B7 S7.4 denied/no-devices tests + screenshots; mid-call notice implemented | VERIFIED |
+| R7.5 | Camera-off renders avatar (not black video) | B7 | B7 self-camera-off-avatar test + B6 remote avatar regression | VERIFIED |
 | R8.1 | Collapsible right-side participant sidebar with In-call + Waiting-to-join | B8 | — | ASSIGNED |
 | R8.2 | Host kebab actions: Mute participant, Remove from meeting | B8 | — | ASSIGNED |
 | R8.3 | Host's own row: kebab disabled | B8 | — | ASSIGNED |
@@ -52,7 +52,7 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R8.6 | Non-host meeting-ended toast + 5s auto-dismiss + nav | B8 | — | ASSIGNED |
 | R8.7 | Active-speaker highlight via Web Audio RMS at 8Hz | B8 | — | ASSIGNED |
 
-**Totals after v2-B6 PASS (2026-05-19):** 33 VERIFIED / 11 ASSIGNED / 0 PARTIAL / 0 FAIL.
+**Totals after v2-B7 implementation callback (2026-05-19):** 38 VERIFIED / 6 ASSIGNED / 0 PARTIAL / 0 FAIL.
 
 **Verification trail:**
 - 2026-05-19 — v2-B1 PASS — R1.1-R1.6 except R1.3 PARTIAL. Live smoke: WS join TEST_ROOM01 → real SQLite row (uuidv4 id, ended_reason=host-disconnect-empty, admitted_peak=1, 623ms duration → correctly excluded from past via 10s filter). 15/31 vitest green. 2 decisions logged. See `validation/batch-1.md`.
@@ -61,3 +61,4 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 - 2026-05-19 — v2-B4 PASS — R4.1-R4.6 VERIFIED. Pagination backward-compat + recordingsCount on ended sessions; real Ongoing+Past pages; URL ?page= persistence. 13 Playwright + 16/42 backend. 3 decisions. See `validation/batch-4.md`.
 - 2026-05-19 — v2-B5 PASS — R5.1-R5.5 VERIFIED. Pattern X pre-grant on lobby mount; <app-lobby-preview> + <app-mic-meter> 8Hz; reacquire on device change; stream-carries-into-call; permission-denied placeholder. 19 Playwright in 11.7s live. 3 decisions (test-mic-deferred, mic-meter-threshold, retry-preflight). See `validation/batch-5.md`.
 - 2026-05-19 — v2-B6 PASS — R6.1-R6.5 VERIFIED. Dynamic grid + tile overlays + media-state relay + elapsed clock. 17/43 backend. Same commit-process gap as v1-B4: codex needed correction to commit before STATUS: DONE; closed in ~15min with 4 grouped commits. B4 ongoing-tab flaky in parallel (passed solo). JROM-comparison screenshot at batch-6/screenshots/jrom-comparison-live-call.png captures the new live look. JROM screenshot complaint closed at visual level. 4 decisions logged. See `validation/batch-6.md`.
+- 2026-05-19 — v2-B7 callback — R7.1-R7.5 implemented and self-verified. Icon-state controls, host-only Record DOM gate, shared recording banner, polished denied/no-device UX, mid-call mic-loss notice, local camera-off avatar. 43 backend tests, full build, 6 B7 Playwright, 32 B3-B7 Playwright sweep with `--workers=1`, PM2 restart, and public live smoke green. Pending /projcore independent verdict.

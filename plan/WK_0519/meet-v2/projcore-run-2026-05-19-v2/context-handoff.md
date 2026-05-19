@@ -85,3 +85,44 @@ Codex's B6 test-report noted parallel race on B4 ongoing-tab when run alongside 
 - §2.10 real DOM + real two-context where applicable
 
 **Active callback target:** `plan/WK_0519/meet-v2/projcore-run-2026-05-19-v2/callbacks.md` + `progress.md`.
+
+---
+
+## Post-B7 callback handoff
+
+**Branch:** `feat/meet-v2-b7-controls-banner-failure`
+
+**Implemented:**
+- Controls bar now uses icon-only state buttons with `aria-label`, `aria-pressed`, focus ring, hover state, and 46px targets.
+- Record button is rendered only for host; non-host DOM has no Record button.
+- New `<app-recording-banner>` shows Host is recording + duration to host and guests from backend `recording-started/stopped` broadcasts.
+- Room page sends existing B2 `recording-state` host commands when starting/stopping local recording.
+- Lobby media failures are typed and polished:
+  - denied with Retry
+  - no-devices without Retry
+  - camera-denied/audio-ok warning
+  - unknown with Retry
+- Mid-call mic track `onmute`/`onended` shows non-blocking disconnected notice and broadcasts mic off.
+- Local self camera-off avatar is covered by B7.
+
+**Validation completed by implementer:**
+- `npm run build -w frontend` — PASS.
+- `npm test -w e2e -- tests/v2-b7-controls --config=playwright.live.config.ts --workers=1` — PASS, 6 tests.
+- `npm test -w backend` — PASS, 17 files / 43 tests.
+- `npm run build` — PASS.
+- `npm test -w e2e -- tests/v2-b3-shell tests/v2-b4-tabs tests/v2-b5-lobby tests/v2-b6-grid tests/v2-b7-controls --config=playwright.live.config.ts --workers=1` — PASS, 32 tests.
+- `pm2 restart meet-poc-fe` — PASS.
+- Public live smoke captured `batch-7/screenshots/live-host-controls-record-visible.png`; temp room deleted.
+
+**Artifacts:**
+- `batch-7/changes.md`
+- `batch-7/scenarios-implemented.md`
+- `batch-7/test-report.md`
+- `batch-7/review.md`
+- `batch-7/independent-validation.md`
+- `batch-7/screenshots/*.png`
+- Decisions:
+  - `2026-05-19-v2-b7-icon-controls.md`
+  - `2026-05-19-v2-b7-recording-stop-order.md`
+  - `2026-05-19-v2-b7-device-copy.md`
+  - `2026-05-19-v2-b7-mid-call-device-loss.md`

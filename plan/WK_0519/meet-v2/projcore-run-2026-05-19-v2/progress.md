@@ -31,7 +31,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 | B4 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B5 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B6 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS (commit-process correction repeated; ~15min to close) |
-| B7 | PENDING | — | — | — | — | — |
+| B7 | DONE | 1 | 2026-05-19 | 2026-05-19 | — | CALLBACK |
 | B8 | PENDING | — | — | — | — | — |
 
 ## Callbacks log
@@ -51,3 +51,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 [projcore callback] v2-batch-6 DONE — grid + per-tile overlays + media-state + clock; live comparison screenshot captured
 [projcore correction] v2-batch-6 — same commit gap as v1-B4; codex committed in 4 grouped commits after asked, no code changes
 [projcore verdict] v2-batch-6 PASS — R6.1-R6.5 VERIFIED. Dynamic grid + tile overlays + media-state + clock. 17/43 backend, 26 Playwright (with 1 flaky parallel race on B4 ongoing-tab, passed solo). 9 screenshots incl jrom-comparison-live-call.png. 4 decisions logged. JROM "trash UI" complaint closed at visual level. Matrix: 33/44 VERIFIED. See validation/batch-6.md.
+[projcore callback] v2-batch-7 DONE — controls polish + host-only Record + recording banner + device failure UX

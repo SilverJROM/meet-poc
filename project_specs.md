@@ -203,6 +203,21 @@ Ended session rows include `recordingsCount`, computed by scanning owned recordi
 - `admitted` payloads include additive host metadata: `hostClientId` plus `peers[].host`.
 - The meeting elapsed clock starts when the local user is admitted, formats as `m:ss` under one hour and `h:mm:ss` after one hour, and is cleared on call cleanup.
 
+### 6.5 v2 Controls And Recording Banner
+
+- `<app-controls-bar>` uses icon-state controls with 46px square touch targets, visible focus rings, `aria-label`, and `aria-pressed`.
+- Record is rendered only when the local user is host. Non-hosts do not have a Record button in the DOM.
+- Host recording uses the existing client-mix `RecorderService` and B2 WS host command:
+  - Start: local `MediaRecorder.start()` then `recording-state {state:'started'}`.
+  - Stop: local `MediaRecorder.stop()`, then `recording-state {state:'stopped'}`, then upload.
+- `<app-recording-banner>` is visible to all admitted peers after `recording-started` and hidden after `recording-stopped`. It shows a pulsing red dot, "Host is recording", and a local duration counter.
+- Lobby media failure states are typed:
+  - denied: blocking retryable microphone instructions
+  - no-devices: blocking refresh guidance
+  - video-denied-but-audio-ok: non-blocking audio-only warning
+  - unknown: blocking retryable diagnostic message
+- Mid-call microphone loss listens to local audio track `onmute`/`onended`, flips local mic state false, broadcasts `media-state`, and shows a non-blocking notice.
+
 ## 7. Testing expectations
 
 - **E2E:** Playwright via `e2e/playwright.config.ts`. baseURL = consolidated dev URL (TBD in B1, likely 4710). Headless chromium with fake-media-stream flags for WebRTC.
