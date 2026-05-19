@@ -2,7 +2,7 @@
 
 **Repo:** `/home/agjrom/websites/meet-poc`
 **Live URL:** `https://voice.silverjrom.app` (CF Tunnel → consolidated local port)
-**Status:** rebuild in progress — locked at 2026-05-19. See `plan/WK_0519/meet-rebuild/og-requirements.md` for the contract.
+**Status:** v2 Run 1 in progress — locked at 2026-05-19. See `plan/WK_0519/meet-v2/og-requirements.md` for the v2 contract.
 
 > Purpose: this file is the source of architectural truth for the rebuilt app. It is updated as decisions are locked. Anything in `og-requirements.md` is the contract; this file is the surrounding context (stack, conventions, tooling, deploy/rollback).
 
@@ -59,7 +59,13 @@ meet-poc/
 │   ├── src/app/
 │   │   ├── pages/
 │   │   │   ├── login/
-│   │   │   ├── dashboard/
+│   │   │   ├── app-shell/             ← authenticated /app parent shell
+│   │   │   ├── rooms/                 ← create-room form + room list
+│   │   │   ├── recordings/            ← recordings list/download
+│   │   │   ├── ongoing-stub/          ← B4 placeholder
+│   │   │   ├── past-stub/             ← B4 placeholder
+│   │   │   ├── transcripts-stub/      ← Run 2 placeholder
+│   │   │   ├── settings-stub/         ← Run 2 placeholder
 │   │   │   └── room/                  ← lobby + call
 │   │   ├── services/
 │   │   ├── components/
@@ -146,6 +152,17 @@ A cross-module import must be one of the above; otherwise it's a Gate-7 standing
 - Dark theme baseline (matches current PoC and lokalcamp).
 - All panel transitions via **Angular Router**, NOT `hidden` attribute toggling (the bug that caused the stitching).
 - Show-password toggle, recording indicator, knock spinner are reusable components under `frontend/src/app/components/`.
+
+### 6.1 v2 App Shell
+
+- Authenticated dashboard surface is now under `/app/*`.
+- `/dashboard` is a compatibility redirect to `/app/rooms`.
+- `/app` is guarded once at the parent route; child pages inherit the auth guard.
+- Left sidebar is persistent across `/app/*`, collapsed by default, and remembers user preference in `localStorage` key `meet-poc.sidebar-collapsed`.
+- Sidebar tabs, in order: Rooms, Ongoing meetings, Past meetings, Recordings, Transcripts, Settings.
+- `/app/rooms` owns the former dashboard create-room form and room list.
+- `/app/recordings` owns the former dashboard recordings list.
+- `/app/ongoing` and `/app/past` are B4 stubs; `/app/transcripts` and `/app/settings` are Run 2 stubs.
 
 ## 7. Testing expectations
 
@@ -245,7 +262,11 @@ Filled in as batches close. Empty at run start.
 | backend/signaling | — | B2 | PENDING |
 | backend/recording | — | B5 | PENDING |
 | frontend/login page | — | B3 | PENDING |
-| frontend/dashboard page | — | B3 | PENDING |
+| frontend/app shell | Codex | v2-B3 | DONE |
+| frontend/rooms page | Codex | v2-B3 | DONE |
+| frontend/recordings page | Codex | v2-B3 | DONE |
+| frontend/ongoing/past stubs | Codex | v2-B3 | DONE |
+| frontend/transcripts/settings stubs | Codex | v2-B3 | DONE |
 | frontend/room page (lobby) | — | B4 | PENDING |
 | frontend/room page (call) | — | B4 | PENDING |
 | infra/coturn | — | B6 | PENDING |
