@@ -24,7 +24,7 @@
 - `better-sqlite3` for persistence (replaces legacy `data.json`)
 - Session-cookie auth (HttpOnly, Secure on HTTPS, SameSite=Lax, 30-day TTL); password hashed via scrypt (carrying the legacy PoC format) or bcrypt — locked in B1
 - `tsx` for dev (`tsx watch src/server.ts`); `tsc` to `dist/` for prod
-- Per-module split under `backend/src/modules/<name>/` (auth, rooms, signaling, recording)
+- Per-module split under `backend/src/modules/<name>/` (auth, rooms, signaling, sessions, recording)
 - SQLite migrations under `backend/migrations/NNNN_<name>.sql` — idempotent (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN`)
 
 **TURN:**
@@ -47,6 +47,7 @@ meet-poc/
 │   │   │   ├── auth/                  ← login/me/logout, hashing, sessions
 │   │   │   ├── rooms/                 ← CRUD routes
 │   │   │   ├── signaling/             ← ws handlers (join/admit/reject/signal)
+│   │   │   ├── sessions/              ← meeting session DB helpers + listing API
 │   │   │   └── recording/             ← /upload route + on-disk persistence
 │   │   └── lib/                       ← shared utils (cookies, errors, types)
 │   ├── migrations/
@@ -114,7 +115,8 @@ Legacy files were moved to `legacy-poc/` during B1 and deleted during B6 per JRO
 |--------|---------|--------------|
 | auth | login/me/logout routes, `assertSession(req)` middleware | `db`, `lib/cookies` |
 | rooms | CRUD routes, `getRoom(id)` helper | `db`, `auth.assertSession` |
-| signaling | `/ws` endpoint, knock/admit protocol | `db`, `auth` (cookie parse), `rooms.getRoom` |
+| signaling | `/ws` endpoint, knock/admit protocol | `db`, `auth` (cookie parse), `rooms.getRoom`, `sessions` lifecycle helpers |
+| sessions | meeting session store + `/api/meeting-sessions` route | `db`, `auth.requireAuth` |
 | recording | `/upload` route, recordings list | `db` (or filesystem only), `auth.assertSession` |
 
 A cross-module import must be one of the above; otherwise it's a Gate-7 standing-rule check fail.
