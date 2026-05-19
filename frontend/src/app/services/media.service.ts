@@ -11,6 +11,7 @@ type DeviceLists = {
 type ReacquireOptions = {
   audioDeviceId?: string;
   videoDeviceId?: string;
+  facingMode?: 'user' | 'environment';
   video: boolean;
 };
 
@@ -24,6 +25,7 @@ export class MediaService {
   readonly screenOn = signal(false);
   readonly screenShareAttempts = signal(0);
   readonly lastVideoConstraints = signal<MediaStreamConstraints | null>(null);
+  readonly audioContextActivated = signal(false);
 
   private screenTrack: MediaStreamTrack | null = null;
   private audioContext: AudioContext | null = null;
@@ -37,10 +39,10 @@ export class MediaService {
     return this.preflight({ audio: true, video: cameraOn });
   }
 
-  async preflight(constraints: { audio: boolean; video: boolean }): Promise<MediaStream> {
+  async preflight(constraints: { audio: boolean; video: boolean; facingMode?: 'user' | 'environment' }): Promise<MediaStream> {
     return this.acquire({
       audio: constraints.audio ? true : false,
-      video: this.videoConstraints(constraints.video),
+      video: this.videoConstraints(constraints.video, constraints.facingMode),
     });
   }
 
@@ -54,11 +56,12 @@ export class MediaService {
 
   async reacquire(options: ReacquireOptions): Promise<MediaStream> {
     const audio = options.audioDeviceId ? { deviceId: { exact: options.audioDeviceId } } : true;
-    const baseVideo = this.videoConstraints(true) as MediaTrackConstraints;
+    const baseVideo = this.videoConstraints(true, options.facingMode) as MediaTrackConstraints;
     const video = options.video
       ? {
           ...baseVideo,
-          ...(options.videoDeviceId ? { deviceId: { exact: options.videoDeviceId } } : {}),
+          // facingMode and deviceId can conflict on mobile browsers; facingMode wins.
+          ...(!options.facingMode && options.videoDeviceId ? { deviceId: { exact: options.videoDeviceId } } : {}),
         }
       : false;
     return this.acquire({ audio, video });
@@ -72,9 +75,33 @@ export class MediaService {
       return this.micLevel.asReadonly();
     }
 
+    if (this.viewport.isMobile() && !this.audioContextActivated()) {
+      this.micLevel.set(0);
+      return this.micLevel.asReadonly();
+    }
+
+    void this.activateMicPreview(stream);
+    return this.micLevel.asReadonly();
+  }
+
+  async activateMicPreview(stream: MediaStream | null = this.localStream()): Promise<boolean> {
+    const track = stream?.getAudioTracks()[0];
+    if (!track) {
+      this.micLevel.set(0);
+      return false;
+    }
+
     const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
     this.audioContext = this.audioContext && this.audioContext.state !== 'closed' ? this.audioContext : new AudioContextCtor();
-    void this.audioContext.resume();
+    await this.audioContext.resume();
+    this.audioContextActivated.set(true);
+    this.startMicLevel(track);
+    return true;
+  }
+
+  private startMicLevel(track: MediaStreamTrack): void {
+    if (!this.audioContext || this.audioContext.state === 'closed') return;
+    this.stopMicLevel();
     const analyser = this.audioContext.createAnalyser();
     analyser.fftSize = 512;
     this.micSource = this.audioContext.createMediaStreamSource(new MediaStream([track]));
@@ -90,7 +117,6 @@ export class MediaService {
       }
       this.micLevel.set(Math.min(1, Math.sqrt(sum / buffer.length) * 3));
     }, 125);
-    return this.micLevel.asReadonly();
   }
 
   toggleMic(): boolean {
@@ -159,22 +185,11 @@ export class MediaService {
   }
 
   stopLocal(): void {
-    this.stopMicLevel();
-    if (this.audioContext && this.audioContext.state !== 'closed') void this.audioContext.close();
-    this.audioContext = null;
-    if (this.screenTrack) {
-      this.screenTrack.stop();
-      this.screenTrack = null;
-    }
-    this.localStream()?.getTracks().forEach((track) => track.stop());
-    this.localStream.set(null);
-    this.screenOn.set(false);
-    this.cameraOn.set(false);
-    this.micOn.set(true);
+    this.stopCurrentMedia({ closeAudioContext: true });
   }
 
   private async acquire(constraints: MediaStreamConstraints): Promise<MediaStream> {
-    this.stopLocal();
+    this.stopCurrentMedia({ closeAudioContext: false });
     this.lastVideoConstraints.set(cloneConstraints(constraints));
     try {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
@@ -195,15 +210,34 @@ export class MediaService {
     this.micLevel.set(0);
   }
 
-  private videoConstraints(video: boolean): boolean | MediaTrackConstraints {
+  private stopCurrentMedia(options: { closeAudioContext: boolean }): void {
+    this.stopMicLevel();
+    if (options.closeAudioContext) {
+      if (this.audioContext && this.audioContext.state !== 'closed') void this.audioContext.close();
+      this.audioContext = null;
+      this.audioContextActivated.set(false);
+    }
+    if (this.screenTrack) {
+      this.screenTrack.stop();
+      this.screenTrack = null;
+    }
+    this.localStream()?.getTracks().forEach((track) => track.stop());
+    this.localStream.set(null);
+    this.screenOn.set(false);
+    this.cameraOn.set(false);
+    this.micOn.set(true);
+  }
+
+  private videoConstraints(video: boolean, facingMode?: 'user' | 'environment'): boolean | MediaTrackConstraints {
     if (!video) return false;
     if (this.viewport.isMobile()) {
       return {
         width: { ideal: 854, max: 854 },
         height: { ideal: 480, max: 480 },
+        ...(facingMode ? { facingMode } : {}),
       };
     }
-    return { width: { ideal: 1280 }, height: { ideal: 720 } };
+    return { width: { ideal: 1280 }, height: { ideal: 720 }, ...(facingMode ? { facingMode } : {}) };
   }
 }
 

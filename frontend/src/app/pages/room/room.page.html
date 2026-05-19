@@ -133,8 +133,12 @@
           [selectedVideoId]="selectedVideoId()"
           [videoEnabled]="cameraRequested()"
           [level]="micLevel()"
+          [audioContextActivated]="media.audioContextActivated()"
+          [facingMode]="currentFacingMode()"
           (audioDeviceChange)="changeAudioDevice($event)"
           (videoDeviceChange)="changeVideoDevice($event)"
+          (enableMicPreview)="enableMicPreview()"
+          (flipCamera)="flipLobbyCamera()"
         />
         <form class="join-form" (ngSubmit)="join()">
           <div class="field">

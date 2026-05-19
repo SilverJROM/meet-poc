@@ -2,6 +2,17 @@
   <div class="preview-tile" [class.camera-off]="!videoEnabled()">
     @if (videoEnabled() && stream()?.getVideoTracks()?.length) {
       <video #video autoplay muted playsinline></video>
+      @if (isMobile()) {
+        <button
+          type="button"
+          class="flip-camera-btn"
+          aria-label="Flip camera"
+          [title]="facingMode() === 'user' ? 'Use rear camera' : 'Use front camera'"
+          (click)="flipCamera.emit()"
+        >
+          <ion-icon name="camera-reverse-outline"></ion-icon>
+        </button>
+      }
     } @else {
       <div class="camera-placeholder">Camera off</div>
     }
@@ -9,7 +20,11 @@
 
   <div class="meter-row">
     <span>Mic level</span>
-    <app-mic-meter [level]="level()" />
+    @if (audioContextActivated()) {
+      <app-mic-meter [level]="level()" />
+    } @else {
+      <button type="button" class="meter-activate" (click)="enableMicPreview.emit()">Tap to enable mic preview</button>
+    }
   </div>
 
   <div class="device-grid">

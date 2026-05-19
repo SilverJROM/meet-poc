@@ -67,6 +67,7 @@ export class RoomPage implements OnDestroy {
   readonly videoInputs = signal<MediaDeviceInfo[]>([]);
   readonly selectedAudioId = signal('');
   readonly selectedVideoId = signal('');
+  readonly currentFacingMode = signal<'user' | 'environment'>('user');
   readonly permissionError = signal<LobbyError | null>(null);
   readonly hasBlockingLobbyError = computed(() => {
     const error = this.permissionError();
@@ -127,6 +128,8 @@ export class RoomPage implements OnDestroy {
         isRecording: this.recorder.isRecording() || this.hostRecording(),
         screenShareAttempts: this.media.screenShareAttempts(),
         lastVideoConstraints: this.media.lastVideoConstraints(),
+        audioContextActivated: this.media.audioContextActivated(),
+        currentFacingMode: this.currentFacingMode(),
         activeSpeakerHz: this.activeSpeaker.activeSpeakerHz(),
         activeSpeakerId: this.activeSpeaker.activePeerId(),
         activeSpeakerAnalyzerCount: this.activeSpeaker.analyzerCount(),
@@ -231,6 +234,16 @@ export class RoomPage implements OnDestroy {
 
   async changeVideoDevice(deviceId: string): Promise<void> {
     this.selectedVideoId.set(deviceId);
+    await this.reacquireLobbyStream();
+  }
+
+  async enableMicPreview(): Promise<void> {
+    await this.media.activateMicPreview(this.localStream());
+  }
+
+  async flipLobbyCamera(): Promise<void> {
+    if (!this.viewport.isMobile() || !this.cameraRequested()) return;
+    this.currentFacingMode.update((mode) => (mode === 'user' ? 'environment' : 'user'));
     await this.reacquireLobbyStream();
   }
 
@@ -479,7 +492,7 @@ export class RoomPage implements OnDestroy {
     this.permissionError.set(null);
     this.error.set(null);
     try {
-      const stream = await this.media.preflight({ audio: true, video: this.cameraRequested() });
+      const stream = await this.media.preflight({ audio: true, video: this.cameraRequested(), facingMode: this.mobileFacingMode() });
       this.attachLocalTrackFailureHandlers(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
       await this.refreshDevices();
@@ -496,6 +509,7 @@ export class RoomPage implements OnDestroy {
       const stream = await this.media.reacquire({
         audioDeviceId: this.selectedAudioId() || undefined,
         videoDeviceId: this.selectedVideoId() || undefined,
+        facingMode: this.mobileFacingMode(),
         video: this.cameraRequested(),
       });
       this.attachLocalTrackFailureHandlers(stream);
@@ -540,6 +554,10 @@ export class RoomPage implements OnDestroy {
     }
   }
 
+  private mobileFacingMode(): 'user' | 'environment' | undefined {
+    return this.viewport.isMobile() && this.cameraRequested() ? this.currentFacingMode() : undefined;
+  }
+
   private cleanupCall(): void {
     this.ws.close();
     this.recorder.discard();
@@ -556,6 +574,7 @@ export class RoomPage implements OnDestroy {
     this.actionNotice.set(null);
     this.hostRecording.set(false);
     this.recordingStartedAt.set(null);
+    this.currentFacingMode.set('user');
     this.activeSpeaker.reset();
     this.stopClock();
     this.uninstallMobileVisibilityPause();
@@ -673,6 +692,8 @@ declare global {
       }[];
       screenShareAttempts: number;
       lastVideoConstraints?: MediaStreamConstraints | null;
+      audioContextActivated?: boolean;
+      currentFacingMode?: 'user' | 'environment';
       isRecording: boolean;
       activeSpeakerHz?: number;
       activeSpeakerId?: string | null;
