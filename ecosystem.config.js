@@ -33,5 +33,23 @@ module.exports = {
       merge_logs: true,
       time: true,
     },
+    {
+      name: 'meet-poc-fe',
+      script: 'scripts/serve.js',
+      cwd: __dirname,
+      env: {
+        PORT: 4710,
+        NODE_ENV: 'development',
+        BACKEND_ORIGIN: 'http://localhost:4720',
+        FRONTEND_ORIGIN: 'http://localhost:4711',
+      },
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '256M',
+      out_file: './logs/meet-poc-fe-out.log',
+      error_file: './logs/meet-poc-fe-error.log',
+      merge_logs: true,
+      time: true,
+    },
   ],
 };
