@@ -30,11 +30,7 @@ Live state of the run. Codex appends callbacks here (format: `[projcore callback
 | B3 | DONE | 1 | 2026-05-19 01:41 | 2026-05-19 01:51 | 2026-05-19 01:56 | PASS |
 | B4 | DONE | 1 | 2026-05-19 01:58 | 2026-05-19 02:07 | 2026-05-19 02:15 | PASS (commit-process correction, 2m 15s to close) |
 | B5 | DONE | 1 | 2026-05-19 02:17 | 2026-05-19 02:23 | 2026-05-19 02:30 | PASS |
-| B6 | DISPATCHING | — | — | — | — | — |
-| B3 | PENDING | — | — | — | — | — |
-| B4 | PENDING | — | — | — | — | — |
-| B5 | PENDING | — | — | — | — | — |
-| B6 | PENDING | — | — | — | — | — |
+| B6 | DONE | 1 | 2026-05-19 02:33 | 2026-05-19 02:45 | 2026-05-19 02:50 | PASS |
 
 ## Callbacks log
 
@@ -52,3 +48,4 @@ Live state of the run. Codex appends callbacks here (format: `[projcore callback
 [projcore callback] batch-5 DONE — recording client-mix + /upload + dashboard list; 3 scenarios green
 [projcore verdict] batch-5 PASS — 4 new VERIFIED (R6.1-R6.4); R6.3 filename extended w/ roomId for fs-only ownership filter (autonomous call documented). Backend 13/23 + B3+B4 regression 16/16 + B5 3/3 all green. ffprobe Opus audio confirmed in S5.3. New commit-before-DONE rule heeded (6 atomic commits, clean tree). 4 decisions logged. See validation/batch-5.md.
 [projcore callback] batch-6 DONE — port-rebind cutover; voice.silverjrom.app on new app; legacy gone
+[projcore verdict] batch-6 PASS — 6 new VERIFIED (R8.3, R8.4, R8.5 closure, R9.5, R10.1, R10.3) + 3 DEFERRED (R7 coturn per JROM). Live URL verified through Cloudflare edge: curl returns Angular `<app-root>` HTML; Playwright public spec PASS in 1.6s. All regression suites green against live PM2 (faster than dev). legacy-poc/ deleted per "indiscriminately delete" directive. 5 atomic commits, clean tree. 3 decisions logged. See validation/batch-6.md. **Run complete: 49/53 VERIFIED + 1 PARTIAL (R5.2) + 3 DEFERRED (R7).**

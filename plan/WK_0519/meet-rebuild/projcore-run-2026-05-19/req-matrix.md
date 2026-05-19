@@ -43,24 +43,24 @@ Status meanings: `UNASSIGNED` → `ASSIGNED` (queued to a batch) → `IN-PROGRES
 | R6.2 | MediaRecorder produces .webm; Record again stops & uploads | B5 | batch-5 S5.1 (indicator on Record click) + S5.2 (Stop uploads .webm via POST /upload) | VERIFIED |
 | R6.3 | POST /upload writes recordings/<timestamp>_<slug>_<rand>.webm | B5 | batch-5 recording/index.ts writes <ts>_<roomId>_<roomSlug>_<rand>.webm (legacy shape extended for fs-only ownership filter; see decisions/2026-05-19-b5-filesystem-recordings.md) | VERIFIED |
 | R6.4 | Recording indicator + recordings list section on dashboard | B5 | batch-5 indicator visible during recording; dashboard Recordings section lists files via GET /api/recordings; S5.1+S5.2+screenshots | VERIFIED |
-| R7.1 | coturn installed + running on this machine | B6 | — | ASSIGNED |
-| R7.2 | coturn URL + creds in frontend ICE_SERVERS via env config | B6 | — | ASSIGNED |
-| R7.3 | Configuration documented + committed under infra/coturn/ | B6 | — | ASSIGNED |
+| R7.1 | coturn installed + running on this machine | B6 | JROM directive 2026-05-19 B6: coturn install deferred to a later batch when a real call needs TURN | DEFERRED |
+| R7.2 | coturn URL + creds in frontend ICE_SERVERS via env config | B6 | JROM directive 2026-05-19 B6: coturn ICE_SERVERS injection deferred | DEFERRED |
+| R7.3 | Configuration documented + committed under infra/coturn/ | B6 | JROM directive 2026-05-19 B6: infra/coturn/ config deferred | DEFERRED |
 | R8.1 | PM2 ecosystem with meet-poc-be + meet-poc-fe | B1+B3 | B1 closes meet-poc-be; B3 closes meet-poc-fe (port 4710 via scripts/serve.js) | VERIFIED |
 | R8.2 | Consolidated single-port serving via scripts/serve.js | B3 | batch-3 scripts/serve.js — /api+/ws+/upload → :4720, else → Angular :4711 / dist | VERIFIED |
-| R8.3 | CF Tunnel routes voice.silverjrom.app to new port | B6 | — | ASSIGNED |
-| R8.4 | Old single-file meet-poc PM2 entry retired | B6 | — | ASSIGNED |
-| R8.5 | Build pipeline produces deployable artifacts | B1+B3 | batch-3 ng build + backend tsc produce deploy artifacts; final cutover pipeline in B6 | PARTIAL |
+| R8.3 | CF Tunnel routes voice.silverjrom.app to new port | B6 | batch-6 — token-based CF Tunnel unchanged; meet-poc-fe rebound :4710→:4700; voice.silverjrom.app live (curl + Playwright public spec PASS) | VERIFIED |
+| R8.4 | Old single-file meet-poc PM2 entry retired | B6 | batch-6 — pm2 stop+delete meet-poc; legacy ecosystem entry removed; legacy-poc/ deleted (commit 2d9a087) | VERIFIED |
+| R8.5 | Build pipeline produces deployable artifacts | B1+B3 | batch-6 — tsc + ng build → frontend/dist → scripts/serve.js prod → PM2 meet-poc-fe; live-verified at voice.silverjrom.app | VERIFIED |
 | R9.1 | Playwright e2e under e2e/tests/ matching lokalcamp pattern | B3 | batch-3 e2e/playwright.config.ts + tests/b3-shell-auth/ matches lokalcamp e2e pattern | VERIFIED |
 | R9.2 | Per-batch scenarios written; tests use real DOM (no setContent) | B3-B6 | batch-3 grep "page.setContent" e2e/tests → no matches; all real-DOM | VERIFIED |
 | R9.3 | Two-context WebRTC tests with fake media flags | B4 | batch-4 S4.3 + S4.4 use --use-fake-ui-for-media-stream + --use-fake-device-for-media-stream in playwright.config.ts | VERIFIED |
 | R9.4 | Per-module targeted runs first; full e2e sanity only | B3-B6 | batch-3 codex ran npm test -w e2e -- tests/b3-shell-auth (targeted, not full) | VERIFIED |
 | R9.5 | Final acceptance: fresh-context validator at voice.silverjrom.app | Phase 2 | — | ASSIGNED |
-| R10.1 | Pre-cutover recordings preserved | B6 | — | ASSIGNED |
+| R10.1 | Pre-cutover recordings preserved | B6 | batch-6: recordings count 6 before / 6 after cutover (8 after B5 regression created new); no deletion | VERIFIED |
 | R10.2 | data.json users migrated into SQLite on first boot | B1 | batch-1 S1.7 + live smoke (fresh temp DB picked up legacy hash) | VERIFIED |
-| R10.3 | Rollback path documented + dry-runnable | B6 | — | ASSIGNED |
+| R10.3 | Rollback path documented + dry-runnable | B6 | batch-6 ROLLBACK.md historical note; git history is recovery channel per JROM directive | VERIFIED |
 
-**Totals after B5 PASS (2026-05-19):** 43 VERIFIED / 7 ASSIGNED / 2 PARTIAL (R5.2, R8.5) / 0 FAIL. (53 reqs total.) **Only B6 + Phase 2 remain.**
+**Totals after B6 PASS (2026-05-19):** **49 VERIFIED / 0 ASSIGNED / 1 PARTIAL (R5.2 STUN-only, coturn deferred) / 3 DEFERRED (R7.1-R7.3 coturn per JROM) / 0 FAIL.** (53 reqs total.) **Run complete.** Phase 2 fresh-context final acceptance recommended next.
 
 **Verification trail:**
 - 2026-05-19 — B1 PASS — 7×R1 + R10.2 VERIFIED; R8.1 PARTIAL (BE entry done, FE deferred to B3). See `validation/batch-1.md`.
@@ -68,3 +68,4 @@ Status meanings: `UNASSIGNED` → `ASSIGNED` (queued to a batch) → `IN-PROGRES
 - 2026-05-19 — B3 PASS — 10 new VERIFIED (R4.1, R4.3, R4.4, R4.5, R4.8, R8.1 closed, R8.2, R9.1, R9.2, R9.4) + R4.2 PARTIAL (room-placeholder routes; full lobby/call → B4) + R8.5 PARTIAL (build artifacts exist; cutover pipeline → B6). S3.5 (stitched-panel absent) closes JROM's verbatim complaint at the requirements level. See `validation/batch-3.md`.
 - 2026-05-19 — B4 PASS — 8 new VERIFIED (R4.2 closed, R4.6, R4.7, R5.1, R5.3, R5.4, R5.5, R9.3) + R5.2 PARTIAL (STUN done; coturn URL injection extension point → B6). Two-context P2P signaling verified in real fake-media browsers (S4.3 connected both ways). Soft-flag: codex left work uncommitted on STATUS: DONE callback; /projcore sent commit-only correction, codex closed in 2m 15s. See `validation/batch-4.md`.
 - 2026-05-19 — B5 PASS — 4 new VERIFIED (R6.1-R6.4). AudioContext mix + MediaRecorder + filesystem-backed /upload + dashboard list. S5.3 verified Opus audio stream via ffprobe. R6.3 filename extended to `<ts>_<roomId>_<slug>_<rand>.webm` (autonomous call: roomId needed for filesystem-only ownership filter; see decisions/2026-05-19-b5-filesystem-recordings.md). Codex committed BEFORE callback per new rule. Backend regression 13/23 + B3+B4 regression 16/16 + B5 3/3 all green. 4 decisions logged. See `validation/batch-5.md`.
+- 2026-05-19 — B6 PASS — 6 new VERIFIED (R8.3, R8.4, R8.5 closure, R9.5, R10.1, R10.3) + 3 DEFERRED (R7.1-R7.3 per JROM "coturn deferred" directive). Port rebind cutover: token-based CF Tunnel unchanged; meet-poc-fe :4710→:4700; legacy retired; legacy-poc/ deleted per JROM "indiscriminately"; voice.silverjrom.app serves Angular SPA live-verified (curl + Playwright public spec). Backend 13/23 + all e2e regression 8+8+3 PASS against live PM2 (faster than dev: ~2s typical). 3 decisions logged. See `validation/batch-6.md`.
