@@ -229,4 +229,80 @@ describe('recording API', () => {
 
     await request(createApp(db)).get(`/api/recordings/${filename}/download`).set('Cookie', cookie).expect(403, { error: 'forbidden' });
   });
+
+  it('FIX-B3 bulk-delete removes only owned safe recordings', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    insertUser(db, 'other@silverjrom.app');
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    insertRoom(db, 'bbb222bbb222', 'Other', 'other@silverjrom.app');
+    const dir = createRecordingDir();
+    const owned1 = '2026-05-19T04-00-00-000Z_aaa111aaa111_Mine_111111.webm';
+    const owned2 = '2026-05-19T04-01-00-000Z_aaa111aaa111_Mine_222222.webm';
+    const otherOwned = '2026-05-19T04-02-00-000Z_bbb222bbb222_Other_333333.webm';
+    const bogusRoom = '2026-05-19T04-03-00-000Z_ccc333ccc333_Ghost_444444.webm';
+    for (const filename of [owned1, owned2, otherOwned, bogusRoom]) {
+      fs.writeFileSync(path.join(dir, filename), Buffer.from(filename));
+    }
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db))
+      .post('/api/recordings/bulk-delete')
+      .set('Cookie', cookie)
+      .send({ filenames: [owned1, owned2, otherOwned, bogusRoom, '../etc/passwd'] })
+      .expect(200, { ok: true, deleted: 2, requested: 5 });
+
+    expect(fs.existsSync(path.join(dir, owned1))).toBe(false);
+    expect(fs.existsSync(path.join(dir, owned2))).toBe(false);
+    expect(fs.existsSync(path.join(dir, otherOwned))).toBe(true);
+    expect(fs.existsSync(path.join(dir, bogusRoom))).toBe(true);
+  });
+
+  it('FIX-B3 bulk-delete rejects a missing filenames array', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    createRecordingDir();
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db))
+      .post('/api/recordings/bulk-delete')
+      .set('Cookie', cookie)
+      .send({})
+      .expect(400, { error: 'filenames array required' });
+  });
+
+  it('FIX-B3 bulk-delete accepts an empty filenames array', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    createRecordingDir();
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db))
+      .post('/api/recordings/bulk-delete')
+      .set('Cookie', cookie)
+      .send({ filenames: [] })
+      .expect(200, { ok: true, deleted: 0, requested: 0 });
+  });
+
+  it('FIX-B3 single delete is ownership-gated', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    insertUser(db, 'other@silverjrom.app');
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    insertRoom(db, 'bbb222bbb222', 'Other', 'other@silverjrom.app');
+    const dir = createRecordingDir();
+    const owned = '2026-05-19T04-04-00-000Z_aaa111aaa111_Mine_555555.webm';
+    const otherOwned = '2026-05-19T04-05-00-000Z_bbb222bbb222_Other_666666.webm';
+    fs.writeFileSync(path.join(dir, owned), Buffer.alloc(5));
+    fs.writeFileSync(path.join(dir, otherOwned), Buffer.alloc(6));
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    await request(app).delete(`/api/recordings/${owned}`).set('Cookie', cookie).expect(200, { ok: true });
+    await request(app).delete(`/api/recordings/${otherOwned}`).set('Cookie', cookie).expect(403, { error: 'forbidden' });
+    await request(app).delete('/api/recordings/../etc/passwd').set('Cookie', cookie).expect(404);
+
+    expect(fs.existsSync(path.join(dir, owned))).toBe(false);
+    expect(fs.existsSync(path.join(dir, otherOwned))).toBe(true);
+  });
 });
