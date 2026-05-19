@@ -14,10 +14,11 @@ Live state of the fix run. Codex appends callbacks in `## Callbacks log`.
 
 | Batch | State | Iter | Dispatched | Callback | Validated | Verdict |
 |-------|-------|------|------------|----------|-----------|---------|
-| FIX-B1 | DISPATCHED | 1 | 2026-05-19 | — | — | — |
+| FIX-B1 | DONE | 1 | 2026-05-19 | 2026-05-19 | — | — |
 | FIX-B2 | QUEUED | — | — | — | — | — |
 
 ## Callbacks log
 
 (codex appends here)
 
+[projcore callback] fixb1 DONE — signaling race buffered + bg-tab UA-gated + controls contrast
