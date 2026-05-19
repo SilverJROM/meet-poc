@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type Database from 'better-sqlite3';
@@ -17,6 +18,9 @@ export type RecordingEntry = {
   uploadedAtIso: string;
   hasMetadata: boolean;
   speakerCount: number | null;
+  durationMs: number | null;
+  hasTranscript: boolean;
+  transcribeStatus: TranscribeStatus;
 };
 
 type UploadResponse = {
@@ -24,6 +28,8 @@ type UploadResponse = {
   file: string;
   bytes: number;
 };
+
+type TranscribeStatus = 'ready' | 'pending' | 'failed' | null;
 
 export function getRecordingsDir(): string {
   return process.env.MEET_RECORDINGS_DIR || path.join(getRepoRoot(), 'recordings');
@@ -63,6 +69,7 @@ export function recordingRouter(database: Database.Database = getDb()): express.
       }
       console.log(`[rec] saved ${filename} (${(body.length / 1024).toFixed(1)} KB)`);
       res.json({ ok: true, file: filename, bytes: body.length } satisfies UploadResponse);
+      scheduleTranscription(filename);
     });
   });
 
@@ -103,6 +110,29 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     return res.json({ ok: true, metaFile: `${filename}.meta.json`, bytes: Buffer.byteLength(body) });
   });
 
+  router.get('/api/recordings/:filename/transcript', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const filename = String(req.params.filename || '');
+    const ownership = ownedRecordingPath(filename, authReq.user.email, database);
+    if (ownership.status !== 200) return res.status(ownership.status).json({ error: ownership.error });
+    const transcriptPath = transcriptPathFor(filename);
+    if (!transcriptPath || !fs.existsSync(transcriptPath)) return res.status(404).json({ error: 'transcript not found' });
+    try {
+      return res.json(JSON.parse(fs.readFileSync(transcriptPath, 'utf8')));
+    } catch {
+      return res.status(500).json({ error: 'transcript unreadable' });
+    }
+  });
+
+  router.post('/api/recordings/:filename/transcribe', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const filename = String(req.params.filename || '');
+    const ownership = ownedRecordingPath(filename, authReq.user.email, database);
+    if (ownership.status !== 200) return res.status(ownership.status).json({ error: ownership.error });
+    spawnTranscription(filename, { force: req.body?.force === true });
+    return res.json({ ok: true, status: 'started' });
+  });
+
   router.post('/api/recordings/bulk-delete', requireAuth(database), (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const raw = req.body && Array.isArray(req.body.filenames) ? req.body.filenames : null;
@@ -126,7 +156,7 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     const filepath = safeRecordingPath(filename);
     if (!filepath || !fs.existsSync(filepath)) return res.status(404).json({ error: 'not found' });
     fs.unlinkSync(filepath);
-    deleteMetadataSidecar(filename);
+    deleteRecordingSidecars(filename);
     return res.json({ ok: true });
   });
 
@@ -158,7 +188,7 @@ function deleteOwnedRecording(filename: string, email: string, database: Databas
   if (!filepath) return false;
   try {
     fs.unlinkSync(filepath);
-    deleteMetadataSidecar(filename);
+    deleteRecordingSidecars(filename);
     return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
@@ -172,13 +202,26 @@ function metadataPathFor(filename: string): string | null {
   return `${filepath}.meta.json`;
 }
 
-function deleteMetadataSidecar(filename: string): void {
-  const metaPath = metadataPathFor(filename);
-  if (!metaPath) return;
-  try {
-    fs.unlinkSync(metaPath);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+function transcriptPathFor(filename: string): string | null {
+  const filepath = safeRecordingPath(filename);
+  if (!filepath) return null;
+  return `${filepath}.transcript.json`;
+}
+
+function transcriptLockPathFor(filename: string): string | null {
+  const filepath = safeRecordingPath(filename);
+  if (!filepath) return null;
+  return `${filepath}.transcribe.lock`;
+}
+
+function deleteRecordingSidecars(filename: string): void {
+  for (const sidecarPath of [metadataPathFor(filename), transcriptPathFor(filename), transcriptLockPathFor(filename)]) {
+    if (!sidecarPath) continue;
+    try {
+      fs.unlinkSync(sidecarPath);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
   }
 }
 
@@ -186,17 +229,101 @@ function isMetadataObject(value: unknown): value is { schemaVersion?: unknown; p
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-function metadataSummary(filename: string): { hasMetadata: boolean; speakerCount: number | null } {
+function metadataSummary(filename: string): { hasMetadata: boolean; speakerCount: number | null; durationMs: number | null } {
   const metaPath = metadataPathFor(filename);
-  if (!metaPath || !fs.existsSync(metaPath)) return { hasMetadata: false, speakerCount: null };
+  if (!metaPath || !fs.existsSync(metaPath)) return { hasMetadata: false, speakerCount: null, durationMs: null };
   try {
-    const parsed = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as { participants?: unknown };
+    const parsed = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as { participants?: unknown; recordingDurationMs?: unknown };
     return {
       hasMetadata: true,
       speakerCount: Array.isArray(parsed.participants) ? parsed.participants.length : null,
+      durationMs: typeof parsed.recordingDurationMs === 'number' ? parsed.recordingDurationMs : null,
     };
   } catch {
-    return { hasMetadata: true, speakerCount: null };
+    return { hasMetadata: true, speakerCount: null, durationMs: null };
+  }
+}
+
+function transcriptSummary(filename: string, recordingMtimeMs: number): { hasTranscript: boolean; transcribeStatus: TranscribeStatus } {
+  const transcriptPath = transcriptPathFor(filename);
+  if (transcriptPath && fs.existsSync(transcriptPath)) {
+    try {
+      JSON.parse(fs.readFileSync(transcriptPath, 'utf8'));
+      return { hasTranscript: true, transcribeStatus: 'ready' };
+    } catch {
+      return { hasTranscript: false, transcribeStatus: 'failed' };
+    }
+  }
+  const lockPath = transcriptLockPathFor(filename);
+  if (lockPath && fs.existsSync(lockPath)) return { hasTranscript: false, transcribeStatus: 'pending' };
+  const ageMs = Date.now() - recordingMtimeMs;
+  return { hasTranscript: false, transcribeStatus: ageMs > 30 * 60 * 1000 ? 'failed' : 'pending' };
+}
+
+function ownedRecordingPath(
+  filename: string,
+  email: string,
+  database: Database.Database,
+): { status: 200; filepath: string } | { status: 400 | 403 | 404; error: string } {
+  const parsed = parseRecordingFilename(filename);
+  if (!parsed || isUnsafeRecordingFilename(filename)) return { status: 404, error: 'not found' };
+  const room = getRoom(parsed.roomId, database);
+  if (!room) return { status: 404, error: 'not found' };
+  if (room.ownerEmail !== email) return { status: 403, error: 'forbidden' };
+  const filepath = safeRecordingPath(filename);
+  if (!filepath || !fs.existsSync(filepath)) return { status: 404, error: 'not found' };
+  return { status: 200, filepath };
+}
+
+function spawnTranscription(filename: string, options: { force: boolean }): void {
+  if (process.env.MEET_TRANSCRIBE_DISABLED === '1') return;
+  const filepath = safeRecordingPath(filename);
+  const lockPath = transcriptLockPathFor(filename);
+  if (!filepath || !lockPath) return;
+  const transcriptPath = transcriptPathFor(filename);
+  if (!options.force && transcriptPath && fs.existsSync(transcriptPath)) return;
+  try {
+    fs.writeFileSync(lockPath, JSON.stringify({ startedAtIso: new Date().toISOString(), filename }, null, 2));
+  } catch (err) {
+    console.error('[transcribe] lock create failed', err);
+    return;
+  }
+  const python = process.env.MEET_TRANSCRIBE_PYTHON || path.join(getRepoRoot(), 'backend', '.venv-transcribe', 'bin', 'python');
+  const script = process.env.MEET_TRANSCRIBE_SCRIPT || path.join(getRepoRoot(), 'backend', 'scripts', 'transcribe.py');
+  const args = [script, filepath, ...(options.force ? ['--force'] : [])];
+  console.log(`[transcribe] start ${filename}`);
+  const child = spawn(python, args, {
+    cwd: getRepoRoot(),
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  child.stdout.on('data', (chunk) => console.log(`[transcribe] ${String(chunk).trim()}`));
+  child.stderr.on('data', (chunk) => console.error(`[transcribe] ${String(chunk).trim()}`));
+  child.on('error', (err) => {
+    console.error(`[transcribe] failed to start ${filename}`, err);
+    cleanupTranscribeLock(lockPath);
+  });
+  child.on('close', (code) => {
+    cleanupTranscribeLock(lockPath);
+    if (code === 0) console.log(`[transcribe] finished ${filename}`);
+    else console.error(`[transcribe] exited ${code} for ${filename}`);
+  });
+}
+
+function scheduleTranscription(filename: string): void {
+  const delayMs = Number(process.env.MEET_TRANSCRIBE_UPLOAD_DELAY_MS || 1500);
+  windowlessSetTimeout(() => spawnTranscription(filename, { force: false }), Number.isFinite(delayMs) ? Math.max(0, delayMs) : 1500);
+}
+
+function windowlessSetTimeout(callback: () => void, delayMs: number): void {
+  setTimeout(callback, delayMs).unref?.();
+}
+
+function cleanupTranscribeLock(lockPath: string): void {
+  try {
+    fs.unlinkSync(lockPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') console.error('[transcribe] lock cleanup failed', err);
   }
 }
 
@@ -241,6 +368,7 @@ export function listRecordingsForUser(
       if (!room || !isOwnerOf(room.id, email, database)) return null;
       const stat = fs.statSync(path.join(dir, filename));
       const meta = metadataSummary(filename);
+      const transcript = transcriptSummary(filename, stat.mtimeMs);
       return {
         filename,
         sizeBytes: stat.size,
@@ -250,6 +378,9 @@ export function listRecordingsForUser(
         uploadedAtIso: new Date(stat.mtimeMs).toISOString(),
         hasMetadata: meta.hasMetadata,
         speakerCount: meta.speakerCount,
+        durationMs: meta.durationMs,
+        hasTranscript: transcript.hasTranscript,
+        transcribeStatus: transcript.transcribeStatus,
         mtimeMs: stat.mtimeMs,
       };
     })
