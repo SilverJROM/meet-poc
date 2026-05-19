@@ -31,10 +31,10 @@ describe('signaling wire format', () => {
     closeWs(guest);
     const peerLeft = await nextMessage(owner, (msg) => msg.type === 'peer-left');
 
-    expect(Object.keys(ownerAdmitted)).toEqual(['type', 'clientId', 'peers', 'roomTitle', 'isOwner']);
+    expect(Object.keys(ownerAdmitted)).toEqual(['type', 'clientId', 'peers', 'roomTitle', 'isOwner', 'hostClientId']);
     expect(Object.keys(knocking)).toEqual(['type', 'clientId', 'roomTitle']);
     expect(Object.keys(knock)).toEqual(['type', 'clientId', 'name']);
-    expect(Object.keys(guestAdmitted)).toEqual(['type', 'clientId', 'peers', 'roomTitle', 'isOwner']);
+    expect(Object.keys(guestAdmitted)).toEqual(['type', 'clientId', 'peers', 'roomTitle', 'isOwner', 'hostClientId']);
     expect(Object.keys(peerJoined)).toEqual(['type', 'clientId', 'name']);
     expect(Object.keys(knockCancelled)).toEqual(['type', 'clientId']);
     expect(Object.keys(signal)).toEqual(['type', 'from', 'data']);
@@ -42,9 +42,10 @@ describe('signaling wire format', () => {
     expect(ownerAdmitted).toMatchObject({ type: 'admitted', peers: [], roomTitle: 'Team sync', isOwner: true });
     expect(guestAdmitted).toMatchObject({
       type: 'admitted',
-      peers: [{ id: ownerAdmitted.clientId, name: 'Owner' }],
+      peers: [{ id: ownerAdmitted.clientId, name: 'Owner', host: true }],
       roomTitle: 'Team sync',
       isOwner: false,
+      hostClientId: ownerAdmitted.clientId,
     });
     expect(signal).toEqual({ type: 'signal', from: ownerAdmitted.clientId, data: { sdp: 'fake-offer' } });
     expect(peerLeft).toEqual({ type: 'peer-left', clientId: guestAdmitted.clientId });

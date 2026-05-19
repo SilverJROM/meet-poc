@@ -23,7 +23,9 @@ describe('signaling owner auto-admit', () => {
       peers: [],
       roomTitle: 'Team sync',
       isOwner: true,
+      hostClientId: expect.any(String),
     });
+    expect(admitted.hostClientId).toBe(admitted.clientId);
     closeWs(owner);
     await closeServer(server);
   });
