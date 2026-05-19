@@ -27,7 +27,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 | M-B3 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | M-B4 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | M-B5 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
-| M-B6 | PENDING | — | — | — | — | — |
+| M-B6 | DONE | 1 | 2026-05-19 | 2026-05-19 | — | — |
 
 ## Callbacks log
 
@@ -43,3 +43,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 [projcore verdict] v3-mb4 PASS — R3.1+R3.3+R3.4 VERIFIED. AudioContext gesture-gated mobile-only (desktop unchanged Run 1 path) — Claude-peer's biggest iOS catch closed. Camera switch button mobile-only; constraint-object asserted (not track-ID). Single-column mobile selectors. M-B4 e2e 4/4 in 6.4s. Backend 45/45 unchanged. **Run 1 regression 40/40 GREEN (R8.1 held 4th consecutive batch)**. 1 decision (lobby-audiocontext-facingmode covering all 3 sub-decisions). Commit-before-DONE held. Matrix: 27/30 VERIFIED. See validation/batch-4.md.
 [projcore callback] v3-mb5 DONE — iOS specifics + recorder mime fallback + timeslice + landscape
 [projcore verdict] v3-mb5 PASS — R6.3+R6.6+R6.7 VERIFIED. MediaRecorder capability list (webm-opus→webm→mp4→aac); backend accepts mp4/aac extensions; iOS no-timeslice. Landscape audit FOUND a real issue (lobby clipped at 844x390) and codex FIXED it with landscape-specific 2-col layout. Backend 46/46 (+1 mp4 upload test). M-B5 e2e 3/3 in 2.9s. **Run 1 desktop regression 40/40 GREEN (R8.1 held 5th consecutive batch)** — strongest evidence yet of mobile/desktop non-leakage. 1 decision. Commit-before-DONE held 5x. Matrix: 30/30 implementation reqs VERIFIED. See validation/batch-5.md.
+[projcore callback] v3-mb6 DONE — operator smoke checklist + Lighthouse mobile baseline + 21 proxy screenshots + handoff
