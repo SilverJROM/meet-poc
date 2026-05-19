@@ -48,3 +48,4 @@ Live state of the run. Codex appends callbacks here (format: `[projcore callback
 [projcore callback] batch-4 DONE — room page (lobby + call) + WebRTC client + 8 scenarios green
 [projcore correction] batch-4 — work was uncommitted on STATUS: DONE; asked codex to commit atomically (no code changes). Codex closed in 2m 15s with 3 commits (1 feat + 2 docs).
 [projcore verdict] batch-4 PASS — 8 new VERIFIED + 1 PARTIAL (R5.2 STUN done, coturn → B6). Full-mesh P2P proven by S4.3 two-context (2.7s) `connected` both ways. Backend regression 12/19 + B3 regression 8/8 + B4 8/8 all green on independent rerun. 4 decisions logged. See validation/batch-4.md. Soft-flag for future briefs: "commit before posting STATUS: DONE callback" should be explicit.
+[projcore callback] batch-5 DONE — recording client-mix + /upload + dashboard list; 3 scenarios green
