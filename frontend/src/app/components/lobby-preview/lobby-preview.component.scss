@@ -118,3 +118,30 @@
     min-height: 48px;
   }
 }
+
+@media (orientation: landscape) and (max-width: 1023px) {
+  .lobby-preview {
+    gap: 8px;
+  }
+
+  .preview-tile {
+    aspect-ratio: 16 / 6;
+    max-height: 108px;
+  }
+
+  .meter-row {
+    min-height: 32px;
+  }
+
+  .device-grid {
+    gap: 6px;
+  }
+
+  .device-grid label {
+    gap: 4px;
+  }
+
+  .device-select {
+    min-height: 42px;
+  }
+}

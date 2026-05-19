@@ -319,3 +319,37 @@ app-tile {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+@media (orientation: landscape) and (max-width: 1023px) {
+  .lobby-panel {
+    width: min(820px, calc(100% - 20px));
+    margin: 8px auto;
+    transform: none;
+    padding: 10px;
+    gap: 8px;
+  }
+
+  .lobby-panel:has(app-lobby-preview) {
+    grid-template-columns: minmax(0, 1fr) minmax(250px, 280px);
+    align-items: start;
+  }
+
+  .lobby-panel:has(app-lobby-preview) h1 {
+    grid-column: 1 / -1;
+    font-size: 20px;
+  }
+
+  .lobby-panel:has(app-lobby-preview) app-lobby-preview {
+    grid-column: 1;
+  }
+
+  .lobby-panel:has(app-lobby-preview) .join-form,
+  .lobby-panel:has(app-lobby-preview) .error-text {
+    grid-column: 2;
+  }
+
+  .lobby-panel:has(app-lobby-preview) .join-form {
+    grid-row: 2;
+    gap: 8px;
+  }
+}
