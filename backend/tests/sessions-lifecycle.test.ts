@@ -119,7 +119,7 @@ describe('meeting session lifecycle', () => {
     await closeServer(server);
   });
 
-  it('S1.3 leaves host-end as a B2-only command and keeps the B1 session open', async () => {
+  it('S1.3 closes with host-end when the host ends the meeting', async () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
@@ -129,15 +129,16 @@ describe('meeting session lifecycle', () => {
     const guest = await joinAndAdmitGuest(owner.ws, url, room.id, 'Guest');
 
     owner.ws.send(JSON.stringify({ type: 'meeting-ended-by-host' }));
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    const ownerEnded = await nextMessage(owner.ws, (msg) => msg.type === 'meeting-ended');
+    const guestEnded = await nextMessage(guest.ws, (msg) => msg.type === 'meeting-ended');
+    await Promise.all([waitForClose(owner.ws), waitForClose(guest.ws)]);
+    await waitFor(() => sessionRows(db, room.id)[0]?.ended_reason === 'host-end');
 
-    expect(sessionRows(db, room.id)[0].ended_at).toBeNull();
-    expect(owner.ws.readyState).toBe(WebSocket.OPEN);
-    expect(guest.ws.readyState).toBe(WebSocket.OPEN);
-    expect(getHostClientId(room.id, db)).toBe(owner.clientId);
+    expect(ownerEnded).toEqual({ type: 'meeting-ended', reason: 'host-end' });
+    expect(guestEnded).toEqual({ type: 'meeting-ended', reason: 'host-end' });
+    expect(sessionRows(db, room.id)[0]).toMatchObject({ ended_at: expect.any(Number), ended_reason: 'host-end' });
+    expect(getHostClientId(room.id, db)).toBeNull();
 
-    await closeAndWait(guest.ws);
-    await closeAndWait(owner.ws);
     await closeServer(server);
   });
 

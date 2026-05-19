@@ -27,6 +27,7 @@ type IncomingMessage = {
   type?: string;
   room?: unknown;
   name?: unknown;
+  state?: unknown;
   to?: string;
   data?: unknown;
   clientId?: unknown;
@@ -75,6 +76,21 @@ function ensureLiveSession(roomId: string, hostEmail: string, live: LiveRoom, da
 
 function bumpAdmittedPeak(live: LiveRoom, database: Database.Database): void {
   bumpPeak(live.currentSessionId, live.admitted.size, database);
+}
+
+function logRejectedHostCommand(command: string, userEmail: string | null, roomId: string | null): void {
+  console.info('[host-cmd-rejected]', command, userEmail, roomId);
+}
+
+function getLiveAdmittedRoom(currentRoom: string | null, state: PeerState): LiveRoom | null {
+  if (state !== 'admitted' || !currentRoom) return null;
+  return liveRooms.get(currentRoom) || null;
+}
+
+function isHostCommandAllowed(command: string, roomId: string | null, userEmail: string | null, database: Database.Database): boolean {
+  const allowed = isOwnerOf(roomId, userEmail, database);
+  if (!allowed) logRejectedHostCommand(command, userEmail, roomId);
+  return allowed;
 }
 
 function admitPeer(roomId: string, clientId: string, database: Database.Database): void {
@@ -211,6 +227,82 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const targetId = String(msg.clientId || '');
         if (msg.type === 'admit') admitPeer(currentRoom, targetId, database);
         else rejectPeer(currentRoom, targetId, database, msg.reason == null ? undefined : String(msg.reason));
+        return;
+      }
+
+      if (msg.type === 'recording-state') {
+        const live = getLiveAdmittedRoom(currentRoom, state);
+        if (!live || !currentRoom) return;
+        if (!isHostCommandAllowed('recording-state', currentRoom, userEmail, database)) return;
+        const recordingState = String(msg.state || '');
+        if (recordingState !== 'started' && recordingState !== 'stopped') return;
+        const wireType = recordingState === 'started' ? 'recording-started' : 'recording-stopped';
+        const hostClientId = getHostClientId(currentRoom, database) || clientId;
+        for (const [, peer] of live.admitted) {
+          send(peer.ws, { type: wireType, clientId: hostClientId, sessionId: live.currentSessionId });
+        }
+        return;
+      }
+
+      if (msg.type === 'meeting-ended-by-host') {
+        const live = getLiveAdmittedRoom(currentRoom, state);
+        if (!live || !currentRoom) return;
+        if (!isHostCommandAllowed('meeting-ended-by-host', currentRoom, userEmail, database)) return;
+        closeSession(live.currentSessionId, 'host-end', database);
+        const admitted = [...live.admitted.values()];
+        const pending = [...live.pending.values()];
+        live.currentSessionId = null;
+        liveRooms.delete(currentRoom);
+        for (const peer of admitted) {
+          peer.setState('idle');
+          send(peer.ws, { type: 'meeting-ended', reason: 'host-end' });
+        }
+        for (const knocker of pending) {
+          knocker.setState('idle');
+          send(knocker.ws, { type: 'rejected', reason: 'meeting ended by host' });
+        }
+        for (const peer of admitted) {
+          try {
+            peer.ws.close();
+          } catch {
+            // Best effort close after the meeting-ended broadcast.
+          }
+        }
+        for (const knocker of pending) {
+          try {
+            knocker.ws.close();
+          } catch {
+            // Best effort close after the rejection message.
+          }
+        }
+        return;
+      }
+
+      if (msg.type === 'mute-target') {
+        const live = getLiveAdmittedRoom(currentRoom, state);
+        if (!live || !currentRoom) return;
+        if (!isHostCommandAllowed('mute-target', currentRoom, userEmail, database)) return;
+        const targetId = String(msg.clientId || '');
+        const target = live.admitted.get(targetId);
+        if (!target) return;
+        send(target.ws, { type: 'mute-request', from: clientId });
+        return;
+      }
+
+      if (msg.type === 'remove-peer') {
+        const live = getLiveAdmittedRoom(currentRoom, state);
+        if (!live || !currentRoom) return;
+        if (!isHostCommandAllowed('remove-peer', currentRoom, userEmail, database)) return;
+        const targetId = String(msg.clientId || '');
+        if (targetId === getHostClientId(currentRoom, database)) return;
+        const target = live.admitted.get(targetId);
+        if (!target) return;
+        send(target.ws, { type: 'peer-removed', reason: 'removed by host' });
+        try {
+          target.ws.close();
+        } catch {
+          // Best effort close after the removal message.
+        }
       }
     });
 
@@ -271,4 +363,8 @@ export function getHostClientId(roomId: string, database: Database.Database = ge
     if (entry.userEmail === room.ownerEmail) return clientId;
   }
   return null;
+}
+
+export function hasLiveRoom(roomId: string): boolean {
+  return liveRooms.has(roomId);
 }
