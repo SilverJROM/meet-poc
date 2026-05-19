@@ -1,0 +1,35 @@
+import { describe, expect, it } from 'vitest';
+import { seedUser } from '../scripts/seed.js';
+import { createSession } from '../src/modules/auth/sessions.js';
+import { createRoom } from '../src/modules/rooms/store.js';
+import { createTestDb } from './helpers.js';
+import { closeServer, closeWs, connectWs, nextMessage, startWsServer } from './signaling-helpers.js';
+
+describe('signaling room cap', () => {
+  it('S2.11 rejects a 9th admitted peer with the room-full error', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const peers = [];
+
+    for (let i = 0; i < 8; i += 1) {
+      const peer = await connectWs(url, ownerCookie);
+      peer.send(JSON.stringify({ type: 'join', room: room.id, name: `Owner ${i}` }));
+      await nextMessage(peer, (msg) => msg.type === 'admitted');
+      peers.push(peer);
+    }
+
+    const ninth = await connectWs(url, ownerCookie);
+    const closed = new Promise<void>((resolve) => ninth.once('close', () => resolve()));
+    ninth.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner 9' }));
+    const error = await nextMessage(ninth);
+    await closed;
+
+    expect(error).toEqual({ type: 'error', error: 'room full (max 8)' });
+    closeWs(ninth);
+    for (const peer of peers) closeWs(peer);
+    await closeServer(server);
+  });
+});
