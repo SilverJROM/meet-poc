@@ -37,7 +37,8 @@ export async function ownerSessionCookie(request: APIRequestContext): Promise<st
 }
 
 export async function openOwnerSocket(roomId: string, cookie: string, name: string): Promise<WebSocket> {
-  const ws = new WebSocket('ws://localhost:4710/ws', { headers: { Cookie: cookie } });
+  const wsOrigin = process.env.E2E_WS_ORIGIN || 'ws://localhost:4710';
+  const ws = new WebSocket(`${wsOrigin}/ws`, { headers: { Cookie: cookie } });
   await waitForOpen(ws);
   ws.send(JSON.stringify({ type: 'join', room: roomId, name }));
   const first = await waitForMessage(ws);
