@@ -136,7 +136,23 @@ export class WebrtcService {
     this.mutatePeers((peers) => peers.delete(clientId));
   }
 
+  stopLocalSenderTracks(): void {
+    const stopped = new Set<MediaStreamTrack>();
+    for (const peer of this.peers().values()) {
+      const pc = peer.pc;
+      if (!pc) continue;
+      for (const sender of pc.getSenders()) {
+        const track = sender.track;
+        if (track && !stopped.has(track)) {
+          track.stop();
+          stopped.add(track);
+        }
+      }
+    }
+  }
+
   reset(): void {
+    this.stopLocalSenderTracks();
     for (const peer of this.peers().values()) {
       peer.pc?.close();
       if (!peer.isLocal) peer.stream?.getTracks().forEach((track) => track.stop());

@@ -152,6 +152,7 @@ export class MediaService {
     const camStream = await navigator.mediaDevices.getUserMedia({
       video: this.videoConstraints(true),
     });
+    registerDebugTracks(camStream);
     const track = camStream.getVideoTracks()[0];
     stream.addTrack(track);
     this.cameraOn.set(true);
@@ -167,6 +168,7 @@ export class MediaService {
     this.screenShareAttempts.update((count) => count + 1);
     const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
     const track = screen.getVideoTracks()[0];
+    registerDebugTracks(screen);
     this.screenTrack = track;
     this.screenOn.set(true);
     track.onended = () => {
@@ -193,6 +195,7 @@ export class MediaService {
     this.lastVideoConstraints.set(cloneConstraints(constraints));
     try {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      registerDebugTracks(stream);
       this.localStream.set(stream);
       this.micOn.set(stream.getAudioTracks()[0]?.enabled ?? false);
       this.cameraOn.set(stream.getVideoTracks().length > 0);
@@ -258,6 +261,13 @@ function normalizeMediaError(err: unknown): MediaError {
 
 declare global {
   interface Window {
+    __activeTracks?: MediaStreamTrack[];
     webkitAudioContext?: typeof AudioContext;
   }
+}
+
+function registerDebugTracks(stream: MediaStream): void {
+  const tracks = stream.getTracks();
+  if (tracks.length === 0) return;
+  window.__activeTracks = [...(window.__activeTracks ?? []), ...tracks];
 }

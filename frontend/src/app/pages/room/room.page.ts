@@ -111,6 +111,7 @@ export class RoomPage implements OnDestroy {
   });
 
   constructor() {
+    this.installPageLifecycleCleanup();
     void this.bootstrap();
     effect(() => {
       const debug: NonNullable<Window['__meetDebug']> = {
@@ -387,6 +388,7 @@ export class RoomPage implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.uninstallPageLifecycleCleanup();
     this.cleanupCall();
     delete window.__meetDebug;
   }
@@ -610,9 +612,9 @@ export class RoomPage implements OnDestroy {
   private cleanupCall(): void {
     this.ws.close();
     this.recorder.discard();
+    this.media.stopLocal();
     this.webrtc.reset();
     this.pendingSignals.clear();
-    this.media.stopLocal();
     this.knockers.set([]);
     this.isOwner.set(false);
     this.myId.set(null);
@@ -630,6 +632,20 @@ export class RoomPage implements OnDestroy {
     this.stopClock();
     this.uninstallMobileVisibilityPause();
   }
+
+  private installPageLifecycleCleanup(): void {
+    window.addEventListener('pagehide', this.handlePageLifecycleLeave);
+    window.addEventListener('beforeunload', this.handlePageLifecycleLeave);
+  }
+
+  private uninstallPageLifecycleCleanup(): void {
+    window.removeEventListener('pagehide', this.handlePageLifecycleLeave);
+    window.removeEventListener('beforeunload', this.handlePageLifecycleLeave);
+  }
+
+  private readonly handlePageLifecycleLeave = (): void => {
+    this.cleanupCall();
+  };
 
   private attachLocalTrackFailureHandlers(stream: MediaStream): void {
     const audioTrack = stream.getAudioTracks()[0];
