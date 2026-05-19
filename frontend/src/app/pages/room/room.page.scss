@@ -162,6 +162,12 @@ h1 {
   align-items: stretch;
 }
 
+app-tile {
+  min-width: 0;
+  min-height: 0;
+  display: block;
+}
+
 .call-content {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 0;
@@ -222,10 +228,6 @@ h1 {
     padding: 0 10px;
   }
 
-  .tiles-grid {
-    grid-template-columns: 1fr !important;
-  }
-
   .call-content,
   .call-content.sidebar-open {
     grid-template-columns: 1fr;
@@ -238,6 +240,71 @@ h1 {
   .check-row input {
     width: 24px;
     height: 24px;
+  }
+}
+
+@include bp.mobile {
+  .call-panel {
+    max-width: none;
+    padding: 0 10px calc(78px + env(safe-area-inset-bottom));
+  }
+
+  .meeting-meta {
+    position: fixed;
+    z-index: 16;
+    top: max(10px, env(safe-area-inset-top));
+    left: 10px;
+    margin: 0;
+    justify-content: flex-start;
+  }
+
+  .meeting-clock {
+    background: rgba(24, 27, 34, 0.88);
+    backdrop-filter: blur(10px);
+  }
+
+  .call-status {
+    display: none;
+  }
+
+  .call-content,
+  .call-content.sidebar-open {
+    display: block;
+  }
+
+  .tiles-grid {
+    height: calc(100vh - 86px);
+    height: calc(100dvh - 86px - env(safe-area-inset-bottom));
+    grid-auto-rows: minmax(0, 1fr);
+    align-items: stretch;
+    padding: 52px 0 10px;
+  }
+
+  .tiles-grid[data-count="1"] {
+    grid-template-columns: 100%;
+  }
+
+  .tiles-grid[data-count="2"] {
+    grid-template-columns: 100%;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+
+  .tiles-grid[data-count="3"],
+  .tiles-grid[data-count="4"] {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: repeat(2, minmax(0, 1fr));
+  }
+
+  .tiles-grid[data-count="5"],
+  .tiles-grid[data-count="6"],
+  .tiles-grid[data-count="7"],
+  .tiles-grid[data-count="8"],
+  .tiles-grid[data-count="9"],
+  .tiles-grid[data-count="10"],
+  .tiles-grid[data-count="11"],
+  .tiles-grid[data-count="12"] {
+    grid-template-columns: 1fr 1fr;
+    max-height: none;
   }
 }
 

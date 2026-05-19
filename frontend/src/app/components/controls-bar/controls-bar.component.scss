@@ -146,13 +146,30 @@
   background: rgba(127, 29, 29, 0.32);
 }
 
-@include bp.max(760px) {
+@include bp.mobile {
   .controls-bar {
+    position: fixed;
+    z-index: 24;
+    right: 0;
+    bottom: 0;
+    left: 0;
     grid-template-columns: 1fr;
+    min-height: calc(64px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line-soft);
+    border-bottom: 0;
+    background: #181b22;
+    padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+  }
+
+  .room-label {
+    display: none;
   }
 
   .controls {
-    justify-content: stretch;
+    flex-wrap: nowrap;
+    justify-content: center;
+    overflow-x: auto;
+    padding: 2px;
   }
 
   .control-btn,

@@ -1,4 +1,20 @@
-<aside class="participant-sidebar" [class.open]="open()" aria-label="Participants">
+@if (isMobile() && open()) {
+  <button type="button" class="sheet-backdrop" aria-label="Close participants" (click)="close.emit()"></button>
+}
+
+<aside
+  class="participant-sidebar"
+  [class.open]="open()"
+  [class.mobile-mode]="isMobile()"
+  aria-label="Participants"
+  (touchstart)="onTouchStart($event)"
+  (touchmove)="onTouchMove($event)"
+  (focusin)="handleFocusIn($event)"
+>
+  @if (isMobile()) {
+    <div class="sheet-handle" aria-hidden="true"></div>
+  }
+
   <header>
     <div>
       <h2>Participants</h2>
@@ -6,6 +22,18 @@
     </div>
   </header>
 
+  @if (isMobile() && isHost()) {
+    <div class="section-tabs" role="tablist" aria-label="Participant sections">
+      <button type="button" role="tab" [attr.aria-selected]="activeSection() === 'participants'" [class.active]="activeSection() === 'participants'" (click)="setSection('participants')">
+        In the call
+      </button>
+      <button type="button" role="tab" [attr.aria-selected]="activeSection() === 'waiting'" [class.active]="activeSection() === 'waiting'" (click)="setSection('waiting')">
+        Waiting
+      </button>
+    </div>
+  }
+
+  @if (!isMobile() || activeSection() === 'participants') {
   <section aria-label="In the call">
     <h3>In the call</h3>
     <ul class="participant-list">
@@ -39,8 +67,10 @@
       }
     </ul>
   </section>
+  }
 
   @if (isHost()) {
+    @if (!isMobile() || activeSection() === 'waiting') {
     <section aria-label="Waiting to join">
       <h3>Waiting to join</h3>
       @if (knockers().length === 0) {
@@ -57,5 +87,6 @@
         </ul>
       }
     </section>
+    }
   }
 </aside>

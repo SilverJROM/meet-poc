@@ -1,3 +1,11 @@
+@use 'breakpoints' as bp;
+
+:host {
+  min-width: 0;
+  min-height: 0;
+  display: block;
+}
+
 .tile {
   position: relative;
   min-height: 220px;
@@ -7,6 +15,24 @@
   border-radius: 8px;
   background: #0b0d11;
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+}
+
+@include bp.mobile {
+  .tile {
+    height: 100%;
+    min-height: 0;
+    aspect-ratio: auto;
+  }
+
+  .tile-overlays {
+    inset: 8px;
+  }
+
+  .host-badge,
+  .name-label,
+  .state {
+    font-size: 11px;
+  }
 }
 
 .tile.is-speaking {

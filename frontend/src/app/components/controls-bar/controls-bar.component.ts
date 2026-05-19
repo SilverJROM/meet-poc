@@ -1,4 +1,4 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, input, output } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, inject, input, output } from '@angular/core';
 import { addIcons } from 'ionicons';
 import {
   callOutline,
@@ -11,6 +11,7 @@ import {
   videocamOffOutline,
   videocamOutline,
 } from 'ionicons/icons';
+import { ViewportService } from '../../services/viewport.service';
 
 @Component({
   selector: 'app-controls-bar',
@@ -20,6 +21,8 @@ import {
   styleUrl: './controls-bar.component.scss',
 })
 export class ControlsBarComponent {
+  private readonly viewport = inject(ViewportService);
+
   readonly roomLabel = input.required<string>();
   readonly micOn = input.required<boolean>();
   readonly cameraOn = input.required<boolean>();
@@ -36,6 +39,7 @@ export class ControlsBarComponent {
   readonly record = output<void>();
   readonly sidebar = output<void>();
   readonly leave = output<void>();
+  readonly isMobile = this.viewport.isMobile;
 
   constructor() {
     addIcons({

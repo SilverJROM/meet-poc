@@ -23,17 +23,19 @@
     >
       <ion-icon [name]="cameraOn() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
     </button>
-    <button
-      type="button"
-      class="control-btn"
-      [class.active]="screenOn()"
-      [attr.aria-pressed]="screenOn()"
-      [attr.aria-label]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
-      (click)="screen.emit()"
-      [title]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
-    >
-      <ion-icon name="desktop-outline"></ion-icon>
-    </button>
+    @if (!isMobile()) {
+      <button
+        type="button"
+        class="control-btn"
+        [class.active]="screenOn()"
+        [attr.aria-pressed]="screenOn()"
+        [attr.aria-label]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
+        (click)="screen.emit()"
+        [title]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
+      >
+        <ion-icon name="desktop-outline"></ion-icon>
+      </button>
+    }
     @if (isHost()) {
       <button
         type="button"

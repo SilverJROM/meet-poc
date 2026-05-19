@@ -87,6 +87,7 @@
           (remove)="removeParticipant($event)"
           (admit)="admit($event)"
           (reject)="reject($event)"
+          (close)="sidebarOpen.set(false)"
         />
       </div>
       @if (leaveDialogOpen()) {

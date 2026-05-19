@@ -1,5 +1,9 @@
 @use 'breakpoints' as bp;
 
+.sheet-backdrop {
+  display: none;
+}
+
 .participant-sidebar {
   width: 0;
   max-width: 0;
@@ -11,7 +15,8 @@
   transition:
     width 180ms ease,
     max-width 180ms ease,
-    border-color 180ms ease;
+    border-color 180ms ease,
+    transform 180ms ease;
 }
 
 .participant-sidebar.open {
@@ -23,6 +28,11 @@
 
 header {
   margin-bottom: 16px;
+}
+
+.sheet-handle,
+.section-tabs {
+  display: none;
 }
 
 h2,
@@ -190,10 +200,80 @@ h3 {
   white-space: nowrap;
 }
 
-@include bp.max(760px) {
+@include bp.mobile {
+  .sheet-backdrop {
+    position: fixed;
+    z-index: 29;
+    inset: 0;
+    display: block;
+    border: 0;
+    background: rgba(0, 0, 0, 0.42);
+    cursor: pointer;
+  }
+
+  .participant-sidebar {
+    position: fixed;
+    z-index: 30;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    width: 100vw;
+    max-width: none;
+    height: 75vh;
+    height: 75dvh;
+    min-height: 0;
+    display: block;
+    overflow-y: auto;
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    border-radius: 14px 14px 0 0;
+    padding: 10px 14px max(18px, env(safe-area-inset-bottom));
+    transform: translateY(100%);
+    box-shadow: 0 -24px 70px rgba(0, 0, 0, 0.48);
+    pointer-events: none;
+  }
+
   .participant-sidebar.open {
     width: 100%;
     max-width: none;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  .sheet-handle {
+    width: 44px;
+    height: 5px;
+    display: block;
+    border-radius: 999px;
+    background: #4b5563;
+    margin: 0 auto 12px;
+  }
+
+  header {
+    margin-bottom: 12px;
+  }
+
+  .section-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+
+  .section-tabs button {
+    min-height: 48px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: var(--muted);
+    background: #10141b;
+    cursor: pointer;
+    font-weight: 900;
+  }
+
+  .section-tabs button.active {
+    border-color: rgba(59, 130, 246, 0.62);
+    color: #fff;
+    background: rgba(59, 130, 246, 0.18);
   }
 
   .kebab {

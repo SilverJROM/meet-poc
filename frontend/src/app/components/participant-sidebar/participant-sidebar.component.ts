@@ -1,6 +1,7 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, computed, input, output, signal } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, computed, inject, input, output, signal } from '@angular/core';
 import { addIcons } from 'ionicons';
 import { ellipsisVerticalOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
+import { ViewportService } from '../../services/viewport.service';
 import { PeerState } from '../../services/webrtc.service';
 
 export type Knocker = {
@@ -16,6 +17,8 @@ export type Knocker = {
   styleUrl: './participant-sidebar.component.scss',
 })
 export class ParticipantSidebarComponent {
+  private readonly viewport = inject(ViewportService);
+
   readonly open = input(false);
   readonly peers = input.required<PeerState[]>();
   readonly knockers = input.required<Knocker[]>();
@@ -25,8 +28,12 @@ export class ParticipantSidebarComponent {
   readonly remove = output<string>();
   readonly admit = output<string>();
   readonly reject = output<string>();
+  readonly close = output<void>();
   readonly menuFor = signal<string | null>(null);
+  readonly activeSection = signal<'participants' | 'waiting'>('participants');
   readonly admittedCount = computed(() => this.peers().length);
+  readonly isMobile = this.viewport.isMobile;
+  private touchStartY: number | null = null;
 
   constructor() {
     addIcons({ ellipsisVerticalOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline });
@@ -58,5 +65,29 @@ export class ParticipantSidebarComponent {
   removePeer(peerId: string): void {
     this.menuFor.set(null);
     this.remove.emit(peerId);
+  }
+
+  setSection(section: 'participants' | 'waiting'): void {
+    if (section === 'waiting' && !this.isHost()) return;
+    this.activeSection.set(section);
+  }
+
+  onTouchStart(event: TouchEvent): void {
+    this.touchStartY = event.touches[0]?.clientY ?? null;
+  }
+
+  onTouchMove(event: TouchEvent): void {
+    if (this.touchStartY == null) return;
+    const currentY = event.touches[0]?.clientY ?? this.touchStartY;
+    if (currentY - this.touchStartY > 60) {
+      this.touchStartY = null;
+      this.close.emit();
+    }
+  }
+
+  handleFocusIn(event: FocusEvent): void {
+    if (!this.isMobile()) return;
+    const target = event.target as HTMLElement | null;
+    if (target?.matches('input, textarea, select')) this.close.emit();
   }
 }
