@@ -19,13 +19,13 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R5.3 | Background-tab BEST-EFFORT pauses local video; keeps audio (mobile) | M-B2 | M-B2 mobile-only visibilitychange listener; hidden→track.enabled=false+broadcast cam:false; visible→restore. Desktop unaffected (S5.5). | VERIFIED |
 | R5.5 | Mobile joiner at 8-cap is rejected (per-client cap + global cap stack) | M-B2 | M-B2 cap-stacking table verified: 4 mobile + 4 desktop = 8 admitted; 9th any-platform → room full (max 8) | VERIFIED |
 | R5.6 | Backend isMobile metadata on PeerEntry; cap check in join handler | M-B2 | M-B2 PeerEntry.isMobile metadata; mobile cap check uses live.admitted filter; signaling-mobile-cap.test.ts 2/2 | VERIFIED |
-| R2.1 | Bottom-sheet replaces sidebar on mobile (75vh); desktop unchanged | M-B3 | — | ASSIGNED |
-| R2.2 | Mobile controls bar docked bottom w/ safe-area-inset | M-B3 | — | ASSIGNED |
-| R2.3 | Dynamic grid mobile variants (1=full / 2=vstack / 3-4=2x2) | M-B3 | — | ASSIGNED |
-| R2.4 | Screen-share button hidden on mobile (visible on desktop) | M-B3 | — | ASSIGNED |
-| R2.5 | Per-tile overlays work identically on mobile tiles | M-B3 | — | ASSIGNED |
-| R2.6 | Bottom-sheet handles iOS virtual keyboard (visualViewport or auto-close) | M-B3 | — | ASSIGNED |
-| R2.7 | Tap-to-switch sidebar sections (placeholder for swipe; v3.5) | M-B3 | — | ASSIGNED |
+| R2.1 | Bottom-sheet replaces sidebar on mobile (75vh); desktop unchanged | M-B3 | M-B3 participant-sidebar extended w/ mobile mode: 75dvh sheet + backdrop + drag-handle + swipe-down; desktop sidebar unchanged | VERIFIED |
+| R2.2 | Mobile controls bar docked bottom w/ safe-area-inset | M-B3 | M-B3 bp.mobile docks controls-bar bottom+safe-area; desktop controls preserved at top | VERIFIED |
+| R2.3 | Dynamic grid mobile variants (1=full / 2=vstack / 3-4=2x2) | M-B3 | M-B3 mobile grid variants 1=full, 2=vstack, 3-4=2x2; desktop grid unchanged | VERIFIED |
+| R2.4 | Screen-share button hidden on mobile (visible on desktop) | M-B3 | M-B3 screen-share button @if(!isMobile()) — toHaveCount(0) on mobile; visible on desktop | VERIFIED |
+| R2.5 | Per-tile overlays work identically on mobile tiles | M-B3 | M-B3 tile.scss mobile sizing guards; overlays remain readable at compact sizes | VERIFIED |
+| R2.6 | Bottom-sheet handles iOS virtual keyboard (visualViewport or auto-close) | M-B3 | M-B3 iOS keyboard handling: sheet auto-closes when input inside it receives focus (codex choice: close-on-focus simpler than visualViewport repositioning) | VERIFIED |
+| R2.7 | Tap-to-switch sidebar sections (placeholder for swipe; v3.5) | M-B3 | M-B3 tap-to-switch sections via local activeSection signal in sidebar (host only); replaces deferred swipe-tabs | VERIFIED |
 | R3.1 | Camera switch button (facingMode) mobile-only; constraint-object asserted | M-B4 | — | ASSIGNED |
 | R3.3 | Single-column lobby device selectors on mobile | M-B4 | — | ASSIGNED |
 | R3.4 | iOS AudioContext gesture-gated mic-meter activation (Claude-peer catch) | M-B4 | — | ASSIGNED |
