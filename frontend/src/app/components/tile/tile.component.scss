@@ -1,14 +1,17 @@
 .tile {
   position: relative;
-  min-height: 190px;
+  min-height: 220px;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: #0b0d11;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
 }
 
+.tile-content,
 video,
-.avatar {
+.camera-off-avatar {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -19,41 +22,88 @@ video {
   object-fit: cover;
 }
 
-.avatar {
-  display: grid;
-  place-items: center;
-  color: #d8dee9;
-  background: #141821;
-  font-size: 48px;
-  font-weight: 800;
+.camera-off-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-footer {
+.camera-off-avatar span {
+  width: clamp(84px, 20%, 128px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  font-size: clamp(40px, 6vw, 64px);
+  font-weight: 900;
+}
+
+.tile-overlays {
   position: absolute;
-  inset-inline: 10px;
-  bottom: 10px;
-  min-height: 34px;
+  inset: 10px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+}
+
+.top-row,
+.bottom-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 7px 9px;
+}
+
+.top-row {
+  justify-content: flex-end;
+}
+
+.host-badge,
+.mute-icon,
+.name-label,
+.state {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   background: rgba(10, 12, 16, 0.78);
+  backdrop-filter: blur(10px);
 }
 
-.name {
+.host-badge {
+  margin-right: auto;
+  padding: 5px 8px;
+  color: #fde68a;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.mute-icon {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.84);
+}
+
+.name-label {
   min-width: 0;
+  max-width: min(72%, 420px);
+  padding: 7px 9px;
   overflow: hidden;
   color: #fff;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .state {
+  padding: 7px 9px;
   color: var(--muted);
   font-size: 11px;
   text-transform: uppercase;

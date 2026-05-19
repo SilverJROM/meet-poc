@@ -8,6 +8,9 @@ export type PeerState = {
   stream: MediaStream | null;
   connectionState: RTCPeerConnectionState | 'local';
   isLocal: boolean;
+  isHost: boolean;
+  micEnabled: boolean;
+  camEnabled: boolean;
 };
 
 type SignalPayload = {
@@ -28,7 +31,7 @@ export class WebrtcService {
     this.sendSignal = sendSignal;
   }
 
-  setLocalPeer(clientId: string, name: string): void {
+  setLocalPeer(clientId: string, name: string, options: { isHost: boolean; micEnabled: boolean; camEnabled: boolean }): void {
     this.mutatePeers((peers) => {
       peers.set(clientId, {
         id: clientId,
@@ -37,11 +40,14 @@ export class WebrtcService {
         stream: this.localStream,
         connectionState: 'local',
         isLocal: true,
+        isHost: options.isHost,
+        micEnabled: options.micEnabled,
+        camEnabled: options.camEnabled,
       });
     });
   }
 
-  async addPeer(clientId: string, name: string, isInitiator: boolean): Promise<void> {
+  async addPeer(clientId: string, name: string, isInitiator: boolean, options: { isHost?: boolean } = {}): Promise<void> {
     if (!this.localStream || !this.sendSignal || this.peers().has(clientId)) return;
     const pc = new RTCPeerConnection({ iceServers: environment.iceServers });
     const peer: PeerState = {
@@ -51,6 +57,9 @@ export class WebrtcService {
       stream: new MediaStream(),
       connectionState: pc.connectionState,
       isLocal: false,
+      isHost: !!options.isHost,
+      micEnabled: true,
+      camEnabled: true,
     };
     this.mutatePeers((peers) => peers.set(clientId, peer));
 
@@ -114,6 +123,10 @@ export class WebrtcService {
     await Promise.all(operations);
     const localPeer = this.peerList().find((peer) => peer.isLocal);
     if (localPeer) this.touchPeer(localPeer.id, { stream: this.localStream });
+  }
+
+  updatePeer(clientId: string, patch: Partial<PeerState>): void {
+    this.touchPeer(clientId, patch);
   }
 
   removePeer(clientId: string): void {

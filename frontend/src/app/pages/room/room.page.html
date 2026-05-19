@@ -49,11 +49,14 @@
           <button type="button" (click)="warningDismissed.set(true)">Dismiss</button>
         </div>
       }
+      <div class="meeting-meta">
+        <span class="meeting-clock" aria-label="Meeting elapsed time">{{ formattedElapsed() }}</span>
+      </div>
       <p class="call-status" role="status">{{ status() }}</p>
       @if (isOwner()) {
         <app-waiting-room-panel [knockers]="knockers()" (admit)="admit($event)" (reject)="reject($event)" />
       }
-      <div class="tiles-grid" aria-label="Participants">
+      <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
         @for (peer of peers(); track peer.id) {
           <app-tile [peer]="peer" />
         }

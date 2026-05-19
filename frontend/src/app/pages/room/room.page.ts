@@ -47,11 +47,25 @@ export class RoomPage implements OnDestroy {
   readonly error = signal<string | null>(null);
   readonly status = signal('');
   readonly myId = signal<string | null>(null);
+  readonly hostClientId = signal<string | null>(null);
   readonly isOwner = signal(false);
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
   readonly peers = this.webrtc.peerList;
   readonly showPeerWarning = computed(() => this.peers().length >= 6 && !this.warningDismissed());
+  private readonly callStartMs = signal<number | null>(null);
+  private readonly clockTick = signal(0);
+  private clockInterval: ReturnType<typeof setInterval> | null = null;
+  readonly formattedElapsed = computed(() => {
+    this.clockTick();
+    const start = this.callStartMs();
+    if (!start) return '0:00';
+    const elapsed = Math.max(0, Math.floor((Date.now() - start) / 1000));
+    const hours = Math.floor(elapsed / 3600);
+    const minutes = Math.floor((elapsed % 3600) / 60);
+    const seconds = elapsed % 60;
+    return hours > 0 ? `${hours}:${pad(minutes)}:${pad(seconds)}` : `${minutes}:${pad(seconds)}`;
+  });
 
   constructor() {
     void this.bootstrap();
@@ -153,12 +167,16 @@ export class RoomPage implements OnDestroy {
   }
 
   async toggleMic(): Promise<void> {
-    this.media.toggleMic();
+    const mic = this.media.toggleMic();
+    this.updateLocalMediaState();
+    this.broadcastMediaState(mic, this.media.cameraOn());
   }
 
   async toggleCamera(): Promise<void> {
     try {
-      await this.media.toggleCamera((track) => this.webrtc.replaceVideoTrack(track));
+      const cam = await this.media.toggleCamera((track) => this.webrtc.replaceVideoTrack(track));
+      this.updateLocalMediaState();
+      this.broadcastMediaState(this.media.micOn(), cam);
     } catch (err) {
       this.status.set(`Camera access failed: ${err instanceof Error ? err.message : 'unknown error'}`);
     }
@@ -233,13 +251,20 @@ export class RoomPage implements OnDestroy {
       const stream = this.media.localStream();
       if (stream) {
         this.webrtc.configure(stream, (to, data) => this.ws.send({ type: 'signal', to, data }));
-        this.webrtc.setLocalPeer(msg.clientId, this.displayName().trim() || 'Anon');
+        this.hostClientId.set(msg.hostClientId || (msg.isOwner ? msg.clientId : null));
+        this.webrtc.setLocalPeer(msg.clientId, this.displayName().trim() || 'Anon', {
+          isHost: msg.isOwner,
+          micEnabled: this.media.micOn(),
+          camEnabled: this.media.cameraOn(),
+        });
       }
       this.state.set('in-call');
+      this.startClock();
       this.status.set(`You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
       for (const peer of msg.peers) {
-        await this.webrtc.addPeer(peer.id, peer.name, true);
+        await this.webrtc.addPeer(peer.id, peer.name, true, { isHost: !!peer.host || peer.id === this.hostClientId() });
       }
+      this.broadcastMediaState(this.media.micOn(), this.media.cameraOn());
       return;
     }
     if (msg.type === 'pending-list') {
@@ -257,7 +282,11 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-joined') {
       this.status.set(`${msg.name} joined.`);
-      await this.webrtc.addPeer(msg.clientId, msg.name, false);
+      await this.webrtc.addPeer(msg.clientId, msg.name, false, { isHost: !!msg.host || msg.clientId === this.hostClientId() });
+      return;
+    }
+    if (msg.type === 'media-state') {
+      this.webrtc.updatePeer(msg.clientId, { micEnabled: msg.mic, camEnabled: msg.cam });
       return;
     }
     if (msg.type === 'peer-left') {
@@ -347,7 +376,37 @@ export class RoomPage implements OnDestroy {
     this.knockers.set([]);
     this.isOwner.set(false);
     this.myId.set(null);
+    this.hostClientId.set(null);
+    this.stopClock();
   }
+
+  private broadcastMediaState(mic: boolean, cam: boolean): void {
+    this.ws.send({ type: 'media-state', mic, cam });
+  }
+
+  private updateLocalMediaState(): void {
+    const id = this.myId();
+    if (!id) return;
+    this.webrtc.updatePeer(id, { micEnabled: this.media.micOn(), camEnabled: this.media.cameraOn() });
+  }
+
+  private startClock(): void {
+    this.stopClock();
+    this.callStartMs.set(Date.now());
+    this.clockTick.set(0);
+    this.clockInterval = setInterval(() => this.clockTick.update((tick) => tick + 1), 1000);
+  }
+
+  private stopClock(): void {
+    if (this.clockInterval) clearInterval(this.clockInterval);
+    this.clockInterval = null;
+    this.callStartMs.set(null);
+    this.clockTick.set(0);
+  }
+}
+
+function pad(value: number): string {
+  return String(value).padStart(2, '0');
 }
 
 declare global {

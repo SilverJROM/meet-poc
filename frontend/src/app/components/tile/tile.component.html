@@ -1,10 +1,28 @@
-<article class="tile" [attr.data-peer]="peer().id" [attr.data-state]="peer().connectionState">
-  <video #video autoplay playsinline [muted]="peer().isLocal"></video>
-  @if (!peer().stream || peer().stream?.getVideoTracks()?.length === 0) {
-    <div class="avatar">{{ peer().name.slice(0, 1).toUpperCase() }}</div>
-  }
-  <footer>
-    <span class="name">{{ peer().name }}</span>
-    <span class="state">{{ peer().connectionState }}</span>
-  </footer>
+<article class="tile" [attr.data-peer]="peer().id" [attr.data-state]="peer().connectionState" [attr.data-host]="peer().isHost">
+  <div class="tile-content">
+    @if (peer().camEnabled && peer().stream?.getVideoTracks()?.length) {
+      <video #video autoplay playsinline [muted]="peer().isLocal"></video>
+    } @else {
+      <div class="camera-off-avatar" [style.background]="avatarColor()">
+        <span>{{ initial() }}</span>
+      </div>
+    }
+
+    <div class="tile-overlays">
+      <div class="top-row">
+        @if (peer().isHost) {
+          <span class="host-badge">HOST</span>
+        }
+        @if (!peer().micEnabled) {
+          <span class="mute-icon" aria-label="microphone muted">
+            <ion-icon name="mic-off-outline"></ion-icon>
+          </span>
+        }
+      </div>
+      <div class="bottom-row">
+        <span class="name-label">{{ peer().name }}</span>
+        <span class="state">{{ peer().connectionState }}</span>
+      </div>
+    </div>
+  </div>
 </article>
