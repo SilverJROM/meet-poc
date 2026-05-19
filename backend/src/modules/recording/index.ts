@@ -77,6 +77,32 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     res.json({ recordings });
   });
 
+  router.post('/api/recordings/bulk-delete', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const raw = req.body && Array.isArray(req.body.filenames) ? req.body.filenames : null;
+    if (!raw) return res.status(400).json({ error: 'filenames array required' });
+    const filenames = raw.map((value: unknown) => String(value)).slice(0, 200);
+    let deleted = 0;
+    for (const filename of filenames) {
+      if (deleteOwnedRecording(filename, authReq.user.email, database)) deleted += 1;
+    }
+    return res.json({ ok: true, deleted, requested: filenames.length });
+  });
+
+  router.delete('/api/recordings/:filename', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const filename = String(req.params.filename || '');
+    const parsed = parseRecordingFilename(filename);
+    if (!parsed || isUnsafeRecordingFilename(filename)) return res.status(404).json({ error: 'not found' });
+    const room = getRoom(parsed.roomId, database);
+    if (!room) return res.status(404).json({ error: 'not found' });
+    if (room.ownerEmail !== authReq.user.email) return res.status(403).json({ error: 'forbidden' });
+    const filepath = safeRecordingPath(filename);
+    if (!filepath || !fs.existsSync(filepath)) return res.status(404).json({ error: 'not found' });
+    fs.unlinkSync(filepath);
+    return res.json({ ok: true });
+  });
+
   router.get('/api/recordings/:filename/download', requireAuth(database), (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const filename = String(req.params.filename || '');
@@ -93,6 +119,32 @@ export function recordingRouter(database: Database.Database = getDb()): express.
   });
 
   return router;
+}
+
+function deleteOwnedRecording(filename: string, email: string, database: Database.Database): boolean {
+  if (isUnsafeRecordingFilename(filename)) return false;
+  const parsed = parseRecordingFilename(filename);
+  if (!parsed) return false;
+  const room = getRoom(parsed.roomId, database);
+  if (!room || room.ownerEmail !== email) return false;
+  const filepath = safeRecordingPath(filename);
+  if (!filepath) return false;
+  try {
+    fs.unlinkSync(filepath);
+    return true;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+    throw err;
+  }
+}
+
+function safeRecordingPath(filename: string): string | null {
+  if (isUnsafeRecordingFilename(filename)) return null;
+  const dir = path.resolve(ensureRecordingsDir());
+  const filepath = path.resolve(path.join(dir, filename));
+  const prefix = dir.endsWith(path.sep) ? dir : `${dir}${path.sep}`;
+  if (filepath !== dir && !filepath.startsWith(prefix)) return null;
+  return filepath;
 }
 
 function hasPaginationQuery(query: Record<string, unknown>): boolean {
@@ -202,4 +254,8 @@ function sanitizeSlug(value: string): string {
 
 function isSafeFilename(filename: string): boolean {
   return path.basename(filename) === filename && /^[a-zA-Z0-9_.-]+$/.test(filename);
+}
+
+function isUnsafeRecordingFilename(filename: string): boolean {
+  return !filename || filename.includes('..') || /[\\/]/.test(filename) || !isSafeFilename(filename);
 }
