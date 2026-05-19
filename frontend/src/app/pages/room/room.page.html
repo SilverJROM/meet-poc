@@ -29,7 +29,7 @@
       <button type="button" class="secondary-btn" (click)="cancelKnock()">Cancel</button>
     </section>
   } @else if (state() === 'in-call') {
-    <section class="call-panel" aria-label="Call">
+    <section class="call-panel" [class.share-layout]="shareLayoutActive()" [class.strip-collapsed]="shareStripCollapsed()" aria-label="Call">
       <app-controls-bar
         [roomLabel]="roomTitle()"
         [micOn]="media.micOn()"
@@ -94,12 +94,35 @@
       </div>
       <app-recording-banner [recording]="hostRecording()" [startedAt]="recordingStartedAt()" />
       <p class="call-status" role="status">{{ status() }}</p>
-      <div class="call-content" [class.sidebar-open]="sidebarOpen()">
-        <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
-          @for (peer of peers(); track peer.id) {
-            <app-tile [peer]="peer" [speaking]="activeSpeaker.activePeerId() === peer.id" />
-          }
-        </div>
+      <div class="call-content" [class.sidebar-open]="sidebarOpen()" [class.share-content]="shareLayoutActive()" [class.strip-collapsed]="shareStripCollapsed()">
+        @if (shareLayoutActive() && sharingPeer(); as presenter) {
+          <div class="share-stage" aria-label="Shared screen">
+            <app-tile [peer]="presenter" [displayStream]="shareStream()" [forceVideo]="true" variant="share-main" [speaking]="activeSpeaker.activePeerId() === presenter.id" />
+          </div>
+          <aside class="share-strip" [class.collapsed]="shareStripCollapsed()" aria-label="Participants during screen share">
+            <button
+              type="button"
+              class="strip-toggle"
+              [attr.aria-label]="shareStripCollapsed() ? 'Show participant strip' : 'Hide participant strip'"
+              (click)="toggleShareStrip()"
+            >
+              {{ shareStripCollapsed() ? '<' : '>' }}
+            </button>
+            @if (!shareStripCollapsed()) {
+              <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
+                @for (peer of orderedStripPeers(); track peer.id) {
+                  <app-tile [peer]="peer" variant="strip" [speaking]="activeSpeaker.activePeerId() === peer.id" />
+                }
+              </div>
+            }
+          </aside>
+        } @else {
+          <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
+            @for (peer of peers(); track peer.id) {
+              <app-tile [peer]="peer" [speaking]="activeSpeaker.activePeerId() === peer.id" />
+            }
+          </div>
+        }
         <app-participant-sidebar
           [open]="sidebarOpen()"
           [peers]="peers()"

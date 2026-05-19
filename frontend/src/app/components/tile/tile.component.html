@@ -1,6 +1,15 @@
-<article class="tile" [class.is-speaking]="speaking()" [attr.data-peer]="peer().id" [attr.data-state]="peer().connectionState" [attr.data-host]="peer().isHost">
+<article
+  class="tile"
+  [class.is-speaking]="speaking()"
+  [class.strip-tile]="variant() === 'strip'"
+  [class.share-main-tile]="variant() === 'share-main'"
+  [attr.data-peer]="peer().id"
+  [attr.data-state]="peer().connectionState"
+  [attr.data-host]="peer().isHost"
+  [attr.data-screen-on]="peer().screenOn"
+>
   <div class="tile-content">
-    @if (peer().camEnabled && peer().stream?.getVideoTracks()?.length) {
+    @if (showVideo()) {
       <video #video autoplay playsinline [muted]="peer().isLocal"></video>
     } @else {
       <div class="camera-off-avatar" [style.background]="avatarColor()">

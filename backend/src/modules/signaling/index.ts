@@ -31,6 +31,7 @@ type IncomingMessage = {
   state?: unknown;
   mic?: unknown;
   cam?: unknown;
+  screenOn?: unknown;
   to?: string;
   data?: unknown;
   clientId?: unknown;
@@ -265,8 +266,9 @@ export function attachSignaling(server: http.Server, database: Database.Database
         if (!live) return;
         const mic = Boolean(msg.mic);
         const cam = Boolean(msg.cam);
+        const screenOn = Boolean(msg.screenOn);
         for (const [id, peer] of live.admitted) {
-          if (id !== clientId) send(peer.ws, { type: 'media-state', clientId, mic, cam });
+          if (id !== clientId) send(peer.ws, { type: 'media-state', clientId, mic, cam, screenOn });
         }
         return;
       }

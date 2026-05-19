@@ -52,16 +52,44 @@ describe('signaling media-state', () => {
     await nextMessage(owner, (msg) => msg.type === 'peer-joined' && msg.clientId === knocking2.clientId);
     await nextMessage(guest1, (msg) => msg.type === 'peer-joined' && msg.clientId === knocking2.clientId);
 
-    guest1.send(JSON.stringify({ type: 'media-state', mic: false, cam: true }));
+    guest1.send(JSON.stringify({ type: 'media-state', mic: false, cam: true, screenOn: true }));
     const ownerState = await nextMessage(owner, (msg) => msg.type === 'media-state');
     const guest2State = await nextMessage(guest2, (msg) => msg.type === 'media-state');
 
-    expect(ownerState).toEqual({ type: 'media-state', clientId: guest1Admitted.clientId, mic: false, cam: true });
+    expect(ownerState).toEqual({ type: 'media-state', clientId: guest1Admitted.clientId, mic: false, cam: true, screenOn: true });
     expect(guest2State).toEqual(ownerState);
     await expectNoMessage(guest1);
 
     closeWs(guest2);
     closeWs(guest1);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('FIXC3 defaults omitted screenOn to false for legacy clients', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Legacy media state', 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner' }));
+    await nextMessage(owner, (msg) => msg.type === 'admitted');
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === knocking.clientId);
+    owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
+    const guestAdmitted = await nextMessage(guest, (msg) => msg.type === 'admitted');
+    await nextMessage(owner, (msg) => msg.type === 'peer-joined' && msg.clientId === guestAdmitted.clientId);
+
+    guest.send(JSON.stringify({ type: 'media-state', mic: true, cam: false }));
+    const ownerState = await nextMessage(owner, (msg) => msg.type === 'media-state');
+
+    expect(ownerState).toEqual({ type: 'media-state', clientId: guestAdmitted.clientId, mic: true, cam: false, screenOn: false });
+
+    closeWs(guest);
     closeWs(owner);
     await closeServer(server);
   });

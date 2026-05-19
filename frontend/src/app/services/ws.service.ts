@@ -14,7 +14,7 @@ export type SignalingMessage =
   | { type: 'pending-list'; knockers: { id: string; name: string }[] }
   | { type: 'peer-joined'; clientId: string; name: string; host?: boolean }
   | { type: 'peer-left'; clientId: string }
-  | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean }
+  | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean; screenOn?: boolean }
   | { type: 'recording-started'; clientId: string; sessionId: string }
   | { type: 'recording-stopped'; clientId: string; sessionId: string }
   | { type: 'meeting-ended'; reason?: string }
@@ -30,7 +30,7 @@ export type OutgoingSignalingMessage =
   | { type: 'signal'; to: string; data: unknown }
   | { type: 'admit'; clientId: string }
   | { type: 'reject'; clientId: string; reason?: string }
-  | { type: 'media-state'; mic: boolean; cam: boolean }
+  | { type: 'media-state'; mic: boolean; cam: boolean; screenOn: boolean }
   | { type: 'recording-state'; state: 'started' | 'stopped' }
   | { type: 'meeting-ended-by-host' }
   | { type: 'mute-target'; clientId: string }

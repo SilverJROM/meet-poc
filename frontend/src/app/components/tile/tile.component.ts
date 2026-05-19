@@ -14,7 +14,12 @@ import { toInitials } from '../../utils/initials';
 export class TileComponent {
   readonly peer = input.required<PeerState>();
   readonly speaking = input(false);
+  readonly variant = input<'grid' | 'strip' | 'share-main'>('grid');
+  readonly displayStream = input<MediaStream | null>(null);
+  readonly forceVideo = input(false);
   readonly initials = computed(() => toInitials(this.peer().name));
+  readonly videoStream = computed(() => this.displayStream() ?? this.peer().stream);
+  readonly showVideo = computed(() => this.forceVideo() || (this.peer().camEnabled && !!this.videoStream()?.getVideoTracks()?.length));
   readonly avatarColor = computed(() => {
     const name = this.peer().name || 'x';
     let hash = 0;
@@ -27,7 +32,7 @@ export class TileComponent {
     addIcons({ micOffOutline });
     effect(() => {
       const video = this.video()?.nativeElement;
-      if (video) video.srcObject = this.peer().stream;
+      if (video) video.srcObject = this.videoStream();
     });
   }
 }

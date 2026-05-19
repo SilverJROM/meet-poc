@@ -184,6 +184,79 @@ app-tile {
   gap: 12px;
 }
 
+.call-content.share-content {
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 220px) 0;
+  gap: 12px;
+}
+
+.call-content.share-content.sidebar-open {
+  grid-template-columns: minmax(0, 1fr) minmax(190px, 220px) minmax(280px, 320px);
+}
+
+.call-content.share-content.strip-collapsed {
+  grid-template-columns: minmax(0, 1fr) 32px 0;
+}
+
+.call-content.share-content.strip-collapsed.sidebar-open {
+  grid-template-columns: minmax(0, 1fr) 32px minmax(280px, 320px);
+}
+
+.share-stage {
+  min-width: 0;
+  padding: 16px 0;
+}
+
+.share-strip {
+  position: relative;
+  min-width: 0;
+  margin: 16px 0;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  padding: 10px;
+  transition: width 160ms ease, padding 160ms ease;
+}
+
+.share-strip.collapsed {
+  width: 32px;
+  min-height: 180px;
+  padding: 0;
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.strip-toggle {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  left: -14px;
+  width: 28px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel-bg);
+  cursor: pointer;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.strip-list {
+  max-height: calc(100vh - 210px);
+  max-height: calc(100dvh - 210px);
+  display: grid;
+  gap: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.share-layout .meeting-meta {
+  justify-content: flex-start;
+}
+
 .tiles-grid[data-count="1"] {
   grid-template-columns: minmax(0, 720px);
   justify-content: center;
@@ -235,6 +308,29 @@ app-tile {
   .call-content,
   .call-content.sidebar-open {
     grid-template-columns: 1fr;
+  }
+
+  .call-content.share-content,
+  .call-content.share-content.sidebar-open,
+  .call-content.share-content.strip-collapsed,
+  .call-content.share-content.strip-collapsed.sidebar-open {
+    grid-template-columns: 1fr;
+  }
+
+  .share-stage {
+    padding-bottom: 0;
+  }
+
+  .share-strip,
+  .share-strip.collapsed {
+    width: auto;
+    min-height: 0;
+    margin-top: 0;
+  }
+
+  .strip-list {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: 240px;
   }
 
   .check-row {

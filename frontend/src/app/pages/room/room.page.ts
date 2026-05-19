@@ -98,6 +98,24 @@ export class RoomPage implements OnDestroy {
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
   readonly peers = this.webrtc.peerList;
+  readonly shareStripCollapsed = signal(false);
+  readonly promotedSpeakerId = signal<string | null>(null);
+  readonly sharingPeer = computed(() => this.peers().find((peer) => peer.screenOn) ?? null);
+  readonly shareLayoutActive = computed(() => !!this.sharingPeer());
+  readonly shareStream = computed(() => {
+    const peer = this.sharingPeer();
+    if (!peer) return null;
+    return peer.isLocal ? this.media.screenStream() : peer.stream;
+  });
+  readonly orderedStripPeers = computed(() => {
+    const promoted = this.promotedSpeakerId() ?? this.activeSpeaker.activePeerId();
+    return [...this.peers()].sort((left, right) => {
+      if (left.id === promoted && right.id !== promoted) return -1;
+      if (right.id === promoted && left.id !== promoted) return 1;
+      if (left.screenOn !== right.screenOn) return left.screenOn ? -1 : 1;
+      return left.name.localeCompare(right.name);
+    });
+  });
   readonly showPeerWarning = computed(() => this.peers().length >= 6 && !this.warningDismissed());
   readonly hostRecording = signal(false);
   readonly recordingStartedAt = signal<number | null>(null);
@@ -109,6 +127,8 @@ export class RoomPage implements OnDestroy {
   private visibilityListenerInstalled = false;
   private camOnBeforeBackground = false;
   private preflightTimer: ReturnType<typeof setTimeout> | null = null;
+  private speakerPromotionTimer: ReturnType<typeof setTimeout> | null = null;
+  private speakerPromotionCandidate: string | null = null;
   private readonly pendingSignals = new Map<string, BufferedSignal[]>();
   readonly formattedElapsed = computed(() => {
     this.clockTick();
@@ -138,8 +158,12 @@ export class RoomPage implements OnDestroy {
             audioEnabled: audio?.enabled,
             micEnabled: peer.micEnabled,
             camEnabled: peer.camEnabled,
+            screenOn: peer.screenOn,
           };
         }),
+        shareLayoutActive: this.shareLayoutActive(),
+        shareStripCollapsed: this.shareStripCollapsed(),
+        promotedSpeakerId: this.promotedSpeakerId(),
         isRecording: this.recorder.isRecording() || this.hostRecording(),
         screenShareAttempts: this.media.screenShareAttempts(),
         lastVideoConstraints: this.media.lastVideoConstraints(),
@@ -184,6 +208,10 @@ export class RoomPage implements OnDestroy {
     });
     effect(() => {
       this.activeSpeaker.observe(this.peers());
+    });
+    effect(() => {
+      const frame = this.activeSpeaker.activeFrame();
+      this.queueSpeakerPromotion(frame.id);
     });
     effect(() => {
       const activePeerIds = new Set<string>();
@@ -348,6 +376,8 @@ export class RoomPage implements OnDestroy {
   async toggleScreen(): Promise<void> {
     try {
       await this.media.toggleScreen((track) => this.webrtc.replaceVideoTrack(track));
+      this.updateLocalMediaState();
+      this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
       this.status.set(this.media.screenOn() ? 'Screen sharing.' : 'Screen sharing stopped.');
     } catch (err) {
       this.status.set(`Screen share failed: ${err instanceof Error ? err.message : 'not available'}`);
@@ -401,6 +431,10 @@ export class RoomPage implements OnDestroy {
 
   toggleSidebar(): void {
     this.sidebarOpen.update((open) => !open);
+  }
+
+  toggleShareStrip(): void {
+    this.shareStripCollapsed.update((collapsed) => !collapsed);
   }
 
   async leave(): Promise<void> {
@@ -477,6 +511,7 @@ export class RoomPage implements OnDestroy {
           isHost: msg.isOwner,
           micEnabled: this.media.micOn(),
           camEnabled: this.media.cameraOn(),
+          screenOn: this.media.screenOn(),
         });
       }
       this.state.set('in-call');
@@ -487,7 +522,7 @@ export class RoomPage implements OnDestroy {
         await this.webrtc.addPeer(peer.id, peer.name, true, { isHost: !!peer.host || peer.id === this.hostClientId() });
         await this.drainPendingSignals(peer.id);
       }
-      this.broadcastMediaState(this.media.micOn(), this.media.cameraOn());
+      this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
       return;
     }
     if (msg.type === 'pending-list') {
@@ -515,7 +550,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'media-state') {
-      this.webrtc.updatePeer(msg.clientId, { micEnabled: msg.mic, camEnabled: msg.cam });
+      this.webrtc.updatePeer(msg.clientId, { micEnabled: msg.mic, camEnabled: msg.cam, screenOn: !!msg.screenOn });
       return;
     }
     if (msg.type === 'mute-request') {
@@ -702,6 +737,10 @@ export class RoomPage implements OnDestroy {
 
   private cleanupCall(): void {
     this.clearPreflightTimer();
+    if (this.speakerPromotionTimer) clearTimeout(this.speakerPromotionTimer);
+    this.speakerPromotionTimer = null;
+    this.speakerPromotionCandidate = null;
+    this.promotedSpeakerId.set(null);
     this.ws.close();
     this.recorder.discard();
     this.media.stopLocal();
@@ -713,6 +752,7 @@ export class RoomPage implements OnDestroy {
     this.hostClientId.set(null);
     this.currentSessionId.set(null);
     this.sidebarOpen.set(false);
+    this.shareStripCollapsed.set(false);
     this.leaveDialogOpen.set(false);
     this.meetingEndedToastOpen.set(false);
     this.deviceFailureNotice.set(null);
@@ -799,8 +839,8 @@ export class RoomPage implements OnDestroy {
     this.deviceFailureNotice.set('Microphone disconnected. Please refresh to rejoin.');
   }
 
-  private broadcastMediaState(mic: boolean, cam: boolean): void {
-    this.ws.send({ type: 'media-state', mic, cam });
+  private broadcastMediaState(mic: boolean, cam: boolean, screenOn = this.media.screenOn()): void {
+    this.ws.send({ type: 'media-state', mic, cam, screenOn });
   }
 
   private installMobileVisibilityPause(): void {
@@ -843,7 +883,17 @@ export class RoomPage implements OnDestroy {
   private updateLocalMediaState(): void {
     const id = this.myId();
     if (!id) return;
-    this.webrtc.updatePeer(id, { micEnabled: this.media.micOn(), camEnabled: this.media.cameraOn() });
+    this.webrtc.updatePeer(id, { micEnabled: this.media.micOn(), camEnabled: this.media.cameraOn(), screenOn: this.media.screenOn() });
+  }
+
+  private queueSpeakerPromotion(candidate: string | null): void {
+    if (this.speakerPromotionCandidate === candidate) return;
+    this.speakerPromotionCandidate = candidate;
+    if (this.speakerPromotionTimer) clearTimeout(this.speakerPromotionTimer);
+    this.speakerPromotionTimer = window.setTimeout(() => {
+      this.promotedSpeakerId.set(this.speakerPromotionCandidate);
+      this.speakerPromotionTimer = null;
+    }, 500);
   }
 
   private shouldEnableBgPause(): boolean {
@@ -958,7 +1008,11 @@ declare global {
         audioEnabled?: boolean;
         micEnabled?: boolean;
         camEnabled?: boolean;
+        screenOn?: boolean;
       }[];
+      shareLayoutActive?: boolean;
+      shareStripCollapsed?: boolean;
+      promotedSpeakerId?: string | null;
       screenShareAttempts: number;
       lastVideoConstraints?: MediaStreamConstraints | null;
       audioContextActivated?: boolean;

@@ -11,6 +11,7 @@ export type PeerState = {
   isHost: boolean;
   micEnabled: boolean;
   camEnabled: boolean;
+  screenOn: boolean;
 };
 
 type SignalPayload = {
@@ -31,7 +32,7 @@ export class WebrtcService {
     this.sendSignal = sendSignal;
   }
 
-  setLocalPeer(clientId: string, name: string, options: { isHost: boolean; micEnabled: boolean; camEnabled: boolean }): void {
+  setLocalPeer(clientId: string, name: string, options: { isHost: boolean; micEnabled: boolean; camEnabled: boolean; screenOn: boolean }): void {
     this.mutatePeers((peers) => {
       peers.set(clientId, {
         id: clientId,
@@ -43,6 +44,7 @@ export class WebrtcService {
         isHost: options.isHost,
         micEnabled: options.micEnabled,
         camEnabled: options.camEnabled,
+        screenOn: options.screenOn,
       });
     });
   }
@@ -60,6 +62,7 @@ export class WebrtcService {
       isHost: !!options.isHost,
       micEnabled: true,
       camEnabled: true,
+      screenOn: false,
     };
     this.mutatePeers((peers) => peers.set(clientId, peer));
 

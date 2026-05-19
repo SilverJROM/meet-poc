@@ -84,6 +84,7 @@ export class ActiveSpeakerService {
       isHost: false,
       micEnabled: true,
       camEnabled: false,
+      screenOn: false,
     });
     this.start();
   }

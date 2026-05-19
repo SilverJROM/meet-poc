@@ -21,6 +21,7 @@ export class MediaService {
   private readonly viewport = inject(ViewportService);
 
   readonly localStream = signal<MediaStream | null>(null);
+  readonly screenStream = signal<MediaStream | null>(null);
   readonly micOn = signal(true);
   readonly cameraOn = signal(false);
   readonly screenOn = signal(false);
@@ -225,6 +226,7 @@ export class MediaService {
     const track = screen.getVideoTracks()[0];
     registerDebugTracks(screen);
     this.screenTrack = track;
+    this.screenStream.set(screen);
     this.screenOn.set(true);
     track.onended = () => {
       void this.stopScreen(onVideoTrackChanged);
@@ -237,6 +239,7 @@ export class MediaService {
     const track = this.screenTrack;
     this.screenTrack = null;
     if (track) track.stop();
+    this.screenStream.set(null);
     this.screenOn.set(false);
     await onVideoTrackChanged(this.localStream()?.getVideoTracks()[0] ?? null);
   }
@@ -279,6 +282,7 @@ export class MediaService {
       this.screenTrack.stop();
       this.screenTrack = null;
     }
+    this.screenStream.set(null);
     this.localStream()?.getTracks().forEach((track) => track.stop());
     this.localStream.set(null);
     this.screenOn.set(false);
