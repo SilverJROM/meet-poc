@@ -6,12 +6,12 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 
 | Req# | Requirement (first 80 chars) | Batch | Evidence | Status |
 |------|-----------------------------|-------|----------|--------|
-| R1.1 | meeting_sessions table + indexes via migration 0003 | B1 | — | ASSIGNED |
-| R1.2 | Session opens on first WS-join, idempotent within room | B1 | — | ASSIGNED |
-| R1.3 | Session closes on host-end / last-peer-left / host-disconnect-empty | B1 | — | ASSIGNED |
-| R1.4 | admitted_peak tracked as high-water mark | B1 | — | ASSIGNED |
-| R1.5 | GET /api/meeting-sessions paginated; active and ended-with-filter | B1 | — | ASSIGNED |
-| R1.6 | Helper getOpenSessionFor(roomId, hostEmail) | B1 | — | ASSIGNED |
+| R1.1 | meeting_sessions table + indexes via migration 0003 | B1 | B1 0003_meeting_sessions.sql; 15/31 tests green | VERIFIED |
+| R1.2 | Session opens on first WS-join, idempotent within room | B1 | B1 S1.1 + live smoke (WS open creates row, idempotent reuse for same room) | VERIFIED |
+| R1.3 | Session closes on host-end / last-peer-left / host-disconnect-empty | B1 | B1 S1.4+S1.5 close on last-peer-left + host-disconnect-empty (live smoke confirmed); host-end → B2 | PARTIAL |
+| R1.4 | admitted_peak tracked as high-water mark | B1 | B1 S1.2 (admitted_peak high water mark) | VERIFIED |
+| R1.5 | GET /api/meeting-sessions paginated; active and ended-with-filter | B1 | B1 S1.6+S1.7+S1.8 + live smoke (active=0 + ended paginated with 10s+peak filter) | VERIFIED |
+| R1.6 | Helper getOpenSessionFor(roomId, hostEmail) | B1 | B1 store.ts getOpenSessionFor + getOpenSessionByRoom helpers | VERIFIED |
 | R2.1 | /upload cookie-trust + 401/403 | B2 | — | ASSIGNED |
 | R2.2 | /upload 409 if no open meeting_session for (room, host) | B2 | — | ASSIGNED |
 | R2.3 | Recording filename embeds meeting_session_id (backward compat) | B2 | — | ASSIGNED |
@@ -52,4 +52,7 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R8.6 | Non-host meeting-ended toast + 5s auto-dismiss + nav | B8 | — | ASSIGNED |
 | R8.7 | Active-speaker highlight via Web Audio RMS at 8Hz | B8 | — | ASSIGNED |
 
-**Totals at run start (2026-05-19):** 0 VERIFIED / 44 ASSIGNED / 0 PARTIAL / 0 FAIL.
+**Totals after v2-B1 PASS (2026-05-19):** 5 VERIFIED / 38 ASSIGNED / 1 PARTIAL (R1.3 — host-end trigger pending B2) / 0 FAIL.
+
+**Verification trail:**
+- 2026-05-19 — v2-B1 PASS — R1.1-R1.6 except R1.3 PARTIAL. Live smoke: WS join TEST_ROOM01 → real SQLite row (uuidv4 id, ended_reason=host-disconnect-empty, admitted_peak=1, 623ms duration → correctly excluded from past via 10s filter). 15/31 vitest green. 2 decisions logged. See `validation/batch-1.md`.
