@@ -29,10 +29,10 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R3.1 | Camera switch button (facingMode) mobile-only; constraint-object asserted | M-B4 | M-B4 Flip camera icon button mobile-only; facingMode constraint asserted on __meetDebug.lastVideoConstraints | VERIFIED |
 | R3.3 | Single-column lobby device selectors on mobile | M-B4 | M-B4 lobby-preview SCSS bp.mobile single-column selectors w/ 48px targets | VERIFIED |
 | R3.4 | iOS AudioContext gesture-gated mic-meter activation (Claude-peer catch) | M-B4 | M-B4 MediaService.activateMicPreview() defers AudioContext+resume() to first user gesture (mobile only); desktop auto-starts unchanged; __meetDebug.audioContextActivated; pill UX | VERIFIED |
-| R6.3 | MediaRecorder mime capability-list fallback; upload/download accept .mp4 | M-B5 | — | ASSIGNED |
+| R6.3 | MediaRecorder mime capability-list fallback; upload/download accept .mp4 | M-B5 | M-B5 recorder.service.ts capability-list (webm-opus → webm → mp4 → aac); X-Ext header per codec; backend accepts mp4/aac; +1 backend test | VERIFIED |
 | R6.5 | 100dvh covers iOS Safari address-bar; verified via R7 real-device | M-B5 | — | ASSIGNED (cross-cuts) |
-| R6.6 | MediaRecorder timeslice ≥ 1000ms on iOS (avoid zero-length segments) | M-B5 | — | ASSIGNED |
-| R6.7 | Orientation: graceful landscape (no portrait lock; existing CSS adapts) | M-B5 | — | ASSIGNED |
+| R6.6 | MediaRecorder timeslice ≥ 1000ms on iOS (avoid zero-length segments) | M-B5 | M-B5 iOS branch calls MediaRecorder.start() WITHOUT timeslice; non-iOS keeps 1000ms; __meetDebug.lastRecorderTimeslice asserts | VERIFIED |
+| R6.7 | Orientation: graceful landscape (no portrait lock; existing CSS adapts) | M-B5 | M-B5 landscape audit found lobby clipping at 844x390; codex added landscape-specific two-column lobby layout; no portrait lock | VERIFIED |
 | R7.1 | Operator iPhone 14 + Android SIMULTANEOUS real-device smoke | M-B6 | — | ASSIGNED |
 | R7.2 | Lighthouse mobile audit ≥ 85 acc / ≥ 70 perf / ≥ 85 best-practices | M-B6 | — | ASSIGNED |
 | R7.3 | Real 2-min call between two REAL devices (iOS + Android) audio+video | M-B6 | — | ASSIGNED |
