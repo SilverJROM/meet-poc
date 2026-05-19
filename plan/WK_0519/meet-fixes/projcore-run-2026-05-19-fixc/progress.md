@@ -24,3 +24,13 @@
 - Live URL HTTP 200, public smoke PASS, TEST_ROOM01 preserved
 - R-C-3 → VERIFIED (browser-side); JROM hardware smoke is the final proof
 - See `batch-fixc1/independent-validation.md`
+
+### FIXC2 — Device modal + in-call hot-swap — **VERIFIED PASS** (2026-05-19, codex wall time 15m 19s)
+
+- Branch: `fix/meet-fixc2-device-modal`
+- Commits: 3cbcd71 fix(frontend): add device test dialog (21 files, 1083+/7-)
+- Backend: 59/59, FIXC2 e2e: 4/4, Run 1 regression: **53/53** (R8.1 → 12 consecutive)
+- Screenshots: lobby-modal.png + in-call-dialog.png (both soft-light theme conforming)
+- R-C-1 → VERIFIED (with 650ms auto-start nuance flagged for JROM hardware smoke)
+- R-C-2 → VERIFIED
+- See `batch-fixc2/independent-validation.md`
