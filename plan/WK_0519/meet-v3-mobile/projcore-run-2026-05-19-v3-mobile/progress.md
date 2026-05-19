@@ -25,7 +25,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 | M-B1 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | M-B2 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | M-B3 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
-| M-B4 | DONE | 1 | 2026-05-19 | 2026-05-19 | — | CALLBACK |
+| M-B4 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | M-B5 | PENDING | — | — | — | — | — |
 | M-B6 | PENDING | — | — | — | — | — |
 
@@ -40,3 +40,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 [projcore callback] v3-mb3 DONE — mobile call layout + bottom-sheet + docked controls + grid
 [projcore verdict] v3-mb3 PASS — R2.1-R2.7 + R8.1+R8.2+R8.5 VERIFIED. Bottom-sheet (75dvh + backdrop + drag-handle + swipe-down + auto-close on input focus for iOS keyboard) extends sidebar; docked controls w/ safe-area; mobile grid 1/2/2x2; screen-share hidden mobile; tap-tabs replace deferred swipe-tabs. 9 specs PASS. **Run 1 regression 40/40 GREEN (R8.1 held 3rd consecutive batch)**. Backend 45/45 unchanged. 1 decision logged. Commit-before-DONE held. Matrix: 24/30 VERIFIED. See validation/batch-3.md.
 [projcore callback] v3-mb4 DONE — mobile lobby + AudioContext gesture gate + camera switch
+[projcore verdict] v3-mb4 PASS — R3.1+R3.3+R3.4 VERIFIED. AudioContext gesture-gated mobile-only (desktop unchanged Run 1 path) — Claude-peer's biggest iOS catch closed. Camera switch button mobile-only; constraint-object asserted (not track-ID). Single-column mobile selectors. M-B4 e2e 4/4 in 6.4s. Backend 45/45 unchanged. **Run 1 regression 40/40 GREEN (R8.1 held 4th consecutive batch)**. 1 decision (lobby-audiocontext-facingmode covering all 3 sub-decisions). Commit-before-DONE held. Matrix: 27/30 VERIFIED. See validation/batch-4.md.

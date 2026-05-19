@@ -26,9 +26,9 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R2.5 | Per-tile overlays work identically on mobile tiles | M-B3 | M-B3 tile.scss mobile sizing guards; overlays remain readable at compact sizes | VERIFIED |
 | R2.6 | Bottom-sheet handles iOS virtual keyboard (visualViewport or auto-close) | M-B3 | M-B3 iOS keyboard handling: sheet auto-closes when input inside it receives focus (codex choice: close-on-focus simpler than visualViewport repositioning) | VERIFIED |
 | R2.7 | Tap-to-switch sidebar sections (placeholder for swipe; v3.5) | M-B3 | M-B3 tap-to-switch sections via local activeSection signal in sidebar (host only); replaces deferred swipe-tabs | VERIFIED |
-| R3.1 | Camera switch button (facingMode) mobile-only; constraint-object asserted | M-B4 | — | ASSIGNED |
-| R3.3 | Single-column lobby device selectors on mobile | M-B4 | — | ASSIGNED |
-| R3.4 | iOS AudioContext gesture-gated mic-meter activation (Claude-peer catch) | M-B4 | — | ASSIGNED |
+| R3.1 | Camera switch button (facingMode) mobile-only; constraint-object asserted | M-B4 | M-B4 Flip camera icon button mobile-only; facingMode constraint asserted on __meetDebug.lastVideoConstraints | VERIFIED |
+| R3.3 | Single-column lobby device selectors on mobile | M-B4 | M-B4 lobby-preview SCSS bp.mobile single-column selectors w/ 48px targets | VERIFIED |
+| R3.4 | iOS AudioContext gesture-gated mic-meter activation (Claude-peer catch) | M-B4 | M-B4 MediaService.activateMicPreview() defers AudioContext+resume() to first user gesture (mobile only); desktop auto-starts unchanged; __meetDebug.audioContextActivated; pill UX | VERIFIED |
 | R6.3 | MediaRecorder mime capability-list fallback; upload/download accept .mp4 | M-B5 | — | ASSIGNED |
 | R6.5 | 100dvh covers iOS Safari address-bar; verified via R7 real-device | M-B5 | — | ASSIGNED (cross-cuts) |
 | R6.6 | MediaRecorder timeslice ≥ 1000ms on iOS (avoid zero-length segments) | M-B5 | — | ASSIGNED |
