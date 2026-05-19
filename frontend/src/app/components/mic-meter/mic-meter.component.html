@@ -1,0 +1,5 @@
+<div class="mic-meter" aria-label="Microphone level">
+  @for (bar of bars; track bar) {
+    <div class="bar" [class.is-active]="level() > bar / 8" [style.height.px]="8 + bar * 3"></div>
+  }
+</div>

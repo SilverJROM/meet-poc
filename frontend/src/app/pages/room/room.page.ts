@@ -1,12 +1,13 @@
-import { Component, OnDestroy, computed, effect, inject, signal } from '@angular/core';
+import { Component, OnDestroy, Signal, computed, effect, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ControlsBarComponent } from '../../components/controls-bar/controls-bar.component';
 import { KnockSpinnerComponent } from '../../components/knock-spinner/knock-spinner.component';
+import { LobbyPreviewComponent } from '../../components/lobby-preview/lobby-preview.component';
 import { TileComponent } from '../../components/tile/tile.component';
 import { Knocker, WaitingRoomPanelComponent } from '../../components/waiting-room-panel/waiting-room-panel.component';
 import { AuthService } from '../../services/auth.service';
-import { MediaService } from '../../services/media.service';
+import { MediaError, MediaService } from '../../services/media.service';
 import { RecorderService } from '../../services/recorder.service';
 import { RoomsService } from '../../services/rooms.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
@@ -17,7 +18,7 @@ type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'knocking' 
 @Component({
   selector: 'app-room',
   standalone: true,
-  imports: [FormsModule, RouterLink, ControlsBarComponent, KnockSpinnerComponent, TileComponent, WaitingRoomPanelComponent],
+  imports: [FormsModule, RouterLink, ControlsBarComponent, KnockSpinnerComponent, LobbyPreviewComponent, TileComponent, WaitingRoomPanelComponent],
   templateUrl: './room.page.html',
   styleUrl: './room.page.scss',
 })
@@ -36,6 +37,13 @@ export class RoomPage implements OnDestroy {
   readonly roomTitle = signal('Checking room...');
   readonly displayName = signal('');
   readonly cameraRequested = signal(false);
+  readonly localStream = this.media.localStream;
+  readonly audioInputs = signal<MediaDeviceInfo[]>([]);
+  readonly videoInputs = signal<MediaDeviceInfo[]>([]);
+  readonly selectedAudioId = signal('');
+  readonly selectedVideoId = signal('');
+  readonly permissionError = signal<MediaError['code'] | null>(null);
+  readonly micLevel = signal<Signal<number>>(signal(0).asReadonly());
   readonly error = signal<string | null>(null);
   readonly status = signal('');
   readonly myId = signal<string | null>(null);
@@ -81,6 +89,7 @@ export class RoomPage implements OnDestroy {
       }
       this.roomTitle.set(info.title ?? 'Untitled room');
       this.state.set('lobby');
+      await this.startLobbyPreflight();
     } catch {
       this.error.set('Room could not be loaded');
       this.state.set('error');
@@ -93,10 +102,10 @@ export class RoomPage implements OnDestroy {
     this.error.set(null);
     this.status.set('Connecting...');
     this.state.set('connecting');
-    try {
-      await this.media.getLocalStream(this.cameraRequested());
-    } catch (err) {
-      this.error.set(`Mic/camera access failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    if (!this.media.localStream()) {
+      await this.startLobbyPreflight();
+    }
+    if (!this.media.localStream()) {
       this.state.set('lobby');
       return;
     }
@@ -121,6 +130,26 @@ export class RoomPage implements OnDestroy {
     this.state.set('lobby');
     this.status.set('');
     this.error.set(null);
+    void this.startLobbyPreflight();
+  }
+
+  async retryPreflight(): Promise<void> {
+    await this.startLobbyPreflight();
+  }
+
+  async setCameraRequested(value: boolean): Promise<void> {
+    this.cameraRequested.set(value);
+    if (this.state() === 'lobby') await this.reacquireLobbyStream();
+  }
+
+  async changeAudioDevice(deviceId: string): Promise<void> {
+    this.selectedAudioId.set(deviceId);
+    await this.reacquireLobbyStream();
+  }
+
+  async changeVideoDevice(deviceId: string): Promise<void> {
+    this.selectedVideoId.set(deviceId);
+    await this.reacquireLobbyStream();
   }
 
   async toggleMic(): Promise<void> {
@@ -263,6 +292,51 @@ export class RoomPage implements OnDestroy {
       if (!peer.isLocal && peer.stream) streams.set(peer.id, peer.stream);
     }
     return streams;
+  }
+
+  private async startLobbyPreflight(): Promise<void> {
+    this.permissionError.set(null);
+    this.error.set(null);
+    try {
+      const stream = await this.media.preflight({ audio: true, video: this.cameraRequested() });
+      this.micLevel.set(this.media.getMicLevel(stream));
+      await this.refreshDevices();
+    } catch (err) {
+      const mediaError = err as MediaError;
+      this.permissionError.set(mediaError.code || 'unknown');
+      this.error.set(mediaError.message || 'Media access failed');
+    }
+  }
+
+  private async reacquireLobbyStream(): Promise<void> {
+    if (this.state() !== 'lobby') return;
+    this.permissionError.set(null);
+    this.error.set(null);
+    try {
+      const stream = await this.media.reacquire({
+        audioDeviceId: this.selectedAudioId() || undefined,
+        videoDeviceId: this.selectedVideoId() || undefined,
+        video: this.cameraRequested(),
+      });
+      this.micLevel.set(this.media.getMicLevel(stream));
+      await this.refreshDevices();
+    } catch (err) {
+      const mediaError = err as MediaError;
+      this.permissionError.set(mediaError.code || 'unknown');
+      this.error.set(mediaError.message || 'Media access failed');
+    }
+  }
+
+  private async refreshDevices(): Promise<void> {
+    const devices = await this.media.enumerateDevices();
+    this.audioInputs.set(devices.audioInputs);
+    this.videoInputs.set(devices.videoInputs);
+    if (!this.selectedAudioId() || !devices.audioInputs.some((device) => device.deviceId === this.selectedAudioId())) {
+      this.selectedAudioId.set(devices.audioInputs[0]?.deviceId || '');
+    }
+    if (!this.selectedVideoId() || !devices.videoInputs.some((device) => device.deviceId === this.selectedVideoId())) {
+      this.selectedVideoId.set(devices.videoInputs[0]?.deviceId || '');
+    }
   }
 
   private cleanupCall(): void {

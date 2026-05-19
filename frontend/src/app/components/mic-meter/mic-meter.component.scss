@@ -1,0 +1,19 @@
+.mic-meter {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: end;
+  gap: 4px;
+}
+
+.bar {
+  width: 8px;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.26);
+  opacity: 0.45;
+  transition: opacity 80ms ease, background-color 80ms ease;
+}
+
+.bar.is-active {
+  background: var(--green);
+  opacity: 1;
+}

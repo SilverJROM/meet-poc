@@ -62,6 +62,28 @@
   } @else {
     <section class="lobby-panel">
       <h1>{{ roomTitle() }}</h1>
+      @if (permissionError() === 'denied') {
+        <div class="permission-error" role="alert">
+          <p>Microphone access denied — meet-poc can't join this call. Check browser settings → allow microphone for voice.silverjrom.app, then click Retry.</p>
+          <button type="button" class="secondary-btn" (click)="retryPreflight()">Retry</button>
+        </div>
+      } @else if (permissionError() === 'no-devices') {
+        <div class="permission-error" role="alert">
+          <p>No microphone detected. Connect a microphone, then click Retry.</p>
+          <button type="button" class="secondary-btn" (click)="retryPreflight()">Retry</button>
+        </div>
+      }
+      <app-lobby-preview
+        [stream]="localStream()"
+        [audioInputs]="audioInputs()"
+        [videoInputs]="videoInputs()"
+        [selectedAudioId]="selectedAudioId()"
+        [selectedVideoId]="selectedVideoId()"
+        [videoEnabled]="cameraRequested()"
+        [level]="micLevel()"
+        (audioDeviceChange)="changeAudioDevice($event)"
+        (videoDeviceChange)="changeVideoDevice($event)"
+      />
       <form class="join-form" (ngSubmit)="join()">
         <div class="field">
           <label for="display-name">Name</label>
@@ -82,12 +104,12 @@
             name="cameraRequested"
             type="checkbox"
             [ngModel]="cameraRequested()"
-            (ngModelChange)="cameraRequested.set($event)"
+            (ngModelChange)="setCameraRequested($event)"
             [disabled]="state() === 'connecting'"
           >
           <span>Start with camera on</span>
         </label>
-        <button type="submit" class="primary-btn" [disabled]="state() === 'connecting' || !displayName().trim()">
+        <button type="submit" class="primary-btn" [disabled]="state() === 'connecting' || !!permissionError() || !displayName().trim()">
           {{ auth.user() ? 'Join' : 'Ask to join' }}
         </button>
       </form>

@@ -25,6 +25,22 @@ h1 {
   gap: 14px;
 }
 
+.permission-error {
+  display: grid;
+  gap: 10px;
+  border: 1px solid rgba(220, 38, 38, 0.5);
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.12);
+  color: #fecaca;
+  padding: 12px;
+}
+
+.permission-error p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .check-row {
   display: inline-flex;
   align-items: center;

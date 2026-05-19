@@ -1,0 +1,34 @@
+<section class="lobby-preview" aria-label="Lobby device preview">
+  <div class="preview-tile" [class.camera-off]="!videoEnabled()">
+    @if (videoEnabled() && stream()?.getVideoTracks()?.length) {
+      <video #video autoplay muted playsinline></video>
+    } @else {
+      <div class="camera-placeholder">Camera off</div>
+    }
+  </div>
+
+  <div class="meter-row">
+    <span>Mic level</span>
+    <app-mic-meter [level]="level()" />
+  </div>
+
+  <div class="device-grid">
+    <label>
+      <span>Microphone</span>
+      <select class="device-select mic-select" [value]="selectedAudioId()" (change)="onAudioChange($event)">
+        @for (device of audioInputs(); track device.deviceId) {
+          <option [value]="device.deviceId">{{ device.label || 'Microphone' }}</option>
+        }
+      </select>
+    </label>
+
+    <label>
+      <span>Camera</span>
+      <select class="device-select camera-select" [value]="selectedVideoId()" (change)="onVideoChange($event)">
+        @for (device of videoInputs(); track device.deviceId) {
+          <option [value]="device.deviceId">{{ device.label || 'Camera' }}</option>
+        }
+      </select>
+    </label>
+  </div>
+</section>

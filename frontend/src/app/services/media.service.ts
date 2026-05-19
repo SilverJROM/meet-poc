@@ -1,4 +1,17 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, Signal, signal } from '@angular/core';
+
+export type MediaError = { code: 'denied' | 'no-devices' | 'unknown'; message: string };
+
+type DeviceLists = {
+  audioInputs: MediaDeviceInfo[];
+  videoInputs: MediaDeviceInfo[];
+};
+
+type ReacquireOptions = {
+  audioDeviceId?: string;
+  videoDeviceId?: string;
+  video: boolean;
+};
 
 @Injectable({ providedIn: 'root' })
 export class MediaService {
@@ -9,17 +22,71 @@ export class MediaService {
   readonly screenShareAttempts = signal(0);
 
   private screenTrack: MediaStreamTrack | null = null;
+  private audioContext: AudioContext | null = null;
+  private micInterval: ReturnType<typeof setInterval> | null = null;
+  private micSource: MediaStreamAudioSourceNode | null = null;
+  private micLevel = signal(0);
 
   async getLocalStream(cameraOn: boolean): Promise<MediaStream> {
-    this.stopLocal();
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: cameraOn ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+    const current = this.localStream();
+    if (current) return current;
+    return this.preflight({ audio: true, video: cameraOn });
+  }
+
+  async preflight(constraints: { audio: boolean; video: boolean }): Promise<MediaStream> {
+    return this.acquire({
+      audio: constraints.audio ? true : false,
+      video: constraints.video ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
     });
-    this.localStream.set(stream);
-    this.micOn.set(stream.getAudioTracks()[0]?.enabled ?? false);
-    this.cameraOn.set(stream.getVideoTracks().length > 0);
-    return stream;
+  }
+
+  async enumerateDevices(): Promise<DeviceLists> {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return {
+      audioInputs: devices.filter((device) => device.kind === 'audioinput'),
+      videoInputs: devices.filter((device) => device.kind === 'videoinput'),
+    };
+  }
+
+  async reacquire(options: ReacquireOptions): Promise<MediaStream> {
+    const audio = options.audioDeviceId ? { deviceId: { exact: options.audioDeviceId } } : true;
+    const video = options.video
+      ? {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          ...(options.videoDeviceId ? { deviceId: { exact: options.videoDeviceId } } : {}),
+        }
+      : false;
+    return this.acquire({ audio, video });
+  }
+
+  getMicLevel(stream: MediaStream): Signal<number> {
+    this.stopMicLevel();
+    const track = stream.getAudioTracks()[0];
+    if (!track) {
+      this.micLevel.set(0);
+      return this.micLevel.asReadonly();
+    }
+
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    this.audioContext = this.audioContext && this.audioContext.state !== 'closed' ? this.audioContext : new AudioContextCtor();
+    void this.audioContext.resume();
+    const analyser = this.audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    this.micSource = this.audioContext.createMediaStreamSource(new MediaStream([track]));
+    this.micSource.connect(analyser);
+    const buffer = new Uint8Array(analyser.fftSize);
+
+    this.micInterval = setInterval(() => {
+      analyser.getByteTimeDomainData(buffer);
+      let sum = 0;
+      for (const sample of buffer) {
+        const centered = (sample - 128) / 128;
+        sum += centered * centered;
+      }
+      this.micLevel.set(Math.min(1, Math.sqrt(sum / buffer.length) * 3));
+    }, 125);
+    return this.micLevel.asReadonly();
   }
 
   toggleMic(): boolean {
@@ -77,6 +144,9 @@ export class MediaService {
   }
 
   stopLocal(): void {
+    this.stopMicLevel();
+    if (this.audioContext && this.audioContext.state !== 'closed') void this.audioContext.close();
+    this.audioContext = null;
     if (this.screenTrack) {
       this.screenTrack.stop();
       this.screenTrack = null;
@@ -86,5 +156,43 @@ export class MediaService {
     this.screenOn.set(false);
     this.cameraOn.set(false);
     this.micOn.set(true);
+  }
+
+  private async acquire(constraints: MediaStreamConstraints): Promise<MediaStream> {
+    this.stopLocal();
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      this.localStream.set(stream);
+      this.micOn.set(stream.getAudioTracks()[0]?.enabled ?? false);
+      this.cameraOn.set(stream.getVideoTracks().length > 0);
+      return stream;
+    } catch (err) {
+      throw normalizeMediaError(err);
+    }
+  }
+
+  private stopMicLevel(): void {
+    if (this.micInterval) clearInterval(this.micInterval);
+    this.micInterval = null;
+    this.micSource?.disconnect();
+    this.micSource = null;
+    this.micLevel.set(0);
+  }
+}
+
+function normalizeMediaError(err: unknown): MediaError {
+  const value = err as { name?: string; message?: string };
+  if (value?.name === 'NotAllowedError' || value?.name === 'PermissionDeniedError') {
+    return { code: 'denied', message: 'Media permission denied' };
+  }
+  if (value?.name === 'NotFoundError' || value?.name === 'DevicesNotFoundError') {
+    return { code: 'no-devices', message: 'No devices found' };
+  }
+  return { code: 'unknown', message: String(value?.message || err) };
+}
+
+declare global {
+  interface Window {
+    webkitAudioContext?: typeof AudioContext;
   }
 }
