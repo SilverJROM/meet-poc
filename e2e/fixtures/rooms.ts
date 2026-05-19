@@ -1,6 +1,25 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import WebSocket from 'ws';
 import { email, initialPassword, loginAsJrom } from './auth';
+
+const TRACK_FILE = path.resolve(process.cwd(), '.test-rooms.json');
+
+function trackRoom(id: string): void {
+  let ids: string[] = [];
+  try {
+    if (fs.existsSync(TRACK_FILE)) ids = JSON.parse(fs.readFileSync(TRACK_FILE, 'utf8'));
+  } catch {
+    ids = [];
+  }
+  if (!ids.includes(id)) ids.push(id);
+  try {
+    fs.writeFileSync(TRACK_FILE, JSON.stringify(ids));
+  } catch {
+    // best effort
+  }
+}
 
 export type TestRoom = {
   id: string;
@@ -13,6 +32,7 @@ export async function createRoomViaApi(request: APIRequestContext, title: string
   const res = await request.post('/api/rooms', { data: { title } });
   expect(res.ok()).toBeTruthy();
   const json = await res.json();
+  trackRoom(json.room.id);
   return { id: json.room.id, title: json.room.title, url: `/room/${json.room.id}` };
 }
 
@@ -25,6 +45,7 @@ export async function createRoomFromDashboard(page: Page, title: string): Promis
   const href = await row.getByRole('link', { name: 'Join' }).getAttribute('href');
   if (!href) throw new Error('room href missing');
   const id = href.split('/').pop() ?? '';
+  if (id) trackRoom(id);
   return { id, title, url: href };
 }
 
