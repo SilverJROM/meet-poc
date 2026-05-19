@@ -51,6 +51,9 @@
             <h3>{{ recording.roomTitle }}</h3>
             <p>{{ recording.filename }}</p>
             <span>{{ recordingSize(recording) }} · {{ recording.uploadedAtIso | date: 'medium' }}</span>
+            @if (recording.hasMetadata) {
+              <span class="speaker-badge">Speakers: {{ recording.speakerCount ?? 0 }}</span>
+            }
           </div>
           <div class="recording-actions">
             <a class="secondary-btn" [href]="recordingsService.downloadUrl(recording)">Download</a>

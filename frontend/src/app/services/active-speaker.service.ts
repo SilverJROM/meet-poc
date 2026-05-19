@@ -21,6 +21,7 @@ export class ActiveSpeakerService {
   readonly analyzerCount = signal(0);
   readonly lastMaxRms = signal(0);
   readonly contextState = signal<AudioContextState | 'none'>('none');
+  readonly activeFrame = signal<{ id: string | null; at: number; rms: number; seq: number }>({ id: null, at: Date.now(), rms: 0, seq: 0 });
 
   private context: AudioContext | null = null;
   private readonly analyzers = new Map<string, SpeakerAnalyzer>();
@@ -37,14 +38,14 @@ export class ActiveSpeakerService {
   }
 
   observe(peers: PeerState[]): void {
-    const remotePeers = peers.filter((peer) => !peer.isLocal && peer.stream?.getAudioTracks().length);
-    const ids = new Set(remotePeers.map((peer) => peer.id));
+    const audiblePeers = peers.filter((peer) => peer.stream?.getAudioTracks().length);
+    const ids = new Set(audiblePeers.map((peer) => peer.id));
 
     for (const id of [...this.analyzers.keys()]) {
       if (!ids.has(id)) this.remove(id);
     }
 
-    for (const peer of remotePeers) {
+    for (const peer of audiblePeers) {
       if (peer.stream && this.analyzers.get(peer.id)?.stream !== peer.stream) {
         this.remove(peer.id);
         this.add(peer);
@@ -67,6 +68,7 @@ export class ActiveSpeakerService {
     this.activeSpeakerHz.set(0);
     this.analyzerCount.set(0);
     this.lastMaxRms.set(0);
+    this.activeFrame.set({ id: null, at: Date.now(), rms: 0, seq: this.activeFrame().seq + 1 });
     this.contextState.set('none');
   }
 
@@ -183,6 +185,7 @@ export class ActiveSpeakerService {
       }
       this.lastMaxRms.set(maxObservedRms);
       this.activePeerId.set(activeId);
+      this.activeFrame.set({ id: activeId, at: now, rms: activeRms, seq: this.activeFrame().seq + 1 });
     } finally {
       this.measuring = false;
     }

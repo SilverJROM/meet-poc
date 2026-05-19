@@ -9,6 +9,8 @@ export type Recording = {
   roomId: string;
   roomTitle: string;
   uploadedAtIso: string;
+  hasMetadata: boolean;
+  speakerCount: number | null;
 };
 
 export type PaginatedRecordings = {

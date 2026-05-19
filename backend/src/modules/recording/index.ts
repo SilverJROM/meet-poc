@@ -15,6 +15,8 @@ export type RecordingEntry = {
   roomId: string;
   roomTitle: string;
   uploadedAtIso: string;
+  hasMetadata: boolean;
+  speakerCount: number | null;
 };
 
 type UploadResponse = {
@@ -77,6 +79,30 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     res.json({ recordings });
   });
 
+  router.post('/api/recordings/upload-metadata', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const filename = typeof req.body?.filename === 'string' ? req.body.filename : '';
+    const metadata = req.body?.metadata;
+    if (isUnsafeRecordingFilename(filename) || !isRecordingFilename(filename)) {
+      return res.status(400).json({ error: 'invalid filename' });
+    }
+    if (!isMetadataObject(metadata) || metadata.schemaVersion !== 1) {
+      return res.status(400).json({ error: 'invalid metadata' });
+    }
+    const parsed = parseRecordingFilename(filename);
+    if (!parsed) return res.status(400).json({ error: 'invalid filename' });
+    const room = getRoom(parsed.roomId, database);
+    if (!room) return res.status(404).json({ error: 'recording not found' });
+    if (room.ownerEmail !== authReq.user.email) return res.status(403).json({ error: 'forbidden' });
+    const filepath = safeRecordingPath(filename);
+    if (!filepath || !fs.existsSync(filepath)) return res.status(404).json({ error: 'recording not found' });
+    const metaPath = metadataPathFor(filename);
+    if (!metaPath) return res.status(400).json({ error: 'invalid filename' });
+    const body = JSON.stringify(metadata, null, 2);
+    fs.writeFileSync(metaPath, body);
+    return res.json({ ok: true, metaFile: `${filename}.meta.json`, bytes: Buffer.byteLength(body) });
+  });
+
   router.post('/api/recordings/bulk-delete', requireAuth(database), (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const raw = req.body && Array.isArray(req.body.filenames) ? req.body.filenames : null;
@@ -100,6 +126,7 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     const filepath = safeRecordingPath(filename);
     if (!filepath || !fs.existsSync(filepath)) return res.status(404).json({ error: 'not found' });
     fs.unlinkSync(filepath);
+    deleteMetadataSidecar(filename);
     return res.json({ ok: true });
   });
 
@@ -131,10 +158,45 @@ function deleteOwnedRecording(filename: string, email: string, database: Databas
   if (!filepath) return false;
   try {
     fs.unlinkSync(filepath);
+    deleteMetadataSidecar(filename);
     return true;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
     throw err;
+  }
+}
+
+function metadataPathFor(filename: string): string | null {
+  const filepath = safeRecordingPath(filename);
+  if (!filepath) return null;
+  return `${filepath}.meta.json`;
+}
+
+function deleteMetadataSidecar(filename: string): void {
+  const metaPath = metadataPathFor(filename);
+  if (!metaPath) return;
+  try {
+    fs.unlinkSync(metaPath);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  }
+}
+
+function isMetadataObject(value: unknown): value is { schemaVersion?: unknown; participants?: unknown } {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function metadataSummary(filename: string): { hasMetadata: boolean; speakerCount: number | null } {
+  const metaPath = metadataPathFor(filename);
+  if (!metaPath || !fs.existsSync(metaPath)) return { hasMetadata: false, speakerCount: null };
+  try {
+    const parsed = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as { participants?: unknown };
+    return {
+      hasMetadata: true,
+      speakerCount: Array.isArray(parsed.participants) ? parsed.participants.length : null,
+    };
+  } catch {
+    return { hasMetadata: true, speakerCount: null };
   }
 }
 
@@ -178,6 +240,7 @@ export function listRecordingsForUser(
       const room = getRoom(parsed.roomId, database);
       if (!room || !isOwnerOf(room.id, email, database)) return null;
       const stat = fs.statSync(path.join(dir, filename));
+      const meta = metadataSummary(filename);
       return {
         filename,
         sizeBytes: stat.size,
@@ -185,6 +248,8 @@ export function listRecordingsForUser(
         roomId: room.id,
         roomTitle: room.title,
         uploadedAtIso: new Date(stat.mtimeMs).toISOString(),
+        hasMetadata: meta.hasMetadata,
+        speakerCount: meta.speakerCount,
         mtimeMs: stat.mtimeMs,
       };
     })

@@ -13,7 +13,7 @@ import { ActiveSpeakerService } from '../../services/active-speaker.service';
 import { AuthService } from '../../services/auth.service';
 import { MediaError, MediaService } from '../../services/media.service';
 import { PlatformService } from '../../services/platform.service';
-import { RecorderService } from '../../services/recorder.service';
+import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
 import { RoomsService } from '../../services/rooms.service';
 import { ViewportService } from '../../services/viewport.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
@@ -91,6 +91,7 @@ export class RoomPage implements OnDestroy {
   readonly showPeerWarning = computed(() => this.peers().length >= 6 && !this.warningDismissed());
   readonly hostRecording = signal(false);
   readonly recordingStartedAt = signal<number | null>(null);
+  readonly currentSessionId = signal<string | null>(null);
   readonly actionNotice = signal<string | null>(null);
   private readonly callStartMs = signal<number | null>(null);
   private readonly clockTick = signal(0);
@@ -136,6 +137,8 @@ export class RoomPage implements OnDestroy {
         lastRecordingExtension: this.recorder.lastRecordingExtension(),
         lastRecorderTimeslice: this.recorder.lastRecorderTimeslice(),
         lastRecordingUpload: this.recorder.lastUpload(),
+        lastMetadataUpload: this.recorder.lastMetadataUpload(),
+        metadataWarning: this.recorder.metadataWarning(),
         recorderSourceCount: this.recorder.sourceCount(),
         activeSpeakerHz: this.activeSpeaker.activeSpeakerHz(),
         activeSpeakerId: this.activeSpeaker.activePeerId(),
@@ -298,7 +301,11 @@ export class RoomPage implements OnDestroy {
     if (!localStream) return;
     try {
       if (!this.recorder.isRecording()) {
-        this.recorder.start(localStream, this.remoteStreams());
+        this.recorder.start(localStream, this.remoteStreams(), {
+          sessionId: this.currentSessionId() || '',
+          roomId: this.roomId,
+          participants: this.participantSnapshot(),
+        });
         this.ws.send({ type: 'recording-state', state: 'started' });
         this.status.set('Recording (audio mix: you + admitted peers).');
         return;
@@ -439,6 +446,11 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'peer-joined') {
       this.status.set(`${msg.name} joined.`);
       await this.webrtc.addPeer(msg.clientId, msg.name, false, { isHost: !!msg.host || msg.clientId === this.hostClientId() });
+      this.recorder.notifyParticipantJoined({
+        clientId: msg.clientId,
+        displayName: msg.name,
+        isHost: !!msg.host || msg.clientId === this.hostClientId(),
+      });
       await this.drainPendingSignals(msg.clientId);
       return;
     }
@@ -469,6 +481,8 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'recording-started') {
       this.hostRecording.set(true);
       this.recordingStartedAt.set(Date.now());
+      this.currentSessionId.set(msg.sessionId || this.currentSessionId());
+      this.recorder.setSessionId(msg.sessionId);
       return;
     }
     if (msg.type === 'recording-stopped') {
@@ -477,7 +491,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'peer-left') {
-      this.recorder.removePeerStream(msg.clientId);
+      this.recorder.notifyParticipantLeft(msg.clientId);
       this.webrtc.removePeer(msg.clientId);
       this.pendingSignals.delete(msg.clientId);
       this.removeKnocker(msg.clientId);
@@ -513,6 +527,14 @@ export class RoomPage implements OnDestroy {
       if (!peer.isLocal && peer.stream) streams.set(peer.id, peer.stream);
     }
     return streams;
+  }
+
+  private participantSnapshot(): ParticipantSnapshot[] {
+    return this.peers().map((peer) => ({
+      clientId: peer.id,
+      displayName: peer.isLocal ? this.displayName().trim() || peer.name.replace(/\s+\(you\)$/, '') || 'Anon' : peer.name,
+      isHost: peer.isHost,
+    }));
   }
 
   private async startLobbyPreflight(): Promise<void> {
@@ -595,6 +617,7 @@ export class RoomPage implements OnDestroy {
     this.isOwner.set(false);
     this.myId.set(null);
     this.hostClientId.set(null);
+    this.currentSessionId.set(null);
     this.sidebarOpen.set(false);
     this.leaveDialogOpen.set(false);
     this.meetingEndedToastOpen.set(false);
@@ -759,6 +782,8 @@ declare global {
       lastRecordingExtension?: string;
       lastRecorderTimeslice?: number | null;
       lastRecordingUpload?: { ok: true; file: string; bytes: number } | null;
+      lastMetadataUpload?: { ok: true; metaFile: string; bytes: number } | null;
+      metadataWarning?: string | null;
       recorderSourceCount?: number;
       isRecording: boolean;
       activeSpeakerHz?: number;
