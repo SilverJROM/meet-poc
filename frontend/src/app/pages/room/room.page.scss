@@ -18,6 +18,10 @@
   gap: 16px;
 }
 
+.lobby-panel:has(app-device-dialog) {
+  width: min(760px, calc(100% - 32px));
+}
+
 h1 {
   margin: 0;
   font-size: 24px;

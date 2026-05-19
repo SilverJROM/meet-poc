@@ -52,6 +52,15 @@
     }
     <button
       type="button"
+      class="control-btn"
+      aria-label="Device settings"
+      (click)="devices.emit()"
+      title="Device settings"
+    >
+      <ion-icon name="settings-outline"></ion-icon>
+    </button>
+    <button
+      type="button"
       class="control-btn participant-toggle"
       [class.active]="sidebarOpen()"
       [class.has-waiting]="waitingCount() > 0"

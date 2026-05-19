@@ -9,7 +9,7 @@ export default defineConfig({
     timeout: 8_000,
   },
   use: {
-    baseURL: 'http://localhost:4700',
+    baseURL: process.env.E2E_BASE_URL || 'http://localhost:4700',
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     launchOptions: {

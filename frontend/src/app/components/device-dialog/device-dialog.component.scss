@@ -1,0 +1,253 @@
+@use 'breakpoints' as bp;
+
+.device-dialog-shell {
+  color: var(--text);
+}
+
+.modal-presentation {
+  position: fixed;
+  z-index: 70;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.38);
+}
+
+.inline-presentation {
+  display: block;
+}
+
+.device-dialog {
+  width: min(720px, 100%);
+  max-height: calc(100vh - 36px);
+  max-height: calc(100dvh - 36px);
+  overflow: auto;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.22);
+  padding: 16px;
+}
+
+.inline-presentation .device-dialog {
+  width: 100%;
+  max-height: none;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.eyebrow {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h2 {
+  color: #0b1220;
+  font-size: 20px;
+  line-height: 1.15;
+}
+
+.icon-btn {
+  width: 42px;
+  min-width: 42px;
+  height: 42px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #0b1220;
+  background: var(--panel-soft);
+  cursor: pointer;
+}
+
+.icon-btn ion-icon {
+  font-size: 22px;
+}
+
+.permission-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid rgba(59, 130, 246, 0.32);
+  border-radius: 8px;
+  background: rgba(59, 130, 246, 0.10);
+  padding: 14px;
+}
+
+.permission-card h3 {
+  color: #0b1220;
+  font-size: 16px;
+}
+
+.permission-card p,
+.hint {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.device-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.95fr);
+  gap: 14px;
+}
+
+.preview-tile {
+  position: relative;
+  min-height: 230px;
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #07090d;
+}
+
+.preview-tile video {
+  width: 100%;
+  height: 100%;
+  min-height: 230px;
+  display: block;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+.camera-placeholder {
+  min-height: 230px;
+  display: grid;
+  place-items: center;
+  color: #f8fafc;
+  font-weight: 900;
+}
+
+.device-controls {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+}
+
+.vu-panel {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-soft);
+  padding: 10px;
+}
+
+.vu-copy {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: #0b1220;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.vu-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(148, 163, 184, 0.28);
+}
+
+.vu-fill {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #22c55e, #3b82f6);
+  transition: width 120ms ease;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+}
+
+label > span {
+  color: #0b1220;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.device-select {
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel-bg);
+  padding: 0 10px;
+}
+
+.speaker-btn,
+.primary-btn {
+  min-height: 42px;
+  border: 1px solid rgba(59, 130, 246, 0.42);
+  border-radius: 6px;
+  color: #0b1220;
+  background: rgba(59, 130, 246, 0.14);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.speaker-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.speaker-btn ion-icon {
+  font-size: 20px;
+}
+
+button:disabled,
+select:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.dialog-error {
+  margin-top: 12px;
+  border: 1px solid rgba(220, 38, 38, 0.4);
+  border-radius: 8px;
+  color: #991b1b;
+  background: rgba(220, 38, 38, 0.08);
+  padding: 10px;
+  font-size: 13px;
+}
+
+.dialog-actions {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+@include bp.max(720px) {
+  .device-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .preview-tile,
+  .preview-tile video,
+  .camera-placeholder {
+    min-height: 180px;
+  }
+}

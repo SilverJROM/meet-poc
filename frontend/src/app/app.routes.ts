@@ -28,5 +28,9 @@ export const routes: Routes = [
     path: 'room/:id',
     loadComponent: () => import('./pages/room/room.page').then((m) => m.RoomPage),
   },
+  {
+    path: 'join/:id',
+    loadComponent: () => import('./pages/room/room.page').then((m) => m.RoomPage),
+  },
   { path: '**', redirectTo: 'app/rooms' },
 ];

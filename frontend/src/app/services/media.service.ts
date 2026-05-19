@@ -5,6 +5,7 @@ export type MediaError = { code: 'denied' | 'no-devices' | 'unknown'; message: s
 
 type DeviceLists = {
   audioInputs: MediaDeviceInfo[];
+  audioOutputs: MediaDeviceInfo[];
   videoInputs: MediaDeviceInfo[];
 };
 
@@ -50,6 +51,7 @@ export class MediaService {
     const devices = await navigator.mediaDevices.enumerateDevices();
     return {
       audioInputs: devices.filter((device) => device.kind === 'audioinput'),
+      audioOutputs: devices.filter((device) => device.kind === 'audiooutput'),
       videoInputs: devices.filter((device) => device.kind === 'videoinput'),
     };
   }
@@ -65,6 +67,59 @@ export class MediaService {
         }
       : false;
     return this.acquire({ audio, video });
+  }
+
+  async replaceAudioTrack(deviceId: string | undefined, onAudioTrackChanged: (track: MediaStreamTrack) => Promise<void>): Promise<MediaStreamTrack | null> {
+    const stream = this.localStream();
+    if (!stream) return null;
+    const oldTrack = stream.getAudioTracks()[0] ?? null;
+    const audio = deviceId ? { deviceId: { exact: deviceId } } : true;
+    const nextStream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
+    registerDebugTracks(nextStream);
+    const nextTrack = nextStream.getAudioTracks()[0];
+    if (!nextTrack) {
+      nextStream.getTracks().forEach((track) => track.stop());
+      return null;
+    }
+    stream.addTrack(nextTrack);
+    await onAudioTrackChanged(nextTrack);
+    if (oldTrack) {
+      stream.removeTrack(oldTrack);
+      oldTrack.stop();
+    }
+    this.micOn.set(nextTrack.enabled);
+    this.startMicLevel(nextTrack);
+    return nextTrack;
+  }
+
+  async replaceVideoTrack(
+    deviceId: string | undefined,
+    onVideoTrackChanged: (track: MediaStreamTrack) => Promise<void>,
+    facingMode?: 'user' | 'environment',
+  ): Promise<MediaStreamTrack | null> {
+    const stream = this.localStream();
+    if (!stream) return null;
+    const oldTrack = stream.getVideoTracks()[0] ?? null;
+    const baseVideo = this.videoConstraints(true, facingMode) as MediaTrackConstraints;
+    const video = {
+      ...baseVideo,
+      ...(!facingMode && deviceId ? { deviceId: { exact: deviceId } } : {}),
+    };
+    const nextStream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+    registerDebugTracks(nextStream);
+    const nextTrack = nextStream.getVideoTracks()[0];
+    if (!nextTrack) {
+      nextStream.getTracks().forEach((track) => track.stop());
+      return null;
+    }
+    stream.addTrack(nextTrack);
+    await onVideoTrackChanged(nextTrack);
+    if (oldTrack) {
+      stream.removeTrack(oldTrack);
+      oldTrack.stop();
+    }
+    this.cameraOn.set(true);
+    return nextTrack;
   }
 
   getMicLevel(stream: MediaStream): Signal<number> {

@@ -109,11 +109,15 @@ export class WebrtcService {
   }
 
   async replaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
+    await this.replaceLocalSenderTrack('video', track);
+  }
+
+  async replaceLocalSenderTrack(kind: 'audio' | 'video', track: MediaStreamTrack | null): Promise<void> {
     const operations: Promise<void>[] = [];
     for (const peer of this.peers().values()) {
       const pc = peer.pc;
       if (!pc) continue;
-      const sender = pc.getSenders().find((candidate) => candidate.track?.kind === 'video');
+      const sender = pc.getSenders().find((candidate) => candidate.track?.kind === kind);
       if (sender) {
         operations.push(sender.replaceTrack(track));
       } else if (track && this.localStream) {

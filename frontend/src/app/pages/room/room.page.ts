@@ -2,6 +2,7 @@ import { Component, OnDestroy, Signal, computed, effect, inject, signal } from '
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ControlsBarComponent } from '../../components/controls-bar/controls-bar.component';
+import { DeviceDialogComponent } from '../../components/device-dialog/device-dialog.component';
 import { LeaveDialogComponent } from '../../components/leave-dialog/leave-dialog.component';
 import { MeetingEndedToastComponent } from '../../components/meeting-ended-toast/meeting-ended-toast.component';
 import { KnockSpinnerComponent } from '../../components/knock-spinner/knock-spinner.component';
@@ -34,6 +35,7 @@ type LobbyError =
     FormsModule,
     RouterLink,
     ControlsBarComponent,
+    DeviceDialogComponent,
     LeaveDialogComponent,
     MeetingEndedToastComponent,
     KnockSpinnerComponent,
@@ -65,10 +67,18 @@ export class RoomPage implements OnDestroy {
   readonly cameraRequested = signal(false);
   readonly localStream = this.media.localStream;
   readonly audioInputs = signal<MediaDeviceInfo[]>([]);
+  readonly audioOutputs = signal<MediaDeviceInfo[]>([]);
   readonly videoInputs = signal<MediaDeviceInfo[]>([]);
-  readonly selectedAudioId = signal('');
-  readonly selectedVideoId = signal('');
+  readonly selectedAudioId = signal(readStoredDevice(DEVICE_STORAGE.audioInput));
+  readonly selectedAudioOutputId = signal(readStoredDevice(DEVICE_STORAGE.audioOutput));
+  readonly selectedVideoId = signal(readStoredDevice(DEVICE_STORAGE.videoInput));
   readonly currentFacingMode = signal<'user' | 'environment'>('user');
+  readonly lobbyDeviceDialogOpen = signal(true);
+  readonly devicePermissionIntro = signal(true);
+  readonly inCallDeviceDialogOpen = signal(false);
+  readonly deviceDialogBusy = signal(false);
+  readonly deviceDialogError = signal<string | null>(null);
+  readonly canSelectAudioOutput = signal(canSetSinkId());
   readonly permissionError = signal<LobbyError | null>(null);
   readonly hasBlockingLobbyError = computed(() => {
     const error = this.permissionError();
@@ -98,6 +108,7 @@ export class RoomPage implements OnDestroy {
   private clockInterval: ReturnType<typeof setInterval> | null = null;
   private visibilityListenerInstalled = false;
   private camOnBeforeBackground = false;
+  private preflightTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly pendingSignals = new Map<string, BufferedSignal[]>();
   readonly formattedElapsed = computed(() => {
     this.clockTick();
@@ -133,6 +144,9 @@ export class RoomPage implements OnDestroy {
         screenShareAttempts: this.media.screenShareAttempts(),
         lastVideoConstraints: this.media.lastVideoConstraints(),
         audioContextActivated: this.media.audioContextActivated(),
+        speakerTestCount: window.__meetDebug?.speakerTestCount ?? 0,
+        localAudioTrackId: this.media.localStream()?.getAudioTracks()[0]?.id,
+        localVideoTrackId: this.media.localStream()?.getVideoTracks()[0]?.id,
         currentFacingMode: this.currentFacingMode(),
         lastRecordingMime: this.recorder.lastRecordingMime(),
         lastRecordingExtension: this.recorder.lastRecordingExtension(),
@@ -197,7 +211,7 @@ export class RoomPage implements OnDestroy {
       }
       this.roomTitle.set(info.title ?? 'Untitled room');
       this.state.set('lobby');
-      await this.startLobbyPreflight();
+      this.prepareLobbyDeviceCheck();
     } catch {
       this.error.set('Room could not be loaded');
       this.state.set('error');
@@ -246,6 +260,10 @@ export class RoomPage implements OnDestroy {
     await this.startLobbyPreflight();
   }
 
+  async continueDeviceSetup(): Promise<void> {
+    await this.startLobbyPreflight();
+  }
+
   async setCameraRequested(value: boolean): Promise<void> {
     this.cameraRequested.set(value);
     if (this.state() === 'lobby') await this.reacquireLobbyStream();
@@ -253,12 +271,52 @@ export class RoomPage implements OnDestroy {
 
   async changeAudioDevice(deviceId: string): Promise<void> {
     this.selectedAudioId.set(deviceId);
+    storeDevice(DEVICE_STORAGE.audioInput, deviceId);
+    if (this.state() === 'in-call') {
+      await this.replaceInCallAudio(deviceId);
+      return;
+    }
     await this.reacquireLobbyStream();
   }
 
   async changeVideoDevice(deviceId: string): Promise<void> {
     this.selectedVideoId.set(deviceId);
+    storeDevice(DEVICE_STORAGE.videoInput, deviceId);
+    if (this.state() === 'in-call') {
+      await this.replaceInCallVideo(deviceId);
+      return;
+    }
     await this.reacquireLobbyStream();
+  }
+
+  async changeAudioOutputDevice(deviceId: string): Promise<void> {
+    this.selectedAudioOutputId.set(deviceId);
+    storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
+    await this.applySpeakerDevice(deviceId);
+  }
+
+  async testSpeaker(): Promise<void> {
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    const context = new AudioContextCtor();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    oscillator.frequency.value = 440;
+    gain.gain.value = 0.2;
+    oscillator.connect(gain);
+    gain.connect(context.destination);
+    await context.resume();
+    oscillator.start();
+    if (window.__meetDebug) window.__meetDebug.speakerTestCount = (window.__meetDebug.speakerTestCount ?? 0) + 1;
+    window.setTimeout(() => {
+      oscillator.stop();
+      void context.close();
+    }, 1000);
+  }
+
+  openInCallDeviceDialog(): void {
+    this.deviceDialogError.set(null);
+    this.inCallDeviceDialogOpen.set(true);
+    void this.refreshDevices();
   }
 
   async enableMicPreview(): Promise<void> {
@@ -540,6 +598,10 @@ export class RoomPage implements OnDestroy {
   }
 
   private async startLobbyPreflight(): Promise<void> {
+    this.clearPreflightTimer();
+    this.devicePermissionIntro.set(false);
+    this.deviceDialogBusy.set(true);
+    this.deviceDialogError.set(null);
     this.permissionError.set(null);
     this.error.set(null);
     try {
@@ -549,11 +611,18 @@ export class RoomPage implements OnDestroy {
       await this.refreshDevices();
     } catch (err) {
       await this.handleLobbyMediaError(err, this.cameraRequested());
+      this.deviceDialogError.set((err as MediaError).message || 'Device setup failed');
+    } finally {
+      this.deviceDialogBusy.set(false);
     }
   }
 
   private async reacquireLobbyStream(): Promise<void> {
     if (this.state() !== 'lobby') return;
+    this.clearPreflightTimer();
+    this.devicePermissionIntro.set(false);
+    this.deviceDialogBusy.set(true);
+    this.deviceDialogError.set(null);
     this.permissionError.set(null);
     this.error.set(null);
     try {
@@ -568,7 +637,25 @@ export class RoomPage implements OnDestroy {
       await this.refreshDevices();
     } catch (err) {
       await this.handleLobbyMediaError(err, this.cameraRequested());
+      this.deviceDialogError.set((err as MediaError).message || 'Device change failed');
+    } finally {
+      this.deviceDialogBusy.set(false);
     }
+  }
+
+  private prepareLobbyDeviceCheck(): void {
+    this.lobbyDeviceDialogOpen.set(true);
+    this.devicePermissionIntro.set(true);
+    this.clearPreflightTimer();
+    if (this.route.snapshot.queryParamMap.get('manualDeviceSetup') === '1') return;
+    this.preflightTimer = window.setTimeout(() => {
+      if (this.state() === 'lobby' && !this.media.localStream()) void this.startLobbyPreflight();
+    }, 650);
+  }
+
+  private clearPreflightTimer(): void {
+    if (this.preflightTimer) clearTimeout(this.preflightTimer);
+    this.preflightTimer = null;
   }
 
   private async handleLobbyMediaError(err: unknown, videoRequested: boolean): Promise<void> {
@@ -596,12 +683,16 @@ export class RoomPage implements OnDestroy {
   private async refreshDevices(): Promise<void> {
     const devices = await this.media.enumerateDevices();
     this.audioInputs.set(devices.audioInputs);
+    this.audioOutputs.set(devices.audioOutputs);
     this.videoInputs.set(devices.videoInputs);
     if (!this.selectedAudioId() || !devices.audioInputs.some((device) => device.deviceId === this.selectedAudioId())) {
-      this.selectedAudioId.set(devices.audioInputs[0]?.deviceId || '');
+      this.selectedAudioId.set(preferredDeviceId(DEVICE_STORAGE.audioInput, devices.audioInputs, this.selectedAudioId()));
     }
     if (!this.selectedVideoId() || !devices.videoInputs.some((device) => device.deviceId === this.selectedVideoId())) {
-      this.selectedVideoId.set(devices.videoInputs[0]?.deviceId || '');
+      this.selectedVideoId.set(preferredDeviceId(DEVICE_STORAGE.videoInput, devices.videoInputs, this.selectedVideoId()));
+    }
+    if (!this.selectedAudioOutputId() || !devices.audioOutputs.some((device) => device.deviceId === this.selectedAudioOutputId())) {
+      this.selectedAudioOutputId.set(preferredDeviceId(DEVICE_STORAGE.audioOutput, devices.audioOutputs, this.selectedAudioOutputId()));
     }
   }
 
@@ -610,6 +701,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private cleanupCall(): void {
+    this.clearPreflightTimer();
     this.ws.close();
     this.recorder.discard();
     this.media.stopLocal();
@@ -631,6 +723,50 @@ export class RoomPage implements OnDestroy {
     this.activeSpeaker.reset();
     this.stopClock();
     this.uninstallMobileVisibilityPause();
+  }
+
+  private async replaceInCallAudio(deviceId: string): Promise<void> {
+    this.deviceDialogBusy.set(true);
+    this.deviceDialogError.set(null);
+    try {
+      const track = await this.media.replaceAudioTrack(deviceId || undefined, (nextTrack) => this.webrtc.replaceLocalSenderTrack('audio', nextTrack));
+      if (track) {
+        this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
+        this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([track])));
+        this.updateLocalMediaState();
+        this.broadcastMediaState(track.enabled, this.media.cameraOn());
+      }
+    } catch (err) {
+      this.deviceDialogError.set(`Microphone switch failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    } finally {
+      this.deviceDialogBusy.set(false);
+    }
+  }
+
+  private async replaceInCallVideo(deviceId: string): Promise<void> {
+    this.deviceDialogBusy.set(true);
+    this.deviceDialogError.set(null);
+    try {
+      const track = await this.media.replaceVideoTrack(deviceId || undefined, (nextTrack) => this.webrtc.replaceLocalSenderTrack('video', nextTrack), this.mobileFacingMode());
+      if (track) {
+        this.updateLocalMediaState();
+        this.broadcastMediaState(this.media.micOn(), true);
+      }
+    } catch (err) {
+      this.deviceDialogError.set(`Camera switch failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    } finally {
+      this.deviceDialogBusy.set(false);
+    }
+  }
+
+  private async applySpeakerDevice(deviceId: string): Promise<void> {
+    const mediaElements = Array.from(document.querySelectorAll('video, audio')) as HTMLMediaElement[];
+    await Promise.all(
+      mediaElements.map(async (element) => {
+        const withSink = element as HTMLMediaElement & { setSinkId?: (sinkId: string) => Promise<void> };
+        if (withSink.setSinkId) await withSink.setSinkId(deviceId);
+      }),
+    );
   }
 
   private installPageLifecycleCleanup(): void {
@@ -776,6 +912,39 @@ function signalKind(data: unknown): string {
   return 'unknown';
 }
 
+const DEVICE_STORAGE = {
+  audioInput: 'meet-poc.device.audioInput',
+  audioOutput: 'meet-poc.device.audioOutput',
+  videoInput: 'meet-poc.device.videoInput',
+} as const;
+
+function readStoredDevice(key: string): string {
+  try {
+    return window.localStorage.getItem(key) || '';
+  } catch {
+    return '';
+  }
+}
+
+function storeDevice(key: string, value: string): void {
+  try {
+    if (value) window.localStorage.setItem(key, value);
+  } catch {
+    // Best effort only; device persistence should not block joining.
+  }
+}
+
+function preferredDeviceId(key: string, devices: MediaDeviceInfo[], current: string): string {
+  const stored = readStoredDevice(key);
+  if (stored && devices.some((device) => device.deviceId === stored)) return stored;
+  if (current && devices.some((device) => device.deviceId === current)) return current;
+  return devices[0]?.deviceId || '';
+}
+
+function canSetSinkId(): boolean {
+  return typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+}
+
 declare global {
   interface Window {
     __meetDebug?: {
@@ -793,6 +962,9 @@ declare global {
       screenShareAttempts: number;
       lastVideoConstraints?: MediaStreamConstraints | null;
       audioContextActivated?: boolean;
+      speakerTestCount?: number;
+      localAudioTrackId?: string;
+      localVideoTrackId?: string;
       currentFacingMode?: 'user' | 'environment';
       lastRecordingMime?: string | null;
       lastRecordingExtension?: string;

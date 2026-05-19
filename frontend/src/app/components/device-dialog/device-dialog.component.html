@@ -1,0 +1,101 @@
+@if (open()) {
+  <div class="device-dialog-shell" [class.modal-presentation]="presentation() === 'modal'" [class.inline-presentation]="presentation() === 'inline'">
+    <section class="device-dialog" role="dialog" aria-modal="true" aria-labelledby="device-dialog-title">
+      <header class="dialog-header">
+        <div>
+          <p class="eyebrow">{{ mode() === 'in-call' ? 'In-call devices' : 'Pre-join device check' }}</p>
+          <h2 id="device-dialog-title">Check your camera and audio</h2>
+        </div>
+        @if (presentation() === 'modal') {
+          <button type="button" class="icon-btn" (click)="close.emit()" aria-label="Close device settings" title="Close device settings">
+            <ion-icon name="close-outline"></ion-icon>
+          </button>
+        }
+      </header>
+
+      @if (permissionIntro()) {
+        <div class="permission-card" data-testid="permission-prep">
+          <h3>Allow access when prompted</h3>
+          <p>Click Continue, then choose Allow in your browser so this room can use your camera and microphone.</p>
+          <button type="button" class="primary-btn" [disabled]="busy()" (click)="continuePermission.emit()">Continue</button>
+        </div>
+      } @else {
+        <div class="device-grid">
+          <div class="preview-tile" [class.camera-off]="!stream()?.getVideoTracks()?.length">
+            @if (stream()?.getVideoTracks()?.length) {
+              <video #video autoplay muted playsinline></video>
+            } @else {
+              <div class="camera-placeholder">Camera off</div>
+            }
+          </div>
+
+          <div class="device-controls">
+            <div class="vu-panel" aria-label="Microphone level">
+              <div class="vu-copy">
+                <span>Microphone</span>
+                <strong>{{ levelLabel() }}%</strong>
+              </div>
+              <div class="vu-track">
+                <span class="vu-fill" [style.width]="levelPercent()"></span>
+              </div>
+              <app-mic-meter [level]="level()" />
+            </div>
+
+            <label>
+              <span>Microphone</span>
+              <select class="device-select mic-select" [value]="selectedAudioId()" [disabled]="busy()" (change)="onAudioChange($event)">
+                @for (device of audioInputs(); track device.deviceId) {
+                  <option [value]="device.deviceId">{{ device.label || 'Microphone' }}</option>
+                }
+              </select>
+            </label>
+
+            <label>
+              <span>Camera</span>
+              <select class="device-select camera-select" [value]="selectedVideoId()" [disabled]="busy()" (change)="onVideoChange($event)">
+                @for (device of videoInputs(); track device.deviceId) {
+                  <option [value]="device.deviceId">{{ device.label || 'Camera' }}</option>
+                }
+              </select>
+            </label>
+
+            <label>
+              <span>Speakers</span>
+              <select
+                class="device-select speaker-select"
+                [value]="selectedAudioOutputId()"
+                [disabled]="busy() || !canSelectAudioOutput()"
+                [title]="canSelectAudioOutput() ? 'Choose speaker output' : 'Audio output switching requires Chrome support'"
+                (change)="onAudioOutputChange($event)"
+              >
+                @if (audioOutputs().length === 0) {
+                  <option value="">System default</option>
+                }
+                @for (device of audioOutputs(); track device.deviceId) {
+                  <option [value]="device.deviceId">{{ device.label || 'Speaker' }}</option>
+                }
+              </select>
+            </label>
+
+            <button type="button" class="speaker-btn" [disabled]="busy()" (click)="testSpeaker.emit()">
+              <ion-icon name="volume-high-outline"></ion-icon>
+              <span>Test speaker</span>
+            </button>
+          </div>
+        </div>
+
+        @if (error()) {
+          <p class="dialog-error" role="alert">{{ error() }}</p>
+        }
+
+        <footer class="dialog-actions">
+          @if (mode() === 'in-call') {
+            <button type="button" class="primary-btn" [disabled]="busy()" (click)="close.emit()">Done</button>
+          } @else {
+            <span class="hint">Your choices will be used when you join.</span>
+          }
+        </footer>
+      }
+    </section>
+  </div>
+}

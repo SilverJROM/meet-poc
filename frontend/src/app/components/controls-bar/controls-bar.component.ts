@@ -8,6 +8,7 @@ import {
   micOffOutline,
   micOutline,
   peopleOutline,
+  settingsOutline,
   videocamOffOutline,
   videocamOutline,
 } from 'ionicons/icons';
@@ -38,6 +39,7 @@ export class ControlsBarComponent {
   readonly screen = output<void>();
   readonly record = output<void>();
   readonly sidebar = output<void>();
+  readonly devices = output<void>();
   readonly leave = output<void>();
   readonly isMobile = this.viewport.isMobile;
 
@@ -50,6 +52,7 @@ export class ControlsBarComponent {
       micOffOutline,
       micOutline,
       peopleOutline,
+      settingsOutline,
       videocamOffOutline,
       videocamOutline,
     });

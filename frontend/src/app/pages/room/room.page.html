@@ -46,7 +46,30 @@
         (screen)="toggleScreen()"
         (record)="toggleRecording()"
         (sidebar)="toggleSidebar()"
+        (devices)="openInCallDeviceDialog()"
         (leave)="leave()"
+      />
+      <app-device-dialog
+        [open]="inCallDeviceDialogOpen()"
+        mode="in-call"
+        presentation="modal"
+        [permissionIntro]="false"
+        [stream]="localStream()"
+        [audioInputs]="audioInputs()"
+        [videoInputs]="videoInputs()"
+        [audioOutputs]="audioOutputs()"
+        [selectedAudioId]="selectedAudioId()"
+        [selectedVideoId]="selectedVideoId()"
+        [selectedAudioOutputId]="selectedAudioOutputId()"
+        [level]="micLevel()"
+        [canSelectAudioOutput]="canSelectAudioOutput()"
+        [busy]="deviceDialogBusy()"
+        [error]="deviceDialogError()"
+        (audioDeviceChange)="changeAudioDevice($event)"
+        (videoDeviceChange)="changeVideoDevice($event)"
+        (audioOutputChange)="changeAudioOutputDevice($event)"
+        (testSpeaker)="testSpeaker()"
+        (close)="inCallDeviceDialogOpen.set(false)"
       />
       @if (showPeerWarning()) {
         <div class="peer-warning" role="status">
@@ -125,6 +148,29 @@
         }
       }
       @if (!hasBlockingLobbyError()) {
+        <app-device-dialog
+          [open]="lobbyDeviceDialogOpen()"
+          mode="lobby"
+          presentation="inline"
+          [permissionIntro]="devicePermissionIntro()"
+          [stream]="localStream()"
+          [audioInputs]="audioInputs()"
+          [videoInputs]="videoInputs()"
+          [audioOutputs]="audioOutputs()"
+          [selectedAudioId]="selectedAudioId()"
+          [selectedVideoId]="selectedVideoId()"
+          [selectedAudioOutputId]="selectedAudioOutputId()"
+          [level]="micLevel()"
+          [canSelectAudioOutput]="canSelectAudioOutput()"
+          [busy]="deviceDialogBusy()"
+          [error]="deviceDialogError()"
+          (continuePermission)="continueDeviceSetup()"
+          (audioDeviceChange)="changeAudioDevice($event)"
+          (videoDeviceChange)="changeVideoDevice($event)"
+          (audioOutputChange)="changeAudioOutputDevice($event)"
+          (testSpeaker)="testSpeaker()"
+          (close)="lobbyDeviceDialogOpen.set(false)"
+        />
         <app-lobby-preview
           [stream]="localStream()"
           [audioInputs]="audioInputs()"
