@@ -22,8 +22,9 @@ export async function closeServer(server: http.Server): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 25));
 }
 
-export async function connectWs(url: string, cookie?: string): Promise<WebSocket> {
-  const ws = new WebSocket(url, cookie ? { headers: { Cookie: cookie } } : undefined);
+export async function connectWs(url: string, cookie?: string, headers: Record<string, string> = {}): Promise<WebSocket> {
+  const finalHeaders = { ...headers, ...(cookie ? { Cookie: cookie } : {}) };
+  const ws = new WebSocket(url, Object.keys(finalHeaders).length > 0 ? { headers: finalHeaders } : undefined);
   await new Promise<void>((resolve, reject) => {
     ws.once('open', resolve);
     ws.once('error', reject);
