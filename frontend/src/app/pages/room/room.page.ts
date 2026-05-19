@@ -93,6 +93,8 @@ export class RoomPage implements OnDestroy {
   private readonly callStartMs = signal<number | null>(null);
   private readonly clockTick = signal(0);
   private clockInterval: ReturnType<typeof setInterval> | null = null;
+  private visibilityListenerInstalled = false;
+  private camOnBeforeBackground = false;
   readonly formattedElapsed = computed(() => {
     this.clockTick();
     const start = this.callStartMs();
@@ -111,10 +113,20 @@ export class RoomPage implements OnDestroy {
         localStream: this.media.localStream(),
         peers: this.peers().map((peer) => {
           const audio = peer.stream?.getAudioTracks()[0];
-          return { id: peer.id, name: peer.name, state: peer.connectionState, audioMuted: audio?.muted, audioReadyState: audio?.readyState, audioEnabled: audio?.enabled };
+          return {
+            id: peer.id,
+            name: peer.name,
+            state: peer.connectionState,
+            audioMuted: audio?.muted,
+            audioReadyState: audio?.readyState,
+            audioEnabled: audio?.enabled,
+            micEnabled: peer.micEnabled,
+            camEnabled: peer.camEnabled,
+          };
         }),
         isRecording: this.recorder.isRecording() || this.hostRecording(),
         screenShareAttempts: this.media.screenShareAttempts(),
+        lastVideoConstraints: this.media.lastVideoConstraints(),
         activeSpeakerHz: this.activeSpeaker.activeSpeakerHz(),
         activeSpeakerId: this.activeSpeaker.activePeerId(),
         activeSpeakerAnalyzerCount: this.activeSpeaker.analyzerCount(),
@@ -182,7 +194,7 @@ export class RoomPage implements OnDestroy {
     this.ws.connect(
       this.roomId,
       (msg) => void this.handleMessage(msg),
-      () => this.ws.send({ type: 'join', room: this.roomId, name }),
+      () => this.ws.send({ type: 'join', room: this.roomId, name, mobile: this.viewport.isMobile() }),
       () => {
         if (this.state() !== 'in-call') {
           this.error.set('Signaling connection error.');
@@ -368,6 +380,7 @@ export class RoomPage implements OnDestroy {
         });
       }
       this.state.set('in-call');
+      this.installMobileVisibilityPause();
       this.startClock();
       this.status.set(`You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
       for (const peer of msg.peers) {
@@ -545,6 +558,7 @@ export class RoomPage implements OnDestroy {
     this.recordingStartedAt.set(null);
     this.activeSpeaker.reset();
     this.stopClock();
+    this.uninstallMobileVisibilityPause();
   }
 
   private attachLocalTrackFailureHandlers(stream: MediaStream): void {
@@ -566,6 +580,43 @@ export class RoomPage implements OnDestroy {
   private broadcastMediaState(mic: boolean, cam: boolean): void {
     this.ws.send({ type: 'media-state', mic, cam });
   }
+
+  private installMobileVisibilityPause(): void {
+    if (this.visibilityListenerInstalled || !this.viewport.isMobile()) return;
+    document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    this.visibilityListenerInstalled = true;
+  }
+
+  private uninstallMobileVisibilityPause(): void {
+    if (!this.visibilityListenerInstalled) return;
+    document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    this.visibilityListenerInstalled = false;
+    this.camOnBeforeBackground = false;
+  }
+
+  // Best-effort: mobile browsers, especially iOS, can throttle background JS/WS delivery.
+  private readonly handleVisibilityChange = (): void => {
+    if (!this.viewport.isMobile() || this.state() !== 'in-call') return;
+    const track = this.media.localStream()?.getVideoTracks()[0] ?? null;
+    if (!track) return;
+    if (document.visibilityState === 'hidden') {
+      this.camOnBeforeBackground = track.enabled;
+      if (track.enabled) {
+        track.enabled = false;
+        this.media.cameraOn.set(false);
+        this.updateLocalMediaState();
+        this.broadcastMediaState(this.media.micOn(), false);
+      }
+      return;
+    }
+    if (document.visibilityState === 'visible' && this.camOnBeforeBackground) {
+      track.enabled = true;
+      this.media.cameraOn.set(true);
+      this.camOnBeforeBackground = false;
+      this.updateLocalMediaState();
+      this.broadcastMediaState(this.media.micOn(), true);
+    }
+  };
 
   private updateLocalMediaState(): void {
     const id = this.myId();
@@ -610,8 +661,18 @@ declare global {
   interface Window {
     __meetDebug?: {
       localStream: MediaStream | null;
-      peers: { id: string; name: string; state: string; audioMuted?: boolean; audioReadyState?: MediaStreamTrackState; audioEnabled?: boolean }[];
+      peers: {
+        id: string;
+        name: string;
+        state: string;
+        audioMuted?: boolean;
+        audioReadyState?: MediaStreamTrackState;
+        audioEnabled?: boolean;
+        micEnabled?: boolean;
+        camEnabled?: boolean;
+      }[];
       screenShareAttempts: number;
+      lastVideoConstraints?: MediaStreamConstraints | null;
       isRecording: boolean;
       activeSpeakerHz?: number;
       activeSpeakerId?: string | null;

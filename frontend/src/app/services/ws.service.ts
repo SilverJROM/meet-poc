@@ -26,7 +26,7 @@ export type SignalingMessage =
   | { type: 'error'; error: string };
 
 export type OutgoingSignalingMessage =
-  | { type: 'join'; room: string; name: string }
+  | { type: 'join'; room: string; name: string; mobile?: boolean }
   | { type: 'signal'; to: string; data: unknown }
   | { type: 'admit'; clientId: string }
   | { type: 'reject'; clientId: string; reason?: string }

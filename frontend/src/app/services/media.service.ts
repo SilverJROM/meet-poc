@@ -1,4 +1,5 @@
-import { Injectable, Signal, signal } from '@angular/core';
+import { Injectable, Signal, inject, signal } from '@angular/core';
+import { ViewportService } from './viewport.service';
 
 export type MediaError = { code: 'denied' | 'no-devices' | 'unknown'; message: string };
 
@@ -15,11 +16,14 @@ type ReacquireOptions = {
 
 @Injectable({ providedIn: 'root' })
 export class MediaService {
+  private readonly viewport = inject(ViewportService);
+
   readonly localStream = signal<MediaStream | null>(null);
   readonly micOn = signal(true);
   readonly cameraOn = signal(false);
   readonly screenOn = signal(false);
   readonly screenShareAttempts = signal(0);
+  readonly lastVideoConstraints = signal<MediaStreamConstraints | null>(null);
 
   private screenTrack: MediaStreamTrack | null = null;
   private audioContext: AudioContext | null = null;
@@ -36,7 +40,7 @@ export class MediaService {
   async preflight(constraints: { audio: boolean; video: boolean }): Promise<MediaStream> {
     return this.acquire({
       audio: constraints.audio ? true : false,
-      video: constraints.video ? { width: { ideal: 1280 }, height: { ideal: 720 } } : false,
+      video: this.videoConstraints(constraints.video),
     });
   }
 
@@ -50,10 +54,10 @@ export class MediaService {
 
   async reacquire(options: ReacquireOptions): Promise<MediaStream> {
     const audio = options.audioDeviceId ? { deviceId: { exact: options.audioDeviceId } } : true;
+    const baseVideo = this.videoConstraints(true) as MediaTrackConstraints;
     const video = options.video
       ? {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
+          ...baseVideo,
           ...(options.videoDeviceId ? { deviceId: { exact: options.videoDeviceId } } : {}),
         }
       : false;
@@ -120,7 +124,7 @@ export class MediaService {
     }
 
     const camStream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 } },
+      video: this.videoConstraints(true),
     });
     const track = camStream.getVideoTracks()[0];
     stream.addTrack(track);
@@ -171,6 +175,7 @@ export class MediaService {
 
   private async acquire(constraints: MediaStreamConstraints): Promise<MediaStream> {
     this.stopLocal();
+    this.lastVideoConstraints.set(cloneConstraints(constraints));
     try {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       this.localStream.set(stream);
@@ -189,6 +194,21 @@ export class MediaService {
     this.micSource = null;
     this.micLevel.set(0);
   }
+
+  private videoConstraints(video: boolean): boolean | MediaTrackConstraints {
+    if (!video) return false;
+    if (this.viewport.isMobile()) {
+      return {
+        width: { ideal: 854, max: 854 },
+        height: { ideal: 480, max: 480 },
+      };
+    }
+    return { width: { ideal: 1280 }, height: { ideal: 720 } };
+  }
+}
+
+function cloneConstraints(constraints: MediaStreamConstraints): MediaStreamConstraints {
+  return JSON.parse(JSON.stringify(constraints)) as MediaStreamConstraints;
 }
 
 function normalizeMediaError(err: unknown): MediaError {

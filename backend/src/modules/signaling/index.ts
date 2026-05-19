@@ -14,6 +14,7 @@ type PeerEntry = {
   ws: WebSocket;
   name: string;
   userEmail: string | null;
+  isMobile: boolean;
   setState: (state: PeerState) => void;
 };
 
@@ -34,9 +35,11 @@ type IncomingMessage = {
   data?: unknown;
   clientId?: unknown;
   reason?: unknown;
+  mobile?: unknown;
 };
 
 const MAX_ADMITTED = 8;
+const MAX_MOBILE_ADMITTED = 4;
 
 const liveRooms = new Map<string, LiveRoom>();
 
@@ -82,6 +85,15 @@ function bumpAdmittedPeak(live: LiveRoom, database: Database.Database): void {
 
 function logRejectedHostCommand(command: string, userEmail: string | null, roomId: string | null): void {
   console.info('[host-cmd-rejected]', command, userEmail, roomId);
+}
+
+function isMobileUserAgent(userAgent: string | string[] | undefined): boolean {
+  const value = Array.isArray(userAgent) ? userAgent.join(' ') : userAgent || '';
+  return /(iPhone|iPad|iPod|Android)/i.test(value);
+}
+
+function mobileAdmittedCount(live: LiveRoom): number {
+  return [...live.admitted.values()].filter((peer) => peer.isMobile).length;
 }
 
 function getLiveAdmittedRoom(currentRoom: string | null, state: PeerState): LiveRoom | null {
@@ -184,6 +196,23 @@ export function attachSignaling(server: http.Server, database: Database.Database
         }
         const joinName = String(msg.name || 'Anon').slice(0, 64);
         const live = getOrCreateLiveRoom(roomId);
+        const declaredMobile = Boolean(msg.mobile);
+        const hasMobileDeclaration = Object.prototype.hasOwnProperty.call(msg, 'mobile');
+        const uaMobile = isMobileUserAgent(req.headers['user-agent']);
+        if (hasMobileDeclaration && declaredMobile !== uaMobile) {
+          console.info('[mobile-cap-audit]', {
+            roomId,
+            clientId,
+            declaredMobile,
+            uaMobile,
+            userAgent: req.headers['user-agent'] || '',
+          });
+        }
+        if (declaredMobile && mobileAdmittedCount(live) >= MAX_MOBILE_ADMITTED) {
+          send(ws, { type: 'error', error: 'mobile room full (4 max)' });
+          ws.close();
+          return;
+        }
         if (live.admitted.size >= MAX_ADMITTED) {
           send(ws, { type: 'error', error: 'room full (max 8)' });
           ws.close();
@@ -194,7 +223,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
         ensureLiveSession(roomId, room.ownerEmail, live, database);
         const owner = isOwnerOf(roomId, userEmail, database);
         currentRoomOwner = owner;
-        const entry = { ws, name: myName, userEmail, setState: (nextState: PeerState) => { state = nextState; } };
+        const entry = { ws, name: myName, userEmail, isMobile: declaredMobile, setState: (nextState: PeerState) => { state = nextState; } };
 
         if (owner) {
           live.admitted.set(clientId, entry);
