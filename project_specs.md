@@ -66,7 +66,7 @@ meet-poc/
 │   │   │   ├── past/                  ← ended sessions with pagination
 │   │   │   ├── transcripts-stub/      ← Run 2 placeholder
 │   │   │   ├── settings-stub/         ← Run 2 placeholder
-│   │   │   └── room/                  ← lobby + call
+│   │   │   └── room/                  ← lobby device preview + call
 │   │   ├── services/
 │   │   ├── components/
 │   │   ├── app.routes.ts
@@ -178,6 +178,16 @@ A cross-module import must be one of the above; otherwise it's a Gate-7 standing
 
 Ended session rows include `recordingsCount`, computed by scanning owned recording files once per request and grouping v2 filenames by `sessionId`. This remains filesystem-backed; there is no recordings DB table yet.
 
+### 6.3 v2 Lobby Media
+
+- `/room/:id` lobby uses Pattern X: pre-grant media on lobby mount with `getUserMedia({audio:true, video: cameraRequested})`.
+- Camera defaults off; the checkbox reacquires the lobby stream with or without video.
+- Lobby preview includes a video tile or "Camera off" placeholder, an 8-bar mic meter sampled at 8 Hz, and native `<select>` dropdowns for microphone and camera.
+- `MediaService` owns the active local stream and exposes `preflight`, `enumerateDevices`, `reacquire`, and `getMicLevel`.
+- Join reuses the pre-acquired stream; it does not call `getUserMedia` a second time when the lobby already has a stream.
+- Permission denied has a B5 placeholder with Retry that re-runs preflight. Full device-failure polish remains B7.
+- Test-mic playback is deferred; the live mic meter is the B5 verification surface for input activity.
+
 ## 7. Testing expectations
 
 - **E2E:** Playwright via `e2e/playwright.config.ts`. baseURL = consolidated dev URL (TBD in B1, likely 4710). Headless chromium with fake-media-stream flags for WebRTC.
@@ -274,7 +284,7 @@ Filled in as batches close. Empty at run start.
 | backend/auth | — | B1 | PENDING |
 | backend/rooms | — | B2 | PENDING |
 | backend/signaling | — | B2 | PENDING |
-| backend/recording | — | B5 | PENDING |
+| backend/recording | Codex | B5/v2-B2/v2-B4 | DONE |
 | frontend/login page | — | B3 | PENDING |
 | frontend/app shell | Codex | v2-B3 | DONE |
 | frontend/rooms page | Codex | v2-B3/v2-B4 | DONE |
@@ -282,7 +292,7 @@ Filled in as batches close. Empty at run start.
 | frontend/ongoing page | Codex | v2-B4 | DONE |
 | frontend/past page | Codex | v2-B4 | DONE |
 | frontend/transcripts/settings stubs | Codex | v2-B3 | DONE |
-| frontend/room page (lobby) | — | B4 | PENDING |
+| frontend/room page (lobby) | Codex | B4/v2-B5 | DONE |
 | frontend/room page (call) | — | B4 | PENDING |
 | infra/coturn | — | B6 | PENDING |
 
