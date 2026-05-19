@@ -48,6 +48,22 @@
         <ion-icon [name]="recording() ? 'ellipse' : 'ellipse-outline'"></ion-icon>
       </button>
     }
+    <button
+      type="button"
+      class="control-btn participant-toggle"
+      [class.active]="sidebarOpen()"
+      [class.has-waiting]="waitingCount() > 0"
+      [attr.aria-pressed]="sidebarOpen()"
+      [attr.aria-label]="sidebarOpen() ? 'Hide participants' : 'Show participants'"
+      (click)="sidebar.emit()"
+      [title]="sidebarOpen() ? 'Hide participants' : 'Show participants'"
+    >
+      <ion-icon name="people-outline"></ion-icon>
+      <span class="count-badge">{{ participantCount() }}</span>
+      @if (waitingCount() > 0) {
+        <span class="waiting-badge">{{ waitingCount() }}</span>
+      }
+    </button>
     <button type="button" class="leave-btn" (click)="leave.emit()" aria-label="Leave call" title="Leave call">
       <ion-icon name="call-outline"></ion-icon>
     </button>

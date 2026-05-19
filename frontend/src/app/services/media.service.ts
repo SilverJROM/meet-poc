@@ -97,6 +97,17 @@ export class MediaService {
     return track.enabled;
   }
 
+  muteMic(): boolean {
+    const track = this.localStream()?.getAudioTracks()[0];
+    if (!track) {
+      this.micOn.set(false);
+      return false;
+    }
+    track.enabled = false;
+    this.micOn.set(false);
+    return false;
+  }
+
   async toggleCamera(onVideoTrackChanged: (track: MediaStreamTrack | null) => Promise<void>): Promise<boolean> {
     const stream = this.localStream();
     if (!stream) return false;

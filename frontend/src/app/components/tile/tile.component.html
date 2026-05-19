@@ -1,4 +1,4 @@
-<article class="tile" [attr.data-peer]="peer().id" [attr.data-state]="peer().connectionState" [attr.data-host]="peer().isHost">
+<article class="tile" [class.is-speaking]="speaking()" [attr.data-peer]="peer().id" [attr.data-state]="peer().connectionState" [attr.data-host]="peer().isHost">
   <div class="tile-content">
     @if (peer().camEnabled && peer().stream?.getVideoTracks()?.length) {
       <video #video autoplay playsinline [muted]="peer().isLocal"></video>

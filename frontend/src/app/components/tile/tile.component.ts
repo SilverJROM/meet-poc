@@ -12,6 +12,7 @@ import { PeerState } from '../../services/webrtc.service';
 })
 export class TileComponent {
   readonly peer = input.required<PeerState>();
+  readonly speaking = input(false);
   readonly initial = computed(() => (this.peer().name.trim().slice(0, 1) || '?').toUpperCase());
   readonly avatarColor = computed(() => {
     const name = this.peer().name || 'x';

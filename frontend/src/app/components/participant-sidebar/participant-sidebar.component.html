@@ -1,0 +1,61 @@
+<aside class="participant-sidebar" [class.open]="open()" aria-label="Participants">
+  <header>
+    <div>
+      <h2>Participants</h2>
+      <p>{{ admittedCount() }} in the call</p>
+    </div>
+  </header>
+
+  <section aria-label="In the call">
+    <h3>In the call</h3>
+    <ul class="participant-list">
+      @for (peer of peers(); track peer.id) {
+        <li class="participant-row" [attr.data-peer]="peer.id">
+          <span class="avatar" [style.background]="avatarColor(peer.name)">{{ initial(peer.name) }}</span>
+          <span class="participant-main">
+            <span class="name">{{ peer.name }}</span>
+            @if (peer.isHost) {
+              <span class="host-badge">HOST</span>
+            }
+          </span>
+          <span class="state-icons" aria-label="Media state">
+            <ion-icon [name]="peer.micEnabled ? 'mic-outline' : 'mic-off-outline'" [class.off]="!peer.micEnabled"></ion-icon>
+            <ion-icon [name]="peer.camEnabled ? 'videocam-outline' : 'videocam-off-outline'" [class.off]="!peer.camEnabled"></ion-icon>
+          </span>
+          @if (canManage(peer)) {
+            <div class="row-actions">
+              <button type="button" class="kebab" [attr.aria-label]="'Actions for ' + peer.name" (click)="toggleMenu(peer.id)">
+                <ion-icon name="ellipsis-vertical-outline"></ion-icon>
+              </button>
+              @if (menuFor() === peer.id) {
+                <div class="action-menu" role="menu">
+                  <button type="button" role="menuitem" (click)="mutePeer(peer.id)">Mute participant</button>
+                  <button type="button" role="menuitem" class="danger" (click)="removePeer(peer.id)">Remove from meeting</button>
+                </div>
+              }
+            </div>
+          }
+        </li>
+      }
+    </ul>
+  </section>
+
+  @if (isHost()) {
+    <section aria-label="Waiting to join">
+      <h3>Waiting to join</h3>
+      @if (knockers().length === 0) {
+        <p class="empty">No one is waiting.</p>
+      } @else {
+        <ul class="waiting-list">
+          @for (knocker of knockers(); track knocker.id) {
+            <li>
+              <span>{{ knocker.name }}</span>
+              <button type="button" class="primary-btn" (click)="admit.emit(knocker.id)">Admit</button>
+              <button type="button" class="secondary-btn" (click)="reject.emit(knocker.id)">Reject</button>
+            </li>
+          }
+        </ul>
+      }
+    </section>
+  }
+</aside>

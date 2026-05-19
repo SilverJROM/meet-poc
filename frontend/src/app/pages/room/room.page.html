@@ -38,10 +38,14 @@
         [recording]="recorder.isRecording()"
         [uploading]="recorder.isUploading()"
         [isHost]="isHost()"
+        [participantCount]="peers().length"
+        [waitingCount]="knockers().length"
+        [sidebarOpen]="sidebarOpen()"
         (mute)="toggleMic()"
         (camera)="toggleCamera()"
         (screen)="toggleScreen()"
         (record)="toggleRecording()"
+        (sidebar)="toggleSidebar()"
         (leave)="leave()"
       />
       @if (showPeerWarning()) {
@@ -56,19 +60,41 @@
           <button type="button" (click)="deviceFailureNotice.set(null)">Dismiss</button>
         </div>
       }
+      @if (actionNotice()) {
+        <div class="device-notice" role="status">
+          <span>{{ actionNotice() }}</span>
+          <button type="button" (click)="actionNotice.set(null)">Dismiss</button>
+        </div>
+      }
       <div class="meeting-meta">
         <span class="meeting-clock" aria-label="Meeting elapsed time">{{ formattedElapsed() }}</span>
       </div>
       <app-recording-banner [recording]="hostRecording()" [startedAt]="recordingStartedAt()" />
       <p class="call-status" role="status">{{ status() }}</p>
-      @if (isOwner()) {
-        <app-waiting-room-panel [knockers]="knockers()" (admit)="admit($event)" (reject)="reject($event)" />
-      }
-      <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
-        @for (peer of peers(); track peer.id) {
-          <app-tile [peer]="peer" />
-        }
+      <div class="call-content" [class.sidebar-open]="sidebarOpen()">
+        <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
+          @for (peer of peers(); track peer.id) {
+            <app-tile [peer]="peer" [speaking]="activeSpeaker.activePeerId() === peer.id" />
+          }
+        </div>
+        <app-participant-sidebar
+          [open]="sidebarOpen()"
+          [peers]="peers()"
+          [knockers]="knockers()"
+          [isHost]="isHost()"
+          [myClientId]="myId()"
+          (mute)="muteParticipant($event)"
+          (remove)="removeParticipant($event)"
+          (admit)="admit($event)"
+          (reject)="reject($event)"
+        />
       </div>
+      @if (leaveDialogOpen()) {
+        <app-leave-dialog (endForAll)="endForAll()" (justLeave)="justLeave()" (cancel)="leaveDialogOpen.set(false)" />
+      }
+      @if (meetingEndedToastOpen()) {
+        <app-meeting-ended-toast (dismiss)="dismissMeetingEnded()" />
+      }
     </section>
   } @else {
     <section class="lobby-panel">

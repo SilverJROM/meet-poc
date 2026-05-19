@@ -7,6 +7,7 @@ import {
   ellipse,
   micOffOutline,
   micOutline,
+  peopleOutline,
   videocamOffOutline,
   videocamOutline,
 } from 'ionicons/icons';
@@ -26,10 +27,14 @@ export class ControlsBarComponent {
   readonly recording = input.required<boolean>();
   readonly uploading = input(false);
   readonly isHost = input(false);
+  readonly participantCount = input(0);
+  readonly waitingCount = input(0);
+  readonly sidebarOpen = input(false);
   readonly mute = output<void>();
   readonly camera = output<void>();
   readonly screen = output<void>();
   readonly record = output<void>();
+  readonly sidebar = output<void>();
   readonly leave = output<void>();
 
   constructor() {
@@ -40,6 +45,7 @@ export class ControlsBarComponent {
       ellipseOutline,
       micOffOutline,
       micOutline,
+      peopleOutline,
       videocamOffOutline,
       videocamOutline,
     });

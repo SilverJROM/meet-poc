@@ -158,6 +158,18 @@ h1 {
   align-items: stretch;
 }
 
+.call-content {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 0;
+  align-items: start;
+  gap: 0;
+}
+
+.call-content.sidebar-open {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
+  gap: 12px;
+}
+
 .tiles-grid[data-count="1"] {
   grid-template-columns: minmax(0, 720px);
   justify-content: center;
@@ -207,6 +219,11 @@ h1 {
 
   .tiles-grid {
     grid-template-columns: 1fr !important;
+  }
+
+  .call-content,
+  .call-content.sidebar-open {
+    grid-template-columns: 1fr;
   }
 }
 
