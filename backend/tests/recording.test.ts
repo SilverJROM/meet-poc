@@ -114,6 +114,37 @@ describe('recording API', () => {
     expect(fs.readFileSync(path.join(dir, res.body.file), 'utf8')).toBe('webm-bytes');
   });
 
+  it('S6.2 upload/list/download accepts mp4 extension from X-Ext', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'abc123abc123', 'Team Sync!');
+    const session = openSession('abc123abc123', 'jrom@silverjrom.app', db);
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    const upload = await request(app)
+      .post('/upload')
+      .set('Cookie', cookie)
+      .set('Content-Type', 'audio/mp4')
+      .set('X-Ext', 'mp4')
+      .set('X-Room', 'abc123abc123')
+      .send(Buffer.from('mp4-bytes'))
+      .expect(200);
+
+    expect(upload.body.file).toMatch(new RegExp(`^\\d{4}-.*_${session.id}_abc123abc123_Team_Sync_[a-f0-9]{6}\\.mp4$`));
+    expect(fs.readFileSync(path.join(dir, upload.body.file), 'utf8')).toBe('mp4-bytes');
+
+    const listed = await request(app).get('/api/recordings').set('Cookie', cookie).expect(200);
+    expect(listed.body.recordings.map((recording: { filename: string }) => recording.filename)).toEqual([upload.body.file]);
+
+    await request(app)
+      .get(`/api/recordings/${upload.body.file}/download`)
+      .set('Cookie', cookie)
+      .expect('Content-Type', /audio\/mp4/)
+      .expect(200);
+  });
+
   it('S5 backend recordings list requires authentication', async () => {
     const db = createTestDb();
     seedUser(db);

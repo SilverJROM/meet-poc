@@ -130,6 +130,10 @@ export class RoomPage implements OnDestroy {
         lastVideoConstraints: this.media.lastVideoConstraints(),
         audioContextActivated: this.media.audioContextActivated(),
         currentFacingMode: this.currentFacingMode(),
+        lastRecordingMime: this.recorder.lastRecordingMime(),
+        lastRecordingExtension: this.recorder.lastRecordingExtension(),
+        lastRecorderTimeslice: this.recorder.lastRecorderTimeslice(),
+        lastRecordingUpload: this.recorder.lastUpload(),
         activeSpeakerHz: this.activeSpeaker.activeSpeakerHz(),
         activeSpeakerId: this.activeSpeaker.activePeerId(),
         activeSpeakerAnalyzerCount: this.activeSpeaker.analyzerCount(),
@@ -694,6 +698,10 @@ declare global {
       lastVideoConstraints?: MediaStreamConstraints | null;
       audioContextActivated?: boolean;
       currentFacingMode?: 'user' | 'environment';
+      lastRecordingMime?: string | null;
+      lastRecordingExtension?: string;
+      lastRecorderTimeslice?: number | null;
+      lastRecordingUpload?: { ok: true; file: string; bytes: number } | null;
       isRecording: boolean;
       activeSpeakerHz?: number;
       activeSpeakerId?: string | null;

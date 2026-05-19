@@ -87,7 +87,7 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     }
     const filepath = path.join(ensureRecordingsDir(), filename);
     if (!fs.existsSync(filepath)) return res.status(404).json({ error: 'not found' });
-    res.setHeader('Content-Type', 'video/webm');
+    res.setHeader('Content-Type', contentTypeFor(filename));
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     fs.createReadStream(filepath).pipe(res);
   });
@@ -118,7 +118,7 @@ export function listRecordingsForUser(
   const dir = ensureRecordingsDir();
   return fs
     .readdirSync(dir)
-    .filter((filename) => filename.endsWith('.webm') && isSafeFilename(filename))
+    .filter((filename) => isRecordingFilename(filename) && isSafeFilename(filename))
     .map((filename) => {
       const parsed = parseRecordingFilename(filename);
       if (!parsed) return null;
@@ -167,7 +167,7 @@ export function countRecordingsBySessionForUser(
 
 export function parseRecordingFilename(filename: string): { sessionId: string | null; roomId: string } | null {
   if (!isSafeFilename(filename)) return null;
-  const withoutExt = filename.replace(/\.webm$/i, '');
+  const withoutExt = filename.replace(/\.[a-z0-9]+$/i, '');
   const newShape = withoutExt.match(
     /^\d{4}-.*_([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})_([a-f0-9]{12})_.+_([a-f0-9]{6})$/i,
   );
@@ -179,6 +179,17 @@ export function parseRecordingFilename(filename: string): { sessionId: string | 
 
 function sanitizeExt(value: string | undefined): string {
   return String(value || 'webm').replace(/[^a-z0-9]/gi, '').slice(0, 8).toLowerCase() || 'webm';
+}
+
+function isRecordingFilename(filename: string): boolean {
+  return /\.(webm|mp4|aac)$/i.test(filename);
+}
+
+function contentTypeFor(filename: string): string {
+  const ext = path.extname(filename).toLowerCase();
+  if (ext === '.mp4') return 'audio/mp4';
+  if (ext === '.aac') return 'audio/aac';
+  return 'audio/webm';
 }
 
 function sanitizeRoomId(value: string | undefined): string {

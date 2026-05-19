@@ -1,4 +1,5 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
+import { PlatformService } from './platform.service';
 
 type RecordingResponse = {
   ok: true;
@@ -8,9 +9,14 @@ type RecordingResponse = {
 
 @Injectable({ providedIn: 'root' })
 export class RecorderService {
+  private readonly platform = inject(PlatformService);
+
   readonly isRecording = signal(false);
   readonly isUploading = signal(false);
   readonly lastUpload = signal<RecordingResponse | null>(null);
+  readonly lastRecordingMime = signal<string | null>(null);
+  readonly lastRecordingExtension = signal<string>('webm');
+  readonly lastRecorderTimeslice = signal<number | null>(null);
 
   private ctx: AudioContext | null = null;
   private dest: MediaStreamAudioDestinationNode | null = null;
@@ -18,6 +24,7 @@ export class RecorderService {
   private chunks: Blob[] = [];
   private sourceFor = new Map<string, MediaStreamAudioSourceNode>();
   private mimeType = 'audio/webm;codecs=opus';
+  private extension = 'webm';
 
   start(localStream: MediaStream, peerStreams: Map<string, MediaStream>): void {
     if (this.isRecording()) return;
@@ -35,13 +42,22 @@ export class RecorderService {
       this.addStream(clientId, stream);
     }
 
-    const supported = ['audio/webm;codecs=opus', 'audio/webm'].find((type) => MediaRecorder.isTypeSupported(type));
-    this.mimeType = supported || 'audio/webm';
-    this.recorder = new MediaRecorder(dest.stream, supported ? { mimeType: supported } : undefined);
+    const selected = this.pickMime();
+    this.mimeType = selected.mimeType || 'audio/webm';
+    this.extension = selected.extension;
+    this.lastRecordingMime.set(selected.mimeType || null);
+    this.lastRecordingExtension.set(selected.extension);
+    this.recorder = new MediaRecorder(dest.stream, selected.mimeType ? { mimeType: selected.mimeType } : undefined);
     this.recorder.ondataavailable = (event) => {
       if (event.data.size > 0) this.chunks.push(event.data);
     };
-    this.recorder.start(1000);
+    if (this.platform.isIOS()) {
+      this.lastRecorderTimeslice.set(null);
+      this.recorder.start();
+    } else {
+      this.lastRecorderTimeslice.set(1000);
+      this.recorder.start(1000);
+    }
     this.isRecording.set(true);
   }
 
@@ -83,7 +99,7 @@ export class RecorderService {
         method: 'POST',
         headers: {
           'Content-Type': blob.type || 'audio/webm',
-          'X-Ext': 'webm',
+          'X-Ext': this.extension,
           'X-Room': roomId,
         },
         body: blob,
@@ -133,6 +149,20 @@ export class RecorderService {
       void this.ctx.close().catch(() => undefined);
       this.ctx = null;
     }
+  }
+
+  private pickMime(): { mimeType: string; extension: string } {
+    const candidates = [
+      { mimeType: 'audio/webm;codecs=opus', extension: 'webm' },
+      { mimeType: 'audio/webm', extension: 'webm' },
+      { mimeType: 'audio/mp4;codecs=mp4a.40.2', extension: 'mp4' },
+      { mimeType: 'audio/mp4', extension: 'mp4' },
+      { mimeType: 'audio/aac', extension: 'aac' },
+    ];
+    for (const candidate of candidates) {
+      if (MediaRecorder.isTypeSupported(candidate.mimeType)) return candidate;
+    }
+    return { mimeType: '', extension: 'webm' };
   }
 }
 
