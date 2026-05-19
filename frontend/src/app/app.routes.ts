@@ -20,7 +20,7 @@ export const routes: Routes = [
       { path: 'ongoing', loadComponent: () => import('./pages/ongoing/ongoing.page').then((m) => m.OngoingPage) },
       { path: 'past', loadComponent: () => import('./pages/past/past.page').then((m) => m.PastPage) },
       { path: 'recordings', loadComponent: () => import('./pages/recordings/recordings.page').then((m) => m.RecordingsPage) },
-      { path: 'transcripts', loadComponent: () => import('./pages/transcripts-stub/transcripts-stub.page').then((m) => m.TranscriptsStubPage) },
+      { path: 'transcripts', loadComponent: () => import('./pages/transcripts/transcripts.page').then((m) => m.TranscriptsPage) },
       { path: 'settings', loadComponent: () => import('./pages/settings-stub/settings-stub.page').then((m) => m.SettingsStubPage) },
     ],
   },

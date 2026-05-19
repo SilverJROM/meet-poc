@@ -1,0 +1,74 @@
+<section class="panel transcripts-page">
+  <div class="section-head">
+    <h2>Transcripts</h2>
+    <button type="button" class="icon-btn" (click)="refreshRecordings()" [disabled]="loading()" aria-label="Refresh transcripts">
+      <ion-icon name="refresh-outline"></ion-icon>
+    </button>
+  </div>
+
+  @if (error()) {
+    <p class="error-text">{{ error() }}</p>
+  }
+
+  @if (loading()) {
+    <p class="empty">Loading transcripts...</p>
+  } @else if (!hasRows()) {
+    <p class="empty">No recordings yet.</p>
+  } @else {
+    <ul class="transcript-list">
+      @for (recording of recordings(); track recording.filename) {
+        <li class="transcript-row" [class.active]="selectedFilename() === recording.filename">
+          <div class="recording-main">
+            <h3>{{ recording.roomTitle }}</h3>
+            <p>{{ recording.filename }}</p>
+            <span>{{ formatDuration(recording.durationMs) }} · Speakers: {{ recording.speakerCount ?? 0 }} · {{ recording.uploadedAtIso | date: 'medium' }}</span>
+          </div>
+          <div class="recording-state">
+            @if (recording.transcribeStatus === 'pending') {
+              <span class="status-badge pending"><span class="spinner"></span>Transcribing...</span>
+            } @else if (recording.transcribeStatus === 'failed') {
+              <span class="status-badge failed">Failed</span>
+            } @else if (recording.transcribeStatus === 'ready') {
+              <span class="status-badge ready">Ready</span>
+            }
+          </div>
+          <div class="recording-actions">
+            @if (recording.hasTranscript) {
+              <button type="button" class="primary-btn" (click)="viewTranscript(recording)" [disabled]="busyFilename() === recording.filename">
+                <ion-icon name="eye-outline"></ion-icon>
+                View
+              </button>
+            } @else {
+              <button type="button" class="secondary-btn" (click)="transcribe(recording)" [disabled]="recording.transcribeStatus === 'pending' || busyFilename() === recording.filename">
+                <ion-icon name="play-circle-outline"></ion-icon>
+                Transcribe
+              </button>
+            }
+          </div>
+        </li>
+      }
+    </ul>
+  }
+
+  @if (selectedTranscript(); as transcript) {
+    <section class="viewer" aria-label="Transcript viewer">
+      <div class="viewer-head">
+        <div>
+          <h3>{{ selectedFilename() }}</h3>
+          <span>{{ transcript.language || 'unknown' }} · {{ transcript.model || 'local' }}</span>
+        </div>
+      </div>
+      <div class="line-stream">
+        @for (line of transcript.lines; track line.startMs + '-' + line.endMs + '-' + line.name) {
+          <div class="transcript-line">
+            <span class="time">[{{ timestamp(line.startMs) }}]</span>
+            <strong [style.color]="speakerColor(line.name)">{{ line.name }}:</strong>
+            <span class="text">{{ line.text }}</span>
+          </div>
+        }
+      </div>
+    </section>
+  }
+
+  <div class="recording-status" role="status">{{ status() || '' }}</div>
+</section>
