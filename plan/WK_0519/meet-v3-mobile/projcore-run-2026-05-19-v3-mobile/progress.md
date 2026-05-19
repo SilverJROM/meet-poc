@@ -22,7 +22,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 
 | Batch | State | Iter | Dispatched | Callback | Validated | Verdict |
 |-------|-------|------|------------|----------|-----------|---------|
-| M-B1 | PENDING | — | — | — | — | — |
+| M-B1 | CALLBACK | 1 | 2026-05-19 | 2026-05-19 | — | — |
 | M-B2 | PENDING | — | — | — | — | — |
 | M-B3 | PENDING | — | — | — | — | — |
 | M-B4 | PENDING | — | — | — | — | — |
@@ -33,3 +33,5 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 ## Callbacks log
 
 (codex appends here)
+
+[projcore callback] v3-mb1 DONE — foundations + platform.service + viewport-fit
