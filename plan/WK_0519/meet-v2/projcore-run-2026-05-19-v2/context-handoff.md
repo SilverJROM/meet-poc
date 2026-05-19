@@ -2,119 +2,86 @@
 
 ---
 
-## Pre-B6 handoff (post-B5 PASS)
+## Pre-B7 handoff (post-B6 PASS)
 
-**HEAD:** `feat/meet-v2-b5-lobby-preview` (`fb6b341 docs: append v2 batch 5 callback`)
-**Branch for B6:** `feat/meet-v2-b6-grid-overlays-clock` — off B5 HEAD.
+**HEAD:** `feat/meet-v2-b6-grid-overlays-clock` (commit `b71a321 docs: add v2 B6 evidence artifacts`)
+**Branch for B7:** `feat/meet-v2-b7-controls-banner-failure` — off B6 HEAD.
 
-**Post-B5 state:**
-- Backend: stable. 16 vitest / 42 tests green.
-- Frontend: app shell + 4 real tabs + lobby device preview all live. MediaDevices plumbing complete.
-- Existing call-UI surface (the thing in JROM's screenshot complaint):
-  - `pages/room/room.page.html` lines 56-60: `<div class="tiles-grid" aria-label="Participants">` rendering `<app-tile [peer]="peer" />` for each peer
-  - `pages/room/room.page.scss` line 72-77: `.tiles-grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; padding: 16px; }` — **this is the bug**: with 1 peer, the single tile stretches full-width via `auto-fit` and the `aspect-ratio: 16/9` (in tile component) makes the letterbox look wrong
-  - `<app-tile>` currently renders: video element + name label corner + LOCAL/state corner. No mute icon, no camera-off avatar, no host badge.
-  - Controls bar shows Mute/Unmute/Camera/Screen/Record/Leave as text-flipping buttons.
-  - No meeting clock anywhere.
+**Post-B6 state:**
+- Backend: 17 vitest / 43 tests green. `media-state` relay live. `admitted` payload includes `hostClientId` + per-peer `host` flag.
+- Frontend: dynamic grid + per-tile overlays (mute icon / camera-off avatar / HOST badge) + meeting clock all live at voice.silverjrom.app. Lobby has device preview from B5.
+- Controls bar currently text-flips ("Mute"/"Unmute", "Camera on"/"Camera off") — UNCHANGED from rebuild. **B7 replaces with icon-state buttons.**
+- Record button: visible to ALL peers currently (legacy from rebuild). **B7 gates it host-only.**
+- No "Host is recording" banner exists. **B7 adds it.**
+- Permission-denied state in lobby is a basic placeholder (B5). **B7 polishes the full device-failure UX (denied, no-devices, mid-call denial, Retry, helpful instructions).**
 
-**WS protocol available (post-B2):** all v2 messages live. **B6 introduces ONE new message:** `media-state {clientId, mic, cam}` — clients broadcast their own mic/cam state changes.
+**WS protocol available (post-B6):** `media-state` (R6.3) + `recording-started/stopped` (R2.4 wired backend-side; B7 wires frontend banner subscription).
 
-**What B6 must produce — closes JROM's #2 screenshot complaint:**
+**What B7 must produce:**
 
-- **`pages/room/room.page.scss`** — replace the broken `auto-fit minmax` grid with **count-driven dynamic grid**:
-  - `<main class="tiles-grid" [attr.data-count]="peers().length">` (already has the binding scaffold ready)
-  - CSS: `.tiles-grid[data-count="1"] { grid-template-columns: minmax(0, 720px); justify-content: center; }` — single tile centered, capped width
-  - `.tiles-grid[data-count="2"] { grid-template-columns: 1fr 1fr; }`
-  - `.tiles-grid[data-count="3"], .tiles-grid[data-count="4"] { grid-template-columns: 1fr 1fr; grid-auto-rows: 1fr; }` — 2x2
-  - `.tiles-grid[data-count="5"], ..., [data-count="9"] { grid-template-columns: 1fr 1fr 1fr; }` — 3x3
-  - `.tiles-grid[data-count^="1"]:not([data-count="1"]) { ... }` OR a fallback rule for 10+ (won't happen at 8-cap but document) — scrollable 3-column
-  - Centered max-width container (~1400px) at outer level + responsive media queries (one breakpoint for <1024 → 2 cols max, one for <640 → 1 col stack)
+1. **Icon-state controls** (R7.1):
+   - Replace text-flip in `<app-controls-bar>` with **single icon buttons** that have on/off visual state. Each button:
+     - Has an Ionicon name (`mic`, `mic-off`, `videocam`, `videocam-off`, `desktop`, `radio`, `exit`)
+     - Renders mic ON state with the `mic` icon + a neutral background; OFF state with `mic-off` icon + red/destructive background
+     - Same for camera, screen-share (toggle), record, leave (no toggle — just an icon)
+     - Has `aria-pressed="true|false"` for screen reader; aria-label tells action
+     - Tooltip on hover shows the action label
+   - Use existing Ionicons setup. Single button per control, NOT 2 mutually exclusive ones.
 
-- **`<app-tile>` per-tile overlays** (R6.2):
-  - **Muted icon overlay**: render a small mic-off icon in the bottom-right when `peer.micEnabled === false`. Use Ionicons (mic-off or similar). Position via absolute + corner padding.
-  - **Camera-off avatar**: when `peer.camEnabled === false` (NOT just an absent video track — explicit state), render the tile content as a centered circle with peer name's first letter (uppercase). Background color hash-derived from name (e.g. `hash(name) % 360` for HSL hue, fixed saturation/lightness for dark-theme readability). Hide the `<video>` element.
-  - **Host badge**: render "HOST" pill in the bottom-left ONLY if the peer is the host. The peer object needs an `isHost: boolean` field — derive from `peer.id === hostClientId()` signal in `room.page.ts`.
+2. **Record button visible only to host** (R7.2):
+   - In `<app-controls-bar>` template: `@if (isHost()) { <button aria-label="Record"...> }`
+   - The `isHost` signal comes from `room.page.ts` (already derived from `hostClientId` in B6).
+   - Non-hosts: button is NOT IN THE DOM (not just `display:none`). Verified by `toHaveCount(0)`.
 
-- **`media-state` broadcast** (R6.3):
-  - Backend `signaling/index.ts` extension: handle `{type:'media-state', mic, cam}` from any admitted peer; relay to all OTHER admitted peers as `{type:'media-state', clientId, mic, cam}`.
-  - Frontend `MediaService` extensions: on `toggleMic()` / `toggleCamera()` / camera-off-during-call → broadcast new state via `WsService.send({type:'media-state', mic:bool, cam:bool})`.
-  - Frontend `WebrtcService` or `room.page.ts`: subscribe to incoming `media-state` events and update the relevant peer's `micEnabled` / `camEnabled` signals.
-  - Local peer's own tile updates from local signals (no round-trip).
-  - This is the SAME pattern as legacy state-flip; just made explicit via signaling instead of inferred from track-enabled state (which doesn't propagate over RTP reliably).
+3. **"Host is recording" banner visible to ALL** (R7.3):
+   - New `<app-recording-banner>` component rendered above the tiles-grid (or inside the call-panel topbar).
+   - Subscribes to incoming `recording-started/stopped` WS broadcasts. State signals: `isRecording = signal(false)`, `recordingStartedAt = signal<number|null>(null)`.
+   - When `isRecording()` true: render a red dot + "Host is recording" text + duration counter (counts up from `recordingStartedAt`, formatted `m:ss` / `h:mm:ss` like the meeting clock).
+   - When false: hidden.
+   - Triggered by:
+     - Server `recording-started` event → banner appears for all admitted peers
+     - Server `recording-stopped` event → banner disappears
+   - For the host: banner serves as their own "I am recording" indicator (no separate UI needed).
 
-- **Meeting clock** (R6.4):
-  - Add a topbar element above the controls-bar (or inside it): `<span class="meeting-clock">{{ elapsed() }}</span>`
-  - `room.page.ts`: when entering `in-call` state, start a `setInterval(1000)` that updates an `elapsedSec` signal. Format: `M:SS` under 60min, `H:MM:SS` over.
-  - Cleanup interval when leaving / state changes.
+4. **Device failure UX polish** (R7.4):
+   - Extend the existing lobby permission-denied placeholder (B5) into a fuller treatment:
+     - **Permission denied (`MediaError.code === 'denied'`):** clearer copy — "Microphone access denied. To join this call, allow microphone access for **voice.silverjrom.app** in your browser settings, then click Retry below." + a Retry button that re-invokes `preflight`.
+     - **No devices found (`MediaError.code === 'no-devices'`):** "No microphone detected. Please connect a microphone and refresh the page." (no Retry — refresh required to re-enumerate).
+     - **Camera-only denial (audio denied but video would work):** mic is required; same as Permission denied above.
+     - **Camera denied but mic ok:** acceptable to join (video off); show a less-blocking warning "Camera unavailable — joining audio-only."
+   - **Mid-call device denial** (e.g. user revokes mic permission mid-call via browser UI): listen for `MediaStreamTrack.onmute`/`onended`; if mic dies mid-call, show a toast "Microphone disconnected. Please refresh to rejoin." — non-blocking, audio stops working but other peers stay on.
 
-- **Centered max-width container** (R6.5):
-  - Wrap `tiles-grid` in a centered max-width container (~1400px) at the call-panel level. Smaller viewports (mobile prep for Run 3) cap at 100% with padding.
+5. **Camera-off renders avatar in-call** (R7.5):
+   - This is mostly closed by B6's `<app-tile>` overlays. B7 just confirms it works correctly in the in-call state when local camera toggles OFF — the local tile flips to avatar same as remote tiles.
+   - Existing test S6.4 covers remote-peer-camera-off. B7 adds a single spec for local-self-camera-off avatar.
 
-**Tests** `e2e/tests/v2-b6-grid/`:
-- `grid-1-peer.spec.ts` (S6.1): owner alone in call, tile clientWidth <= 720, horizontally centered
-- `grid-2-peer.spec.ts` (S6.2): two-context — owner + admitted guest, two tiles side-by-side
-- `mute-icon.spec.ts` (S6.3): two-context — guest mutes, owner's view of guest's tile shows mute icon within 2s
-- `camera-off-avatar.spec.ts` (S6.4): two-context — guest camera off, owner's view shows initials avatar on guest tile
-- `host-badge.spec.ts` (S6.5): two-context — owner sees "HOST" pill on own tile, no badge on guest tile
-- `meeting-clock.spec.ts` (S6.6): owner enters call, clock shows `0:00`, after 2s shows `0:02` (±1s)
+### Tests `e2e/tests/v2-b7-controls/`
 
-**Standing flags:**
-- Commit BEFORE STATUS: DONE
-- §1.15 decisions for: avatar color hash function, exact grid breakpoints, clock format edge cases (>9:59:59?)
-- §2.10 real DOM + real two-context
-- Hygiene: tests clean up rooms/sessions
+- `record-button-host-only.spec.ts` (S7.1, S7.2) — two-context: host sees Record button (visible); non-host (`toHaveCount(0)`)
+- `recording-banner.spec.ts` (S7.3) — two-context: host clicks Record → both contexts see "Host is recording" banner within 2s; host clicks Stop → banner disappears within 2s; banner duration counter advances
+- `permission-denied-polish.spec.ts` (S7.4) — Playwright with `permissions: []`; lobby shows the polished copy + Retry; click Retry re-invokes preflight (verify via spy or by granting permissions after Retry and seeing the lobby load)
+- `no-devices.spec.ts` (S7.4) — harder to fake `NotFoundError` in Playwright. Acceptable to mock via `page.addInitScript` overriding `getUserMedia` to throw `NotFoundError`. Verify "No microphone detected" message + no Retry button.
+- `controls-aria-pressed.spec.ts` (S7.5 — aria-pressed flip)
 
-**Decisions locked:**
-- Dynamic grid via `data-count` attribute selector (not Angular structural directive)
-- Mute icon visible when peer.micEnabled=false (signal-driven)
-- Camera-off renders avatar (NOT black video element)
-- Host badge derived from `hostClientId` (added in B6)
-- Clock starts at in-call state entry; resets on reconnect (acceptable drift)
+### Build + deploy
 
-**Live service:** PM2 NODE_ENV=production. Rebuild + restart meet-poc-fe (FE) + tsx-watch handles BE.
+```bash
+npm run build -w frontend
+pm2 restart meet-poc-fe
+```
+
+Verify live at voice.silverjrom.app: log in, join a room, see icon-state controls + Record button only when you're the host.
+
+### Hygiene reminder (carried from B6 flaky-parallel learning)
+
+Codex's B6 test-report noted parallel race on B4 ongoing-tab when run alongside B6 specs. Same root cause: tests hit prod DB. **For B7 tests**: prefer running with `--workers=1` for the regression sweep, OR ensure each spec serializes its own DB writes. If a flaky FAIL surfaces in parallel, /projcore reruns solo to confirm; not a blocker if solo-PASS.
+
+**`meet-poc-fe` PM2 restart is needed after frontend build** for changes to land on voice.silverjrom.app. `meet-poc-be` tsx-watch picks up backend changes automatically.
+
+## Standing flags (unchanged from prior)
+
+- Commit BEFORE STATUS: DONE — **B6 missed this AGAIN; treat as a hard reminder**
+- §1.15 decisions for non-trivial autonomous calls (icon choice, exact tooltip strings if non-obvious, mid-call denial detection strategy)
+- §2.10 real DOM + real two-context where applicable
 
 **Active callback target:** `plan/WK_0519/meet-v2/projcore-run-2026-05-19-v2/callbacks.md` + `progress.md`.
-
----
-
-## Post-B6 callback handoff
-
-**Branch:** `feat/meet-v2-b6-grid-overlays-clock`
-
-**Implemented:**
-- Backend admitted-only `media-state` relay.
-- Backend additive host metadata on admitted messages: `hostClientId` and `peers[].host`.
-- Angular call grid now uses `data-count` thresholds:
-  - 1 centered/capped
-  - 2 split
-  - 3-4 2-column
-  - 5-9 3-column
-- `<app-tile>` now renders:
-  - HOST badge
-  - mute icon
-  - camera-off initials avatar
-  - stable name/state overlays
-- Room page now broadcasts local mic/camera toggles and updates remote peer state from `media-state`.
-- Meeting clock starts on admission and clears on cleanup.
-
-**Validation completed by implementer:**
-- `npm test -w backend` — PASS, 17 files / 43 tests.
-- `npm run build` — PASS.
-- `npm test -w e2e -- tests/v2-b6-grid --config=playwright.live.config.ts` — PASS after restart, 7 tests.
-- `npm test -w e2e -- tests/v2-b5-lobby --config=playwright.live.config.ts` — PASS, 6 tests.
-- `npm test -w e2e -- tests/v2-b3-shell tests/v2-b4-tabs --config=playwright.live.config.ts` — PASS, 13 tests.
-- `pm2 restart meet-poc-be` + `pm2 restart meet-poc-fe` — both online.
-- Public live screenshot captured at `batch-6/screenshots/jrom-comparison-live-call.png`; temp public room deleted.
-
-**Artifacts:**
-- `batch-6/changes.md`
-- `batch-6/scenarios-implemented.md`
-- `batch-6/test-report.md`
-- `batch-6/review.md`
-- `batch-6/independent-validation.md`
-- `batch-6/screenshots/*.png`
-- Decisions:
-  - `2026-05-19-v2-b6-host-identity-protocol.md`
-  - `2026-05-19-v2-b6-avatar-color-hash.md`
-  - `2026-05-19-v2-b6-clock-format.md`
-  - `2026-05-19-v2-b6-backend-restart.md`

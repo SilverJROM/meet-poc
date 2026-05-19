@@ -30,7 +30,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 | B3 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B4 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B5 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
-| B6 | DONE | 1 | 2026-05-19 | 2026-05-19 | — | CALLBACK |
+| B6 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS (commit-process correction repeated; ~15min to close) |
 | B7 | PENDING | — | — | — | — | — |
 | B8 | PENDING | — | — | — | — | — |
 
@@ -49,3 +49,5 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 [projcore callback] v2-batch-5 DONE — lobby device preview + mic meter + stream carry-forward
 [projcore verdict] v2-batch-5 PASS — R5.1-R5.5 VERIFIED. Pattern X pre-grant on lobby mount; MediaService preflight + enumerateDevices + reacquire + getMicLevel 8Hz. <app-lobby-preview> + <app-mic-meter>. Stream carries into call (track IDs match). Permission-denied placeholder with Retry (B7 polish). 19 Playwright tests green (B3+B4+B5) in 11.7s live. 3 decisions logged. Hygiene clean. Matrix: 28/44 VERIFIED. See validation/batch-5.md.
 [projcore callback] v2-batch-6 DONE — grid + per-tile overlays + media-state + clock; live comparison screenshot captured
+[projcore correction] v2-batch-6 — same commit gap as v1-B4; codex committed in 4 grouped commits after asked, no code changes
+[projcore verdict] v2-batch-6 PASS — R6.1-R6.5 VERIFIED. Dynamic grid + tile overlays + media-state + clock. 17/43 backend, 26 Playwright (with 1 flaky parallel race on B4 ongoing-tab, passed solo). 9 screenshots incl jrom-comparison-live-call.png. 4 decisions logged. JROM "trash UI" complaint closed at visual level. Matrix: 33/44 VERIFIED. See validation/batch-6.md.
