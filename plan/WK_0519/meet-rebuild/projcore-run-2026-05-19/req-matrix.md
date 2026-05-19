@@ -39,10 +39,10 @@ Status meanings: `UNASSIGNED` → `ASSIGNED` (queued to a batch) → `IN-PROGRES
 | R5.3 | Mute, camera toggle, screen-share controls work | B4 | batch-4 S4.5 — mute/camera/screen-share toggles update track enabled flags via __meetDebug hook | VERIFIED |
 | R5.4 | Connection state per peer visible | B4 | batch-4 S4.3 — app-tile .state shows peer.connectionState text "connected" both directions | VERIFIED |
 | R5.5 | Non-blocking warning at 6 peers | B4 | batch-4 S4.8 — 6-peer warning banner appears when admitted-count reaches 6 | VERIFIED |
-| R6.1 | Recording mixes local mic + every admitted peer's audio | B5 | — | ASSIGNED |
-| R6.2 | MediaRecorder produces .webm; Record again stops & uploads | B5 | — | ASSIGNED |
-| R6.3 | POST /upload writes recordings/<timestamp>_<slug>_<rand>.webm | B5 | — | ASSIGNED |
-| R6.4 | Recording indicator + recordings list section on dashboard | B5 | — | ASSIGNED |
+| R6.1 | Recording mixes local mic + every admitted peer's audio | B5 | batch-5 recorder.service.ts AudioContext + per-peer sourceFor map; S5.3 ffprobe Opus stream confirmed | VERIFIED |
+| R6.2 | MediaRecorder produces .webm; Record again stops & uploads | B5 | batch-5 S5.1 (indicator on Record click) + S5.2 (Stop uploads .webm via POST /upload) | VERIFIED |
+| R6.3 | POST /upload writes recordings/<timestamp>_<slug>_<rand>.webm | B5 | batch-5 recording/index.ts writes <ts>_<roomId>_<roomSlug>_<rand>.webm (legacy shape extended for fs-only ownership filter; see decisions/2026-05-19-b5-filesystem-recordings.md) | VERIFIED |
+| R6.4 | Recording indicator + recordings list section on dashboard | B5 | batch-5 indicator visible during recording; dashboard Recordings section lists files via GET /api/recordings; S5.1+S5.2+screenshots | VERIFIED |
 | R7.1 | coturn installed + running on this machine | B6 | — | ASSIGNED |
 | R7.2 | coturn URL + creds in frontend ICE_SERVERS via env config | B6 | — | ASSIGNED |
 | R7.3 | Configuration documented + committed under infra/coturn/ | B6 | — | ASSIGNED |
@@ -60,10 +60,11 @@ Status meanings: `UNASSIGNED` → `ASSIGNED` (queued to a batch) → `IN-PROGRES
 | R10.2 | data.json users migrated into SQLite on first boot | B1 | batch-1 S1.7 + live smoke (fresh temp DB picked up legacy hash) | VERIFIED |
 | R10.3 | Rollback path documented + dry-runnable | B6 | — | ASSIGNED |
 
-**Totals after B4 PASS (2026-05-19):** 39 VERIFIED / 11 ASSIGNED / 2 PARTIAL (R5.2, R8.5) / 0 FAIL. (53 reqs total.) Only B5+B6 scope remaining.
+**Totals after B5 PASS (2026-05-19):** 43 VERIFIED / 7 ASSIGNED / 2 PARTIAL (R5.2, R8.5) / 0 FAIL. (53 reqs total.) **Only B6 + Phase 2 remain.**
 
 **Verification trail:**
 - 2026-05-19 — B1 PASS — 7×R1 + R10.2 VERIFIED; R8.1 PARTIAL (BE entry done, FE deferred to B3). See `validation/batch-1.md`.
 - 2026-05-19 — B2 PASS — R2.1-R2.5 + R3.1-R3.8 VERIFIED (13 reqs). Wire format identity verified at three levels (test file, source diff, live smoke). See `validation/batch-2.md`.
 - 2026-05-19 — B3 PASS — 10 new VERIFIED (R4.1, R4.3, R4.4, R4.5, R4.8, R8.1 closed, R8.2, R9.1, R9.2, R9.4) + R4.2 PARTIAL (room-placeholder routes; full lobby/call → B4) + R8.5 PARTIAL (build artifacts exist; cutover pipeline → B6). S3.5 (stitched-panel absent) closes JROM's verbatim complaint at the requirements level. See `validation/batch-3.md`.
 - 2026-05-19 — B4 PASS — 8 new VERIFIED (R4.2 closed, R4.6, R4.7, R5.1, R5.3, R5.4, R5.5, R9.3) + R5.2 PARTIAL (STUN done; coturn URL injection extension point → B6). Two-context P2P signaling verified in real fake-media browsers (S4.3 connected both ways). Soft-flag: codex left work uncommitted on STATUS: DONE callback; /projcore sent commit-only correction, codex closed in 2m 15s. See `validation/batch-4.md`.
+- 2026-05-19 — B5 PASS — 4 new VERIFIED (R6.1-R6.4). AudioContext mix + MediaRecorder + filesystem-backed /upload + dashboard list. S5.3 verified Opus audio stream via ffprobe. R6.3 filename extended to `<ts>_<roomId>_<slug>_<rand>.webm` (autonomous call: roomId needed for filesystem-only ownership filter; see decisions/2026-05-19-b5-filesystem-recordings.md). Codex committed BEFORE callback per new rule. Backend regression 13/23 + B3+B4 regression 16/16 + B5 3/3 all green. 4 decisions logged. See `validation/batch-5.md`.

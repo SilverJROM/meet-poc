@@ -29,7 +29,8 @@ Live state of the run. Codex appends callbacks here (format: `[projcore callback
 | B2 | DONE | 1 | 2026-05-19 01:25 | 2026-05-19 01:33 | 2026-05-19 01:38 | PASS |
 | B3 | DONE | 1 | 2026-05-19 01:41 | 2026-05-19 01:51 | 2026-05-19 01:56 | PASS |
 | B4 | DONE | 1 | 2026-05-19 01:58 | 2026-05-19 02:07 | 2026-05-19 02:15 | PASS (commit-process correction, 2m 15s to close) |
-| B5 | DISPATCHING | — | — | — | — | — |
+| B5 | DONE | 1 | 2026-05-19 02:17 | 2026-05-19 02:23 | 2026-05-19 02:30 | PASS |
+| B6 | DISPATCHING | — | — | — | — | — |
 | B3 | PENDING | — | — | — | — | — |
 | B4 | PENDING | — | — | — | — | — |
 | B5 | PENDING | — | — | — | — | — |
@@ -49,3 +50,4 @@ Live state of the run. Codex appends callbacks here (format: `[projcore callback
 [projcore correction] batch-4 — work was uncommitted on STATUS: DONE; asked codex to commit atomically (no code changes). Codex closed in 2m 15s with 3 commits (1 feat + 2 docs).
 [projcore verdict] batch-4 PASS — 8 new VERIFIED + 1 PARTIAL (R5.2 STUN done, coturn → B6). Full-mesh P2P proven by S4.3 two-context (2.7s) `connected` both ways. Backend regression 12/19 + B3 regression 8/8 + B4 8/8 all green on independent rerun. 4 decisions logged. See validation/batch-4.md. Soft-flag for future briefs: "commit before posting STATUS: DONE callback" should be explicit.
 [projcore callback] batch-5 DONE — recording client-mix + /upload + dashboard list; 3 scenarios green
+[projcore verdict] batch-5 PASS — 4 new VERIFIED (R6.1-R6.4); R6.3 filename extended w/ roomId for fs-only ownership filter (autonomous call documented). Backend 13/23 + B3+B4 regression 16/16 + B5 3/3 all green. ffprobe Opus audio confirmed in S5.3. New commit-before-DONE rule heeded (6 atomic commits, clean tree). 4 decisions logged. See validation/batch-5.md.
