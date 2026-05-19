@@ -175,7 +175,7 @@ export class RoomPage implements OnDestroy {
 
   async leave(): Promise<void> {
     this.cleanupCall();
-    await this.router.navigate([this.auth.user() ? '/dashboard' : '/']);
+    await this.router.navigate([this.auth.user() ? '/app/rooms' : '/']);
   }
 
   ngOnDestroy(): void {

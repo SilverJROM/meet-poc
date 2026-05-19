@@ -36,7 +36,7 @@ export class LoginPage {
     this.error.set(null);
     try {
       await this.auth.login(this.email, this.password);
-      await this.router.navigate(['/dashboard']);
+      await this.router.navigate(['/app/rooms']);
     } catch {
       this.error.set('Invalid email or password');
     } finally {

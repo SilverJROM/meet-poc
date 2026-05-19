@@ -7,19 +7,19 @@
     <section class="lobby-panel">
       <h1>Room not found</h1>
       <p class="muted">This room does not exist or has been deleted by the host.</p>
-      <a class="secondary-btn" routerLink="/dashboard">Back to dashboard</a>
+      <a class="secondary-btn" routerLink="/app/rooms">Back to rooms</a>
     </section>
   } @else if (state() === 'rejected') {
     <section class="lobby-panel">
       <h1>Request declined</h1>
       <p class="error-text">{{ error() }}</p>
-      <a class="secondary-btn" routerLink="/dashboard">Back to dashboard</a>
+      <a class="secondary-btn" routerLink="/app/rooms">Back to rooms</a>
     </section>
   } @else if (state() === 'error') {
     <section class="lobby-panel">
       <h1>Room unavailable</h1>
       <p class="error-text">{{ error() }}</p>
-      <a class="secondary-btn" routerLink="/dashboard">Back to dashboard</a>
+      <a class="secondary-btn" routerLink="/app/rooms">Back to rooms</a>
     </section>
   } @else if (state() === 'knocking') {
     <section class="lobby-panel knocking-panel">

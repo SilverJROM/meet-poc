@@ -1,63 +1,38 @@
+import { DatePipe } from '@angular/common';
 import { Component, CUSTOM_ELEMENTS_SCHEMA, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DatePipe } from '@angular/common';
-import { Router, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
-import { clipboardOutline, logOutOutline, trashOutline, videocamOutline } from 'ionicons/icons';
-import { AuthService } from '../../services/auth.service';
-import { Recording, RecordingsService } from '../../services/recordings.service';
+import { clipboardOutline, trashOutline, videocamOutline } from 'ionicons/icons';
 import { Room, RoomsService } from '../../services/rooms.service';
 
 @Component({
-  selector: 'app-dashboard',
+  selector: 'app-rooms-page',
   standalone: true,
-  imports: [FormsModule, RouterLink, DatePipe],
+  imports: [DatePipe, FormsModule, RouterLink],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
-  templateUrl: './dashboard.page.html',
-  styleUrl: './dashboard.page.scss',
+  templateUrl: './rooms.page.html',
+  styleUrl: './rooms.page.scss',
 })
-export class DashboardPage {
-  private readonly auth = inject(AuthService);
-  readonly recordingsService = inject(RecordingsService);
+export class RoomsPage {
   private readonly roomsService = inject(RoomsService);
-  private readonly router = inject(Router);
 
-  readonly user = this.auth.user;
   readonly rooms = signal<Room[]>([]);
-  readonly recordings = signal<Recording[]>([]);
   readonly loading = signal(true);
-  readonly recordingsLoading = signal(true);
   readonly busy = signal(false);
   readonly error = signal<string | null>(null);
   readonly copyStatus = signal<string | null>(null);
   readonly newTitle = signal('');
   readonly origin = window.location.origin;
   readonly hasRooms = computed(() => this.rooms().length > 0);
-  readonly hasRecordings = computed(() => this.recordings().length > 0);
 
   constructor() {
-    addIcons({ clipboardOutline, logOutOutline, trashOutline, videocamOutline });
+    addIcons({ clipboardOutline, trashOutline, videocamOutline });
     void this.refreshRooms();
-    void this.refreshRecordings();
   }
 
   shareUrl(room: Room): string {
     return `${this.origin}/room/${room.id}`;
-  }
-
-  async refreshRecordings(): Promise<void> {
-    this.recordingsLoading.set(true);
-    try {
-      this.recordings.set(await this.recordingsService.list());
-    } catch {
-      this.recordings.set([]);
-    } finally {
-      this.recordingsLoading.set(false);
-    }
-  }
-
-  recordingSize(recording: Recording): string {
-    return `${Math.round(recording.sizeBytes / 1024)} KB`;
   }
 
   async refreshRooms(): Promise<void> {
@@ -102,10 +77,5 @@ export class DashboardPage {
     if (!window.confirm(`Delete "${room.title}"?`)) return;
     await this.roomsService.delete(room.id);
     this.rooms.set(this.rooms().filter((item) => item.id !== room.id));
-  }
-
-  async logout(): Promise<void> {
-    await this.auth.logout();
-    await this.router.navigate(['/login']);
   }
 }

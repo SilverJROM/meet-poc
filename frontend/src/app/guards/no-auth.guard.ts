@@ -6,5 +6,5 @@ export const noAuthGuard: CanActivateFn = async () => {
   const auth = inject(AuthService);
   const router = inject(Router);
   const user = await auth.ensureSession();
-  return user ? router.createUrlTree(['/dashboard']) : true;
+  return user ? router.createUrlTree(['/app/rooms']) : true;
 };
