@@ -1,19 +1,21 @@
 @use 'breakpoints' as bp;
 
 :root {
-  color-scheme: dark;
-  --page-bg: #0f1115;
-  --panel-bg: #181b22;
-  --panel-soft: #1f232c;
-  --line: #2c313c;
-  --line-soft: #262a33;
-  --text: #e6e6e6;
-  --muted: #9aa3b2;
-  --muted-2: #6b7280;
+  color-scheme: light;
+  --page-bg: #f6f7f9;
+  --panel-bg: #ffffff;
+  --panel-soft: #eef0f4;
+  --line: #d8dde6;
+  --line-soft: #e3e6ec;
+  --text: #1a1f2b;
+  --muted: #5b6573;
+  --muted-2: #7a8392;
   --blue: #3b82f6;
   --blue-strong: #2563eb;
   --green: #16a34a;
   --red: #dc2626;
+  --selected-tint: #e8f0ff;
+  --video-bg: #0b0d11;
 }
 
 * {
@@ -97,12 +99,12 @@ a {
 
 .danger-btn {
   background: transparent;
-  color: #fecaca;
+  color: #b91c1c;
   border: 1px solid rgba(220, 38, 38, 0.45);
 }
 
 .danger-btn:hover {
-  background: rgba(220, 38, 38, 0.12);
+  background: rgba(220, 38, 38, 0.08);
 }
 
 .field {
@@ -111,7 +113,7 @@ a {
 }
 
 .field label {
-  color: #b9bfca;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -120,7 +122,7 @@ a {
   min-height: 40px;
   border: 1px solid var(--line);
   border-radius: 6px;
-  background: #0f1115;
+  background: var(--panel-bg);
   color: var(--text);
   padding: 8px 10px;
 }
@@ -132,7 +134,7 @@ a {
 
 .error-text {
   min-height: 18px;
-  color: #f87171;
+  color: var(--red);
   font-size: 13px;
 }
 

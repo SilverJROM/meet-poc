@@ -39,14 +39,14 @@ h1 {
 
 .lobby-error {
   border: 1px solid rgba(220, 38, 38, 0.5);
-  background: rgba(220, 38, 38, 0.12);
-  color: #fecaca;
+  background: rgba(220, 38, 38, 0.08);
+  color: #991b1b;
 }
 
 .lobby-warning {
-  border: 1px solid rgba(234, 179, 8, 0.45);
-  background: rgba(234, 179, 8, 0.12);
-  color: #fde68a;
+  border: 1px solid rgba(234, 179, 8, 0.55);
+  background: rgba(234, 179, 8, 0.10);
+  color: #854d0e;
 }
 
 .lobby-error h2 {
@@ -119,10 +119,10 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid rgba(234, 179, 8, 0.45);
+  border: 1px solid rgba(234, 179, 8, 0.55);
   border-radius: 8px;
-  background: rgba(234, 179, 8, 0.12);
-  color: #fde68a;
+  background: rgba(234, 179, 8, 0.10);
+  color: #854d0e;
   padding: 10px 12px;
 }
 
@@ -134,15 +134,15 @@ h1 {
   gap: 12px;
   border: 1px solid rgba(220, 38, 38, 0.45);
   border-radius: 8px;
-  background: rgba(220, 38, 38, 0.12);
-  color: #fecaca;
+  background: rgba(220, 38, 38, 0.08);
+  color: #991b1b;
   padding: 10px 12px;
 }
 
 .device-notice button {
   border: 0;
   background: transparent;
-  color: #fee2e2;
+  color: #991b1b;
   cursor: pointer;
   font-weight: 700;
 }
@@ -150,7 +150,7 @@ h1 {
 .peer-warning button {
   border: 0;
   background: transparent;
-  color: #fff7c2;
+  color: #854d0e;
   cursor: pointer;
   font-weight: 700;
 }

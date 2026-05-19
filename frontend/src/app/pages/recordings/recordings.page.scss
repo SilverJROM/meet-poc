@@ -33,7 +33,7 @@ h3 {
   border: 1px dashed var(--line);
   border-radius: 8px;
   color: var(--muted);
-  background: #0f1115;
+  background: var(--page-bg);
   padding: 18px;
   text-align: center;
 }
@@ -60,7 +60,7 @@ h3 {
   align-items: center;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: #0f1115;
+  background: var(--page-bg);
   padding: 14px;
 }
 

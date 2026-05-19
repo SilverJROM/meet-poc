@@ -20,7 +20,7 @@
   flex-direction: column;
   gap: 14px;
   border-right: 1px solid var(--line-soft);
-  background: #12151b;
+  background: var(--panel-bg);
   padding: 12px 10px;
 }
 
@@ -84,8 +84,8 @@
 }
 
 .nav-link.is-active {
-  background: #202633;
-  color: var(--text);
+  background: var(--selected-tint);
+  color: var(--blue-strong);
 }
 
 .nav-link.is-active::before {
@@ -139,7 +139,7 @@
   align-items: center;
   gap: 12px;
   border-bottom: 1px solid var(--line-soft);
-  background: rgba(24, 27, 34, 0.96);
+  background: rgba(255, 255, 255, 0.92);
   padding: 8px 18px;
   backdrop-filter: blur(12px);
 }

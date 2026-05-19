@@ -8,7 +8,7 @@
   gap: 14px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--line-soft);
-  background: rgba(24, 27, 34, 0.96);
+  background: rgba(255, 255, 255, 0.92);
 }
 
 .room-label {
@@ -39,7 +39,7 @@
   justify-content: center;
   border: 1px solid var(--line);
   color: var(--text);
-  background: rgba(12, 15, 21, 0.78);
+  background: var(--panel-bg);
   cursor: pointer;
   transition:
     border-color 140ms ease,
@@ -55,7 +55,7 @@
 
 .control-btn:hover,
 .leave-btn:hover {
-  border-color: rgba(255, 255, 255, 0.24);
+  border-color: var(--blue);
   transform: translateY(-1px);
 }
 
@@ -137,13 +137,13 @@
 .control-btn:disabled {
   cursor: not-allowed;
   color: var(--muted-2);
-  background: #11141a;
+  background: var(--panel-soft);
 }
 
 .leave-btn {
   border-color: rgba(220, 38, 38, 0.52);
-  color: #fecaca;
-  background: rgba(127, 29, 29, 0.32);
+  color: #b91c1c;
+  background: rgba(220, 38, 38, 0.08);
 }
 
 @include bp.mobile {
@@ -157,7 +157,7 @@
     min-height: calc(64px + env(safe-area-inset-bottom));
     border-top: 1px solid var(--line-soft);
     border-bottom: 0;
-    background: #181b22;
+    background: var(--panel-bg);
     padding: 8px 10px max(8px, env(safe-area-inset-bottom));
   }
 

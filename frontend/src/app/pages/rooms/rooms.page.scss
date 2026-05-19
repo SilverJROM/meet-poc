@@ -46,7 +46,7 @@ h3 {
   border: 1px dashed var(--line);
   border-radius: 8px;
   color: var(--muted);
-  background: #0f1115;
+  background: var(--page-bg);
   padding: 18px;
   text-align: center;
 }
@@ -66,14 +66,14 @@ h3 {
   align-items: center;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: #0f1115;
+  background: var(--page-bg);
   padding: 14px;
   transition: border-color 120ms ease, background 120ms ease;
 }
 
 .room-row.selected {
   border-color: var(--accent, #4a8df8);
-  background: #131b2a;
+  background: var(--selected-tint);
 }
 
 .room-select {
@@ -100,13 +100,13 @@ h3 {
   margin-bottom: 12px;
   border: 1px solid var(--line-soft);
   border-radius: 8px;
-  background: #0f1115;
+  background: var(--page-bg);
   transition: border-color 120ms ease, background 120ms ease;
 }
 
 .bulk-bar.active {
   border-color: var(--accent, #4a8df8);
-  background: #131b2a;
+  background: var(--selected-tint);
 }
 
 .bulk-select-all {

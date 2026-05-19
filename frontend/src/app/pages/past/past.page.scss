@@ -25,7 +25,7 @@ h2 {
   border: 1px dashed var(--line);
   border-radius: 8px;
   color: var(--muted);
-  background: #0f1115;
+  background: var(--page-bg);
   padding: 18px;
   text-align: center;
 }
@@ -35,7 +35,7 @@ h2 {
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   overflow: hidden;
-  background: #0f1115;
+  background: var(--page-bg);
 }
 
 .session-row {
