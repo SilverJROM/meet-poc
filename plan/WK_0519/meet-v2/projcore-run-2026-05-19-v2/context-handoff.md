@@ -2,53 +2,46 @@
 
 ---
 
-## Pre-B2 handoff (post-B1 PASS)
+## Pre-B3 handoff (post-B2 PASS — backend layer complete)
 
-**HEAD:** `feat/meet-v2-b1-sessions-backend` (commit `884c26d docs: append v2 batch 1 callback`)
-**Branch for B2:** `feat/meet-v2-b2-host-authority` — off the B1 HEAD.
+**HEAD:** `feat/meet-v2-b2-host-authority` (commit `758bc5f docs: append v2 batch 2 callback`)
+**Branch for B3:** `feat/meet-v2-b3-app-shell` — off the B2 HEAD.
 
-**What's in the repo now (post-B1):**
-- `backend/` — 5 modules now (auth, rooms, signaling, recording, **sessions**). 15 vitest files / 31 tests green.
-- `backend/migrations/0003_meeting_sessions.sql` applied; runtime DB has the table.
-- `backend/src/modules/sessions/{index,store}.ts` — exports `openSession`, `getOpenSessionFor`, `getOpenSessionByRoom`, `closeSession`, `bumpPeak`, `listActiveForOwner`, `listEndedForOwner`, plus `MeetingSession` type.
-- `backend/src/modules/signaling/index.ts` — lifecycle hooks: opens session on first `join`, bumps peak on admits, closes on `last-peer-left` / `host-disconnect-empty`. **Does NOT YET close on `host-end`** — that's B2.
-- `backend/src/modules/signaling/index.ts` — `getHostClientId(roomId)` helper EXPORTED (B1 added; B2 first user).
-- Live PM2 BE picked up the changes via tsx-watch (verified live API + WS smoke).
+**Backend state (no further BE changes in B3-B8):**
+- 5 modules: auth, rooms, signaling, recording, sessions. 16 vitest / 39 tests green.
+- `/api/meeting-sessions?status=&page=&pageSize=` ready for B4 to consume
+- `/upload` auth-gated + session-bound; filename embeds sessionId UUID
+- WS protocol full: recording-state, recording-started/stopped, meeting-ended-by-host, meeting-ended, mute-target, mute-request, remove-peer, peer-removed
 
-**WS protocol available today (post-B1):**
-- Same as post-rebuild + B1 added internal lifecycle (no new wire-format messages — those land in B2).
+**Frontend state (pre-v2):**
+- Angular 20 SPA: login, single `/dashboard`, `/room/:id`
+- Auth guard on `/dashboard`. Login redirects to `/dashboard`. noAuthGuard on `/login`
+- Live at voice.silverjrom.app via PM2 NODE_ENV=production (serves built dist/)
 
-**B2 introduces these wire-format additions:**
-- Client → server:
-  - `{type:'recording-state', state:'started'|'stopped'}` — host's client tells server when local MediaRecorder starts/stops
-  - `{type:'meeting-ended-by-host'}` — host-only command
-  - `{type:'mute-target', clientId}` — host-only command
-  - `{type:'remove-peer', clientId}` — host-only command
-- Server → broadcast / direct:
-  - `{type:'recording-started', clientId, sessionId}` — broadcast to all admitted on host's `recording-state:started`
-  - `{type:'recording-stopped', clientId, sessionId}` — broadcast to all admitted on host's `recording-state:stopped`
-  - `{type:'meeting-ended', reason}` — broadcast to all admitted on host's `meeting-ended-by-host`
-  - `{type:'mute-request', from}` — direct to the targeted peer on host's `mute-target`
-  - `{type:'peer-removed', reason}` — direct to the targeted peer on host's `remove-peer`
+**What B3 must produce:**
+- New `pages/app-shell/` layout component with collapsible left sidebar + topbar + `<router-outlet>`
+- `app.routes.ts` refactor: `/app` parent with 6 children (rooms, ongoing, past, recordings, transcripts, settings); `/dashboard` redirects to `/app/rooms`
+- Migrate existing dashboard content to `/app/rooms` (no pagination yet — B4)
+- Promote recordings section to `/app/recordings`
+- Stub pages for Ongoing + Past (B4 wires content), Transcripts + Settings (Run 2)
+- Move `authGuard` to `/app` parent
+- Default sidebar collapsed; remember via localStorage
+- Rebuild + `pm2 restart meet-poc-fe` to land on voice.silverjrom.app
 
-**What B2 must produce:**
-- `backend/src/modules/recording/index.ts` — auth + ownership + session-binding for `/upload`; backward-compat filename parser.
-- `backend/src/modules/signaling/index.ts` — handlers for `recording-state`, `meeting-ended-by-host`, `mute-target`, `remove-peer` with host validation + audit-via-stdout for non-host attempts.
-- Tests: update `recording.test.ts` for new auth gates + add `signaling-host-actions.test.ts`.
+**B3 does NOT do (deferred to B4):**
+- Rooms pagination, Ongoing 5s poll, Past list, `?page=` URL persistence
 
 **Standing flags:**
-- Commit BEFORE STATUS: DONE.
-- §1.15 — decisions/2026-05-19-v2-b2-<slug>.md for non-trivial autonomous calls.
-- §2.10 — real DB + real ws clients.
-- Hygiene — no prod-DB pollution in tests.
+- Commit BEFORE STATUS: DONE
+- §1.15 decisions/2026-05-19-v2-b3-<slug>.md for non-trivial calls
+- §2.10 Playwright real-DOM
+- Hygiene: test cleanup
 
-**Decisions already locked (do not re-litigate):**
-- /upload is now authenticated (REVERSES v1 B5 trade-off — documented in plan-locked decision file).
-- X-Room is a hint, not trust; cookie + DB ownership is.
-- Mute = soft request, Remove = hard force-close.
-- Non-host commands dropped silently with info log.
-- No `audit_events` DB table.
+**Decisions locked:**
+- /app/* refactor (not extend /dashboard)
+- Transcripts + Settings as VISIBLE stubs (not hidden) so sidebar is shape-complete
+- Sidebar collapsed by default; localStorage memory
 
-**Live service:** voice.silverjrom.app on PM2 :4700. tsx-watch picks up backend changes automatically.
+**Live service:** PM2 NODE_ENV=production. Codex MAY `pm2 restart meet-poc-fe` once after `npm run build -w frontend` to land on voice.silverjrom.app (autonomous-OK; new entry only, no legacy touch).
 
 **Active callback target:** `plan/WK_0519/meet-v2/projcore-run-2026-05-19-v2/callbacks.md` + `progress.md`.

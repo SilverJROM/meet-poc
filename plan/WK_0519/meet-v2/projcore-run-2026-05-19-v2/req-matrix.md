@@ -8,17 +8,17 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 |------|-----------------------------|-------|----------|--------|
 | R1.1 | meeting_sessions table + indexes via migration 0003 | B1 | B1 0003_meeting_sessions.sql; 15/31 tests green | VERIFIED |
 | R1.2 | Session opens on first WS-join, idempotent within room | B1 | B1 S1.1 + live smoke (WS open creates row, idempotent reuse for same room) | VERIFIED |
-| R1.3 | Session closes on host-end / last-peer-left / host-disconnect-empty | B1 | B1 S1.4+S1.5 close on last-peer-left + host-disconnect-empty (live smoke confirmed); host-end → B2 | PARTIAL |
+| R1.3 | Session closes on host-end / last-peer-left / host-disconnect-empty | B1 | B1 closed last-peer-left + host-disconnect-empty; B2 closes host-end (S2.6 + sessions-lifecycle regression) | VERIFIED |
 | R1.4 | admitted_peak tracked as high-water mark | B1 | B1 S1.2 (admitted_peak high water mark) | VERIFIED |
 | R1.5 | GET /api/meeting-sessions paginated; active and ended-with-filter | B1 | B1 S1.6+S1.7+S1.8 + live smoke (active=0 + ended paginated with 10s+peak filter) | VERIFIED |
 | R1.6 | Helper getOpenSessionFor(roomId, hostEmail) | B1 | B1 store.ts getOpenSessionFor + getOpenSessionByRoom helpers | VERIFIED |
-| R2.1 | /upload cookie-trust + 401/403 | B2 | — | ASSIGNED |
-| R2.2 | /upload 409 if no open meeting_session for (room, host) | B2 | — | ASSIGNED |
-| R2.3 | Recording filename embeds meeting_session_id (backward compat) | B2 | — | ASSIGNED |
-| R2.4 | WS broadcasts: recording-started/stopped, meeting-ended, mute-request, peer-removed | B2 | — | ASSIGNED |
-| R2.5 | Host-only WS commands: meeting-ended-by-host, mute-target, remove-peer | B2 | — | ASSIGNED |
-| R2.6 | Non-host commands dropped silently with info-level log | B2 | — | ASSIGNED |
-| R2.7 | Helper getHostClientId(roomId) | B2 | — | ASSIGNED |
+| R2.1 | /upload cookie-trust + 401/403 | B2 | B2 S2.1 + live smoke 401 (no cookie) + 403 (non-owner) | VERIFIED |
+| R2.2 | /upload 409 if no open meeting_session for (room, host) | B2 | B2 S2.3 + live smoke 409 (cookie ok, no open session) | VERIFIED |
+| R2.3 | Recording filename embeds meeting_session_id (backward compat) | B2 | B2 S2.4 + live smoke: new filename <ts>_<sessionId>_<roomId>_<slug>_<rand>.webm; backward-compat parser | VERIFIED |
+| R2.4 | WS broadcasts: recording-started/stopped, meeting-ended, mute-request, peer-removed | B2 | B2 S2.5 (recording-started/stopped), S2.6 (meeting-ended), S2.7 (mute-request), S2.8 (peer-removed) | VERIFIED |
+| R2.5 | Host-only WS commands: meeting-ended-by-host, mute-target, remove-peer | B2 | B2 S2.5-S2.8 all four host-only commands work; close-order documented in decisions/meeting-end-close-order.md | VERIFIED |
+| R2.6 | Non-host commands dropped silently with info-level log | B2 | B2 S2.9 non-host commands produce info logs + no broadcasts | VERIFIED |
+| R2.7 | Helper getHostClientId(roomId) | B2 | B1 added/exported getHostClientId(roomId); B2 first uses it indirectly via isOwnerOf | VERIFIED |
 | R3.1 | /app/{rooms,ongoing,past,recordings,transcripts,settings} routes + stubs | B3 | — | ASSIGNED |
 | R3.2 | /dashboard redirects to /app/rooms | B3 | — | ASSIGNED |
 | R3.3 | Layout: persistent collapsible sidebar + topbar + active state | B3 | — | ASSIGNED |
