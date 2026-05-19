@@ -6,6 +6,7 @@ import { getDb } from '../../db.js';
 import { parseCookies } from '../../lib/cookies.js';
 import { getSessionUser } from '../auth/sessions.js';
 import { getRoom, isOwnerOf } from '../rooms/store.js';
+import { bumpPeak, closeSession, openSession } from '../sessions/store.js';
 
 type PeerState = 'idle' | 'admitted' | 'pending';
 
@@ -19,6 +20,7 @@ type PeerEntry = {
 type LiveRoom = {
   admitted: Map<string, PeerEntry>;
   pending: Map<string, PeerEntry>;
+  currentSessionId: string | null;
 };
 
 type IncomingMessage = {
@@ -38,7 +40,7 @@ const liveRooms = new Map<string, LiveRoom>();
 function getOrCreateLiveRoom(roomId: string): LiveRoom {
   let live = liveRooms.get(roomId);
   if (!live) {
-    live = { admitted: new Map(), pending: new Map() };
+    live = { admitted: new Map(), pending: new Map(), currentSessionId: null };
     liveRooms.set(roomId, live);
   }
   return live;
@@ -56,6 +58,7 @@ function broadcastToOwners(live: LiveRoom, roomId: string, msg: Record<string, u
 
 function rejectForRoomFull(roomId: string, clientId: string, pending: PeerEntry, live: LiveRoom, database: Database.Database): void {
   live.pending.delete(clientId);
+  pending.setState('idle');
   send(pending.ws, { type: 'error', error: 'room full (max 8)' });
   try {
     pending.ws.close();
@@ -63,6 +66,15 @@ function rejectForRoomFull(roomId: string, clientId: string, pending: PeerEntry,
     // Best effort close mirrors the legacy reject path.
   }
   broadcastToOwners(live, roomId, { type: 'knock-cancelled', clientId }, database);
+}
+
+function ensureLiveSession(roomId: string, hostEmail: string, live: LiveRoom, database: Database.Database): void {
+  const session = openSession(roomId, hostEmail, database);
+  live.currentSessionId = session.id;
+}
+
+function bumpAdmittedPeak(live: LiveRoom, database: Database.Database): void {
+  bumpPeak(live.currentSessionId, live.admitted.size, database);
 }
 
 function admitPeer(roomId: string, clientId: string, database: Database.Database): void {
@@ -90,6 +102,7 @@ function admitPeer(roomId: string, clientId: string, database: Database.Database
     send(peer.ws, { type: 'peer-joined', clientId, name: pending.name });
   }
   live.admitted.set(clientId, pending);
+  bumpAdmittedPeak(live, database);
   broadcastToOwners(live, roomId, { type: 'knock-cancelled', clientId }, database);
   console.log(`[room ${roomId}] ADMITTED ${pending.name} (${clientId})  admitted=${live.admitted.size} pending=${live.pending.size}`);
 }
@@ -100,6 +113,7 @@ function rejectPeer(roomId: string, clientId: string, database: Database.Databas
   const pending = live.pending.get(clientId);
   if (!pending) return;
   live.pending.delete(clientId);
+  pending.setState('idle');
   send(pending.ws, { type: 'rejected', reason });
   try {
     pending.ws.close();
@@ -122,6 +136,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
     let currentRoom: string | null = null;
     let myName = 'Anon';
     let state: PeerState = 'idle';
+    let currentRoomOwner = false;
 
     ws.on('message', (raw) => {
       let msg: IncomingMessage;
@@ -139,19 +154,23 @@ export function attachSignaling(server: http.Server, database: Database.Database
           ws.close();
           return;
         }
-        currentRoom = roomId;
-        myName = String(msg.name || 'Anon').slice(0, 64);
+        const joinName = String(msg.name || 'Anon').slice(0, 64);
         const live = getOrCreateLiveRoom(roomId);
         if (live.admitted.size >= MAX_ADMITTED) {
           send(ws, { type: 'error', error: 'room full (max 8)' });
           ws.close();
           return;
         }
+        currentRoom = roomId;
+        myName = joinName;
+        ensureLiveSession(roomId, room.ownerEmail, live, database);
         const owner = isOwnerOf(roomId, userEmail, database);
+        currentRoomOwner = owner;
         const entry = { ws, name: myName, userEmail, setState: (nextState: PeerState) => { state = nextState; } };
 
         if (owner) {
           live.admitted.set(clientId, entry);
+          bumpAdmittedPeak(live, database);
           state = 'admitted';
           const peers = [...live.admitted.entries()]
             .filter(([id]) => id !== clientId)
@@ -199,6 +218,9 @@ export function attachSignaling(server: http.Server, database: Database.Database
       if (!currentRoom) return;
       const live = liveRooms.get(currentRoom);
       if (!live) return;
+      const admittedBeforeClose = live.admitted.size;
+      const pendingBeforeClose = live.pending.size;
+      const closingPeerWasHost = currentRoomOwner;
       if (state === 'admitted') {
         live.admitted.delete(clientId);
         for (const [, peer] of live.admitted) {
@@ -207,10 +229,26 @@ export function attachSignaling(server: http.Server, database: Database.Database
         console.log(`[room ${currentRoom}] - ${myName} (${clientId})  admitted=${live.admitted.size}`);
       } else if (state === 'pending') {
         live.pending.delete(clientId);
-        broadcastToOwners(live, currentRoom, { type: 'knock-cancelled', clientId }, database);
+        try {
+          broadcastToOwners(live, currentRoom, { type: 'knock-cancelled', clientId }, database);
+        } catch (err) {
+          console.warn(`[room ${currentRoom}] failed to broadcast knock cancellation`, err);
+        }
         console.log(`[room ${currentRoom}] CANCEL ${myName} (${clientId})  pending=${live.pending.size}`);
       }
-      if (live.admitted.size === 0 && live.pending.size === 0) liveRooms.delete(currentRoom);
+      if (live.admitted.size === 0 && live.pending.size === 0) {
+        const reason =
+          closingPeerWasHost && admittedBeforeClose <= 1 && pendingBeforeClose === 0
+            ? 'host-disconnect-empty'
+            : 'last-peer-left';
+        try {
+          closeSession(live.currentSessionId, reason, database);
+        } catch (err) {
+          console.warn(`[room ${currentRoom}] failed to close meeting session`, err);
+        }
+        live.currentSessionId = null;
+        liveRooms.delete(currentRoom);
+      }
     });
   });
 
@@ -223,4 +261,14 @@ export function attachSignaling(server: http.Server, database: Database.Database
       wss.emit('connection', ws, req);
     });
   });
+}
+
+export function getHostClientId(roomId: string, database: Database.Database = getDb()): string | null {
+  const live = liveRooms.get(roomId);
+  const room = getRoom(roomId, database);
+  if (!live || !room) return null;
+  for (const [clientId, entry] of live.admitted) {
+    if (entry.userEmail === room.ownerEmail) return clientId;
+  }
+  return null;
 }
