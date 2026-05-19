@@ -39,3 +39,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 (codex appends here)
 [projcore callback] v2-batch-1 DONE — meeting_sessions + API + 8 scenarios green
 [projcore verdict] v2-batch-1 PASS — 5 VERIFIED (R1.1-R1.6 except R1.3 PARTIAL pending B2 host-end trigger). 15 files / 31 tests green. Live smoke: WS join TEST_ROOM01 → SQLite row created (id, ended_reason=host-disconnect-empty, admitted_peak=1, duration 623ms → correctly excluded from past listing by 10s filter). 2 decisions logged (open-session-reuse without 2s window, host-end-test-boundary). codex committed before STATUS: DONE. See validation/batch-1.md.
+[projcore callback] v2-batch-2 DONE — host authority + recording binding + WS commands
