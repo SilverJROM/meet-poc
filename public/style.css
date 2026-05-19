@@ -1,0 +1,86 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; background: #0f1115; color: #e6e6e6; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+
+.boot { display: flex; align-items: center; justify-content: center; height: 100vh; color: #6b7280; }
+.spinner { width: 18px; height: 18px; border: 2px solid #2c313c; border-top-color: #3b82f6; border-radius: 50%; animation: spin 0.8s linear infinite; }
+.spinner.inline { display: inline-block; vertical-align: middle; margin-right: 8px; width: 14px; height: 14px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.panel.auth { display: flex; align-items: center; justify-content: center; height: 100vh; padding: 16px; }
+.card { width: 100%; max-width: 420px; padding: 28px; background: #181b22; border: 1px solid #262a33; border-radius: 10px; }
+.card h1, .card h2 { margin: 0 0 6px; font-size: 22px; }
+.card h2 { font-size: 16px; margin-bottom: 14px; }
+.card .hint { margin: 0 0 18px; color: #8a93a3; font-size: 13px; }
+
+form label { display: block; margin: 12px 0; font-size: 13px; color: #b9bfca; }
+form label.checkbox { display: flex; align-items: center; gap: 8px; }
+form input[type="text"], form input[type="email"], form input[type="password"], form input:not([type]) {
+  display: block; width: 100%; margin-top: 6px;
+  padding: 8px 10px; background: #0f1115; color: #e6e6e6;
+  border: 1px solid #2c313c; border-radius: 6px; font-size: 14px;
+}
+
+button { cursor: pointer; font-size: 14px; padding: 8px 12px; border-radius: 6px; border: 0; background: #2c313c; color: #e6e6e6; }
+button:hover { background: #3a414f; }
+button.primary { background: #3b82f6; color: #fff; font-weight: 600; padding: 10px 14px; }
+button.primary:hover { background: #2563eb; }
+button.danger { background: #b91c1c; color: #fff; }
+button.danger:hover { background: #991b1b; }
+button.ghost { background: transparent; color: #b9bfca; border: 1px solid #2c313c; }
+button.ghost:hover { background: #1f232c; }
+form button.primary { width: 100%; margin-top: 14px; }
+
+.error { margin-top: 12px; color: #f87171; font-size: 13px; min-height: 18px; }
+
+.input-with-toggle { position: relative; }
+.input-with-toggle input { padding-right: 40px !important; }
+.eye-btn { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: transparent; padding: 6px; color: #8a93a3; display: flex; align-items: center; justify-content: center; border-radius: 4px; }
+.eye-btn:hover { background: #2c313c; color: #e6e6e6; }
+.eye-btn svg { display: block; }
+
+.topbar { display: flex; align-items: center; gap: 10px; padding: 12px 18px; background: #181b22; border-bottom: 1px solid #262a33; }
+.topbar .brand { font-weight: 700; }
+.topbar .spacer { flex: 1; }
+.topbar .user-email { color: #8a93a3; font-size: 13px; }
+
+.dashboard { max-width: 820px; margin: 28px auto; padding: 0 18px; display: grid; gap: 18px; }
+
+.room-list ul { list-style: none; padding: 0; margin: 0; }
+.room-list li { padding: 14px; background: #0f1115; border: 1px solid #262a33; border-radius: 8px; margin-bottom: 10px; }
+.room-list .room-title { font-weight: 600; margin-bottom: 4px; }
+.room-list .room-meta { font-size: 12px; color: #6b7280; margin-bottom: 8px; }
+.room-list .room-url { font-size: 12px; color: #8a93a3; word-break: break-all; margin-bottom: 10px; }
+.room-list .room-url code { background: #181b22; padding: 2px 6px; border-radius: 4px; }
+.room-list .room-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.room-list .room-actions a, .room-list .room-actions button { font-size: 13px; padding: 6px 10px; text-decoration: none; display: inline-block; }
+.room-list .room-actions a.primary { background: #3b82f6; color: #fff; font-weight: 600; border-radius: 6px; }
+.room-list .room-actions a.primary:hover { background: #2563eb; }
+.room-list .empty { padding: 18px; text-align: center; color: #6b7280; background: #0f1115; border: 1px dashed #262a33; border-radius: 8px; }
+
+.call { display: flex; flex-direction: column; height: 100vh; }
+.controls { display: flex; align-items: center; gap: 8px; padding: 10px 14px; background: #181b22; border-bottom: 1px solid #262a33; }
+.controls .room-label { color: #8a93a3; font-size: 13px; margin-right: auto; }
+.controls button.active { background: #3b82f6; }
+#rec-indicator { color: #f87171; font-weight: 700; font-size: 13px; }
+
+.tiles { flex: 1; display: grid; gap: 8px; padding: 8px; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); align-content: start; overflow: auto; }
+.tile { position: relative; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 16 / 9; }
+.tile video { width: 100%; height: 100%; object-fit: cover; background: #000; display: block; }
+.tile .name { position: absolute; bottom: 8px; left: 8px; padding: 3px 8px; background: rgba(0,0,0,0.55); border-radius: 4px; font-size: 12px; }
+
+.status { padding: 6px 14px; font-size: 12px; color: #6b7280; background: #181b22; border-top: 1px solid #262a33; min-height: 24px; }
+
+.waiting-room { position: fixed; top: 60px; right: 14px; width: 280px; max-height: 60vh; overflow: auto; background: #1c1f27; border: 1px solid #2c313c; border-radius: 8px; padding: 12px; z-index: 10; box-shadow: 0 6px 20px rgba(0,0,0,0.4); }
+.waiting-room .waiting-header { font-size: 13px; font-weight: 700; margin-bottom: 8px; color: #e6e6e6; }
+.waiting-room ul { list-style: none; padding: 0; margin: 0; }
+.waiting-room li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 8px; background: #0f1115; border-radius: 6px; margin-bottom: 6px; font-size: 13px; }
+.waiting-room .knocker-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.waiting-room button { font-size: 12px; padding: 4px 8px; }
+.waiting-room .admit-btn { background: #16a34a; color: #fff; }
+.waiting-room .admit-btn:hover { background: #15803d; }
+.waiting-room .reject-btn { background: #b91c1c; color: #fff; }
+.waiting-room .reject-btn:hover { background: #991b1b; }
+
+#knocking-state { margin-top: 18px; padding-top: 18px; border-top: 1px solid #262a33; text-align: center; }
+#knocking-state .hint { text-align: left; }
+#knocking-state button { margin-top: 8px; }

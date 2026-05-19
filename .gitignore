@@ -1,0 +1,7 @@
+node_modules/
+recordings/
+logs/
+data.json
+INITIAL_PASSWORD.txt
+*.log
+.DS_Store

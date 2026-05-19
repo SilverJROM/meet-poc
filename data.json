@@ -1,0 +1,49 @@
+{
+  "users": [
+    {
+      "email": "jrom@silverjrom.app",
+      "passwordHash": "d71496a3659b2adb7690a7aff9c75d2f:d54eaf03c1ad3bd78af85cfd2f036eac5d9d75f2f0280913cf93e12e4e7d47cd078815bdb46bc6092c77e17f1651e8a03ac63fa6248637e8a776be6489c2eda8",
+      "createdAt": 1779150913259,
+      "updatedAt": 1779151417827
+    }
+  ],
+  "rooms": {},
+  "sessions": {
+    "7d54a8042bb01eea9f2e09ae2b1208c2f01fbf25b3b4f3eae9f27933ecaecb41": {
+      "email": "jrom@silverjrom.app",
+      "expiresAt": 1781742947336
+    },
+    "6e6f9884b86d30d5fec0909bb9e2bb6e529cbadb43cc2ff4024ad3387d978b26": {
+      "email": "jrom@silverjrom.app",
+      "expiresAt": 1781742998218
+    },
+    "8f61b3d74f3e5f13e2ec02bb90f567941ea169403b1740597cae7424c465a7a2": {
+      "email": "jrom@silverjrom.app",
+      "expiresAt": 1781743015302
+    },
+    "c394059230f326bc3e0bcad4a711e7558744eb5dde3b6491a58accc736c5c05e": {
+      "email": "jrom@silverjrom.app",
+      "expiresAt": 1781743016085
+    },
+    "31f06811849fc87ee891a1b475ae6eb037d0a0a75fbfe35d368bb298b1e8b239": {
+      "email": "jrom@silverjrom.app",
+      "expiresAt": 1781743347963
+    },
+    "7a98209c57da1a3159ca9f56fb30ed3e4e969c64b240828e44bbb8348d842690": {
+      "email": "jrom@silverjrom.app",
+      "expiresAt": 1781743429679
+    },
+    "e23dd1f60b630cc4f171e6048c918433823f90da5eb693bd44e4a3a126088c26": {
+      "email": "jrom@silverjrom.app",
+      "expiresAt": 1781743463496
+    },
+    "d74a1d83d8af0e0477994e983d5cc722fc1ab142a805e037b9f86b8aa3679ffd": {
+      "email": "jrom@silverjrom.app",
+      "expiresAt": 1781743469194
+    },
+    "89d1d3a2f00bb458f9f01cc6a6024b00841287999de16c6f8bdca4367a226bab": {
+      "email": "jrom@silverjrom.app",
+      "expiresAt": 1781743470939
+    }
+  }
+}
