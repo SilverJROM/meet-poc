@@ -6,14 +6,14 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 
 | Req# | Requirement (first 80 chars) | Batch | Evidence | Status |
 |------|-----------------------------|-------|----------|--------|
-| R1.1 | All 100vh + calc(100vh-...) migrated to 100dvh w/ fallback | M-B1 | — | ASSIGNED |
-| R1.2 | Lobby+call+sidebar interactive controls ≥ 48×48 px on mobile | M-B1 | — | ASSIGNED |
-| R1.3 | Breakpoint system formalized in shared SCSS partial | M-B1 | — | ASSIGNED |
-| R1.4 | isMobile() signal in viewport.service.ts; debounced resize | M-B1 | — | ASSIGNED |
-| R1.5 | isMobile() defaults to false; desktop unchanged | M-B1 | — | ASSIGNED |
-| R1.6 | viewport-fit=cover meta tag audit (iOS safe-area-inset) | M-B1 | — | ASSIGNED |
-| R1.7 | Angular SCSS partial accessible (includePaths or @use pattern) | M-B1 | — | ASSIGNED |
-| R1.8 | platform.service.ts isIOS()+isAndroid() signals (moved from M-B6) | M-B1 | — | ASSIGNED |
+| R1.1 | All 100vh + calc(100vh-...) migrated to 100dvh w/ fallback | M-B1 | M-B1 100vh+calc(100vh-...) paired with 100dvh fallback; audit table in changes.md; 8 sites across 4 files | VERIFIED |
+| R1.2 | Lobby+call+sidebar interactive controls ≥ 48×48 px on mobile | M-B1 | M-B1 narrowed scope (lobby+call+sidebar) 48px via bp.mobile mixin; M1.3 spec PASS | VERIFIED |
+| R1.3 | Breakpoint system formalized in shared SCSS partial | M-B1 | M-B1 frontend/src/styles/_breakpoints.scss with $mobile-max/$desktop-min + mobile/desktop/max/between mixins | VERIFIED |
+| R1.4 | isMobile() signal in viewport.service.ts; debounced resize | M-B1 | M-B1 viewport.service.ts isMobile signal w/ 250ms debounce; __meetDebug.isMobile(); M1.2 spec PASS | VERIFIED |
+| R1.5 | isMobile() defaults to false; desktop unchanged | M-B1 | M-B1 M1.4 spec confirms desktop layout preserved + no mobile-only leaks at 1920×1080 | VERIFIED |
+| R1.6 | viewport-fit=cover meta tag audit (iOS safe-area-inset) | M-B1 | M-B1 index.html viewport meta updated to include viewport-fit=cover | VERIFIED |
+| R1.7 | Angular SCSS partial accessible (includePaths or @use pattern) | M-B1 | M-B1 angular.json stylePreprocessorOptions.includePaths=["src/styles"]; per decisions/2026-05-19-v3-mb1-scss-includepaths.md | VERIFIED |
+| R1.8 | platform.service.ts isIOS()+isAndroid() signals (moved from M-B6) | M-B1 | M-B1 platform.service.ts isIOS()+isAndroid()+isMobileUA() signals (moved from M-B6 per Codex review) | VERIFIED |
 | R5.1 | Mobile preflight requests 480p; desktop unchanged 720p+ | M-B2 | — | ASSIGNED |
 | R5.2 | Mobile peer cap=4 via client-declared mobile:true in join payload | M-B2 | — | ASSIGNED |
 | R5.3 | Background-tab BEST-EFFORT pauses local video; keeps audio (mobile) | M-B2 | — | ASSIGNED |
