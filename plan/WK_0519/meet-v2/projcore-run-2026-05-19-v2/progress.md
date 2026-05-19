@@ -46,3 +46,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 [projcore callback] v2-batch-4 DONE — tabs + pagination + ongoing/past pages
 [projcore verdict] v2-batch-4 PASS — R4.1-R4.6 VERIFIED. Backend ?page=&pageSize= backward-compat + recordingsCount on ended sessions. Frontend shared pagination + real Ongoing (5s poll) + real Past + Recordings/Rooms paginated + URL ?page=N persistence. 13 Playwright tests green (B3+B4) in 12s live. Backend 16/42. Hygiene clean (rooms=1, sessions=0, recordings=0). 3 decisions logged. Matrix: 23/44 VERIFIED. See validation/batch-4.md.
 [projcore callback] v2-batch-4 DONE — tabs pagination + ongoing/past + recordingsCount
+[projcore callback] v2-batch-5 DONE — lobby device preview + mic meter + stream carry-forward
