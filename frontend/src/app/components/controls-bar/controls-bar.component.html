@@ -1,0 +1,25 @@
+<header class="controls-bar">
+  <div class="room-label">{{ roomLabel() }}</div>
+  <div class="controls">
+    <button type="button" class="control-btn" [class.active]="micOn()" (click)="mute.emit()" [title]="micOn() ? 'Mute' : 'Unmute'">
+      <ion-icon [name]="micOn() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
+      <span>{{ micOn() ? 'Mute' : 'Unmute' }}</span>
+    </button>
+    <button type="button" class="control-btn" [class.active]="cameraOn()" (click)="camera.emit()" [title]="cameraOn() ? 'Camera off' : 'Camera on'">
+      <ion-icon [name]="cameraOn() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
+      <span>{{ cameraOn() ? 'Camera off' : 'Camera on' }}</span>
+    </button>
+    <button type="button" class="control-btn" [class.active]="screenOn()" (click)="screen.emit()" [title]="screenOn() ? 'Stop sharing' : 'Share screen'">
+      <ion-icon name="desktop-outline"></ion-icon>
+      <span>{{ screenOn() ? 'Stop share' : 'Share screen' }}</span>
+    </button>
+    <button type="button" class="control-btn" disabled title="Recording lands in B5">
+      <ion-icon name="ellipse-outline"></ion-icon>
+      <span>Record</span>
+    </button>
+    <button type="button" class="leave-btn" (click)="leave.emit()" title="Leave">
+      <ion-icon name="call-outline"></ion-icon>
+      <span>Leave</span>
+    </button>
+  </div>
+</header>

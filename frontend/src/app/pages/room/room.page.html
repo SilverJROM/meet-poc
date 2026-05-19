@@ -1,0 +1,94 @@
+<main class="room-shell" [attr.data-state]="state()">
+  @if (state() === 'checking') {
+    <section class="lobby-panel">
+      <p class="muted">Checking room...</p>
+    </section>
+  } @else if (state() === 'not-found') {
+    <section class="lobby-panel">
+      <h1>Room not found</h1>
+      <p class="muted">This room does not exist or has been deleted by the host.</p>
+      <a class="secondary-btn" routerLink="/dashboard">Back to dashboard</a>
+    </section>
+  } @else if (state() === 'rejected') {
+    <section class="lobby-panel">
+      <h1>Request declined</h1>
+      <p class="error-text">{{ error() }}</p>
+      <a class="secondary-btn" routerLink="/dashboard">Back to dashboard</a>
+    </section>
+  } @else if (state() === 'error') {
+    <section class="lobby-panel">
+      <h1>Room unavailable</h1>
+      <p class="error-text">{{ error() }}</p>
+      <a class="secondary-btn" routerLink="/dashboard">Back to dashboard</a>
+    </section>
+  } @else if (state() === 'knocking') {
+    <section class="lobby-panel knocking-panel">
+      <app-knock-spinner />
+      <h1>{{ roomTitle() }}</h1>
+      <p class="muted">Asking the host to admit you...</p>
+      <button type="button" class="secondary-btn" (click)="cancelKnock()">Cancel</button>
+    </section>
+  } @else if (state() === 'in-call') {
+    <section class="call-panel" aria-label="Call">
+      <app-controls-bar
+        [roomLabel]="roomTitle()"
+        [micOn]="media.micOn()"
+        [cameraOn]="media.cameraOn()"
+        [screenOn]="media.screenOn()"
+        (mute)="toggleMic()"
+        (camera)="toggleCamera()"
+        (screen)="toggleScreen()"
+        (leave)="leave()"
+      />
+      @if (showPeerWarning()) {
+        <div class="peer-warning" role="status">
+          <span>Calls with more than 6 participants may be unstable on this stack</span>
+          <button type="button" (click)="warningDismissed.set(true)">Dismiss</button>
+        </div>
+      }
+      <p class="call-status" role="status">{{ status() }}</p>
+      @if (isOwner()) {
+        <app-waiting-room-panel [knockers]="knockers()" (admit)="admit($event)" (reject)="reject($event)" />
+      }
+      <div class="tiles-grid" aria-label="Participants">
+        @for (peer of peers(); track peer.id) {
+          <app-tile [peer]="peer" />
+        }
+      </div>
+    </section>
+  } @else {
+    <section class="lobby-panel">
+      <h1>{{ roomTitle() }}</h1>
+      <form class="join-form" (ngSubmit)="join()">
+        <div class="field">
+          <label for="display-name">Name</label>
+          <input
+            id="display-name"
+            name="displayName"
+            type="text"
+            autocomplete="name"
+            maxlength="80"
+            required
+            [ngModel]="displayName()"
+            (ngModelChange)="displayName.set($event)"
+            [disabled]="state() === 'connecting'"
+          >
+        </div>
+        <label class="check-row">
+          <input
+            name="cameraRequested"
+            type="checkbox"
+            [ngModel]="cameraRequested()"
+            (ngModelChange)="cameraRequested.set($event)"
+            [disabled]="state() === 'connecting'"
+          >
+          <span>Start with camera on</span>
+        </label>
+        <button type="submit" class="primary-btn" [disabled]="state() === 'connecting' || !displayName().trim()">
+          {{ auth.user() ? 'Join' : 'Ask to join' }}
+        </button>
+      </form>
+      <p class="error-text">{{ error() || '' }}</p>
+    </section>
+  }
+</main>

@@ -1,0 +1,73 @@
+import { Injectable, signal } from '@angular/core';
+
+export type SignalingMessage =
+  | { type: 'admitted'; clientId: string; peers: { id: string; name: string }[]; roomTitle?: string; isOwner: boolean }
+  | { type: 'knocking'; clientId: string; roomTitle?: string }
+  | { type: 'knock'; clientId: string; name: string }
+  | { type: 'pending-list'; knockers: { id: string; name: string }[] }
+  | { type: 'peer-joined'; clientId: string; name: string }
+  | { type: 'peer-left'; clientId: string }
+  | { type: 'knock-cancelled'; clientId: string }
+  | { type: 'signal'; from: string; data: unknown }
+  | { type: 'rejected'; reason?: string }
+  | { type: 'error'; error: string };
+
+export type OutgoingSignalingMessage =
+  | { type: 'join'; room: string; name: string }
+  | { type: 'signal'; to: string; data: unknown }
+  | { type: 'admit'; clientId: string }
+  | { type: 'reject'; clientId: string; reason?: string };
+
+@Injectable({ providedIn: 'root' })
+export class WsService {
+  private socket: WebSocket | null = null;
+
+  readonly connected = signal(false);
+  readonly disconnected = signal(false);
+
+  connect(roomId: string, onMessage: (msg: SignalingMessage) => void, onOpen: () => void, onError: () => void): void {
+    this.close();
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const ws = new WebSocket(`${proto}://${window.location.host}/ws`);
+    this.socket = ws;
+    this.connected.set(false);
+    this.disconnected.set(false);
+
+    ws.onopen = () => {
+      if (this.socket !== ws) return;
+      this.connected.set(true);
+      onOpen();
+    };
+    ws.onmessage = (evt) => {
+      if (this.socket !== ws) return;
+      try {
+        onMessage(JSON.parse(evt.data) as SignalingMessage);
+      } catch {
+        onError();
+      }
+    };
+    ws.onerror = () => {
+      if (this.socket === ws) onError();
+    };
+    ws.onclose = () => {
+      if (this.socket !== ws) return;
+      this.connected.set(false);
+      this.disconnected.set(true);
+    };
+  }
+
+  send(msg: OutgoingSignalingMessage): void {
+    if (this.socket?.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(msg));
+    }
+  }
+
+  close(): void {
+    const ws = this.socket;
+    this.socket = null;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
+      ws.close();
+    }
+    this.connected.set(false);
+  }
+}

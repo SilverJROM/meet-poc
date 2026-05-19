@@ -1,0 +1,10 @@
+<article class="tile" [attr.data-peer]="peer().id" [attr.data-state]="peer().connectionState">
+  <video #video autoplay playsinline [muted]="peer().isLocal"></video>
+  @if (!peer().stream || peer().stream?.getVideoTracks()?.length === 0) {
+    <div class="avatar">{{ peer().name.slice(0, 1).toUpperCase() }}</div>
+  }
+  <footer>
+    <span class="name">{{ peer().name }}</span>
+    <span class="state">{{ peer().connectionState }}</span>
+  </footer>
+</article>

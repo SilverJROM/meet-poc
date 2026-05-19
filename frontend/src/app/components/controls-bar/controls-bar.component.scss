@@ -1,0 +1,72 @@
+.controls-bar {
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--line-soft);
+  background: rgba(24, 27, 34, 0.96);
+}
+
+.room-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.control-btn,
+.leave-btn {
+  min-height: 38px;
+  border-radius: 6px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+}
+
+.control-btn.active {
+  border-color: rgba(59, 130, 246, 0.55);
+  background: rgba(59, 130, 246, 0.16);
+}
+
+.control-btn:disabled {
+  cursor: not-allowed;
+  color: var(--muted-2);
+  background: #11141a;
+}
+
+.leave-btn {
+  border-color: rgba(220, 38, 38, 0.52);
+  color: #fecaca;
+}
+
+@media (max-width: 760px) {
+  .controls-bar {
+    grid-template-columns: 1fr;
+  }
+
+  .controls {
+    justify-content: stretch;
+  }
+
+  .control-btn,
+  .leave-btn {
+    flex: 1 1 138px;
+  }
+}

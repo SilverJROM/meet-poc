@@ -1,0 +1,17 @@
+@if (knockers().length > 0) {
+  <aside class="waiting-room" aria-label="Waiting room">
+    <header>
+      <h2>Waiting room</h2>
+      <span>{{ knockers().length }}</span>
+    </header>
+    <ul>
+      @for (knocker of knockers(); track knocker.id) {
+        <li>
+          <span>{{ knocker.name }}</span>
+          <button type="button" class="primary-btn" (click)="admit.emit(knocker.id)">Admit</button>
+          <button type="button" class="secondary-btn" (click)="reject.emit(knocker.id)">Reject</button>
+        </li>
+      }
+    </ul>
+  </aside>
+}

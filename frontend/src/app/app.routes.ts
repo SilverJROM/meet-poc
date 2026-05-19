@@ -16,7 +16,7 @@ export const routes: Routes = [
   },
   {
     path: 'room/:id',
-    loadComponent: () => import('./pages/room-placeholder/room-placeholder.page').then((m) => m.RoomPlaceholderPage),
+    loadComponent: () => import('./pages/room/room.page').then((m) => m.RoomPage),
   },
   { path: '**', redirectTo: 'dashboard' },
 ];
