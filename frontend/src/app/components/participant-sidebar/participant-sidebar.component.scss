@@ -48,7 +48,7 @@ h2 {
 header p,
 .empty {
   margin-top: 4px;
-  color: var(--muted);
+  color: var(--text);
   font-size: 12px;
 }
 
@@ -58,7 +58,7 @@ section + section {
 
 h3 {
   margin-bottom: 10px;
-  color: var(--muted);
+  color: var(--text);
   font-size: 12px;
   font-weight: 900;
   letter-spacing: 0.04em;
@@ -131,7 +131,7 @@ h3 {
 .state-icons {
   display: inline-flex;
   gap: 5px;
-  color: var(--muted);
+  color: #0b1220;
 }
 
 .state-icons ion-icon {
@@ -264,7 +264,7 @@ h3 {
     min-height: 48px;
     border: 1px solid var(--line);
     border-radius: 8px;
-    color: var(--muted);
+    color: #0b1220;
     background: var(--panel-bg);
     cursor: pointer;
     font-weight: 900;
@@ -277,7 +277,7 @@ h3 {
   }
 
   .participant-sidebar header p {
-    color: var(--muted);
+    color: var(--text);
   }
 
   .kebab {

@@ -45,7 +45,7 @@ h3 {
   margin: 0;
   border: 1px dashed var(--line);
   border-radius: 8px;
-  color: var(--muted);
+  color: var(--text);
   background: var(--page-bg);
   padding: 18px;
   text-align: center;
@@ -114,7 +114,7 @@ h3 {
   align-items: center;
   gap: 8px;
   font-size: 13px;
-  color: var(--muted);
+  color: var(--text);
   cursor: pointer;
 }
 
@@ -132,12 +132,12 @@ h3 {
 
 .room-main p {
   margin: 0;
-  color: var(--muted-2);
+  color: var(--text);
   font-size: 12px;
 }
 
 .room-main code {
-  color: var(--muted);
+  color: var(--text);
   background: var(--panel-bg);
   border-radius: 4px;
   padding: 3px 6px;

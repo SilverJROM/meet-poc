@@ -32,7 +32,7 @@
   align-items: center;
   gap: 12px;
   border-radius: 7px;
-  color: var(--muted);
+  color: #0b1220;
   text-decoration: none;
 }
 
@@ -72,9 +72,10 @@
 
 .nav-link ion-icon,
 .collapse-btn ion-icon {
-  inline-size: 22px;
-  block-size: 22px;
+  inline-size: 24px;
+  block-size: 24px;
   flex: 0 0 auto;
+  color: #0b1220;
 }
 
 .nav-link:hover,
@@ -85,6 +86,10 @@
 
 .nav-link.is-active {
   background: var(--selected-tint);
+  color: var(--blue-strong);
+}
+
+.nav-link.is-active ion-icon {
   color: var(--blue-strong);
 }
 
@@ -150,10 +155,11 @@
 }
 
 .topbar-title span {
-  color: var(--muted-2);
+  color: #0b1220;
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0;
+  font-weight: 800;
 }
 
 .topbar-title h1 {
@@ -166,7 +172,7 @@
 }
 
 .user-email {
-  color: var(--muted);
+  color: var(--text);
   font-size: 13px;
 }
 
