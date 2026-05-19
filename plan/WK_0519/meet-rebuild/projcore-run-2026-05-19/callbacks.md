@@ -3,3 +3,4 @@
 [projcore callback] batch-3 DONE — Angular SPA shell with auth + dashboard; 8 scenarios green; meet-poc-fe up
 [projcore callback] batch-4 DONE — room page (lobby + call) + WebRTC client + 8 scenarios green
 [projcore callback] batch-5 DONE — recording client-mix + /upload + dashboard list; 3 scenarios green
+[projcore callback] batch-6 DONE — port-rebind cutover; voice.silverjrom.app on new app; legacy gone
