@@ -2,9 +2,10 @@ import express from 'express';
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
-import { WebSocketServer } from 'ws';
 import { countUsers, getDb, getRepoRoot, runMigrations } from './db.js';
 import { authRouter } from './modules/auth/index.js';
+import { roomsRouter } from './modules/rooms/index.js';
+import { attachSignaling } from './modules/signaling/index.js';
 import { migrateFromJson } from '../scripts/migrate-from-json.js';
 
 export function createApp(database = getDb()): express.Express {
@@ -12,6 +13,7 @@ export function createApp(database = getDb()): express.Express {
   app.set('trust proxy', true);
   app.use(express.json({ limit: '1mb' }));
   app.use('/api', authRouter(database));
+  app.use('/api', roomsRouter(database));
   app.get('/health', (_req, res) => res.json({ ok: true }));
   return app;
 }
@@ -27,25 +29,10 @@ export async function prepareDatabase(): Promise<void> {
 
 export async function startServer(): Promise<http.Server> {
   await prepareDatabase();
-  const app = createApp();
+  const db = getDb();
+  const app = createApp(db);
   const server = http.createServer(app);
-  const wss = new WebSocketServer({ noServer: true });
-
-  wss.on('connection', (ws) => {
-    ws.on('message', (message) => {
-      if (ws.readyState === ws.OPEN) ws.send(message);
-    });
-  });
-
-  server.on('upgrade', (req, socket, head) => {
-    if (req.url !== '/ws') {
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(req, socket, head, (ws) => {
-      wss.emit('connection', ws, req);
-    });
-  });
+  attachSignaling(server, db);
 
   const port = Number(process.env.PORT || 4720);
   server.listen(port, '0.0.0.0', () => {
