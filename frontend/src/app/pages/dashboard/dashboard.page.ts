@@ -5,6 +5,7 @@ import { Router, RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
 import { clipboardOutline, logOutOutline, trashOutline, videocamOutline } from 'ionicons/icons';
 import { AuthService } from '../../services/auth.service';
+import { Recording, RecordingsService } from '../../services/recordings.service';
 import { Room, RoomsService } from '../../services/rooms.service';
 
 @Component({
@@ -17,26 +18,46 @@ import { Room, RoomsService } from '../../services/rooms.service';
 })
 export class DashboardPage {
   private readonly auth = inject(AuthService);
+  readonly recordingsService = inject(RecordingsService);
   private readonly roomsService = inject(RoomsService);
   private readonly router = inject(Router);
 
   readonly user = this.auth.user;
   readonly rooms = signal<Room[]>([]);
+  readonly recordings = signal<Recording[]>([]);
   readonly loading = signal(true);
+  readonly recordingsLoading = signal(true);
   readonly busy = signal(false);
   readonly error = signal<string | null>(null);
   readonly copyStatus = signal<string | null>(null);
   readonly newTitle = signal('');
   readonly origin = window.location.origin;
   readonly hasRooms = computed(() => this.rooms().length > 0);
+  readonly hasRecordings = computed(() => this.recordings().length > 0);
 
   constructor() {
     addIcons({ clipboardOutline, logOutOutline, trashOutline, videocamOutline });
     void this.refreshRooms();
+    void this.refreshRecordings();
   }
 
   shareUrl(room: Room): string {
     return `${this.origin}/room/${room.id}`;
+  }
+
+  async refreshRecordings(): Promise<void> {
+    this.recordingsLoading.set(true);
+    try {
+      this.recordings.set(await this.recordingsService.list());
+    } catch {
+      this.recordings.set([]);
+    } finally {
+      this.recordingsLoading.set(false);
+    }
+  }
+
+  recordingSize(recording: Recording): string {
+    return `${Math.round(recording.sizeBytes / 1024)} KB`;
   }
 
   async refreshRooms(): Promise<void> {

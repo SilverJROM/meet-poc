@@ -7,6 +7,7 @@ import { TileComponent } from '../../components/tile/tile.component';
 import { Knocker, WaitingRoomPanelComponent } from '../../components/waiting-room-panel/waiting-room-panel.component';
 import { AuthService } from '../../services/auth.service';
 import { MediaService } from '../../services/media.service';
+import { RecorderService } from '../../services/recorder.service';
 import { RoomsService } from '../../services/rooms.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
 import { WebrtcService } from '../../services/webrtc.service';
@@ -27,6 +28,7 @@ export class RoomPage implements OnDestroy {
   private readonly rooms = inject(RoomsService);
   private readonly ws = inject(WsService);
   readonly media = inject(MediaService);
+  readonly recorder = inject(RecorderService);
   readonly webrtc = inject(WebrtcService);
 
   readonly roomId = this.route.snapshot.paramMap.get('id') ?? '';
@@ -49,8 +51,20 @@ export class RoomPage implements OnDestroy {
       window.__meetDebug = {
         localStream: this.media.localStream(),
         peers: this.peers().map((peer) => ({ id: peer.id, name: peer.name, state: peer.connectionState })),
+        isRecording: this.recorder.isRecording(),
         screenShareAttempts: this.media.screenShareAttempts(),
       };
+    });
+    effect(() => {
+      const activePeerIds = new Set<string>();
+      for (const peer of this.peers()) {
+        if (peer.isLocal) continue;
+        activePeerIds.add(peer.id);
+        this.recorder.addPeerStream(peer.id, peer.stream);
+      }
+      for (const peer of this.peers()) {
+        if (!peer.isLocal && !activePeerIds.has(peer.id)) this.recorder.removePeerStream(peer.id);
+      }
     });
   }
 
@@ -130,6 +144,25 @@ export class RoomPage implements OnDestroy {
     }
   }
 
+  async toggleRecording(): Promise<void> {
+    const localStream = this.media.localStream();
+    if (!localStream) return;
+    try {
+      if (!this.recorder.isRecording()) {
+        this.recorder.start(localStream, this.remoteStreams());
+        this.status.set('Recording (audio mix: you + admitted peers).');
+        return;
+      }
+      const blob = await this.recorder.stop();
+      this.status.set(`Uploading recording (${Math.round(blob.size / 1024)} KB)...`);
+      const upload = await this.recorder.upload(blob, this.roomId);
+      this.status.set(`Recording saved: ${upload.file}`);
+    } catch (err) {
+      this.status.set(`Recording failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+      this.recorder.discard();
+    }
+  }
+
   admit(clientId: string): void {
     this.ws.send({ type: 'admit', clientId });
     this.removeKnocker(clientId);
@@ -199,6 +232,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'peer-left') {
+      this.recorder.removePeerStream(msg.clientId);
       this.webrtc.removePeer(msg.clientId);
       this.removeKnocker(msg.clientId);
       return;
@@ -223,8 +257,17 @@ export class RoomPage implements OnDestroy {
     this.knockers.set(this.knockers().filter((item) => item.id !== clientId));
   }
 
+  private remoteStreams(): Map<string, MediaStream> {
+    const streams = new Map<string, MediaStream>();
+    for (const peer of this.peers()) {
+      if (!peer.isLocal && peer.stream) streams.set(peer.id, peer.stream);
+    }
+    return streams;
+  }
+
   private cleanupCall(): void {
     this.ws.close();
+    this.recorder.discard();
     this.webrtc.reset();
     this.media.stopLocal();
     this.knockers.set([]);
@@ -239,6 +282,7 @@ declare global {
       localStream: MediaStream | null;
       peers: { id: string; name: string; state: string }[];
       screenShareAttempts: number;
+      isRecording: boolean;
     };
   }
 }

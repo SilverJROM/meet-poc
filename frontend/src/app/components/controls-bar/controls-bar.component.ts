@@ -22,9 +22,12 @@ export class ControlsBarComponent {
   readonly micOn = input.required<boolean>();
   readonly cameraOn = input.required<boolean>();
   readonly screenOn = input.required<boolean>();
+  readonly recording = input.required<boolean>();
+  readonly uploading = input(false);
   readonly mute = output<void>();
   readonly camera = output<void>();
   readonly screen = output<void>();
+  readonly record = output<void>();
   readonly leave = output<void>();
 
   constructor() {

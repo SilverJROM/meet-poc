@@ -35,9 +35,12 @@
         [micOn]="media.micOn()"
         [cameraOn]="media.cameraOn()"
         [screenOn]="media.screenOn()"
+        [recording]="recorder.isRecording()"
+        [uploading]="recorder.isUploading()"
         (mute)="toggleMic()"
         (camera)="toggleCamera()"
         (screen)="toggleScreen()"
+        (record)="toggleRecording()"
         (leave)="leave()"
       />
       @if (showPeerWarning()) {

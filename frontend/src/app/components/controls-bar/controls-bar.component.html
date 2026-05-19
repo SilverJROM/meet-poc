@@ -13,10 +13,20 @@
       <ion-icon name="desktop-outline"></ion-icon>
       <span>{{ screenOn() ? 'Stop share' : 'Share screen' }}</span>
     </button>
-    <button type="button" class="control-btn" disabled title="Recording lands in B5">
+    <button
+      type="button"
+      class="control-btn"
+      [class.recording]="recording()"
+      [disabled]="uploading()"
+      (click)="record.emit()"
+      [title]="recording() ? 'Stop recording' : 'Record'"
+    >
       <ion-icon name="ellipse-outline"></ion-icon>
-      <span>Record</span>
+      <span>{{ recording() ? 'Stop' : 'Record' }}</span>
     </button>
+    @if (recording()) {
+      <span class="recording-indicator" role="status">Recording</span>
+    }
     <button type="button" class="leave-btn" (click)="leave.emit()" title="Leave">
       <ion-icon name="call-outline"></ion-icon>
       <span>Leave</span>
