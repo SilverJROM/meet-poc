@@ -62,8 +62,8 @@ meet-poc/
 │   │   │   ├── app-shell/             ← authenticated /app parent shell
 │   │   │   ├── rooms/                 ← create-room form + room list
 │   │   │   ├── recordings/            ← recordings list/download
-│   │   │   ├── ongoing-stub/          ← B4 placeholder
-│   │   │   ├── past-stub/             ← B4 placeholder
+│   │   │   ├── ongoing/               ← active sessions with 5s poll
+│   │   │   ├── past/                  ← ended sessions with pagination
 │   │   │   ├── transcripts-stub/      ← Run 2 placeholder
 │   │   │   ├── settings-stub/         ← Run 2 placeholder
 │   │   │   └── room/                  ← lobby + call
@@ -162,7 +162,21 @@ A cross-module import must be one of the above; otherwise it's a Gate-7 standing
 - Sidebar tabs, in order: Rooms, Ongoing meetings, Past meetings, Recordings, Transcripts, Settings.
 - `/app/rooms` owns the former dashboard create-room form and room list.
 - `/app/recordings` owns the former dashboard recordings list.
-- `/app/ongoing` and `/app/past` are B4 stubs; `/app/transcripts` and `/app/settings` are Run 2 stubs.
+- `/app/rooms`, `/app/past`, and `/app/recordings` persist `?page=N` in the URL and default to page size 20.
+- `/app/ongoing` polls active meeting sessions every 5 seconds and links active rooms back to `/room/:id`.
+- `/app/past` renders ended sessions with full start timestamp, duration, admitted peak, and `recordingsCount`.
+- `/app/recordings` supports optional `?session=<meeting_session_id>` filtering for Past-page recording links.
+- `/app/transcripts` and `/app/settings` are Run 2 stubs.
+
+### 6.2 v2 Pagination API Shapes
+
+| Endpoint | No pagination params | With `page` or `pageSize` |
+|---|---|---|
+| `GET /api/rooms` | `{rooms}` | `{rooms, page, pageSize, total}` |
+| `GET /api/recordings` | `{recordings}` | `{recordings, page, pageSize, total}` |
+| `GET /api/meeting-sessions?status=ended` | `{sessions, page, pageSize, total}` | `{sessions, page, pageSize, total}` |
+
+Ended session rows include `recordingsCount`, computed by scanning owned recording files once per request and grouping v2 filenames by `sessionId`. This remains filesystem-backed; there is no recordings DB table yet.
 
 ## 7. Testing expectations
 
@@ -263,9 +277,10 @@ Filled in as batches close. Empty at run start.
 | backend/recording | — | B5 | PENDING |
 | frontend/login page | — | B3 | PENDING |
 | frontend/app shell | Codex | v2-B3 | DONE |
-| frontend/rooms page | Codex | v2-B3 | DONE |
-| frontend/recordings page | Codex | v2-B3 | DONE |
-| frontend/ongoing/past stubs | Codex | v2-B3 | DONE |
+| frontend/rooms page | Codex | v2-B3/v2-B4 | DONE |
+| frontend/recordings page | Codex | v2-B3/v2-B4 | DONE |
+| frontend/ongoing page | Codex | v2-B4 | DONE |
+| frontend/past page | Codex | v2-B4 | DONE |
 | frontend/transcripts/settings stubs | Codex | v2-B3 | DONE |
 | frontend/room page (lobby) | — | B4 | PENDING |
 | frontend/room page (call) | — | B4 | PENDING |
