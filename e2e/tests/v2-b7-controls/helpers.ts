@@ -30,10 +30,19 @@ export async function admitBrowserGuest(browser: Browser, owner: Page, room: Tes
   const context = await browser.newContext();
   const guest = await context.newPage();
   await joinGuestAndWait(guest, room, name);
-  const waitingRow = owner.getByLabel('Waiting room').locator('li').filter({ hasText: name });
+  await openParticipants(owner);
+  const waitingRow = owner.getByLabel('Waiting to join').locator('li').filter({ hasText: name });
   await expect(waitingRow).toBeVisible();
   await waitingRow.getByRole('button', { name: 'Admit' }).click();
   await expect(guest.locator('.call-panel')).toBeVisible();
   await expect(owner.locator('app-tile')).toHaveCount(2);
   return guest;
+}
+
+async function openParticipants(page: Page): Promise<void> {
+  const sidebar = page.locator('app-participant-sidebar .participant-sidebar.open');
+  if ((await sidebar.count()) === 0) {
+    await page.getByRole('button', { name: 'Show participants' }).click();
+  }
+  await expect(sidebar).toBeVisible();
 }
