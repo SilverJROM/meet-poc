@@ -19,6 +19,7 @@ export async function closeServer(server: http.Server): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     server.close((err) => (err ? reject(err) : resolve()));
   });
+  await new Promise((resolve) => setTimeout(resolve, 25));
 }
 
 export async function connectWs(url: string, cookie?: string): Promise<WebSocket> {
