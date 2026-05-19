@@ -1,0 +1,83 @@
+<main class="dashboard-shell">
+  <header class="topbar">
+    <a class="brand" routerLink="/dashboard">meet-poc</a>
+    <span class="spacer"></span>
+    <span class="user-email">{{ user()?.email }}</span>
+    <button type="button" class="secondary-btn" (click)="logout()">
+      <ion-icon name="log-out-outline"></ion-icon>
+      Logout
+    </button>
+  </header>
+
+  <section class="dashboard-grid">
+    <div class="panel create-panel">
+      <h1>Create a room</h1>
+      <form class="create-form" (ngSubmit)="createRoom()">
+        <div class="field">
+          <label for="room-title">Room name</label>
+          <input
+            id="room-title"
+            name="roomTitle"
+            type="text"
+            maxlength="100"
+            placeholder="Team sync"
+            [ngModel]="newTitle()"
+            (ngModelChange)="newTitle.set($event)"
+            [disabled]="busy()"
+          >
+        </div>
+        <button type="submit" class="primary-btn" [disabled]="busy()">
+          <ion-icon name="videocam-outline"></ion-icon>
+          Create room
+        </button>
+      </form>
+      <p class="error-text">{{ error() || '' }}</p>
+    </div>
+
+    <div class="panel rooms-panel">
+      <div class="section-head">
+        <h2>Your rooms</h2>
+        <span class="muted">{{ rooms().length }} total</span>
+      </div>
+
+      @if (loading()) {
+        <p class="empty">Loading rooms...</p>
+      } @else if (!hasRooms()) {
+        <p class="empty">No rooms yet. Create one above to get a shareable join link.</p>
+      } @else {
+        <ul class="room-list">
+          @for (room of rooms(); track room.id) {
+            <li class="room-row">
+              <div class="room-main">
+                <h3>{{ room.title }}</h3>
+                <p>Created {{ room.createdAt | date: 'medium' }}</p>
+                <code>{{ shareUrl(room) }}</code>
+              </div>
+              <div class="room-actions">
+                <a class="primary-btn" [routerLink]="['/room', room.id]">Join</a>
+                <button type="button" class="secondary-btn" (click)="copyLink(room)">
+                  <ion-icon name="clipboard-outline"></ion-icon>
+                  Copy link
+                </button>
+                <button type="button" class="danger-btn" (click)="deleteRoom(room)">
+                  <ion-icon name="trash-outline"></ion-icon>
+                  Delete
+                </button>
+              </div>
+            </li>
+          }
+        </ul>
+      }
+
+      <div class="copy-status" role="status">{{ copyStatus() || '' }}</div>
+    </div>
+
+    <div class="panel recordings-panel">
+      <div class="section-head">
+        <h2>Recordings</h2>
+        <span class="muted">Coming in B5</span>
+      </div>
+      <p class="empty">No recordings yet.</p>
+    </div>
+  </section>
+</main>

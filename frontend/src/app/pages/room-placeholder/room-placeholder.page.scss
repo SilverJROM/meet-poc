@@ -1,0 +1,25 @@
+.room-placeholder {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.panel {
+  width: min(100%, 440px);
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  padding: 24px;
+  display: grid;
+  gap: 14px;
+}
+
+h1,
+p {
+  margin: 0;
+}
+
+p {
+  color: var(--muted);
+}

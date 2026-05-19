@@ -1,0 +1,14 @@
+<main class="room-placeholder">
+  <section class="panel">
+    @if (loading()) {
+      <h1>Checking room...</h1>
+    } @else if (!exists()) {
+      <h1>Room not found</h1>
+      <p>This room may have been deleted by the owner.</p>
+    } @else {
+      <h1>{{ title() }}</h1>
+      <p>The room lobby and call view are added in the next batch.</p>
+    }
+    <a routerLink="/dashboard" class="secondary-btn">Back to dashboard</a>
+  </section>
+</main>

@@ -1,0 +1,161 @@
+.dashboard-shell {
+  min-height: 100vh;
+  background: var(--page-bg);
+}
+
+.topbar {
+  min-height: 58px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--panel-bg);
+}
+
+.brand {
+  color: var(--text);
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.user-email {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.dashboard-grid {
+  width: min(1040px, 100%);
+  margin: 0 auto;
+  padding: 24px 18px 48px;
+  display: grid;
+  gap: 18px;
+}
+
+.panel {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  padding: 20px;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+}
+
+h1 {
+  font-size: 22px;
+}
+
+h2 {
+  font-size: 17px;
+}
+
+h3 {
+  font-size: 16px;
+}
+
+.create-form {
+  margin-top: 14px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.empty {
+  margin: 0;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #0f1115;
+  padding: 18px;
+  text-align: center;
+}
+
+.room-list {
+  list-style: none;
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+}
+
+.room-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #0f1115;
+  padding: 14px;
+}
+
+.room-main {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.room-main p {
+  margin: 0;
+  color: var(--muted-2);
+  font-size: 12px;
+}
+
+.room-main code {
+  color: var(--muted);
+  background: var(--panel-bg);
+  border-radius: 4px;
+  padding: 3px 6px;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
+.room-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.copy-status {
+  min-height: 18px;
+  margin-top: 12px;
+  color: var(--green);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+
+  .create-form,
+  .room-row {
+    grid-template-columns: 1fr;
+  }
+
+  .room-actions {
+    justify-content: stretch;
+  }
+
+  .room-actions > * {
+    flex: 1;
+  }
+}

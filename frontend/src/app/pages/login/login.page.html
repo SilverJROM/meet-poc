@@ -1,0 +1,56 @@
+<main class="login-shell">
+  <section class="login-card">
+    <div class="brand-block">
+      <span class="brand-mark">m</span>
+      <div>
+        <h1>meet-poc</h1>
+        <p>Sign in to create meeting rooms.</p>
+      </div>
+    </div>
+
+    <form class="login-form" (ngSubmit)="onSubmit()" autocomplete="on">
+      <div class="field">
+        <label for="login-email">Email</label>
+        <input
+          id="login-email"
+          name="email"
+          type="email"
+          required
+          autocomplete="username"
+          [(ngModel)]="email"
+          [disabled]="loading()"
+        >
+      </div>
+
+      <div class="field">
+        <label for="login-password">Password</label>
+        <div class="password-field">
+          <input
+            id="login-password"
+            name="password"
+            [type]="showPassword() ? 'text' : 'password'"
+            required
+            autocomplete="current-password"
+            [(ngModel)]="password"
+            [disabled]="loading()"
+          >
+          <button
+            type="button"
+            class="icon-btn"
+            (click)="showPassword.set(!showPassword())"
+            [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'"
+            [attr.aria-pressed]="showPassword()"
+          >
+            <ion-icon [name]="showPassword() ? 'eye-off' : 'eye'"></ion-icon>
+          </button>
+        </div>
+      </div>
+
+      <div class="error-text" role="status">{{ error() || '' }}</div>
+
+      <button type="submit" class="primary-btn submit-btn" [disabled]="loading()">
+        {{ loading() ? 'Signing in...' : 'Sign in' }}
+      </button>
+    </form>
+  </section>
+</main>
