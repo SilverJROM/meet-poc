@@ -2,6 +2,7 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, computed, effect, input,
 import { addIcons } from 'ionicons';
 import { micOffOutline } from 'ionicons/icons';
 import { PeerState } from '../../services/webrtc.service';
+import { toInitials } from '../../utils/initials';
 
 @Component({
   selector: 'app-tile',
@@ -13,7 +14,7 @@ import { PeerState } from '../../services/webrtc.service';
 export class TileComponent {
   readonly peer = input.required<PeerState>();
   readonly speaking = input(false);
-  readonly initial = computed(() => (this.peer().name.trim().slice(0, 1) || '?').toUpperCase());
+  readonly initials = computed(() => toInitials(this.peer().name));
   readonly avatarColor = computed(() => {
     const name = this.peer().name || 'x';
     let hash = 0;

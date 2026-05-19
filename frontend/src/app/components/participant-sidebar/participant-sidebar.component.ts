@@ -3,6 +3,7 @@ import { addIcons } from 'ionicons';
 import { ellipsisVerticalOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
 import { ViewportService } from '../../services/viewport.service';
 import { PeerState } from '../../services/webrtc.service';
+import { toInitials } from '../../utils/initials';
 
 export type Knocker = {
   id: string;
@@ -40,7 +41,7 @@ export class ParticipantSidebarComponent {
   }
 
   initial(name: string): string {
-    return (name.trim().slice(0, 1) || '?').toUpperCase();
+    return toInitials(name);
   }
 
   avatarColor(name: string): string {
