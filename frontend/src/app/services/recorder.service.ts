@@ -17,6 +17,7 @@ export class RecorderService {
   readonly lastRecordingMime = signal<string | null>(null);
   readonly lastRecordingExtension = signal<string>('webm');
   readonly lastRecorderTimeslice = signal<number | null>(null);
+  readonly sourceCount = signal(0);
 
   private ctx: AudioContext | null = null;
   private dest: MediaStreamAudioDestinationNode | null = null;
@@ -34,6 +35,7 @@ export class RecorderService {
     this.ctx = ctx;
     this.dest = dest;
     this.sourceFor = new Map();
+    this.sourceCount.set(0);
     this.chunks = [];
     this.lastUpload.set(null);
 
@@ -75,6 +77,7 @@ export class RecorderService {
       // Disconnect can throw if the node is already gone during cleanup.
     }
     this.sourceFor.delete(clientId);
+    this.sourceCount.set(this.sourceFor.size);
   }
 
   async stop(): Promise<Blob> {
@@ -128,6 +131,7 @@ export class RecorderService {
       const source = this.ctx.createMediaStreamSource(stream);
       source.connect(this.dest);
       this.sourceFor.set(clientId, source);
+      this.sourceCount.set(this.sourceFor.size);
     } catch (err) {
       console.warn('recording mix source failed', err);
     }
@@ -142,6 +146,7 @@ export class RecorderService {
       }
     }
     this.sourceFor.clear();
+    this.sourceCount.set(0);
     this.chunks = [];
     this.recorder = null;
     this.dest = null;

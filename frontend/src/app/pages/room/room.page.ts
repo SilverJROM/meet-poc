@@ -20,6 +20,7 @@ import { SignalingMessage, WsService } from '../../services/ws.service';
 import { WebrtcService } from '../../services/webrtc.service';
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'knocking' | 'in-call' | 'rejected' | 'error';
+type BufferedSignal = { from: string; data: unknown };
 type LobbyError =
   | { kind: 'denied' }
   | { kind: 'no-devices' }
@@ -96,6 +97,7 @@ export class RoomPage implements OnDestroy {
   private clockInterval: ReturnType<typeof setInterval> | null = null;
   private visibilityListenerInstalled = false;
   private camOnBeforeBackground = false;
+  private readonly pendingSignals = new Map<string, BufferedSignal[]>();
   readonly formattedElapsed = computed(() => {
     this.clockTick();
     const start = this.callStartMs();
@@ -134,11 +136,25 @@ export class RoomPage implements OnDestroy {
         lastRecordingExtension: this.recorder.lastRecordingExtension(),
         lastRecorderTimeslice: this.recorder.lastRecorderTimeslice(),
         lastRecordingUpload: this.recorder.lastUpload(),
+        recorderSourceCount: this.recorder.sourceCount(),
         activeSpeakerHz: this.activeSpeaker.activeSpeakerHz(),
         activeSpeakerId: this.activeSpeaker.activePeerId(),
         activeSpeakerAnalyzerCount: this.activeSpeaker.analyzerCount(),
         activeSpeakerLastMaxRms: this.activeSpeaker.lastMaxRms(),
         activeSpeakerContextState: this.activeSpeaker.contextState(),
+        peerConnectionStates: () =>
+          this.peers()
+            .filter((peer) => !peer.isLocal && peer.pc)
+            .map((peer) => ({ id: peer.id, state: peer.pc?.connectionState ?? peer.connectionState })),
+        remoteMedia: () =>
+          this.peers()
+            .filter((peer) => !peer.isLocal)
+            .map((peer) => ({
+              id: peer.id,
+              audioTracks: peer.stream?.getAudioTracks().length ?? 0,
+              videoTracks: peer.stream?.getVideoTracks().length ?? 0,
+              hasVideoSrcObject: !!peer.stream?.getVideoTracks().length,
+            })),
         isMobile: () => this.viewport.isMobile(),
         isIOS: () => this.platform.isIOS(),
         isAndroid: () => this.platform.isAndroid(),
@@ -402,6 +418,7 @@ export class RoomPage implements OnDestroy {
       this.status.set(`You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
       for (const peer of msg.peers) {
         await this.webrtc.addPeer(peer.id, peer.name, true, { isHost: !!peer.host || peer.id === this.hostClientId() });
+        await this.drainPendingSignals(peer.id);
       }
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn());
       return;
@@ -422,6 +439,7 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'peer-joined') {
       this.status.set(`${msg.name} joined.`);
       await this.webrtc.addPeer(msg.clientId, msg.name, false, { isHost: !!msg.host || msg.clientId === this.hostClientId() });
+      await this.drainPendingSignals(msg.clientId);
       return;
     }
     if (msg.type === 'media-state') {
@@ -461,10 +479,15 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'peer-left') {
       this.recorder.removePeerStream(msg.clientId);
       this.webrtc.removePeer(msg.clientId);
+      this.pendingSignals.delete(msg.clientId);
       this.removeKnocker(msg.clientId);
       return;
     }
     if (msg.type === 'signal') {
+      if (!this.hasPeerConnection(msg.from)) {
+        this.bufferSignal(msg);
+        return;
+      }
       await this.webrtc.handleSignal(msg.from, msg.data);
       return;
     }
@@ -566,6 +589,7 @@ export class RoomPage implements OnDestroy {
     this.ws.close();
     this.recorder.discard();
     this.webrtc.reset();
+    this.pendingSignals.clear();
     this.media.stopLocal();
     this.knockers.set([]);
     this.isOwner.set(false);
@@ -605,7 +629,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private installMobileVisibilityPause(): void {
-    if (this.visibilityListenerInstalled || !this.viewport.isMobile()) return;
+    if (this.visibilityListenerInstalled || !this.shouldEnableBgPause()) return;
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
     this.visibilityListenerInstalled = true;
   }
@@ -619,7 +643,7 @@ export class RoomPage implements OnDestroy {
 
   // Best-effort: mobile browsers, especially iOS, can throttle background JS/WS delivery.
   private readonly handleVisibilityChange = (): void => {
-    if (!this.viewport.isMobile() || this.state() !== 'in-call') return;
+    if (!this.shouldEnableBgPause() || this.state() !== 'in-call') return;
     const track = this.media.localStream()?.getVideoTracks()[0] ?? null;
     if (!track) return;
     if (document.visibilityState === 'hidden') {
@@ -645,6 +669,32 @@ export class RoomPage implements OnDestroy {
     const id = this.myId();
     if (!id) return;
     this.webrtc.updatePeer(id, { micEnabled: this.media.micOn(), camEnabled: this.media.cameraOn() });
+  }
+
+  private shouldEnableBgPause(): boolean {
+    return this.viewport.isMobile() && this.platform.isMobileUA();
+  }
+
+  private hasPeerConnection(clientId: string): boolean {
+    return !!this.webrtc.peers().get(clientId)?.pc;
+  }
+
+  private bufferSignal(msg: Extract<SignalingMessage, { type: 'signal' }>): void {
+    const queue = this.pendingSignals.get(msg.from) ?? [];
+    if (queue.length >= 20) queue.shift();
+    queue.push({ from: msg.from, data: msg.data });
+    this.pendingSignals.set(msg.from, queue);
+    console.debug(`[signaling] buffered ${signalKind(msg.data)} from ${msg.from} (queue=${queue.length})`);
+  }
+
+  private async drainPendingSignals(clientId: string): Promise<void> {
+    const queue = this.pendingSignals.get(clientId);
+    if (!queue?.length) return;
+    this.pendingSignals.delete(clientId);
+    console.debug(`[signaling] drained ${queue.length} queued signals for ${clientId}`);
+    for (const msg of queue) {
+      await this.webrtc.handleSignal(msg.from, msg.data);
+    }
   }
 
   private startClock(): void {
@@ -680,6 +730,13 @@ function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T | null): Pr
   return Promise.race([promise, new Promise<T | null>((resolve) => setTimeout(() => resolve(fallback), ms))]);
 }
 
+function signalKind(data: unknown): string {
+  const payload = data as { sdp?: { type?: string }; ice?: unknown };
+  if (payload?.sdp?.type) return payload.sdp.type;
+  if (payload?.ice) return 'ice';
+  return 'unknown';
+}
+
 declare global {
   interface Window {
     __meetDebug?: {
@@ -702,12 +759,15 @@ declare global {
       lastRecordingExtension?: string;
       lastRecorderTimeslice?: number | null;
       lastRecordingUpload?: { ok: true; file: string; bytes: number } | null;
+      recorderSourceCount?: number;
       isRecording: boolean;
       activeSpeakerHz?: number;
       activeSpeakerId?: string | null;
       activeSpeakerAnalyzerCount?: number;
       activeSpeakerLastMaxRms?: number;
       activeSpeakerContextState?: string;
+      peerConnectionStates?: () => { id: string; state: RTCPeerConnectionState | 'local' }[];
+      remoteMedia?: () => { id: string; audioTracks: number; videoTracks: number; hasVideoSrcObject: boolean }[];
       isMobile?: () => boolean;
       isIOS?: () => boolean;
       isAndroid?: () => boolean;
