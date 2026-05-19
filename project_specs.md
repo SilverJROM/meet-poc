@@ -28,8 +28,8 @@
 - SQLite migrations under `backend/migrations/NNNN_<name>.sql` — idempotent (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN`)
 
 **TURN:**
-- `coturn` installed on `minisserver` (this machine), config under `infra/coturn/`
-- ICE_SERVERS embedded into FE bundle at build time via env config
+- Deferred by JROM on 2026-05-19 B6 cutover. Current ICE config is STUN-only.
+- Future coturn work should add TURN entries through the frontend environment ICE config.
 
 **Process management:**
 - PM2 ecosystem.config.js — two apps: `meet-poc-be` and `meet-poc-fe`
@@ -78,9 +78,6 @@ meet-poc/
 │   │   ├── b5-recording/
 │   │   └── b6-cutover/
 │   └── fixtures/
-├── infra/
-│   └── coturn/
-│       └── turnserver.conf
 ├── scripts/
 │   ├── serve.js                       ← consolidated proxy
 │   ├── seed.ts                        ← seed jrom@silverjrom.app from INITIAL_PASSWORD.txt
@@ -94,7 +91,7 @@ meet-poc/
 └── INITIAL_PASSWORD.txt               ← (gitignored) bootstrap seed
 ```
 
-Legacy files (`server.js`, `public/`, `data.json`, single `package.json`) move to `legacy-poc/` during B1 (preserve until B6 cutover verifies the new app).
+Legacy files were moved to `legacy-poc/` during B1 and deleted during B6 per JROM directive. Legacy source remains available in git history.
 
 ## 3. Auth
 
@@ -154,15 +151,15 @@ pm2 logs meet-poc-fe
 ```
 
 Dev URLs:
-- **Consolidated (default):** `http://localhost:4710` — proxy
-- Backend direct: `http://localhost:4700`
-- Angular dev server direct: `http://localhost:4701`
+- **Consolidated live:** `http://localhost:4700` — proxy
+- Backend direct: `http://localhost:4720`
+- Angular dev server direct, only when running separately: `http://localhost:4711`
 
 ### 8.2 Environments
 
 | Env | URL | Backend | Notes |
 |-----|-----|---------|-------|
-| Local | http://localhost:4710 | PM2 `meet-poc-be` (dev mode `tsx watch`) | |
+| Local | http://localhost:4700 | PM2 `meet-poc-be` + `meet-poc-fe` | |
 | DEV | https://voice.silverjrom.app | (proxied via CF Tunnel → localhost:4710) | **CURRENT** deploy mechanism |
 | QA / PROD | — | — | not configured; out of scope |
 
@@ -180,22 +177,13 @@ pm2 restart meet-poc-fe
 
 ### 8.4 CF Tunnel
 
-The named CF Tunnel routes `voice.silverjrom.app` → `http://localhost:4710` (consolidated proxy). Must use `http://` not `https://` to origin (otherwise CF 525 SSL). Routed via `~/.cloudflared/config.yml`.
+The named CF Tunnel routes `voice.silverjrom.app` → `http://localhost:4700` (consolidated proxy). The tunnel is token-based and the hostname mapping is managed in Cloudflare Zero Trust, not a local `~/.cloudflared/config.yml` file.
 
 ### 8.5 Rollback (R10.3)
 
-If the rebuilt app fails post-cutover:
+The legacy single-file PoC was deleted during B6 per JROM directive. There is no supported live rollback path after cutover; recover legacy source from git history if ever needed. See `ROLLBACK.md`.
 
-```bash
-cd /home/agjrom/websites/meet-poc
-pm2 stop meet-poc-be meet-poc-fe
-# Restore legacy single-file PM2 entry:
-git checkout legacy-poc-snapshot -- ecosystem.config.js
-pm2 start ecosystem.config.js --only meet-poc
-# CF Tunnel must point at the legacy port (4700) — update ~/.cloudflared/config.yml if needed
-```
-
-Recordings dir is preserved across rollback.
+The `recordings/` directory was preserved at cutover.
 
 ### 8.6 Gate protocol (per-batch)
 
