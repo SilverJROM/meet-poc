@@ -14,11 +14,11 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R1.6 | viewport-fit=cover meta tag audit (iOS safe-area-inset) | M-B1 | M-B1 index.html viewport meta updated to include viewport-fit=cover | VERIFIED |
 | R1.7 | Angular SCSS partial accessible (includePaths or @use pattern) | M-B1 | M-B1 angular.json stylePreprocessorOptions.includePaths=["src/styles"]; per decisions/2026-05-19-v3-mb1-scss-includepaths.md | VERIFIED |
 | R1.8 | platform.service.ts isIOS()+isAndroid() signals (moved from M-B6) | M-B1 | M-B1 platform.service.ts isIOS()+isAndroid()+isMobileUA() signals (moved from M-B6 per Codex review) | VERIFIED |
-| R5.1 | Mobile preflight requests 480p; desktop unchanged 720p+ | M-B2 | — | ASSIGNED |
-| R5.2 | Mobile peer cap=4 via client-declared mobile:true in join payload | M-B2 | — | ASSIGNED |
-| R5.3 | Background-tab BEST-EFFORT pauses local video; keeps audio (mobile) | M-B2 | — | ASSIGNED |
-| R5.5 | Mobile joiner at 8-cap is rejected (per-client cap + global cap stack) | M-B2 | — | ASSIGNED |
-| R5.6 | Backend isMobile metadata on PeerEntry; cap check in join handler | M-B2 | — | ASSIGNED |
+| R5.1 | Mobile preflight requests 480p; desktop unchanged 720p+ | M-B2 | M-B2 MediaService branches on isMobile(); mobile=854x480 max constraint; __meetDebug.lastVideoConstraints; S5.1 PASS | VERIFIED |
+| R5.2 | Mobile peer cap=4 via client-declared mobile:true in join payload | M-B2 | M-B2 client-declared mobile:true in join payload (PRIMARY); cap=4 enforced in join MSG handler; backend isMobile metadata on PeerEntry | VERIFIED |
+| R5.3 | Background-tab BEST-EFFORT pauses local video; keeps audio (mobile) | M-B2 | M-B2 mobile-only visibilitychange listener; hidden→track.enabled=false+broadcast cam:false; visible→restore. Desktop unaffected (S5.5). | VERIFIED |
+| R5.5 | Mobile joiner at 8-cap is rejected (per-client cap + global cap stack) | M-B2 | M-B2 cap-stacking table verified: 4 mobile + 4 desktop = 8 admitted; 9th any-platform → room full (max 8) | VERIFIED |
+| R5.6 | Backend isMobile metadata on PeerEntry; cap check in join handler | M-B2 | M-B2 PeerEntry.isMobile metadata; mobile cap check uses live.admitted filter; signaling-mobile-cap.test.ts 2/2 | VERIFIED |
 | R2.1 | Bottom-sheet replaces sidebar on mobile (75vh); desktop unchanged | M-B3 | — | ASSIGNED |
 | R2.2 | Mobile controls bar docked bottom w/ safe-area-inset | M-B3 | — | ASSIGNED |
 | R2.3 | Dynamic grid mobile variants (1=full / 2=vstack / 3-4=2x2) | M-B3 | — | ASSIGNED |
