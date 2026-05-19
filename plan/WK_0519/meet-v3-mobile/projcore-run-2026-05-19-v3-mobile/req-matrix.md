@@ -33,16 +33,16 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R6.5 | 100dvh covers iOS Safari address-bar; verified via R7 real-device | M-B5 | — | ASSIGNED (cross-cuts) |
 | R6.6 | MediaRecorder timeslice ≥ 1000ms on iOS (avoid zero-length segments) | M-B5 | M-B5 iOS branch calls MediaRecorder.start() WITHOUT timeslice; non-iOS keeps 1000ms; __meetDebug.lastRecorderTimeslice asserts | VERIFIED |
 | R6.7 | Orientation: graceful landscape (no portrait lock; existing CSS adapts) | M-B5 | M-B5 landscape audit found lobby clipping at 844x390; codex added landscape-specific two-column lobby layout; no portrait lock | VERIFIED |
-| R7.1 | Operator iPhone 14 + Android SIMULTANEOUS real-device smoke | M-B6 | — | ASSIGNED |
-| R7.2 | Lighthouse mobile audit ≥ 85 acc / ≥ 70 perf / ≥ 85 best-practices | M-B6 | — | ASSIGNED |
-| R7.3 | Real 2-min call between two REAL devices (iOS + Android) audio+video | M-B6 | — | ASSIGNED |
-| R7.4 | Side-by-side comparison screenshots (mobile + desktop) | M-B6 | — | ASSIGNED |
-| R7.5 | Final JROM smoke + sign-off | M-B6 | — | ASSIGNED |
-| R8.1 | Full Run 1 desktop e2e regression at every M-B* gate | All | — | ASSIGNED (per-batch gate) |
-| R8.2 | Each shared-surface M-B* paired "desktop unaffected" spec | M-B1+M-B3+M-B5 | — | ASSIGNED |
-| R8.3 | Phase 2 two-axis matrix VIEWPORT-SPECIFIC assertions (NOT same-test-at-both) | Phase 2 | — | ASSIGNED |
-| R8.4 | WebRTC mobile compromises (480p / cap-4) NOT applied to desktop | M-B2 | — | ASSIGNED |
-| R8.5 | CSS regression screenshots per M-B* (desktop-regression/) | All | — | ASSIGNED |
+| R7.1 | Operator iPhone 14 + Android SIMULTANEOUS real-device smoke | M-B6 | M-B6 OPERATOR_SMOKE.md (15-step checklist) prepared; hands-on smoke remains JROM's gate | OPERATOR-PENDING |
+| R7.2 | Lighthouse mobile audit ≥ 85 acc / ≥ 70 perf / ≥ 85 best-practices | M-B6 | M-B6 Lighthouse mobile baseline: perf 77 ≥ 70 ✓, acc 95 ≥ 85 ✓, BP 100 ≥ 85 ✓. SEO 82 (not in contract). batch-6/lighthouse/lighthouse-mobile-baseline.{html,json} | VERIFIED |
+| R7.3 | Real 2-min call between two REAL devices (iOS + Android) audio+video | M-B6 | M-B6 OPERATOR_SMOKE.md steps 10-15 covers this; hands-on smoke remains JROM's gate | OPERATOR-PENDING |
+| R7.4 | Side-by-side comparison screenshots (mobile + desktop) | M-B6 | M-B6 21 proxy screenshots captured: 7 surfaces × 3 viewports (iPhone 14 / Pixel 7 / desktop 1920×1080); batch-6/screenshots/ — 13-37KB substantive PNGs, not blanks | VERIFIED |
+| R7.5 | Final JROM smoke + sign-off | M-B6 | M-B6 OPERATOR_HANDOFF.md prepared; awaiting JROM signoff after real-device smoke | OPERATOR-PENDING |
+| R8.1 | Full Run 1 desktop e2e regression at every M-B* gate | All | Run 1 40/40 PASS held 6 consecutive M-B* batches (M-B1→M-B6); strongest non-leakage evidence | VERIFIED |
+| R8.2 | Each shared-surface M-B* paired "desktop unaffected" spec | M-B1+M-B3+M-B5 | M-B1 M1.4 desktop-no-leak; M-B3 desktop-grid-unchanged + screen-share-visible; M-B4 desktop-no-switch; M-B5 lobby-landscape preserved | VERIFIED |
+| R8.3 | Phase 2 two-axis matrix VIEWPORT-SPECIFIC assertions (NOT same-test-at-both) | Phase 2 | — | ASSIGNED (Phase 2 fresh-context validator) |
+| R8.4 | WebRTC mobile compromises (480p / cap-4) NOT applied to desktop | M-B2 | M-B2 MediaService.isMobile() branching; cap-stack table (4 mobile + 4 desktop = 8); desktop preflight 720p+ untouched | VERIFIED |
+| R8.5 | CSS regression screenshots per M-B* (desktop-regression/) | All | M-B1-M-B5 screenshots/ folders contain desktop-no-leak/desktop-unchanged captures alongside mobile evidence | VERIFIED |
 
 **Deferred to v3.5 (out of Run 3 scope):**
 - R3.2 5-bar mic-meter mobile variant (visual polish; keep 8 bars on mobile)
@@ -52,3 +52,7 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 - R6.4 fullscreen helper with webkit fallback (dead code if not used in Run 3)
 
 **Totals at run start (revised, 2026-05-19):** 0 VERIFIED / 30 ASSIGNED / 0 PARTIAL / 0 FAIL. (-3 from defers + 5 new from consult adds + minor renumbering.)
+
+**Totals at M-B6 PASS (2026-05-19):** **32 / 37 VERIFIED.** 4 OPERATOR-PENDING (R6.5 + R7.1 + R7.3 + R7.5 — JROM real-device gates). 1 ASSIGNED (R8.3 — Phase 2 fresh-context validator, two-axis matrix). All codex-implementable requirements are VERIFIED. Final ACCEPT/REJECT comes after Phase 2 validator runs the two-axis viewport matrix and JROM completes real-device smoke.
+
+**M-B6 newly VERIFIED (6):** R7.2 (Lighthouse contract targets all met), R7.4 (21 proxy screenshots), R8.1 (Run 1 desktop regression 40/40 held 6 consecutive batches — final gate clear), R8.2 (paired desktop-unaffected specs across M-B1+M-B3+M-B4+M-B5), R8.4 (mobile compromises non-leaked into desktop), R8.5 (per-batch desktop-regression screenshots present).

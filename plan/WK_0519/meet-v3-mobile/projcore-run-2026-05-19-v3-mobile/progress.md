@@ -27,7 +27,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 | M-B3 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | M-B4 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | M-B5 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
-| M-B6 | DONE | 1 | 2026-05-19 | 2026-05-19 | — | — |
+| M-B6 | DONE | 2 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 
 ## Callbacks log
 
@@ -45,3 +45,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 [projcore verdict] v3-mb5 PASS — R6.3+R6.6+R6.7 VERIFIED. MediaRecorder capability list (webm-opus→webm→mp4→aac); backend accepts mp4/aac extensions; iOS no-timeslice. Landscape audit FOUND a real issue (lobby clipped at 844x390) and codex FIXED it with landscape-specific 2-col layout. Backend 46/46 (+1 mp4 upload test). M-B5 e2e 3/3 in 2.9s. **Run 1 desktop regression 40/40 GREEN (R8.1 held 5th consecutive batch)** — strongest evidence yet of mobile/desktop non-leakage. 1 decision. Commit-before-DONE held 5x. Matrix: 30/30 implementation reqs VERIFIED. See validation/batch-5.md.
 [projcore callback] v3-mb6 DONE — operator smoke checklist + Lighthouse mobile baseline + 21 proxy screenshots + handoff
 [projcore callback] v3-mb6 RECOMMIT — batch-6 evidence artifacts + decision file restaged for validation visibility
+[projcore verdict] v3-mb6 PASS (iter 2) — R7.2+R7.4+R8.1+R8.2+R8.4+R8.5 VERIFIED. Operator-prep package: OPERATOR_SMOKE.md (15-step real-device checklist), OPERATOR_HANDOFF.md (Run 3 aggregate), scripts/lighthouse-mobile.sh + Node fallback + Playwright proxy capture script, batch-6/lighthouse baseline (perf 77/acc 95/BP 100 — all 3 contract targets met), 21 proxy screenshots (7 surfaces × 3 viewports, 13-37KB substantive). **Run 1 desktop regression 40/40 GREEN in 1.0m (R8.1 held 6th consecutive batch — final gate)** — strongest cumulative non-leakage evidence. Iter 1 broke commit-before-DONE (batch-6/ untracked); single-gap correction sent per §1.3.4; recommit clean. 1 decision. Matrix: **32/37 VERIFIED**; 4 OPERATOR-PENDING (R6.5+R7.1+R7.3+R7.5); 1 ASSIGNED (R8.3 Phase 2). All codex-implementable reqs VERIFIED. **Run 3 implementation COMPLETE on codex side.** Next: Phase 2 fresh-context validator + JROM real-device smoke. See validation/batch-6.md.
