@@ -23,7 +23,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 | Batch | State | Iter | Dispatched | Callback | Validated | Verdict |
 |-------|-------|------|------------|----------|-----------|---------|
 | M-B1 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
-| M-B2 | DISPATCHING | — | — | — | — | — |
+| M-B2 | CALLBACK | 1 | 2026-05-19 | 2026-05-19 | — | — |
 | M-B3 | PENDING | — | — | — | — | — |
 | M-B4 | PENDING | — | — | — | — | — |
 | M-B5 | PENDING | — | — | — | — | — |
@@ -35,3 +35,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log`.
 
 [projcore callback] v3-mb1 DONE — foundations + platform.service + viewport-fit
 [projcore verdict] v3-mb1 PASS — R1.1-R1.8 VERIFIED. 100dvh migration (8 sites/4 files paired) + viewport-fit=cover + breakpoint partial via angular.json includePaths + isMobile() signal w/ 250ms debounce + platform.service.ts (moved from M-B6 per Codex). Run 1 desktop regression 40/40 in 1.0m (R8.1 gate green first try). M-B1 e2e 4/4. Backend 17/43 unchanged. Codex committed BEFORE callback (hard-reminder rule held). 1 decision logged (scss-includepaths). Matrix: 10/30 VERIFIED. See validation/batch-1.md.
+[projcore callback] v3-mb2 DONE — WebRTC mobile adjustments + 480p + client-declared mobile cap + bg-tab pause
