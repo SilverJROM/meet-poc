@@ -24,7 +24,7 @@ test('S5.2 stop uploads webm and dashboard lists it', async ({ page }) => {
   expect(fs.statSync(recordingPath).size).toBeGreaterThan(1000);
 
   await page.getByRole('button', { name: 'Leave' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page).toHaveURL(/\/app\/rooms$/);
   const row = page.locator('.recording-row').filter({ hasText: room.title }).first();
   await expect(row).toBeVisible();
   await expect(row.getByRole('link', { name: 'Download' })).toHaveAttribute('href', /\/api\/recordings\/.*\/download$/);

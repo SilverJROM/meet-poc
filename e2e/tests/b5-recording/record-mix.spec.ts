@@ -28,7 +28,7 @@ test('S5.3 recording with a peer produces a webm with an audio stream', async ({
   expect(fs.statSync(recordingPath).size).toBeGreaterThan(1000);
 
   await page.getByRole('button', { name: 'Leave' }).click();
-  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page).toHaveURL(/\/app\/rooms$/);
   const href = await page.locator('.recording-row').filter({ hasText: room.title }).getByRole('link', { name: 'Download' }).first().getAttribute('href');
   if (!href) throw new Error('download href missing');
   const download = await page.request.get(href);
