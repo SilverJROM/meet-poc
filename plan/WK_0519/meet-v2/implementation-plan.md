@@ -113,3 +113,46 @@ Per /projcore §1.18 — same as v1. The lobby device preview (B5) is the most l
 Run folder: `plan/WK_0519/meet-v2/projcore-run-2026-05-19-v2/`.
 Decision files: `decisions/2026-05-19-v2-b<n>-<slug>.md`.
 Validation files: `validation/batch-<n>.md`.
+
+---
+
+## Future Run 3 — Mobile UI/UX (placeholder; awaiting JROM intake)
+
+**Status:** Architecture-level decisions LOCKED by JROM on 2026-05-19 (intake completed while Run 1 v2-B2 in flight). Run 3 is GATED on Run 1 completion (acceptance). On Run 1 PASS, /projcore refines this into og-requirements + scenarios, consults codex, then dispatches.
+
+**Discovery findings (current FE baseline):**
+- Viewport meta tag is correct: `width=device-width, initial-scale=1`
+- Only 3 media queries in the entire FE (room@640, dashboard@720, controls-bar@760) — minimal mobile work done
+- `min-height: 100vh` is used in **4 places** (login, dashboard, room.shell, call-panel) — classic iOS Safari bug where address bar collapse/expand causes overflow/clipping. Needs `100dvh` (dynamic viewport)
+- Zero touch event handlers — only `cursor:pointer` (mouse-only)
+- No PWA manifest, no service worker, no install metadata
+- WebRTC primitives (MediaRecorder, getDisplayMedia) have known mobile-browser quirks not yet considered
+
+**JROM-LOCKED decisions (2026-05-19):**
+1. **Targets:** iOS Safari (16+) **AND** Android Chrome (latest stable). Cross-platform.
+2. **Strategy:** Fluid responsive single SPA — same Angular routes, breakpoint-driven mobile UI via CSS media queries + signal-driven layout swaps. NO PWA install layer (Run 3); NO separate `/m/*` route tree. (PWA can be a Run 4 if useful.)
+3. **Feature parity:** Full parity EXCEPT screen-share — hidden on mobile (`getDisplayMedia` reliability varies, especially iOS pre-15). Record, host actions, sidebar, participant management all work on mobile.
+4. **WebRTC mobile compromises:** Default video resolution **480p** on mobile (vs 720p desktop). Mobile peer cap **4** (vs desktop 8). Banner explains the cap when reached. Adaptive auto-downgrade via `getStats()` is a v2.5 polish, NOT Run 3 scope.
+
+**Probable Run 3 batch shape (subject to og-requirements refinement at run-start):**
+
+- **M-B1 — Mobile foundations.** Viewport-units migration (`100vh` → `100dvh` everywhere), touch-target audit (48px minimum on all interactive controls), responsive breakpoint system formalized (suggest `xs <480`, `sm 480-767`, `md 768-1023`, `lg 1024+`), `isMobile()` signal driving conditional rendering. NO PWA manifest in this batch (locked: not in Run 3).
+- **M-B2 — Mobile call layout.** Bottom-sheet pattern replaces the right-side participant sidebar (B8 in Run 1) when on mobile. Controls bar → docked bottom (thumb-reachable). Dynamic-grid mobile variants: 1 peer = full-screen with safe-area insets, 2-3 = vertical stack, 4 = 2x2 (the mobile cap). Screen-share button **hidden** on `isMobile()`. Mute icon overlays remain.
+- **M-B3 — Mobile lobby.** Camera-switch button (front ↔ rear) using `getUserMedia({video:{facingMode:'user'|'environment'}})`. Compact mic-level meter. Single-column device selectors (vs side-by-side desktop).
+- **M-B4 — Touch interactions.** Tap-to-focus-tile (taps non-self tile → that tile becomes primary, others go to thumbnail strip). Swipe between sidebar tabs in bottom-sheet. Pinch-to-zoom and double-tap-to-pin DEFERRED to v2.5.
+- **M-B5 — Mobile WebRTC adjustments.** `MediaService.getUserMedia()` requests `{video: {width: 854, height: 480}}` on mobile (vs default desktop). Backend signaling soft-rejects 5th admit when room has mobile peers (or just enforce mobile-room-cap=4 client-side via UI). Background-tab handling: pause local video on `document.hidden` (keep audio); resume on visible.
+- **M-B6 — iOS Safari specifics.** UA-detection helper for iOS. `getDisplayMedia` already hidden via `isMobile()` (M-B2); also hard-fail with a friendly message if a user somehow lands on the desktop URL on mobile (rare). MediaRecorder mime fallback (`audio/mp4` if `audio/webm` unsupported on iOS — research at batch time). Fullscreen API differences (`webkitRequestFullscreen` fallback).
+- **M-B7 — Acceptance.** Operator-assisted real-device test pass: iPhone 14+ Safari + Pixel/Android Chrome. Lighthouse mobile audit (accessibility, performance, best-practices targets ≥85). Real call on real phones for 2 minutes. JROM smoke + sign-off.
+
+**Cross-batch quality gates:**
+- `100vh` must be eliminated entirely (or fall-back via `100dvh` + `100vh` for older browsers).
+- All interactive elements pass 48×48 px hit-test.
+- Mobile call sustains ≥ 25 FPS for self-tile and remote tiles for 2 minutes on a current mid-range Android (Pixel 7 or equivalent).
+- Mobile call sustains for 2 minutes without dropping below 30% battery from 80% on iPhone 14 (or note as future-tune if degrades).
+
+**Dependencies:**
+- Run 3 starts ONLY after Run 1 acceptance (because mobile builds on the participant-sidebar / controls / grid from Run 1 — can't mobilize what doesn't exist yet).
+- Run 2 (transcripts) is independent of Run 3 and can ship in either order.
+
+
+
