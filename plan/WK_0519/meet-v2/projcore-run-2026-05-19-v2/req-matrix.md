@@ -19,10 +19,10 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R2.5 | Host-only WS commands: meeting-ended-by-host, mute-target, remove-peer | B2 | B2 S2.5-S2.8 all four host-only commands work; close-order documented in decisions/meeting-end-close-order.md | VERIFIED |
 | R2.6 | Non-host commands dropped silently with info-level log | B2 | B2 S2.9 non-host commands produce info logs + no broadcasts | VERIFIED |
 | R2.7 | Helper getHostClientId(roomId) | B2 | B1 added/exported getHostClientId(roomId); B2 first uses it indirectly via isOwnerOf | VERIFIED |
-| R3.1 | /app/{rooms,ongoing,past,recordings,transcripts,settings} routes + stubs | B3 | — | ASSIGNED |
-| R3.2 | /dashboard redirects to /app/rooms | B3 | — | ASSIGNED |
-| R3.3 | Layout: persistent collapsible sidebar + topbar + active state | B3 | — | ASSIGNED |
-| R3.4 | Auth guard at /app/** | B3 | — | ASSIGNED |
+| R3.1 | /app/{rooms,ongoing,past,recordings,transcripts,settings} routes + stubs | B3 | B3 /app/* parent + 6 children (rooms, ongoing-stub, past-stub, recordings, transcripts-stub, settings-stub); S3.3 confirms stubs | VERIFIED |
+| R3.2 | /dashboard redirects to /app/rooms | B3 | B3 /dashboard → /app/rooms redirect; S3.2 + live curl https://voice.silverjrom.app/dashboard | VERIFIED |
+| R3.3 | Layout: persistent collapsible sidebar + topbar + active state | B3 | B3 collapsible sidebar with 6 nav links + topbar + active state via routerLinkActive; localStorage memory; 4 screenshots | VERIFIED |
+| R3.4 | Auth guard at /app/** | B3 | B3 authGuard moved to /app parent; S3.4 verifies /app/rooms + /app/ongoing both redirect to /login when unauthed | VERIFIED |
 | R4.1 | Rooms tab paginated, /api/rooms?page=&pageSize= backward-compat | B4 | — | ASSIGNED |
 | R4.2 | Ongoing tab polls active sessions every 5s | B4 | — | ASSIGNED |
 | R4.3 | Past tab paginated with duration formatting | B4 | — | ASSIGNED |
@@ -52,7 +52,9 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R8.6 | Non-host meeting-ended toast + 5s auto-dismiss + nav | B8 | — | ASSIGNED |
 | R8.7 | Active-speaker highlight via Web Audio RMS at 8Hz | B8 | — | ASSIGNED |
 
-**Totals after v2-B1 PASS (2026-05-19):** 5 VERIFIED / 38 ASSIGNED / 1 PARTIAL (R1.3 — host-end trigger pending B2) / 0 FAIL.
+**Totals after v2-B3 PASS (2026-05-19):** 17 VERIFIED / 27 ASSIGNED / 0 PARTIAL / 0 FAIL.
 
 **Verification trail:**
 - 2026-05-19 — v2-B1 PASS — R1.1-R1.6 except R1.3 PARTIAL. Live smoke: WS join TEST_ROOM01 → real SQLite row (uuidv4 id, ended_reason=host-disconnect-empty, admitted_peak=1, 623ms duration → correctly excluded from past via 10s filter). 15/31 vitest green. 2 decisions logged. See `validation/batch-1.md`.
+- 2026-05-19 — v2-B2 PASS — R2.1-R2.7 + R1.3 closed (host-end leg). 16/39 vitest green. Live smoke: /upload 401/409/200. 3 decisions logged. See `validation/batch-2.md`.
+- 2026-05-19 — v2-B3 PASS — R3.1-R3.4 VERIFIED. /app/* shell + 6 sidebar tabs + auth guard moved to /app parent. 8 Playwright tests live. voice.silverjrom.app serves the new shell. 3 decisions logged. See `validation/batch-3.md`.

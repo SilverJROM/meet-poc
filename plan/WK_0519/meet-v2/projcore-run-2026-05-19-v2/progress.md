@@ -27,7 +27,7 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 | B0 | DONE | 1 | 2026-05-19 | (self) | (self) | PASS |
 | B1 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B2 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
-| B3 | PENDING | — | — | — | — | — |
+| B3 | DONE | 1 | 2026-05-19 | 2026-05-19 | 2026-05-19 | PASS |
 | B4 | PENDING | — | — | — | — | — |
 | B5 | PENDING | — | — | — | — | — |
 | B6 | PENDING | — | — | — | — | — |
@@ -42,3 +42,4 @@ Live state of the run. Codex appends callbacks in `## Callbacks log` (format: `[
 [projcore callback] v2-batch-2 DONE — host authority + recording binding + WS commands
 [projcore verdict] v2-batch-2 PASS — R2.1-R2.7 + R1.3 CLOSED (host-end leg). 16/39 vitest green. Live smoke confirmed all 3 /upload gates (401 no cookie, 409 no session, 200 with filename embedding sessionId UUID). 3 decisions logged (meeting-end-close-order, recording-parser-longest-match, upload-auth-before-raw-body). project_specs.md updated. Matrix: 13/44 VERIFIED, 0 PARTIAL. Smoke artifacts cleaned post-validation (hygiene). See validation/batch-2.md.
 [projcore callback] v2-batch-3 DONE — /app/* shell with sidebar + tabs + stubs
+[projcore verdict] v2-batch-3 PASS — R3.1-R3.4 VERIFIED. 8 Playwright tests green in 2.2s live. Live URL: voice.silverjrom.app/dashboard redirects to /app/rooms (Angular SPA shell). 3 decisions logged (sidebar-persistence localStorage key, logout-in-topbar, live-playwright-config). project_specs.md updated. Matrix: 17/44 VERIFIED. See validation/batch-3.md.
