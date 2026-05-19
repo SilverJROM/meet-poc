@@ -1,12 +1,20 @@
 import { Injectable, signal } from '@angular/core';
 
 export type SignalingMessage =
-  | { type: 'admitted'; clientId: string; peers: { id: string; name: string }[]; roomTitle?: string; isOwner: boolean }
+  | {
+      type: 'admitted';
+      clientId: string;
+      peers: { id: string; name: string; host?: boolean }[];
+      roomTitle?: string;
+      isOwner: boolean;
+      hostClientId?: string;
+    }
   | { type: 'knocking'; clientId: string; roomTitle?: string }
   | { type: 'knock'; clientId: string; name: string }
   | { type: 'pending-list'; knockers: { id: string; name: string }[] }
-  | { type: 'peer-joined'; clientId: string; name: string }
+  | { type: 'peer-joined'; clientId: string; name: string; host?: boolean }
   | { type: 'peer-left'; clientId: string }
+  | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean }
   | { type: 'knock-cancelled'; clientId: string }
   | { type: 'signal'; from: string; data: unknown }
   | { type: 'rejected'; reason?: string }
@@ -16,7 +24,8 @@ export type OutgoingSignalingMessage =
   | { type: 'join'; room: string; name: string }
   | { type: 'signal'; to: string; data: unknown }
   | { type: 'admit'; clientId: string }
-  | { type: 'reject'; clientId: string; reason?: string };
+  | { type: 'reject'; clientId: string; reason?: string }
+  | { type: 'media-state'; mic: boolean; cam: boolean };
 
 @Injectable({ providedIn: 'root' })
 export class WsService {

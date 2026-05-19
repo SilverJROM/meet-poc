@@ -28,6 +28,8 @@ type IncomingMessage = {
   room?: unknown;
   name?: unknown;
   state?: unknown;
+  mic?: unknown;
+  cam?: unknown;
   to?: string;
   data?: unknown;
   clientId?: unknown;
@@ -93,6 +95,14 @@ function isHostCommandAllowed(command: string, roomId: string | null, userEmail:
   return allowed;
 }
 
+function peerSummaries(live: LiveRoom, roomId: string, database: Database.Database): { id: string; name: string; host: boolean }[] {
+  return [...live.admitted.entries()].map(([id, p]) => ({
+    id,
+    name: p.name,
+    host: isOwnerOf(roomId, p.userEmail, database),
+  }));
+}
+
 function admitPeer(roomId: string, clientId: string, database: Database.Database): void {
   const live = liveRooms.get(roomId);
   const room = getRoom(roomId, database);
@@ -106,13 +116,15 @@ function admitPeer(roomId: string, clientId: string, database: Database.Database
   live.pending.delete(clientId);
   pending.setState('admitted');
 
-  const peers = [...live.admitted.entries()].map(([id, p]) => ({ id, name: p.name }));
+  const peers = peerSummaries(live, roomId, database);
+  const hostClientId = getHostClientId(roomId, database);
   send(pending.ws, {
     type: 'admitted',
     clientId,
     peers,
     roomTitle: room.title,
     isOwner: isOwnerOf(roomId, pending.userEmail, database),
+    hostClientId,
   });
   for (const [, peer] of live.admitted) {
     send(peer.ws, { type: 'peer-joined', clientId, name: pending.name });
@@ -188,10 +200,8 @@ export function attachSignaling(server: http.Server, database: Database.Database
           live.admitted.set(clientId, entry);
           bumpAdmittedPeak(live, database);
           state = 'admitted';
-          const peers = [...live.admitted.entries()]
-            .filter(([id]) => id !== clientId)
-            .map(([id, p]) => ({ id, name: p.name }));
-          send(ws, { type: 'admitted', clientId, peers, roomTitle: room.title, isOwner: true });
+          const peers = peerSummaries(live, roomId, database).filter((peer) => peer.id !== clientId);
+          send(ws, { type: 'admitted', clientId, peers, roomTitle: room.title, isOwner: true, hostClientId: clientId });
           for (const [id, peer] of live.admitted) {
             if (id !== clientId) send(peer.ws, { type: 'peer-joined', clientId, name: myName });
           }
@@ -217,6 +227,18 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const target = live.admitted.get(String(msg.to || ''));
         if (!target) return;
         send(target.ws, { type: 'signal', from: clientId, data: msg.data });
+        return;
+      }
+
+      if (msg.type === 'media-state') {
+        if (state !== 'admitted') return;
+        const live = currentRoom ? liveRooms.get(currentRoom) : null;
+        if (!live) return;
+        const mic = Boolean(msg.mic);
+        const cam = Boolean(msg.cam);
+        for (const [id, peer] of live.admitted) {
+          if (id !== clientId) send(peer.ws, { type: 'media-state', clientId, mic, cam });
+        }
         return;
       }
 
