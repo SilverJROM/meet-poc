@@ -188,6 +188,21 @@ Ended session rows include `recordingsCount`, computed by scanning owned recordi
 - Permission denied has a B5 placeholder with Retry that re-runs preflight. Full device-failure polish remains B7.
 - Test-mic playback is deferred; the live mic meter is the B5 verification surface for input activity.
 
+### 6.4 v2 In-Call Grid And Tile State
+
+- `/room/:id` in-call view uses a count-driven grid via `.tiles-grid[data-count]`.
+- 1 peer: single centered tile capped at 720px.
+- 2 peers: two equal split columns.
+- 3-4 peers: two-column 2x2 layout.
+- 5-9 peers: three-column 3x3 layout.
+- 10-12 is a documented fallback with three columns and vertical overflow, even though the current room cap prevents it.
+- The call panel is centered with `max-width: 1400px`; tablet and mobile breakpoints collapse higher-count grids to two columns and then one column.
+- `PeerState` includes `isHost`, `micEnabled`, and `camEnabled`.
+- Per-tile overlays show participant name, connection state, HOST badge for the owner, mute icon when `micEnabled=false`, and an initials avatar when the camera is off or no video track is present.
+- `media-state` is transient WebSocket state: admitted clients may send `{type:'media-state', mic, cam}`, and the backend relays `{type:'media-state', clientId, mic, cam}` to other admitted peers only.
+- `admitted` payloads include additive host metadata: `hostClientId` plus `peers[].host`.
+- The meeting elapsed clock starts when the local user is admitted, formats as `m:ss` under one hour and `h:mm:ss` after one hour, and is cleared on call cleanup.
+
 ## 7. Testing expectations
 
 - **E2E:** Playwright via `e2e/playwright.config.ts`. baseURL = consolidated dev URL (TBD in B1, likely 4710). Headless chromium with fake-media-stream flags for WebRTC.

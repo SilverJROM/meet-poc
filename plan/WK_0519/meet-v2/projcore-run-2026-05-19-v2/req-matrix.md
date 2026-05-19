@@ -34,11 +34,11 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R5.3 | Device-change re-acquires getUserMedia with new deviceId | B5 | B5 MediaService.reacquire on device change; S5.3 verifies selector populates | VERIFIED |
 | R5.4 | Test-mic playback (optional polish) | B5 | B5 deferred Test mic playback per decision (mic-meter already verifies live input); decisions/2026-05-19-v2-b5-test-mic-deferred.md | VERIFIED |
 | R5.5 | Lobby pre-acquired stream carries into call (no double getUserMedia) | B5 | B5 S5.5: track IDs match before lobby Join and after in-call transition (single stream) | VERIFIED |
-| R6.1 | Dynamic grid 1=center-capped, 2=split, 3-4=2x2, 5-9=3x3 | B6 | — | ASSIGNED |
-| R6.2 | Per-tile overlays: mute icon, camera-off avatar, host badge | B6 | — | ASSIGNED |
-| R6.3 | media-state WS broadcast for mic/cam state | B6 | — | ASSIGNED |
-| R6.4 | Meeting elapsed-time clock in topbar | B6 | — | ASSIGNED |
-| R6.5 | tiles-grid centered max-width container + responsive fallbacks | B6 | — | ASSIGNED |
+| R6.1 | Dynamic grid 1=center-capped, 2=split, 3-4=2x2, 5-9=3x3 | B6 | B6 grid-layout.spec.ts + screenshots for 1/2/3/5 peers | VERIFIED |
+| R6.2 | Per-tile overlays: mute icon, camera-off avatar, host badge | B6 | B6 overlays-clock.spec.ts + screenshots host-badge/mute/avatar | VERIFIED |
+| R6.3 | media-state WS broadcast for mic/cam state | B6 | B6 signaling-media-state.test.ts + browser mute icon relay | VERIFIED |
+| R6.4 | Meeting elapsed-time clock in topbar | B6 | B6 overlays-clock.spec.ts clock assertion + screenshot | VERIFIED |
+| R6.5 | tiles-grid centered max-width container + responsive fallbacks | B6 | B6 room.page.scss + one-peer centered/capped browser assertion | VERIFIED |
 | R7.1 | Icon-state controls with aria-pressed | B7 | — | ASSIGNED |
 | R7.2 | Record button visible only to host | B7 | — | ASSIGNED |
 | R7.3 | "Host is recording" banner visible to ALL with duration counter | B7 | — | ASSIGNED |
@@ -52,7 +52,7 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 | R8.6 | Non-host meeting-ended toast + 5s auto-dismiss + nav | B8 | — | ASSIGNED |
 | R8.7 | Active-speaker highlight via Web Audio RMS at 8Hz | B8 | — | ASSIGNED |
 
-**Totals after v2-B5 PASS (2026-05-19):** 28 VERIFIED / 16 ASSIGNED / 0 PARTIAL / 0 FAIL.
+**Totals after v2-B6 implementation callback (2026-05-19):** 33 VERIFIED / 11 ASSIGNED / 0 PARTIAL / 0 FAIL.
 
 **Verification trail:**
 - 2026-05-19 — v2-B1 PASS — R1.1-R1.6 except R1.3 PARTIAL. Live smoke: WS join TEST_ROOM01 → real SQLite row (uuidv4 id, ended_reason=host-disconnect-empty, admitted_peak=1, 623ms duration → correctly excluded from past via 10s filter). 15/31 vitest green. 2 decisions logged. See `validation/batch-1.md`.
@@ -60,3 +60,4 @@ Status meanings: `ASSIGNED` → `IN-PROGRESS` → `CLAIMED` → `VERIFIED` (or `
 - 2026-05-19 — v2-B3 PASS — R3.1-R3.4 VERIFIED. /app/* shell + 6 sidebar tabs + auth guard moved to /app parent. 8 Playwright tests live. voice.silverjrom.app serves the new shell. 3 decisions logged. See `validation/batch-3.md`.
 - 2026-05-19 — v2-B4 PASS — R4.1-R4.6 VERIFIED. Pagination backward-compat + recordingsCount on ended sessions; real Ongoing+Past pages; URL ?page= persistence. 13 Playwright + 16/42 backend. 3 decisions. See `validation/batch-4.md`.
 - 2026-05-19 — v2-B5 PASS — R5.1-R5.5 VERIFIED. Pattern X pre-grant on lobby mount; <app-lobby-preview> + <app-mic-meter> 8Hz; reacquire on device change; stream-carries-into-call; permission-denied placeholder. 19 Playwright in 11.7s live. 3 decisions (test-mic-deferred, mic-meter-threshold, retry-preflight). See `validation/batch-5.md`.
+- 2026-05-19 — v2-B6 callback — R6.1-R6.5 implemented and self-verified. Dynamic grid + tile overlays + media-state relay + elapsed clock. 43 backend tests, 7 B6 Playwright tests, 6 B5 regressions, 13 B3/B4 regressions, full build, PM2 restart, and public live screenshot green. Pending /projcore independent verdict.

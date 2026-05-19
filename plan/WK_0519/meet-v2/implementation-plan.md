@@ -128,11 +128,15 @@ Validation files: `validation/batch-<n>.md`.
 - No PWA manifest, no service worker, no install metadata
 - WebRTC primitives (MediaRecorder, getDisplayMedia) have known mobile-browser quirks not yet considered
 
-**JROM-LOCKED decisions (2026-05-19):**
+**JROM-LOCKED decisions (2026-05-19; no further questions to be asked during Run 3 per JROM directive):**
 1. **Targets:** iOS Safari (16+) **AND** Android Chrome (latest stable). Cross-platform.
 2. **Strategy:** Fluid responsive single SPA — same Angular routes, breakpoint-driven mobile UI via CSS media queries + signal-driven layout swaps. NO PWA install layer (Run 3); NO separate `/m/*` route tree. (PWA can be a Run 4 if useful.)
 3. **Feature parity:** Full parity EXCEPT screen-share — hidden on mobile (`getDisplayMedia` reliability varies, especially iOS pre-15). Record, host actions, sidebar, participant management all work on mobile.
-4. **WebRTC mobile compromises:** Default video resolution **480p** on mobile (vs 720p desktop). Mobile peer cap **4** (vs desktop 8). Banner explains the cap when reached. Adaptive auto-downgrade via `getStats()` is a v2.5 polish, NOT Run 3 scope.
+4. **WebRTC mobile compromises:** Default video resolution **480p** on mobile (vs 720p desktop). Mobile peer cap **4**. Adaptive auto-downgrade via `getStats()` is a v2.5 polish, NOT Run 3 scope.
+5. **Mobile cap enforcement = per-client.** Backend uses User-Agent on WS `join` to detect mobile-vs-desktop joiner. Mobile joiners hard-rejected (`{type:'error', error:'mobile room full (4 max)'}`) when 4 mobile peers already admitted. Desktop joiners stay capped at 8 overall. A mixed-platform meeting can have 4 mobile + up to 4 more desktop (8 total). Document: UA-detection is imperfect; client-side fallback also enforces a soft cap warning.
+6. **Mobile sidebar = bottom-sheet** that swipes up from below to reveal participant list + host actions. Tap-outside or swipe-down dismisses. Desktop right-side `<app-participant-sidebar>` (Run 1 B8) is replaced by `<app-participant-sheet>` (or conditional swap inside the same component) when `isMobile()` is true.
+7. **Background-tab audio = keep audio, pause local video.** On `document.visibilityState === 'hidden'`: pause local video track + signal `media-state {mic:current, cam:false}` to peers so they see the avatar; keep audio track unchanged. On `visible` again: resume local video + signal new state.
+8. **Mobile breakpoint = `<1024px`.** Includes tablets in portrait orientation. `isMobile()` signal: `window.innerWidth < 1024`. Hooks into `resize` event with debounce. Above 1024 = desktop UX (existing Run 1 layout); below = mobile UX (sheet, docked controls, mobile grid).
 
 **Probable Run 3 batch shape (subject to og-requirements refinement at run-start):**
 
@@ -149,6 +153,30 @@ Validation files: `validation/batch-<n>.md`.
 - All interactive elements pass 48×48 px hit-test.
 - Mobile call sustains ≥ 25 FPS for self-tile and remote tiles for 2 minutes on a current mid-range Android (Pixel 7 or equivalent).
 - Mobile call sustains for 2 minutes without dropping below 30% battery from 80% on iPhone 14 (or note as future-tune if degrades).
+
+**Regression discipline (JROM directive 2026-05-19) — MANDATORY for every M-B*:**
+
+Mobile is risky because it touches shared CSS, shared services, shared components, and shared route handlers. Each M-B* batch MUST satisfy ALL of:
+
+1. **Full Run 1 desktop e2e regression at every batch gate.** Codex MUST run the entire desktop suite (v2-b3-shell + v2-b4-tabs + v2-b5-lobby + v2-b6-grid + v2-b7-controls + v2-b8-sidebar) against the live PM2 stack BEFORE posting `STATUS: DONE`. **Any single desktop spec failure = batch FAIL** — no soft pass. If the failure traces to the mobile change, fix or roll back. If it traces to a pre-existing flake, codex must surface it as a blocker and /projcore decides.
+2. **Desktop-only scenarios** added per M-B*: every mobile batch that touches shared surface gets a paired "desktop unaffected" spec. Examples:
+   - M-B1 (100vh → 100dvh) → `tests/v3-b1-foundations-desktop-regression.spec.ts` asserting topbar + tiles-grid + lobby render at full 1920×1080 viewport with identical visual layout (Playwright snapshot or DOM measurement).
+   - M-B2 (bottom-sheet vs sidebar) → `tests/v3-b2-layout-desktop.spec.ts` confirming `<app-participant-sidebar>` is STILL the right-side panel (not a bottom sheet) at viewport ≥ 768.
+   - M-B6 (iOS Safari specifics) → `tests/v3-b6-non-mobile-platform.spec.ts` confirming `getDisplayMedia` button is STILL visible at desktop UA + viewport (not gated by stale UA detection).
+3. **`isMobile()` signal must short-circuit cleanly** — desktop path defaults to the existing Run 1 behavior unless the viewport explicitly meets the mobile breakpoint. Default-to-desktop, not default-to-mobile-detection-with-quirks.
+4. **Two-axis test matrix** at M-B7 final acceptance: every B3/B4/B5/B6/B7/B8 scenario re-run at TWO viewports — 1920×1080 (desktop) and 390×844 (iPhone 14 portrait) — both must be GREEN for sign-off. /projcore enforces this in Phase 2.
+5. **WebRTC compromises (480p mobile, peer-cap-4) MUST NOT apply to desktop.** Verified by a desktop scenario asserting `getUserMedia({video:{width:1280, height:720}})` (or whatever the desktop default is) at desktop viewport.
+6. **CSS regression**: codex adds a `screenshots/desktop-regression/` folder per M-B* with comparison shots of each major page at 1920×1080. /projcore checks visually + via Playwright DOM-bounding-rect assertions. Any visible-pixel drift from Run 1 closing screenshots is a flag.
+
+**Codex must declare in every M-B*'s `changes.md`:**
+- Full list of desktop e2e suites run + pass counts
+- Any shared service / component / SCSS file touched + the regression spec covering it
+- Explicit "no desktop scenarios FAILED" confirmation
+
+**/projcore enforcement:**
+- Gate 4 of the per-batch validation includes "desktop full e2e regression" as a hard check.
+- Phase 2 final acceptance runs the two-axis matrix (desktop + mobile viewport) against voice.silverjrom.app, both must pass.
+- If any desktop scenario regresses mid-Run-3, /projcore raises immediately to JROM — no autonomous decision to ship a desktop-broken state.
 
 **Dependencies:**
 - Run 3 starts ONLY after Run 1 acceptance (because mobile builds on the participant-sidebar / controls / grid from Run 1 — can't mobilize what doesn't exist yet).

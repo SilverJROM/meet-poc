@@ -74,3 +74,47 @@
 **Live service:** PM2 NODE_ENV=production. Rebuild + restart meet-poc-fe (FE) + tsx-watch handles BE.
 
 **Active callback target:** `plan/WK_0519/meet-v2/projcore-run-2026-05-19-v2/callbacks.md` + `progress.md`.
+
+---
+
+## Post-B6 callback handoff
+
+**Branch:** `feat/meet-v2-b6-grid-overlays-clock`
+
+**Implemented:**
+- Backend admitted-only `media-state` relay.
+- Backend additive host metadata on admitted messages: `hostClientId` and `peers[].host`.
+- Angular call grid now uses `data-count` thresholds:
+  - 1 centered/capped
+  - 2 split
+  - 3-4 2-column
+  - 5-9 3-column
+- `<app-tile>` now renders:
+  - HOST badge
+  - mute icon
+  - camera-off initials avatar
+  - stable name/state overlays
+- Room page now broadcasts local mic/camera toggles and updates remote peer state from `media-state`.
+- Meeting clock starts on admission and clears on cleanup.
+
+**Validation completed by implementer:**
+- `npm test -w backend` — PASS, 17 files / 43 tests.
+- `npm run build` — PASS.
+- `npm test -w e2e -- tests/v2-b6-grid --config=playwright.live.config.ts` — PASS after restart, 7 tests.
+- `npm test -w e2e -- tests/v2-b5-lobby --config=playwright.live.config.ts` — PASS, 6 tests.
+- `npm test -w e2e -- tests/v2-b3-shell tests/v2-b4-tabs --config=playwright.live.config.ts` — PASS, 13 tests.
+- `pm2 restart meet-poc-be` + `pm2 restart meet-poc-fe` — both online.
+- Public live screenshot captured at `batch-6/screenshots/jrom-comparison-live-call.png`; temp public room deleted.
+
+**Artifacts:**
+- `batch-6/changes.md`
+- `batch-6/scenarios-implemented.md`
+- `batch-6/test-report.md`
+- `batch-6/review.md`
+- `batch-6/independent-validation.md`
+- `batch-6/screenshots/*.png`
+- Decisions:
+  - `2026-05-19-v2-b6-host-identity-protocol.md`
+  - `2026-05-19-v2-b6-avatar-color-hash.md`
+  - `2026-05-19-v2-b6-clock-format.md`
+  - `2026-05-19-v2-b6-backend-restart.md`

@@ -3,3 +3,4 @@
 [projcore callback] v2-batch-3 DONE — /app/* shell with sidebar + tabs + stubs
 [projcore callback] v2-batch-4 DONE — tabs pagination + ongoing/past + recordingsCount
 [projcore callback] v2-batch-5 DONE — lobby device preview + mic meter + stream carry-forward
+[projcore callback] v2-batch-6 DONE — grid + per-tile overlays + media-state + clock; live comparison screenshot captured
