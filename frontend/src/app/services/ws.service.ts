@@ -15,6 +15,8 @@ export type SignalingMessage =
   | { type: 'peer-joined'; clientId: string; name: string; host?: boolean }
   | { type: 'peer-left'; clientId: string }
   | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean }
+  | { type: 'recording-started'; clientId: string; sessionId: string }
+  | { type: 'recording-stopped'; clientId: string; sessionId: string }
   | { type: 'knock-cancelled'; clientId: string }
   | { type: 'signal'; from: string; data: unknown }
   | { type: 'rejected'; reason?: string }
@@ -25,7 +27,8 @@ export type OutgoingSignalingMessage =
   | { type: 'signal'; to: string; data: unknown }
   | { type: 'admit'; clientId: string }
   | { type: 'reject'; clientId: string; reason?: string }
-  | { type: 'media-state'; mic: boolean; cam: boolean };
+  | { type: 'media-state'; mic: boolean; cam: boolean }
+  | { type: 'recording-state'; state: 'started' | 'stopped' };
 
 @Injectable({ providedIn: 'root' })
 export class WsService {

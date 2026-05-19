@@ -1,35 +1,55 @@
 <header class="controls-bar">
   <div class="room-label">{{ roomLabel() }}</div>
   <div class="controls">
-    <button type="button" class="control-btn" [class.active]="micOn()" (click)="mute.emit()" [title]="micOn() ? 'Mute' : 'Unmute'">
+    <button
+      type="button"
+      class="control-btn"
+      [class.is-off]="!micOn()"
+      [attr.aria-pressed]="micOn()"
+      [attr.aria-label]="micOn() ? 'Mute microphone' : 'Unmute microphone'"
+      (click)="mute.emit()"
+      [title]="micOn() ? 'Mute microphone' : 'Unmute microphone'"
+    >
       <ion-icon [name]="micOn() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
-      <span>{{ micOn() ? 'Mute' : 'Unmute' }}</span>
-    </button>
-    <button type="button" class="control-btn" [class.active]="cameraOn()" (click)="camera.emit()" [title]="cameraOn() ? 'Camera off' : 'Camera on'">
-      <ion-icon [name]="cameraOn() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
-      <span>{{ cameraOn() ? 'Camera off' : 'Camera on' }}</span>
-    </button>
-    <button type="button" class="control-btn" [class.active]="screenOn()" (click)="screen.emit()" [title]="screenOn() ? 'Stop sharing' : 'Share screen'">
-      <ion-icon name="desktop-outline"></ion-icon>
-      <span>{{ screenOn() ? 'Stop share' : 'Share screen' }}</span>
     </button>
     <button
       type="button"
       class="control-btn"
-      [class.recording]="recording()"
-      [disabled]="uploading()"
-      (click)="record.emit()"
-      [title]="recording() ? 'Stop recording' : 'Record'"
+      [class.is-off]="!cameraOn()"
+      [attr.aria-pressed]="cameraOn()"
+      [attr.aria-label]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
+      (click)="camera.emit()"
+      [title]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
     >
-      <ion-icon name="ellipse-outline"></ion-icon>
-      <span>{{ recording() ? 'Stop' : 'Record' }}</span>
+      <ion-icon [name]="cameraOn() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
     </button>
-    @if (recording()) {
-      <span class="recording-indicator" role="status">Recording</span>
+    <button
+      type="button"
+      class="control-btn"
+      [class.active]="screenOn()"
+      [attr.aria-pressed]="screenOn()"
+      [attr.aria-label]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
+      (click)="screen.emit()"
+      [title]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
+    >
+      <ion-icon name="desktop-outline"></ion-icon>
+    </button>
+    @if (isHost()) {
+      <button
+        type="button"
+        class="control-btn"
+        [class.recording]="recording()"
+        [disabled]="uploading()"
+        [attr.aria-pressed]="recording()"
+        [attr.aria-label]="recording() ? 'Stop recording' : 'Record'"
+        (click)="record.emit()"
+        [title]="recording() ? 'Stop recording' : 'Record'"
+      >
+        <ion-icon [name]="recording() ? 'ellipse' : 'ellipse-outline'"></ion-icon>
+      </button>
     }
-    <button type="button" class="leave-btn" (click)="leave.emit()" title="Leave">
+    <button type="button" class="leave-btn" (click)="leave.emit()" aria-label="Leave call" title="Leave call">
       <ion-icon name="call-outline"></ion-icon>
-      <span>Leave</span>
     </button>
   </div>
 </header>

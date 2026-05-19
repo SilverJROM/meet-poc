@@ -27,17 +27,40 @@
 
 .control-btn,
 .leave-btn {
-  min-height: 38px;
+  width: 46px;
+  min-width: 46px;
+  min-height: 46px;
   border-radius: 6px;
-  padding: 0 12px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
   border: 1px solid var(--line);
   color: var(--text);
-  background: transparent;
+  background: rgba(12, 15, 21, 0.78);
   cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    box-shadow 140ms ease,
+    transform 140ms ease;
+}
+
+.control-btn ion-icon,
+.leave-btn ion-icon {
+  font-size: 22px;
+}
+
+.control-btn:hover,
+.leave-btn:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+  transform: translateY(-1px);
+}
+
+.control-btn:focus-visible,
+.leave-btn:focus-visible {
+  outline: 2px solid rgba(96, 165, 250, 0.95);
+  outline-offset: 2px;
 }
 
 .control-btn.active {
@@ -45,29 +68,16 @@
   background: rgba(59, 130, 246, 0.16);
 }
 
+.control-btn.is-off {
+  border-color: rgba(220, 38, 38, 0.68);
+  color: #fff;
+  background: #991b1b;
+}
+
 .control-btn.recording {
   border-color: rgba(220, 38, 38, 0.65);
-  background: rgba(220, 38, 38, 0.18);
-  color: #fecaca;
-}
-
-.recording-indicator {
-  min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: #fecaca;
-  font-size: 12px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.recording-indicator::before {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--red);
-  content: "";
+  background: #7f1d1d;
+  color: #fff;
 }
 
 .control-btn:disabled {
@@ -79,6 +89,7 @@
 .leave-btn {
   border-color: rgba(220, 38, 38, 0.52);
   color: #fecaca;
+  background: rgba(127, 29, 29, 0.32);
 }
 
 @media (max-width: 760px) {
@@ -92,6 +103,6 @@
 
   .control-btn,
   .leave-btn {
-    flex: 1 1 138px;
+    flex: 0 0 46px;
   }
 }

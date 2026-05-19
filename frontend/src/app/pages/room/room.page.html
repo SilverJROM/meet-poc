@@ -37,6 +37,7 @@
         [screenOn]="media.screenOn()"
         [recording]="recorder.isRecording()"
         [uploading]="recorder.isUploading()"
+        [isHost]="isHost()"
         (mute)="toggleMic()"
         (camera)="toggleCamera()"
         (screen)="toggleScreen()"
@@ -49,9 +50,16 @@
           <button type="button" (click)="warningDismissed.set(true)">Dismiss</button>
         </div>
       }
+      @if (deviceFailureNotice()) {
+        <div class="device-notice" role="status">
+          <span>{{ deviceFailureNotice() }}</span>
+          <button type="button" (click)="deviceFailureNotice.set(null)">Dismiss</button>
+        </div>
+      }
       <div class="meeting-meta">
         <span class="meeting-clock" aria-label="Meeting elapsed time">{{ formattedElapsed() }}</span>
       </div>
+      <app-recording-banner [recording]="hostRecording()" [startedAt]="recordingStartedAt()" />
       <p class="call-status" role="status">{{ status() }}</p>
       @if (isOwner()) {
         <app-waiting-room-panel [knockers]="knockers()" (admit)="admit($event)" (reject)="reject($event)" />
@@ -65,58 +73,81 @@
   } @else {
     <section class="lobby-panel">
       <h1>{{ roomTitle() }}</h1>
-      @if (permissionError() === 'denied') {
-        <div class="permission-error" role="alert">
-          <p>Microphone access denied — meet-poc can't join this call. Check browser settings → allow microphone for voice.silverjrom.app, then click Retry.</p>
-          <button type="button" class="secondary-btn" (click)="retryPreflight()">Retry</button>
-        </div>
-      } @else if (permissionError() === 'no-devices') {
-        <div class="permission-error" role="alert">
-          <p>No microphone detected. Connect a microphone, then click Retry.</p>
-          <button type="button" class="secondary-btn" (click)="retryPreflight()">Retry</button>
+      @if (permissionError(); as lobbyError) {
+        @if (lobbyError.kind === 'denied') {
+          <div class="lobby-error" role="alert">
+            <h2>Microphone access denied</h2>
+            <p>To join this call, allow microphone access for <strong>voice.silverjrom.app</strong> in your browser settings, then click Retry below.</p>
+            <button type="button" class="secondary-btn" (click)="retryPreflight()">Retry</button>
+          </div>
+        } @else if (lobbyError.kind === 'no-devices') {
+          <div class="lobby-error" role="alert">
+            <h2>No microphone detected</h2>
+            <p>Please connect a microphone and refresh the page.</p>
+          </div>
+        } @else if (lobbyError.kind === 'video-denied-but-audio-ok') {
+          <div class="lobby-warning" role="status">
+            <p>Camera unavailable — joining audio-only. You can enable video later if browser permissions change.</p>
+          </div>
+        } @else {
+          <div class="lobby-error" role="alert">
+            <h2>Unable to access media devices</h2>
+            <p>{{ lobbyError.message }}</p>
+            <button type="button" class="secondary-btn" (click)="retryPreflight()">Retry</button>
+          </div>
+        }
+      }
+      @if (!hasBlockingLobbyError()) {
+        <app-lobby-preview
+          [stream]="localStream()"
+          [audioInputs]="audioInputs()"
+          [videoInputs]="videoInputs()"
+          [selectedAudioId]="selectedAudioId()"
+          [selectedVideoId]="selectedVideoId()"
+          [videoEnabled]="cameraRequested()"
+          [level]="micLevel()"
+          (audioDeviceChange)="changeAudioDevice($event)"
+          (videoDeviceChange)="changeVideoDevice($event)"
+        />
+        <form class="join-form" (ngSubmit)="join()">
+          <div class="field">
+            <label for="display-name">Name</label>
+            <input
+              id="display-name"
+              name="displayName"
+              type="text"
+              autocomplete="name"
+              maxlength="80"
+              required
+              [ngModel]="displayName()"
+              (ngModelChange)="displayName.set($event)"
+              [disabled]="state() === 'connecting'"
+            >
+          </div>
+          <label class="check-row">
+            <input
+              name="cameraRequested"
+              type="checkbox"
+              [ngModel]="cameraRequested()"
+              (ngModelChange)="setCameraRequested($event)"
+              [disabled]="state() === 'connecting'"
+            >
+            <span>Start with camera on</span>
+          </label>
+          <button type="submit" class="primary-btn" [disabled]="state() === 'connecting' || hasBlockingLobbyError() || !displayName().trim()">
+            {{ auth.user() ? 'Join' : 'Ask to join' }}
+          </button>
+        </form>
+        <p class="error-text">{{ error() || '' }}</p>
+      } @else {
+        <div class="join-form disabled-lobby">
+          <div class="field">
+            <label for="display-name-disabled">Name</label>
+            <input id="display-name-disabled" type="text" [value]="displayName()" disabled>
+          </div>
+          <button type="button" class="primary-btn" disabled>{{ auth.user() ? 'Join' : 'Ask to join' }}</button>
         </div>
       }
-      <app-lobby-preview
-        [stream]="localStream()"
-        [audioInputs]="audioInputs()"
-        [videoInputs]="videoInputs()"
-        [selectedAudioId]="selectedAudioId()"
-        [selectedVideoId]="selectedVideoId()"
-        [videoEnabled]="cameraRequested()"
-        [level]="micLevel()"
-        (audioDeviceChange)="changeAudioDevice($event)"
-        (videoDeviceChange)="changeVideoDevice($event)"
-      />
-      <form class="join-form" (ngSubmit)="join()">
-        <div class="field">
-          <label for="display-name">Name</label>
-          <input
-            id="display-name"
-            name="displayName"
-            type="text"
-            autocomplete="name"
-            maxlength="80"
-            required
-            [ngModel]="displayName()"
-            (ngModelChange)="displayName.set($event)"
-            [disabled]="state() === 'connecting'"
-          >
-        </div>
-        <label class="check-row">
-          <input
-            name="cameraRequested"
-            type="checkbox"
-            [ngModel]="cameraRequested()"
-            (ngModelChange)="setCameraRequested($event)"
-            [disabled]="state() === 'connecting'"
-          >
-          <span>Start with camera on</span>
-        </label>
-        <button type="submit" class="primary-btn" [disabled]="state() === 'connecting' || !!permissionError() || !displayName().trim()">
-          {{ auth.user() ? 'Join' : 'Ask to join' }}
-        </button>
-      </form>
-      <p class="error-text">{{ error() || '' }}</p>
     </section>
   }
 </main>

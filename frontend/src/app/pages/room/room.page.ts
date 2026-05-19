@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { ControlsBarComponent } from '../../components/controls-bar/controls-bar.component';
 import { KnockSpinnerComponent } from '../../components/knock-spinner/knock-spinner.component';
 import { LobbyPreviewComponent } from '../../components/lobby-preview/lobby-preview.component';
+import { RecordingBannerComponent } from '../../components/recording-banner/recording-banner.component';
 import { TileComponent } from '../../components/tile/tile.component';
 import { Knocker, WaitingRoomPanelComponent } from '../../components/waiting-room-panel/waiting-room-panel.component';
 import { AuthService } from '../../services/auth.service';
@@ -14,11 +15,25 @@ import { SignalingMessage, WsService } from '../../services/ws.service';
 import { WebrtcService } from '../../services/webrtc.service';
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'knocking' | 'in-call' | 'rejected' | 'error';
+type LobbyError =
+  | { kind: 'denied' }
+  | { kind: 'no-devices' }
+  | { kind: 'video-denied-but-audio-ok' }
+  | { kind: 'unknown'; message: string };
 
 @Component({
   selector: 'app-room',
   standalone: true,
-  imports: [FormsModule, RouterLink, ControlsBarComponent, KnockSpinnerComponent, LobbyPreviewComponent, TileComponent, WaitingRoomPanelComponent],
+  imports: [
+    FormsModule,
+    RouterLink,
+    ControlsBarComponent,
+    KnockSpinnerComponent,
+    LobbyPreviewComponent,
+    RecordingBannerComponent,
+    TileComponent,
+    WaitingRoomPanelComponent,
+  ],
   templateUrl: './room.page.html',
   styleUrl: './room.page.scss',
 })
@@ -42,17 +57,25 @@ export class RoomPage implements OnDestroy {
   readonly videoInputs = signal<MediaDeviceInfo[]>([]);
   readonly selectedAudioId = signal('');
   readonly selectedVideoId = signal('');
-  readonly permissionError = signal<MediaError['code'] | null>(null);
+  readonly permissionError = signal<LobbyError | null>(null);
+  readonly hasBlockingLobbyError = computed(() => {
+    const error = this.permissionError();
+    return !!error && error.kind !== 'video-denied-but-audio-ok';
+  });
   readonly micLevel = signal<Signal<number>>(signal(0).asReadonly());
   readonly error = signal<string | null>(null);
   readonly status = signal('');
+  readonly deviceFailureNotice = signal<string | null>(null);
   readonly myId = signal<string | null>(null);
   readonly hostClientId = signal<string | null>(null);
   readonly isOwner = signal(false);
+  readonly isHost = computed(() => this.isOwner() || (!!this.myId() && this.hostClientId() === this.myId()));
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
   readonly peers = this.webrtc.peerList;
   readonly showPeerWarning = computed(() => this.peers().length >= 6 && !this.warningDismissed());
+  readonly hostRecording = signal(false);
+  readonly recordingStartedAt = signal<number | null>(null);
   private readonly callStartMs = signal<number | null>(null);
   private readonly clockTick = signal(0);
   private clockInterval: ReturnType<typeof setInterval> | null = null;
@@ -73,7 +96,7 @@ export class RoomPage implements OnDestroy {
       window.__meetDebug = {
         localStream: this.media.localStream(),
         peers: this.peers().map((peer) => ({ id: peer.id, name: peer.name, state: peer.connectionState })),
-        isRecording: this.recorder.isRecording(),
+        isRecording: this.recorder.isRecording() || this.hostRecording(),
         screenShareAttempts: this.media.screenShareAttempts(),
       };
     });
@@ -192,15 +215,18 @@ export class RoomPage implements OnDestroy {
   }
 
   async toggleRecording(): Promise<void> {
+    if (!this.isHost()) return;
     const localStream = this.media.localStream();
     if (!localStream) return;
     try {
       if (!this.recorder.isRecording()) {
         this.recorder.start(localStream, this.remoteStreams());
+        this.ws.send({ type: 'recording-state', state: 'started' });
         this.status.set('Recording (audio mix: you + admitted peers).');
         return;
       }
       const blob = await this.recorder.stop();
+      this.ws.send({ type: 'recording-state', state: 'stopped' });
       this.status.set(`Uploading recording (${Math.round(blob.size / 1024)} KB)...`);
       const upload = await this.recorder.upload(blob, this.roomId);
       this.status.set(`Recording saved: ${upload.file}`);
@@ -289,6 +315,16 @@ export class RoomPage implements OnDestroy {
       this.webrtc.updatePeer(msg.clientId, { micEnabled: msg.mic, camEnabled: msg.cam });
       return;
     }
+    if (msg.type === 'recording-started') {
+      this.hostRecording.set(true);
+      this.recordingStartedAt.set(Date.now());
+      return;
+    }
+    if (msg.type === 'recording-stopped') {
+      this.hostRecording.set(false);
+      this.recordingStartedAt.set(null);
+      return;
+    }
     if (msg.type === 'peer-left') {
       this.recorder.removePeerStream(msg.clientId);
       this.webrtc.removePeer(msg.clientId);
@@ -328,12 +364,11 @@ export class RoomPage implements OnDestroy {
     this.error.set(null);
     try {
       const stream = await this.media.preflight({ audio: true, video: this.cameraRequested() });
+      this.attachLocalTrackFailureHandlers(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
       await this.refreshDevices();
     } catch (err) {
-      const mediaError = err as MediaError;
-      this.permissionError.set(mediaError.code || 'unknown');
-      this.error.set(mediaError.message || 'Media access failed');
+      await this.handleLobbyMediaError(err, this.cameraRequested());
     }
   }
 
@@ -347,13 +382,34 @@ export class RoomPage implements OnDestroy {
         videoDeviceId: this.selectedVideoId() || undefined,
         video: this.cameraRequested(),
       });
+      this.attachLocalTrackFailureHandlers(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
       await this.refreshDevices();
     } catch (err) {
-      const mediaError = err as MediaError;
-      this.permissionError.set(mediaError.code || 'unknown');
-      this.error.set(mediaError.message || 'Media access failed');
+      await this.handleLobbyMediaError(err, this.cameraRequested());
     }
+  }
+
+  private async handleLobbyMediaError(err: unknown, videoRequested: boolean): Promise<void> {
+    const mediaError = err as MediaError;
+    if (videoRequested && mediaError.code === 'denied') {
+      try {
+        const stream = await this.media.preflight({ audio: true, video: false });
+        this.cameraRequested.set(false);
+        this.permissionError.set({ kind: 'video-denied-but-audio-ok' });
+        this.error.set(null);
+        this.attachLocalTrackFailureHandlers(stream);
+        this.micLevel.set(this.media.getMicLevel(stream));
+        await this.refreshDevices();
+        return;
+      } catch (fallbackErr) {
+        this.permissionError.set(toLobbyError(fallbackErr as MediaError));
+        this.error.set((fallbackErr as MediaError).message || 'Media access failed');
+        return;
+      }
+    }
+    this.permissionError.set(toLobbyError(mediaError));
+    this.error.set(mediaError.message || 'Media access failed');
   }
 
   private async refreshDevices(): Promise<void> {
@@ -377,7 +433,26 @@ export class RoomPage implements OnDestroy {
     this.isOwner.set(false);
     this.myId.set(null);
     this.hostClientId.set(null);
+    this.deviceFailureNotice.set(null);
+    this.hostRecording.set(false);
+    this.recordingStartedAt.set(null);
     this.stopClock();
+  }
+
+  private attachLocalTrackFailureHandlers(stream: MediaStream): void {
+    const audioTrack = stream.getAudioTracks()[0];
+    if (!audioTrack) return;
+    const onFailure = () => this.handleLocalAudioFailure();
+    audioTrack.onended = onFailure;
+    audioTrack.onmute = onFailure;
+  }
+
+  private handleLocalAudioFailure(): void {
+    if (this.state() !== 'in-call') return;
+    this.media.micOn.set(false);
+    this.updateLocalMediaState();
+    this.broadcastMediaState(false, this.media.cameraOn());
+    this.deviceFailureNotice.set('Microphone disconnected. Please refresh to rejoin.');
   }
 
   private broadcastMediaState(mic: boolean, cam: boolean): void {
@@ -407,6 +482,12 @@ export class RoomPage implements OnDestroy {
 
 function pad(value: number): string {
   return String(value).padStart(2, '0');
+}
+
+function toLobbyError(error: MediaError): LobbyError {
+  if (error.code === 'denied') return { kind: 'denied' };
+  if (error.code === 'no-devices') return { kind: 'no-devices' };
+  return { kind: 'unknown', message: error.message || 'Media access failed' };
 }
 
 declare global {

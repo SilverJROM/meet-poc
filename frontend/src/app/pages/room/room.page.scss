@@ -25,20 +25,42 @@ h1 {
   gap: 14px;
 }
 
-.permission-error {
+.permission-error,
+.lobby-error,
+.lobby-warning {
   display: grid;
   gap: 10px;
-  border: 1px solid rgba(220, 38, 38, 0.5);
   border-radius: 8px;
-  background: rgba(220, 38, 38, 0.12);
-  color: #fecaca;
   padding: 12px;
 }
 
-.permission-error p {
+.lobby-error {
+  border: 1px solid rgba(220, 38, 38, 0.5);
+  background: rgba(220, 38, 38, 0.12);
+  color: #fecaca;
+}
+
+.lobby-warning {
+  border: 1px solid rgba(234, 179, 8, 0.45);
+  background: rgba(234, 179, 8, 0.12);
+  color: #fde68a;
+}
+
+.lobby-error h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.permission-error p,
+.lobby-error p,
+.lobby-warning p {
   margin: 0;
   font-size: 13px;
   line-height: 1.4;
+}
+
+.disabled-lobby {
+  opacity: 0.72;
 }
 
 .check-row {
@@ -98,6 +120,27 @@ h1 {
   background: rgba(234, 179, 8, 0.12);
   color: #fde68a;
   padding: 10px 12px;
+}
+
+.device-notice {
+  margin: 12px 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(220, 38, 38, 0.45);
+  border-radius: 8px;
+  background: rgba(220, 38, 38, 0.12);
+  color: #fecaca;
+  padding: 10px 12px;
+}
+
+.device-notice button {
+  border: 0;
+  background: transparent;
+  color: #fee2e2;
+  cursor: pointer;
+  font-weight: 700;
 }
 
 .peer-warning button {

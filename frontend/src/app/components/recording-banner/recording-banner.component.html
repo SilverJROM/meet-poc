@@ -1,0 +1,7 @@
+@if (recording()) {
+  <div class="recording-banner" role="status" aria-live="polite">
+    <span class="dot"></span>
+    <span class="label">Host is recording</span>
+    <span class="duration">{{ formatted() }}</span>
+  </div>
+}

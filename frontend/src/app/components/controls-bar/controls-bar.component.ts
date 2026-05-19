@@ -4,6 +4,7 @@ import {
   callOutline,
   desktopOutline,
   ellipseOutline,
+  ellipse,
   micOffOutline,
   micOutline,
   videocamOffOutline,
@@ -24,6 +25,7 @@ export class ControlsBarComponent {
   readonly screenOn = input.required<boolean>();
   readonly recording = input.required<boolean>();
   readonly uploading = input(false);
+  readonly isHost = input(false);
   readonly mute = output<void>();
   readonly camera = output<void>();
   readonly screen = output<void>();
@@ -34,6 +36,7 @@ export class ControlsBarComponent {
     addIcons({
       callOutline,
       desktopOutline,
+      ellipse,
       ellipseOutline,
       micOffOutline,
       micOutline,
