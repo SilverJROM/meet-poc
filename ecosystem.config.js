@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: 'meet-poc',
-      script: 'server.js',
+      script: 'legacy-poc/server.js',
       cwd: __dirname,
       env: {
         PORT: 4700,
@@ -13,6 +13,23 @@ module.exports = {
       max_memory_restart: '256M',
       out_file: './logs/out.log',
       error_file: './logs/error.log',
+      merge_logs: true,
+      time: true,
+    },
+    {
+      name: 'meet-poc-be',
+      script: 'npx',
+      args: 'tsx watch backend/src/server.ts',
+      cwd: __dirname,
+      env: {
+        PORT: 4720,
+        NODE_ENV: 'development',
+      },
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '256M',
+      out_file: './logs/meet-poc-be-out.log',
+      error_file: './logs/meet-poc-be-error.log',
       merge_logs: true,
       time: true,
     },

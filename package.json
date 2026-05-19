@@ -1,0 +1,15 @@
+{
+  "name": "meet-poc-rebuild",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "backend"
+  ],
+  "scripts": {
+    "build": "npm run build -w backend",
+    "dev:backend": "npm run dev -w backend",
+    "seed": "npm run seed -w backend",
+    "migrate-from-json": "npm run migrate-from-json -w backend",
+    "test": "npm test -w backend"
+  }
+}

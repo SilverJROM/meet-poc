@@ -8,7 +8,7 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 4700;
 const ROOT = __dirname;
 const DATA_FILE = path.join(ROOT, 'data.json');
-const RECORDINGS_DIR = path.join(ROOT, 'recordings');
+const RECORDINGS_DIR = path.join(ROOT, '..', 'recordings');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
 
