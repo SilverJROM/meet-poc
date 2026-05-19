@@ -36,6 +36,13 @@ h3 {
   text-align: center;
 }
 
+.filter-note {
+  margin: -4px 0 14px;
+  color: var(--muted-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
 .recording-list {
   list-style: none;
   display: grid;

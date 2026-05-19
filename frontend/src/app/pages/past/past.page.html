@@ -1,0 +1,42 @@
+<section class="panel past-page">
+  <div class="section-head">
+    <h2>Past meetings</h2>
+    <span class="muted">{{ total() }} total</span>
+  </div>
+
+  @if (error()) {
+    <p class="error-text">{{ error() }}</p>
+  }
+
+  @if (loading()) {
+    <p class="empty">Loading past meetings...</p>
+  } @else if (sessions().length === 0) {
+    <p class="empty">No past meetings yet.</p>
+  } @else {
+    <div class="session-table" role="table" aria-label="Past meetings">
+      <div class="session-row header" role="row">
+        <span role="columnheader">Room</span>
+        <span role="columnheader">Started</span>
+        <span role="columnheader">Duration</span>
+        <span role="columnheader">Participants</span>
+        <span role="columnheader">Recordings</span>
+      </div>
+      @for (session of sessions(); track session.id) {
+        <div class="session-row" role="row">
+          <span role="cell">{{ session.roomTitle }}</span>
+          <span role="cell">{{ session.startedAtIso | date: 'medium' }}</span>
+          <span role="cell">{{ duration(session) }}</span>
+          <span role="cell">{{ participantsLabel(session) }}</span>
+          <span role="cell">
+            @if ((session.recordingsCount || 0) > 0) {
+              <a [routerLink]="['/app/recordings']" [queryParams]="{ session: session.id }">{{ session.recordingsCount }} recording(s)</a>
+            } @else {
+              0
+            }
+          </span>
+        </div>
+      }
+    </div>
+    <app-pagination [page]="page()" [pageSize]="pageSize()" [total]="total()" (pageChange)="goToPage($event)"></app-pagination>
+  }
+</section>

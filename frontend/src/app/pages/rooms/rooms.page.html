@@ -26,7 +26,7 @@
   <div class="panel rooms-panel">
     <div class="section-head">
       <h2>Your rooms</h2>
-      <span class="muted">{{ rooms().length }} total</span>
+      <span class="muted">{{ total() }} total</span>
     </div>
 
     @if (loading()) {
@@ -56,6 +56,7 @@
           </li>
         }
       </ul>
+      <app-pagination [page]="page()" [pageSize]="pageSize()" [total]="total()" (pageChange)="goToPage($event)"></app-pagination>
     }
 
     <div class="copy-status" role="status">{{ copyStatus() || '' }}</div>

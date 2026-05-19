@@ -1,0 +1,31 @@
+.pagination {
+  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.pagination button {
+  min-width: 76px;
+  min-height: 48px;
+}
+
+.pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+@media (max-width: 560px) {
+  .pagination {
+    justify-content: stretch;
+  }
+
+  .pagination button,
+  .pagination span {
+    flex: 1;
+    text-align: center;
+  }
+}

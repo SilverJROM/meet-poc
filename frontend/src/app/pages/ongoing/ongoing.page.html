@@ -1,0 +1,29 @@
+<section class="panel ongoing-page">
+  <div class="section-head">
+    <h2>Ongoing meetings</h2>
+    <span class="muted">{{ sessions().length }} active</span>
+  </div>
+
+  @if (error()) {
+    <p class="error-text">{{ error() }}</p>
+  }
+
+  @if (loading()) {
+    <p class="empty">Loading ongoing meetings...</p>
+  } @else if (sessions().length === 0) {
+    <p class="empty">No meetings in progress.</p>
+  } @else {
+    <ul class="session-list">
+      @for (session of sessions(); track session.id) {
+        <li class="session-row">
+          <div class="session-main">
+            <h3>{{ session.roomTitle }}</h3>
+            <p>{{ startedAgo(session) }} · {{ participantsLabel(session) }}</p>
+            <span>{{ session.hostEmail }}</span>
+          </div>
+          <a class="primary-btn" [routerLink]="['/room', session.roomId]">Join meeting</a>
+        </li>
+      }
+    </ul>
+  }
+</section>

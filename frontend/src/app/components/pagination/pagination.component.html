@@ -1,0 +1,5 @@
+<nav class="pagination" aria-label="Pagination">
+  <button type="button" class="secondary-btn" [disabled]="previousDisabled" (click)="previous()">Prev</button>
+  <span>Page {{ page }} of {{ totalPages }}</span>
+  <button type="button" class="secondary-btn" [disabled]="nextDisabled" (click)="next()">Next</button>
+</nav>

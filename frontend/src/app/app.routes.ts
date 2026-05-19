@@ -17,8 +17,8 @@ export const routes: Routes = [
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'rooms' },
       { path: 'rooms', loadComponent: () => import('./pages/rooms/rooms.page').then((m) => m.RoomsPage) },
-      { path: 'ongoing', loadComponent: () => import('./pages/ongoing-stub/ongoing-stub.page').then((m) => m.OngoingStubPage) },
-      { path: 'past', loadComponent: () => import('./pages/past-stub/past-stub.page').then((m) => m.PastStubPage) },
+      { path: 'ongoing', loadComponent: () => import('./pages/ongoing/ongoing.page').then((m) => m.OngoingPage) },
+      { path: 'past', loadComponent: () => import('./pages/past/past.page').then((m) => m.PastPage) },
       { path: 'recordings', loadComponent: () => import('./pages/recordings/recordings.page').then((m) => m.RecordingsPage) },
       { path: 'transcripts', loadComponent: () => import('./pages/transcripts-stub/transcripts-stub.page').then((m) => m.TranscriptsStubPage) },
       { path: 'settings', loadComponent: () => import('./pages/settings-stub/settings-stub.page').then((m) => m.SettingsStubPage) },

@@ -1,8 +1,12 @@
 <section class="panel recordings-page">
   <div class="section-head">
     <h2>Recordings</h2>
-    <span class="muted">{{ recordings().length }} total</span>
+    <span class="muted">{{ total() }} total</span>
   </div>
+
+  @if (sessionId()) {
+    <p class="filter-note">Filtered to meeting session {{ sessionId() }}</p>
+  }
 
   @if (loading()) {
     <p class="empty">Loading recordings...</p>
@@ -21,5 +25,6 @@
         </li>
       }
     </ul>
+    <app-pagination [page]="page()" [pageSize]="pageSize()" [total]="total()" (pageChange)="goToPage($event)"></app-pagination>
   }
 </section>

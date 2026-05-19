@@ -9,13 +9,27 @@ export type Room = {
   createdAt: number;
 };
 
+export type PaginatedRooms = {
+  rooms: Room[];
+  page: number;
+  pageSize: number;
+  total: number;
+};
+
 @Injectable({ providedIn: 'root' })
 export class RoomsService {
   private readonly http = inject(HttpClient);
 
-  async list(): Promise<Room[]> {
-    const res = await firstValueFrom(this.http.get<{ rooms: Room[] }>('/api/rooms'));
-    return res.rooms;
+  async list(options: { page: number; pageSize: number }): Promise<PaginatedRooms> {
+    const res = await firstValueFrom(
+      this.http.get<PaginatedRooms>('/api/rooms', {
+        params: {
+          page: String(options.page),
+          pageSize: String(options.pageSize),
+        },
+      }),
+    );
+    return res;
   }
 
   async create(title: string): Promise<Room> {
