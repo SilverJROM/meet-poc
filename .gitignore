@@ -2,6 +2,9 @@ node_modules/
 recordings/
 logs/
 data.json
+data/
+backend/dist/
+backend/node_modules/
 INITIAL_PASSWORD.txt
 *.log
 .DS_Store
