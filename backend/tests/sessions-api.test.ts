@@ -1,6 +1,9 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import request from 'supertest';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type Database from 'better-sqlite3';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
@@ -8,6 +11,15 @@ import { createRoom } from '../src/modules/rooms/store.js';
 import { openSession } from '../src/modules/sessions/store.js';
 import { createApp } from '../src/server.js';
 import { createTestDb } from './helpers.js';
+
+const recordingDirs: string[] = [];
+
+function createRecordingDir(): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'meet-poc-session-recordings-'));
+  recordingDirs.push(dir);
+  process.env.MEET_RECORDINGS_DIR = dir;
+  return dir;
+}
 
 function insertUser(db: Database.Database, email: string): void {
   db.prepare('INSERT INTO users (email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
@@ -33,6 +45,13 @@ function insertEndedSession(
   ).run(id, roomId, hostEmail, startedAt, endedAt, reason, admittedPeak);
   return id;
 }
+
+afterEach(() => {
+  delete process.env.MEET_RECORDINGS_DIR;
+  for (const dir of recordingDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 describe('meeting sessions API', () => {
   it('S1.6 lists only active sessions for the authenticated owner', async () => {
@@ -115,5 +134,30 @@ describe('meeting sessions API', () => {
     expect(page1.body.sessions).toHaveLength(20);
     expect(page2.body).toMatchObject({ page: 2, pageSize: 20, total: 25 });
     expect(page2.body.sessions).toHaveLength(5);
+  });
+
+  it('S4.3 includes recordingsCount on ended session rows', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Archive', 'jrom@silverjrom.app', db);
+    const now = Date.now();
+    const sessionId = insertEndedSession(db, room.id, 'jrom@silverjrom.app', now - 60000, now, 2);
+    const dir = createRecordingDir();
+    fs.writeFileSync(path.join(dir, `2026-05-19T03-00-00-000Z_${sessionId}_${room.id}_Archive_111111.webm`), Buffer.alloc(5));
+    fs.writeFileSync(path.join(dir, `2026-05-19T03-01-00-000Z_${sessionId}_${room.id}_Archive_222222.webm`), Buffer.alloc(6));
+    fs.writeFileSync(path.join(dir, `2026-05-19T03-02-00-000Z_${room.id}_Archive_333333.webm`), Buffer.alloc(7));
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    const res = await request(createApp(db))
+      .get('/api/meeting-sessions?status=ended')
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(res.body.sessions).toHaveLength(1);
+    expect(res.body.sessions[0]).toMatchObject({
+      id: sessionId,
+      roomTitle: 'Archive',
+      recordingsCount: 2,
+    });
   });
 });

@@ -2,7 +2,22 @@ import { Router } from 'express';
 import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
-import { createRoom, deleteRoom, getRoom, isOwnerOf, listOwnedRooms } from './store.js';
+import { createRoom, deleteRoom, getRoom, isOwnerOf, listOwnedRooms, listOwnedRoomsPage } from './store.js';
+
+function hasPaginationQuery(query: Record<string, unknown>): boolean {
+  return query.page != null || query.pageSize != null;
+}
+
+function parsePagination(query: Record<string, unknown>): { page: number; pageSize: number } {
+  const page = parsePositiveInt(query.page, 1);
+  const pageSize = Math.min(parsePositiveInt(query.pageSize, 20), 100);
+  return { page, pageSize };
+}
+
+function parsePositiveInt(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : fallback;
+}
 
 export function roomsRouter(database: Database.Database = getDb()): Router {
   const router = Router();
@@ -16,6 +31,11 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
 
   router.get('/rooms', auth, (req, res) => {
     const authed = req as AuthenticatedRequest;
+    if (hasPaginationQuery(req.query)) {
+      const { page, pageSize } = parsePagination(req.query);
+      const result = listOwnedRoomsPage(authed.user.email, page, pageSize, database);
+      return res.json({ rooms: result.rooms, page, pageSize, total: result.total });
+    }
     return res.json({ rooms: listOwnedRooms(authed.user.email, database) });
   });
 

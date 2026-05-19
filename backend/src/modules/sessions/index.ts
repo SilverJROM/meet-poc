@@ -2,6 +2,7 @@ import { Router } from 'express';
 import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
+import { countRecordingsBySessionForUser } from '../recording/index.js';
 import { listActiveForOwner, listEndedForOwner, type MeetingSession } from './store.js';
 
 function parsePositiveInt(value: unknown, fallback: number): number {
@@ -10,7 +11,7 @@ function parsePositiveInt(value: unknown, fallback: number): number {
   return parsed;
 }
 
-function mapSession(session: MeetingSession, includeEndedFields = false): Record<string, unknown> {
+function mapSession(session: MeetingSession, includeEndedFields = false, recordingsCount = 0): Record<string, unknown> {
   const mapped: Record<string, unknown> = {
     id: session.id,
     roomId: session.roomId,
@@ -23,6 +24,7 @@ function mapSession(session: MeetingSession, includeEndedFields = false): Record
     mapped.endedAtIso = new Date(session.endedAt).toISOString();
     mapped.endedReason = session.endedReason || undefined;
     mapped.durationMs = session.endedAt - session.startedAt;
+    mapped.recordingsCount = recordingsCount;
   }
   return mapped;
 }
@@ -48,8 +50,9 @@ export function sessionsRouter(database: Database.Database = getDb()): Router {
       const requestedPageSize = parsePositiveInt(req.query.pageSize, 20);
       const pageSize = Math.min(requestedPageSize, 100);
       const result = listEndedForOwner(authed.user.email, page, pageSize, database);
+      const recordingCounts = countRecordingsBySessionForUser(authed.user.email, database);
       return res.json({
-        sessions: result.rows.map((session) => mapSession(session, true)),
+        sessions: result.rows.map((session) => mapSession(session, true, recordingCounts.get(session.id) || 0)),
         page,
         pageSize,
         total: result.total,

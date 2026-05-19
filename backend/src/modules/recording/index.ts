@@ -67,7 +67,14 @@ export function recordingRouter(database: Database.Database = getDb()): express.
   router.get('/api/recordings', requireAuth(database), (req, res) => {
     ensureRecordingsDir();
     const authReq = req as AuthenticatedRequest;
-    res.json({ recordings: listRecordingsForUser(authReq.user.email, database) });
+    const sessionId = typeof req.query.session === 'string' ? req.query.session : null;
+    if (hasPaginationQuery(req.query)) {
+      const { page, pageSize } = parsePagination(req.query);
+      const result = listRecordingsPageForUser(authReq.user.email, page, pageSize, database, sessionId);
+      return res.json({ recordings: result.recordings, page, pageSize, total: result.total });
+    }
+    const recordings = listRecordingsForUser(authReq.user.email, database, sessionId);
+    res.json({ recordings });
   });
 
   router.get('/api/recordings/:filename/download', requireAuth(database), (req, res) => {
@@ -88,7 +95,26 @@ export function recordingRouter(database: Database.Database = getDb()): express.
   return router;
 }
 
-export function listRecordingsForUser(email: string, database: Database.Database = getDb()): RecordingEntry[] {
+function hasPaginationQuery(query: Record<string, unknown>): boolean {
+  return query.page != null || query.pageSize != null;
+}
+
+function parsePagination(query: Record<string, unknown>): { page: number; pageSize: number } {
+  const page = parsePositiveInt(query.page, 1);
+  const pageSize = Math.min(parsePositiveInt(query.pageSize, 20), 100);
+  return { page, pageSize };
+}
+
+function parsePositiveInt(value: unknown, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 1 ? parsed : fallback;
+}
+
+export function listRecordingsForUser(
+  email: string,
+  database: Database.Database = getDb(),
+  sessionId: string | null = null,
+): RecordingEntry[] {
   const dir = ensureRecordingsDir();
   return fs
     .readdirSync(dir)
@@ -96,6 +122,7 @@ export function listRecordingsForUser(email: string, database: Database.Database
     .map((filename) => {
       const parsed = parseRecordingFilename(filename);
       if (!parsed) return null;
+      if (sessionId && parsed.sessionId !== sessionId) return null;
       const room = getRoom(parsed.roomId, database);
       if (!room || !isOwnerOf(room.id, email, database)) return null;
       const stat = fs.statSync(path.join(dir, filename));
@@ -112,6 +139,30 @@ export function listRecordingsForUser(email: string, database: Database.Database
     .filter((entry): entry is RecordingEntry & { mtimeMs: number } => !!entry)
     .sort((a, b) => b.mtimeMs - a.mtimeMs)
     .map(({ mtimeMs: _mtimeMs, ...entry }) => entry);
+}
+
+export function listRecordingsPageForUser(
+  email: string,
+  page: number,
+  pageSize: number,
+  database: Database.Database = getDb(),
+  sessionId: string | null = null,
+): { recordings: RecordingEntry[]; total: number } {
+  const recordings = listRecordingsForUser(email, database, sessionId);
+  const offset = (page - 1) * pageSize;
+  return { recordings: recordings.slice(offset, offset + pageSize), total: recordings.length };
+}
+
+export function countRecordingsBySessionForUser(
+  email: string,
+  database: Database.Database = getDb(),
+): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const recording of listRecordingsForUser(email, database)) {
+    if (!recording.sessionId) continue;
+    counts.set(recording.sessionId, (counts.get(recording.sessionId) || 0) + 1);
+  }
+  return counts;
 }
 
 export function parseRecordingFilename(filename: string): { sessionId: string | null; roomId: string } | null {

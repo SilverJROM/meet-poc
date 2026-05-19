@@ -47,6 +47,23 @@ export function listOwnedRooms(email: string, database: Database.Database = getD
     .map((row) => toRoom(row as RoomRow));
 }
 
+export function listOwnedRoomsPage(
+  email: string,
+  page: number,
+  pageSize: number,
+  database: Database.Database = getDb(),
+): { rooms: Room[]; total: number } {
+  const offset = (page - 1) * pageSize;
+  const totalRow = database
+    .prepare('SELECT COUNT(*) AS total FROM rooms WHERE owner_email = ?')
+    .get(email) as { total: number };
+  const rooms = database
+    .prepare('SELECT id, title, owner_email, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
+    .all(email, pageSize, offset)
+    .map((row) => toRoom(row as RoomRow));
+  return { rooms, total: totalRow.total };
+}
+
 export function createRoom(titleInput: unknown, email: string, database: Database.Database = getDb()): Room {
   const title =
     String(titleInput || '').slice(0, 100).trim() || `Room ${new Date().toISOString().slice(0, 10)}`;

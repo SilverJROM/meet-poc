@@ -159,6 +159,33 @@ describe('recording API', () => {
     });
   });
 
+  it('S4.4 paginates recordings while preserving legacy list shape', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const dir = createRecordingDir();
+    const now = Date.now();
+    for (let i = 0; i < 25; i += 1) {
+      const filename = `2026-05-19T02-00-${String(i).padStart(2, '0')}-000Z_aaa111aaa111_Mine_${String(i).padStart(6, '0')}.webm`;
+      fs.writeFileSync(path.join(dir, filename), Buffer.alloc(i + 1));
+      fs.utimesSync(path.join(dir, filename), now / 1000 + i, now / 1000 + i);
+    }
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    const legacy = await request(app).get('/api/recordings').set('Cookie', cookie).expect(200);
+    const page1 = await request(app).get('/api/recordings?page=1&pageSize=20').set('Cookie', cookie).expect(200);
+    const page2 = await request(app).get('/api/recordings?page=2&pageSize=20').set('Cookie', cookie).expect(200);
+
+    expect(legacy.body).toEqual({ recordings: expect.any(Array) });
+    expect(legacy.body.recordings).toHaveLength(25);
+    expect(legacy.body.page).toBeUndefined();
+    expect(page1.body).toMatchObject({ page: 1, pageSize: 20, total: 25 });
+    expect(page1.body.recordings).toHaveLength(20);
+    expect(page2.body).toMatchObject({ page: 2, pageSize: 20, total: 25 });
+    expect(page2.body.recordings).toHaveLength(5);
+  });
+
   it('S5 backend download rejects a non-owned room recording', async () => {
     const db = createTestDb();
     seedUser(db);
