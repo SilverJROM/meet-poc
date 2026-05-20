@@ -11,7 +11,7 @@ Status legend: `OPEN` / `IN_BATCH` / `IMPLEMENTED` / `VERIFIED`
 | R-C-5 | Transcript download as subtitle-style `.txt` | FIXC4 | **VERIFIED** | batch-fixc4/independent-validation.md — FIXC4.1 PASS |
 | R-C-6 | Transcript delete independent of audio | FIXC4 | **VERIFIED** | batch-fixc4/independent-validation.md — FIXC4.2/4.3 PASS |
 | R-C-7 | Past-meetings delete = rooms-bulk-delete (no new UI) | FIXC4 | **VERIFIED** | existing rooms-bulk-delete coverage in backend suite |
-| R-C-8 | LLM provider abstraction (Claude sonnet / Codex spark / Ollama) | FIXC5 | OPEN | — |
+| R-C-8 | LLM provider abstraction (Claude sonnet / Codex spark / Ollama) | FIXC5 | **VERIFIED** | batch-fixc5/independent-validation.md — live /api/llm/health returns all-true |
 | R-C-9 | Settings UI for LLM default (star to set) | FIXC7 | OPEN | — |
 | R-C-10 | Ollama benchmark — top 3 by accuracy then speed | FIXC6 | OPEN | — |
 | R-C-11 | Question library CRUD | FIXC7 | OPEN | — |

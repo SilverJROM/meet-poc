@@ -56,3 +56,13 @@
 ## Halfway gate (4/8 batches, 7/13 requirements verified)
 
 R-C-1, R-C-2, R-C-3, R-C-4, R-C-5, R-C-6, R-C-7 all VERIFIED. Remaining: R-C-8 (LLM providers), R-C-9 (settings UI), R-C-10 (Ollama benchmark), R-C-11/12 (question library), R-C-13 (transcriber dropdown). Run 1 holds at 14 consecutive PASS.
+
+### FIXC5 — LLM provider abstraction — **VERIFIED PASS** (2026-05-20, codex wall time 11m 06s)
+
+- Branch: `fix/meet-fixc5-llm-providers`
+- Commits: 725e6dd feat: add llm provider abstraction (17 files, 880+/2-)
+- Backend: **81 passed / 1 skipped** (skip = `LLM_SMOKE=1`-gated real Ollama smoke)
+- Live `/api/llm/health`: `{"claude":true,"codex":true,"ollama":true}` against `https://voice.silverjrom.app/`
+- Run 1 regression: **58/58** (R8.1 → 15 consecutive)
+- R-C-8 → VERIFIED
+- See `batch-fixc5/independent-validation.md`
