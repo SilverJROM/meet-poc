@@ -21,6 +21,7 @@ describe('signaling owner auto-admit', () => {
     expect(admitted).toEqual({
       type: 'admitted',
       clientId: expect.any(String),
+      participantId: expect.any(String),
       peers: [],
       roomTitle: 'Team sync',
       isOwner: true,

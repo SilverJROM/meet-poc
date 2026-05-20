@@ -193,8 +193,10 @@ export class RoomPage implements OnDestroy {
           const audio = peer.stream?.getAudioTracks()[0];
           return {
             id: peer.id,
+            participantId: peer.participantId,
             name: peer.name,
             state: peer.connectionState,
+            reconnecting: peer.reconnecting,
             audioMuted: audio?.muted,
             audioReadyState: audio?.readyState,
             audioEnabled: audio?.enabled,
@@ -747,6 +749,7 @@ export class RoomPage implements OnDestroy {
           this.webrtc.resetRemotePeers();
         }
         this.webrtc.setLocalPeer(msg.clientId, this.displayName().trim() || 'Anon', {
+          participantId: msg.participantId,
           isHost: msg.isOwner,
           micEnabled: this.media.micOn(),
           camEnabled: this.media.cameraOn(),
@@ -758,7 +761,7 @@ export class RoomPage implements OnDestroy {
       if (!this.callStartMs()) this.startClock();
       this.status.set(wasInCall ? 'Reconnected to signaling. Syncing peers...' : `You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
       for (const peer of msg.peers) {
-        await this.webrtc.addPeer(peer.id, peer.name, true, { isHost: !!peer.host || peer.id === this.hostClientId() });
+        await this.webrtc.addPeer(peer.id, peer.name, true, { participantId: peer.participantId, isHost: !!peer.host || peer.id === this.hostClientId() });
         await this.drainPendingSignals(peer.id);
       }
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
@@ -784,7 +787,7 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-joined') {
       this.status.set(`${msg.name} joined.`);
-      await this.webrtc.addPeer(msg.clientId, msg.name, false, { isHost: !!msg.host || msg.clientId === this.hostClientId() });
+      await this.webrtc.addPeer(msg.clientId, msg.name, false, { participantId: msg.participantId, isHost: !!msg.host || msg.clientId === this.hostClientId() });
       this.recorder.notifyParticipantJoined({
         clientId: msg.clientId,
         displayName: msg.name,
@@ -802,7 +805,7 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-resumed') {
       this.status.set(`${msg.name} reconnected.`);
-      await this.webrtc.resumePeer(msg.oldClientId, msg.clientId, msg.name, false, { isHost: !!msg.host || msg.clientId === this.hostClientId() });
+      await this.webrtc.resumePeer(msg.oldClientId, msg.clientId, msg.name, false, { participantId: msg.participantId, isHost: !!msg.host || msg.clientId === this.hostClientId() });
       const queued = this.pendingSignals.get(msg.oldClientId);
       if (queued?.length) {
         this.pendingSignals.delete(msg.oldClientId);
@@ -1556,8 +1559,10 @@ declare global {
       localStream: MediaStream | null;
       peers: {
         id: string;
+        participantId: string;
         name: string;
         state: string;
+        reconnecting: boolean;
         audioMuted?: boolean;
         audioReadyState?: MediaStreamTrackState;
         audioEnabled?: boolean;

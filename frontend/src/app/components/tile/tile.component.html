@@ -5,6 +5,7 @@
   [class.share-main-tile]="variant() === 'share-main'"
   [attr.data-peer]="peer().id"
   [attr.data-state]="peer().connectionState"
+  [attr.data-reconnecting]="peer().reconnecting"
   [attr.data-host]="peer().isHost"
   [attr.data-screen-on]="peer().screenOn"
 >
@@ -35,7 +36,7 @@
       </div>
       <div class="bottom-row">
         <span class="name-label">{{ peer().name }}</span>
-        <span class="state">{{ peer().connectionState }}</span>
+        <span class="state">{{ peer().reconnecting ? 'Reconnecting…' : peer().connectionState }}</span>
       </div>
     </div>
   </div>

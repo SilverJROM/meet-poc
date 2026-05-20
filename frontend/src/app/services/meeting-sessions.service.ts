@@ -40,6 +40,7 @@ export type DiagnosticsTrackInfo = {
 
 export type DiagnosticsPeerSample = {
   id: string;
+  participantId?: string;
   name: string;
   isLocal: boolean;
   isHost: boolean;
@@ -60,6 +61,7 @@ export type DiagnosticsPeerSample = {
   screenOn: boolean;
   outboundAudio: DiagnosticsTrackInfo;
   outboundVideo: DiagnosticsTrackInfo;
+  reconnecting?: boolean;
   updatedAt: number;
 };
 

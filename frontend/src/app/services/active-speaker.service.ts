@@ -78,6 +78,7 @@ export class ActiveSpeakerService {
     this.remove(id);
     this.add({
       id,
+      participantId: id,
       stream,
       pc: null,
       name: id,
@@ -98,6 +99,8 @@ export class ActiveSpeakerService {
       micEnabled: true,
       camEnabled: false,
       screenOn: false,
+      reconnecting: false,
+      reconnectingSince: null,
     });
     this.start();
   }

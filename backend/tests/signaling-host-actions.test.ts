@@ -17,6 +17,7 @@ type SessionRow = {
 type JoinedPeer = {
   ws: WebSocket;
   clientId: string;
+  participantId: string;
 };
 
 function sessionRow(db: Database.Database, roomId: string): SessionRow {
@@ -67,7 +68,7 @@ async function joinOwner(url: string, cookie: string, roomId: string): Promise<J
   const ws = await connectWs(url, cookie);
   ws.send(JSON.stringify({ type: 'join', room: roomId, name: 'Owner' }));
   const admitted = await nextMessage(ws, (msg) => msg.type === 'admitted');
-  return { ws, clientId: String(admitted.clientId) };
+  return { ws, clientId: String(admitted.clientId), participantId: String(admitted.participantId) };
 }
 
 async function joinAndAdmitGuest(owner: WebSocket, url: string, roomId: string, name: string): Promise<JoinedPeer> {
@@ -78,7 +79,7 @@ async function joinAndAdmitGuest(owner: WebSocket, url: string, roomId: string, 
   owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
   const admitted = await nextMessage(ws, (msg) => msg.type === 'admitted');
   await nextMessage(owner, (msg) => msg.type === 'peer-joined' && msg.clientId === knocking.clientId);
-  return { ws, clientId: String(admitted.clientId) };
+  return { ws, clientId: String(admitted.clientId), participantId: String(admitted.participantId) };
 }
 
 describe('signaling host authority', () => {
@@ -189,7 +190,7 @@ describe('signaling host authority', () => {
     const guest2PeerLeft = await guest2PeerLeftPromise;
 
     expect(removed).toEqual({ type: 'peer-removed', reason: 'removed by host' });
-    expect(ownerPeerLeft).toEqual({ type: 'peer-left', clientId: guest1.clientId });
+    expect(ownerPeerLeft).toEqual({ type: 'peer-left', clientId: guest1.clientId, participantId: guest1.participantId });
     expect(guest2PeerLeft).toEqual(ownerPeerLeft);
 
     await closeAndWait(guest2.ws);

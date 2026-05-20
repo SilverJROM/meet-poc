@@ -28,7 +28,7 @@ describe('signaling reconnect', () => {
     const guestTokenPromise = nextMessage(guest, (msg) => msg.type === 'reconnect-token');
     const peerJoinedPromise = nextMessage(owner, (msg) => msg.type === 'peer-joined');
     owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
-    await guestAdmittedPromise;
+    const guestAdmitted = await guestAdmittedPromise;
     const guestToken = await guestTokenPromise;
     await peerJoinedPromise;
     const peerReconnectingPromise = nextMessage(owner, (msg) => msg.type === 'peer-reconnecting' && msg.clientId === knocking.clientId);
@@ -53,10 +53,18 @@ describe('signaling reconnect', () => {
       roomTitle: 'Team sync',
       isOwner: false,
       hostClientId: ownerAdmitted.clientId,
-      peers: [{ id: ownerAdmitted.clientId, name: 'Owner', host: true }],
+      participantId: guestAdmitted.participantId,
+      peers: [{ id: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId, name: 'Owner', host: true }],
     });
     expect(resumedAdmitted.clientId).not.toBe(knocking.clientId);
-    expect(rejoin).toEqual({ type: 'peer-resumed', oldClientId: knocking.clientId, clientId: resumedAdmitted.clientId, name: 'Guest', host: false });
+    expect(rejoin).toEqual({
+      type: 'peer-resumed',
+      oldClientId: knocking.clientId,
+      clientId: resumedAdmitted.clientId,
+      participantId: guestAdmitted.participantId,
+      name: 'Guest',
+      host: false,
+    });
 
     closeWs(resumed);
     closeWs(owner);
@@ -88,6 +96,65 @@ describe('signaling reconnect', () => {
     await closeServer(server);
   });
 
+  it('resumes a tokened guest before the old socket close handler runs', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Guest race', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    const ownerTokenPromise = nextMessage(owner, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    await ownerTokenPromise;
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock');
+    const guestAdmittedPromise = nextMessage(guest, (msg) => msg.type === 'admitted');
+    const guestTokenPromise = nextMessage(guest, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
+    const guestAdmitted = await guestAdmittedPromise;
+    const guestToken = await guestTokenPromise;
+    await nextMessage(owner, (msg) => msg.type === 'peer-joined' && msg.clientId === knocking.clientId);
+
+    const oldClosed = new Promise<void>((resolve) => guest.once('close', () => resolve()));
+    const resumed = await connectWs(url);
+    resumed.send(
+      JSON.stringify({
+        type: 'join',
+        room: room.id,
+        name: 'Guest',
+        supportsReconnect: true,
+        reconnectToken: guestToken.token,
+      }),
+    );
+    const resumedAdmitted = await nextMessage(resumed, (msg) => msg.type === 'admitted');
+    const resumedNotice = await nextMessage(owner, (msg) => msg.type === 'peer-resumed');
+    await oldClosed;
+
+    expect(resumedAdmitted).toMatchObject({
+      type: 'admitted',
+      isOwner: false,
+      participantId: guestAdmitted.participantId,
+      hostClientId: ownerAdmitted.clientId,
+    });
+    expect(resumedNotice).toEqual({
+      type: 'peer-resumed',
+      oldClientId: knocking.clientId,
+      clientId: resumedAdmitted.clientId,
+      participantId: guestAdmitted.participantId,
+      name: 'Guest',
+      host: false,
+    });
+
+    closeWs(resumed);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
   it('auto-resumes a disconnected owner by ownership without knocking', async () => {
     const db = createTestDb();
     seedUser(db);
@@ -110,9 +177,58 @@ describe('signaling reconnect', () => {
       roomTitle: 'Owner reconnect',
       isOwner: true,
       peers: [],
+      participantId: firstAdmitted.participantId,
     });
     expect(admitted.clientId).not.toBe(firstAdmitted.clientId);
 
+    closeWs(resumed);
+    await closeServer(server);
+  });
+
+  it('resumes an owner by stable ownership before the old socket close handler runs', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Owner race', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    const ownerTokenPromise = nextMessage(owner, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const firstAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    await ownerTokenPromise;
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock');
+    owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
+    await nextMessage(guest, (msg) => msg.type === 'admitted');
+    await nextMessage(owner, (msg) => msg.type === 'peer-joined');
+
+    const oldClosed = new Promise<void>((resolve) => owner.once('close', () => resolve()));
+    const resumed = await connectWs(url, ownerCookie);
+    resumed.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const admitted = await nextMessage(resumed, (msg) => msg.type === 'admitted');
+    const resumedNotice = await nextMessage(guest, (msg) => msg.type === 'peer-resumed');
+    await oldClosed;
+
+    expect(admitted).toMatchObject({
+      type: 'admitted',
+      roomTitle: 'Owner race',
+      isOwner: true,
+      participantId: firstAdmitted.participantId,
+    });
+    expect(resumedNotice).toEqual({
+      type: 'peer-resumed',
+      oldClientId: firstAdmitted.clientId,
+      clientId: admitted.clientId,
+      participantId: firstAdmitted.participantId,
+      name: 'Owner',
+      host: true,
+    });
+
+    closeWs(guest);
     closeWs(resumed);
     await closeServer(server);
   });

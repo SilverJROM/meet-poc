@@ -27,7 +27,7 @@ describe('signaling peer-left', () => {
     closeWs(guest);
     const peerLeft = await nextMessage(owner, (msg) => msg.type === 'peer-left');
 
-    expect(peerLeft).toEqual({ type: 'peer-left', clientId: guestAdmitted.clientId });
+    expect(peerLeft).toEqual({ type: 'peer-left', clientId: guestAdmitted.clientId, participantId: guestAdmitted.participantId });
     closeWs(owner);
     await closeServer(server);
   });

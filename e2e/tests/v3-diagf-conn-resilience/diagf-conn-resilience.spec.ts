@@ -83,7 +83,7 @@ test('DR-22 transient recovering state keeps the tile and recovers without teard
   await page.evaluate((peerId) => window.__meetDebug?.markPeerReconnectingForTest?.(peerId), guestPeerId);
 
   const guestTile = page.locator('app-tile').filter({ hasText: 'guest-grace' });
-  await expect(guestTile.locator('.state')).toHaveText('disconnected');
+  await expect(guestTile.locator('.state')).toHaveText('Reconnecting…');
   await expect(guestTile.locator('.quality-pill')).toHaveText('weak');
   await expect(page.locator('app-tile')).toHaveCount(2);
   await page.screenshot({ path: `${SCREENSHOT_DIR}/grace-recovering.png`, fullPage: true });

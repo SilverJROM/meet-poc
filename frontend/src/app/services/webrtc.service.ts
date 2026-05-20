@@ -4,6 +4,7 @@ import type { DiagnosticsPeerSample, DiagnosticsTrackInfo } from './meeting-sess
 
 export type PeerState = {
   id: string;
+  participantId: string;
   name: string;
   pc: RTCPeerConnection | null;
   stream: MediaStream | null;
@@ -24,6 +25,8 @@ export type PeerState = {
   micEnabled: boolean;
   camEnabled: boolean;
   screenOn: boolean;
+  reconnecting: boolean;
+  reconnectingSince: number | null;
 };
 
 export type ConnectionQuality = 'good' | 'weak' | 'poor';
@@ -112,6 +115,7 @@ export class WebrtcService {
       .filter((peer) => !peer.isLocal)
       .map((peer) => ({
         id: peer.id,
+        participantId: peer.participantId,
         name: peer.name,
         connectionState: peer.connectionState,
         iceConnectionState: peer.iceConnectionState,
@@ -124,6 +128,7 @@ export class WebrtcService {
         rttMs: peer.rttMs,
         availableOutgoingBitrateKbps: peer.availableOutgoingBitrateKbps,
         audioOnlyReason: peer.audioOnlyReason,
+        reconnecting: peer.reconnecting,
         updatedAt: peer.updatedAt,
       })),
   );
@@ -133,11 +138,17 @@ export class WebrtcService {
     this.sendSignal = sendSignal;
   }
 
-  setLocalPeer(clientId: string, name: string, options: { isHost: boolean; micEnabled: boolean; camEnabled: boolean; screenOn: boolean }): void {
+  setLocalPeer(
+    clientId: string,
+    name: string,
+    options: { participantId?: string; isHost: boolean; micEnabled: boolean; camEnabled: boolean; screenOn: boolean },
+  ): void {
     this.localClientId = clientId;
+    const participantId = options.participantId || clientId;
     this.mutatePeers((peers) => {
       peers.set(clientId, {
         id: clientId,
+        participantId,
         name: `${name} (you)`,
         pc: null,
         stream: this.localStream,
@@ -158,6 +169,8 @@ export class WebrtcService {
         micEnabled: options.micEnabled,
         camEnabled: options.camEnabled,
         screenOn: options.screenOn,
+        reconnecting: false,
+        reconnectingSince: null,
       });
       for (const [id, peer] of peers) {
         if (peer.isLocal && id !== clientId) peers.delete(id);
@@ -165,14 +178,22 @@ export class WebrtcService {
     });
   }
 
-  async addPeer(clientId: string, name: string, isInitiator: boolean, options: { isHost?: boolean; stream?: MediaStream } = {}): Promise<void> {
-    if (!this.localStream || !this.sendSignal || this.peers().has(clientId)) return;
+  async addPeer(clientId: string, name: string, isInitiator: boolean, options: { participantId?: string; isHost?: boolean; stream?: MediaStream } = {}): Promise<void> {
+    const participantId = options.participantId || clientId;
+    if (!this.localStream || !this.sendSignal) return;
+    if (this.peers().has(clientId)) {
+      this.updatePeer(clientId, { name, participantId, isHost: !!options.isHost, reconnecting: false, reconnectingSince: null });
+      return;
+    }
+    const blockedByLivePeer = this.removeStalePeersForParticipant(participantId, clientId);
+    if (blockedByLivePeer) return;
     const iceServers = await this.iceConfig.getIceServers();
     const pc = new RTCPeerConnection(this.peerConnectionConfig(iceServers));
     const meta = this.createPeerMeta(clientId);
     this.peerMeta.set(clientId, meta);
     const peer: PeerState = {
       id: clientId,
+      participantId,
       name,
       pc,
       stream: options.stream ?? new MediaStream(),
@@ -193,6 +214,8 @@ export class WebrtcService {
       micEnabled: true,
       camEnabled: true,
       screenOn: false,
+      reconnecting: false,
+      reconnectingSince: null,
     };
     this.mutatePeers((peers) => peers.set(clientId, peer));
 
@@ -212,14 +235,14 @@ export class WebrtcService {
       this.touchPeer(clientId, { stream: nextStream });
     };
     pc.onconnectionstatechange = () => {
-      this.touchPeer(clientId, { connectionState: pc.connectionState });
+      this.touchPeer(clientId, { connectionState: pc.connectionState, reconnecting: false, reconnectingSince: null });
       console.log(`[webrtc] peer ${clientId} connectionState=${pc.connectionState} at ${new Date().toISOString()}`);
       this.updateRecoveryState(clientId, pc);
       void this.logSelectedCandidateType(clientId, pc);
       this.maybeScheduleIceRestart(clientId, pc);
     };
     pc.oniceconnectionstatechange = () => {
-      this.touchPeer(clientId, { iceConnectionState: pc.iceConnectionState });
+      this.touchPeer(clientId, { iceConnectionState: pc.iceConnectionState, reconnecting: false, reconnectingSince: null });
       console.log(`[webrtc] peer ${clientId} iceConnectionState=${pc.iceConnectionState} at ${new Date().toISOString()}`);
       this.updateRecoveryState(clientId, pc);
       void this.logSelectedCandidateType(clientId, pc);
@@ -240,27 +263,18 @@ export class WebrtcService {
     this.startQualityPolling();
   }
 
-  async resumePeer(oldClientId: string, clientId: string, name: string, isInitiator: boolean, options: { isHost?: boolean } = {}): Promise<void> {
+  async resumePeer(oldClientId: string, clientId: string, name: string, isInitiator: boolean, options: { participantId?: string; isHost?: boolean } = {}): Promise<void> {
+    const participantId = options.participantId || this.peers().get(oldClientId)?.participantId || clientId;
     if (oldClientId === clientId) {
-      this.updatePeer(clientId, { name, isHost: !!options.isHost });
+      this.updatePeer(clientId, { name, participantId, isHost: !!options.isHost, reconnecting: false, reconnectingSince: null });
       return;
     }
     const oldPeer = this.peers().get(oldClientId);
     const preservedStream = oldPeer?.stream ?? new MediaStream();
-    const oldMeta = this.peerMeta.get(oldClientId);
-    if (oldMeta?.restartTimer) clearTimeout(oldMeta.restartTimer);
-    if (oldMeta?.recoveryTimer) clearTimeout(oldMeta.recoveryTimer);
-    oldPeer?.pc?.close();
-    this.peerMeta.delete(oldClientId);
-    this.qualityCounters.delete(oldClientId);
-    this.previousStats.delete(oldClientId);
-    this.autoPausedReceivers.delete(oldClientId);
-    this.remotePauseRequests.delete(oldClientId);
-    this.outboundVideoPaused.delete(oldClientId);
-    this.videoSenders.delete(oldClientId);
-    this.fallbackVideoTracks.delete(oldClientId);
+    this.removePeerResources(oldClientId, false);
     this.mutatePeers((peers) => peers.delete(oldClientId));
-    await this.addPeer(clientId, name, isInitiator, { ...options, stream: preservedStream });
+    this.removeStalePeersForParticipant(participantId, clientId, oldClientId);
+    await this.addPeer(clientId, name, isInitiator, { ...options, participantId, stream: preservedStream });
   }
 
   markPeerReconnecting(clientId: string): void {
@@ -268,6 +282,8 @@ export class WebrtcService {
       connectionState: 'disconnected',
       iceConnectionState: 'disconnected',
       quality: 'weak',
+      reconnecting: true,
+      reconnectingSince: Date.now(),
     });
   }
 
@@ -279,6 +295,8 @@ export class WebrtcService {
       connectionState: 'connected',
       iceConnectionState: 'connected',
       quality: 'good',
+      reconnecting: false,
+      reconnectingSince: null,
     });
   }
 
@@ -294,6 +312,7 @@ export class WebrtcService {
       .filter((peer) => !peer.isLocal)
       .map((peer) => ({
         id: peer.id,
+        participantId: peer.participantId,
         name: peer.name,
         isHost: peer.isHost,
         micEnabled: peer.micEnabled,
@@ -302,7 +321,7 @@ export class WebrtcService {
       }));
     for (const peer of remotes) this.removePeer(peer.id);
     for (const peer of remotes) {
-      await this.addPeer(peer.id, peer.name, true, { isHost: peer.isHost });
+      await this.addPeer(peer.id, peer.name, true, { participantId: peer.participantId, isHost: peer.isHost });
       this.updatePeer(peer.id, { micEnabled: peer.micEnabled, camEnabled: peer.camEnabled, screenOn: peer.screenOn });
     }
   }
@@ -382,6 +401,7 @@ export class WebrtcService {
         const fallbackVideo = this.localStream?.getVideoTracks()[0] ?? peer.stream?.getVideoTracks()[0] ?? null;
         return {
           id: peer.id,
+          participantId: peer.participantId,
           name: peer.name,
           isLocal: peer.isLocal,
           isHost: peer.isHost,
@@ -402,6 +422,7 @@ export class WebrtcService {
           screenOn: peer.screenOn,
           outboundAudio: trackInfo(audioSender?.track ?? null, fallbackAudio, 'audio'),
           outboundVideo: trackInfo(videoSender?.track ?? null, fallbackVideo, 'video'),
+          reconnecting: peer.reconnecting,
           updatedAt: peer.updatedAt,
         };
       }),
@@ -472,20 +493,7 @@ export class WebrtcService {
   }
 
   removePeer(clientId: string): void {
-    const peer = this.peers().get(clientId);
-    const meta = this.peerMeta.get(clientId);
-    if (meta?.restartTimer) clearTimeout(meta.restartTimer);
-    if (meta?.recoveryTimer) clearTimeout(meta.recoveryTimer);
-    this.peerMeta.delete(clientId);
-    this.qualityCounters.delete(clientId);
-    this.previousStats.delete(clientId);
-    this.autoPausedReceivers.delete(clientId);
-    this.remotePauseRequests.delete(clientId);
-    this.outboundVideoPaused.delete(clientId);
-    this.videoSenders.delete(clientId);
-    this.fallbackVideoTracks.delete(clientId);
-    peer?.pc?.close();
-    peer?.stream?.getTracks().forEach((track) => track.stop());
+    this.removePeerResources(clientId, true);
     this.mutatePeers((peers) => peers.delete(clientId));
     if (!this.peerList().some((peerState) => !peerState.isLocal)) this.stopQualityPolling();
   }
@@ -549,6 +557,51 @@ export class WebrtcService {
     const next = new Map(this.peers());
     change(next);
     this.peers.set(next);
+  }
+
+  private removeStalePeersForParticipant(participantId: string, keepClientId: string, explicitOldClientId?: string): boolean {
+    let livePeerBlocks = false;
+    const removeIds: string[] = [];
+    for (const [id, peer] of this.peers()) {
+      if (id === keepClientId || peer.isLocal || peer.participantId !== participantId) continue;
+      if (id === explicitOldClientId || this.isStalePeer(peer)) {
+        removeIds.push(id);
+      } else {
+        livePeerBlocks = true;
+      }
+    }
+    for (const id of removeIds) this.removePeer(id);
+    return livePeerBlocks;
+  }
+
+  private isStalePeer(peer: PeerState): boolean {
+    return (
+      peer.reconnecting ||
+      peer.connectionState === 'failed' ||
+      peer.connectionState === 'disconnected' ||
+      peer.connectionState === 'closed' ||
+      peer.iceConnectionState === 'failed' ||
+      peer.iceConnectionState === 'disconnected' ||
+      peer.iceConnectionState === 'closed' ||
+      peer.signalingState === 'closed'
+    );
+  }
+
+  private removePeerResources(clientId: string, stopStreamTracks: boolean): void {
+    const peer = this.peers().get(clientId);
+    const meta = this.peerMeta.get(clientId);
+    if (meta?.restartTimer) clearTimeout(meta.restartTimer);
+    if (meta?.recoveryTimer) clearTimeout(meta.recoveryTimer);
+    this.peerMeta.delete(clientId);
+    this.qualityCounters.delete(clientId);
+    this.previousStats.delete(clientId);
+    this.autoPausedReceivers.delete(clientId);
+    this.remotePauseRequests.delete(clientId);
+    this.outboundVideoPaused.delete(clientId);
+    this.videoSenders.delete(clientId);
+    this.fallbackVideoTracks.delete(clientId);
+    peer?.pc?.close();
+    if (stopStreamTracks) peer?.stream?.getTracks().forEach((track) => track.stop());
   }
 
   private createPeerMeta(clientId: string): PeerMeta {

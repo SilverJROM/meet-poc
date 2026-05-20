@@ -31,13 +31,14 @@ describe('signaling knock, admit, reject', () => {
     expect(guestAdmitted).toEqual({
       type: 'admitted',
       clientId: knocking.clientId,
-      peers: [{ id: ownerAdmitted.clientId, name: 'Owner', host: true }],
+      participantId: expect.any(String),
+      peers: [{ id: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId, name: 'Owner', host: true }],
       roomTitle: 'Team sync',
       isOwner: false,
       hostClientId: ownerAdmitted.clientId,
       sessionId: ownerAdmitted.sessionId,
     });
-    expect(peerJoined).toEqual({ type: 'peer-joined', clientId: knocking.clientId, name: 'Guest' });
+    expect(peerJoined).toEqual({ type: 'peer-joined', clientId: knocking.clientId, participantId: guestAdmitted.participantId, name: 'Guest' });
     closeWs(guest);
     closeWs(owner);
     await closeServer(server);

@@ -134,7 +134,7 @@
             </label>
           </div>
           <div class="diagnostics-list">
-            @for (peer of webrtc.diagnostics(); track peer.id) {
+            @for (peer of webrtc.diagnostics(); track peer.participantId) {
               <article class="diagnostic-peer">
                 <h3>{{ peer.name }}</h3>
                 <dl>
@@ -213,7 +213,7 @@
             </button>
             @if (!shareStripCollapsed()) {
               <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
-                @for (peer of orderedStripPeers(); track peer.id) {
+                @for (peer of orderedStripPeers(); track peer.participantId) {
                   <app-tile [peer]="peer" variant="strip" [speaking]="activeSpeaker.activePeerId() === peer.id" />
                 }
               </div>
@@ -221,7 +221,7 @@
           </aside>
         } @else {
           <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
-            @for (peer of peers(); track peer.id) {
+            @for (peer of peers(); track peer.participantId) {
               <app-tile [peer]="peer" [speaking]="activeSpeaker.activePeerId() === peer.id" />
             }
           </div>
