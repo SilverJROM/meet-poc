@@ -93,6 +93,10 @@ video {
   object-fit: cover;
 }
 
+video.is-mirrored-self-view {
+  transform: scaleX(-1);
+}
+
 .camera-off-avatar {
   display: flex;
   align-items: center;

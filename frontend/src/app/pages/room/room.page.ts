@@ -25,7 +25,6 @@ import { ViewportService } from '../../services/viewport.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
 import { WebrtcService } from '../../services/webrtc.service';
 
-const SPEAKER_ORDER_SETTLE_MS = 5_000;
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
 
@@ -130,7 +129,6 @@ export class RoomPage implements OnDestroy {
   readonly knockers = signal<Knocker[]>([]);
   readonly peers = this.webrtc.peerList;
   readonly shareStripCollapsed = signal(false);
-  readonly promotedSpeakerId = signal<string | null>(null);
   readonly sharingPeer = computed(() => this.peers().find((peer) => peer.screenOn) ?? null);
   readonly shareLayoutActive = computed(() => !!this.sharingPeer());
   readonly shareStream = computed(() => {
@@ -138,15 +136,7 @@ export class RoomPage implements OnDestroy {
     if (!peer) return null;
     return peer.isLocal ? this.media.screenStream() : peer.stream;
   });
-  readonly orderedStripPeers = computed(() => {
-    const promoted = this.promotedSpeakerId();
-    return [...this.peers()].sort((left, right) => {
-      if (left.id === promoted && right.id !== promoted) return -1;
-      if (right.id === promoted && left.id !== promoted) return 1;
-      if (left.screenOn !== right.screenOn) return left.screenOn ? -1 : 1;
-      return left.name.localeCompare(right.name);
-    });
-  });
+  readonly orderedStripPeers = computed(() => this.peers());
   readonly showPeerWarning = computed(() => this.peers().length >= 6 && !this.warningDismissed());
   readonly weakAudioOnlyPeers = computed(() => this.peers().filter((peer) => !peer.isLocal && peer.audioOnlyReason === 'auto-poor'));
   readonly hostRecording = signal(false);
@@ -160,8 +150,6 @@ export class RoomPage implements OnDestroy {
   private camOnBeforeBackground = false;
   private preflightTimer: ReturnType<typeof setTimeout> | null = null;
   private waitingRoomTimer: ReturnType<typeof setInterval> | null = null;
-  private speakerPromotionTimer: ReturnType<typeof setTimeout> | null = null;
-  private speakerPromotionCandidate: string | null = null;
   private diagnosticsLogTimer: ReturnType<typeof setInterval> | null = null;
   private lastDiagnosticsEventAt = 0;
   private diagnosticsLogInFlight = false;
@@ -209,7 +197,6 @@ export class RoomPage implements OnDestroy {
         }),
         shareLayoutActive: this.shareLayoutActive(),
         shareStripCollapsed: this.shareStripCollapsed(),
-        promotedSpeakerId: this.promotedSpeakerId(),
         isRecording: this.recorder.isRecording() || this.hostRecording(),
         screenShareAttempts: this.media.screenShareAttempts(),
         lastVideoConstraints: this.media.lastVideoConstraints(),
@@ -282,10 +269,6 @@ export class RoomPage implements OnDestroy {
     });
     effect(() => {
       this.activeSpeaker.observe(this.peers());
-    });
-    effect(() => {
-      const frame = this.activeSpeaker.activeFrame();
-      this.queueSpeakerPromotion(frame.id);
     });
     effect(() => {
       const activePeerIds = new Set<string>();
@@ -1146,10 +1129,6 @@ export class RoomPage implements OnDestroy {
     if (this.state() === 'in-call') this.flushDiagnosticsLog('call-end', { useBeacon: true });
     this.stopDiagnosticsLogger();
     this.clearPreflightTimer();
-    if (this.speakerPromotionTimer) clearTimeout(this.speakerPromotionTimer);
-    this.speakerPromotionTimer = null;
-    this.speakerPromotionCandidate = null;
-    this.promotedSpeakerId.set(null);
     this.stopWaitingRoomCountdown();
     if (this.state() === 'in-call' || this.state() === 'knocking' || this.state() === 'waiting-room') this.ws.send({ type: 'leave' });
     this.ws.close();
@@ -1392,16 +1371,6 @@ export class RoomPage implements OnDestroy {
     this.webrtc.updatePeer(id, { micEnabled: this.media.micOn(), camEnabled: this.media.cameraOn(), screenOn: this.media.screenOn() });
   }
 
-  private queueSpeakerPromotion(candidate: string | null): void {
-    if (this.speakerPromotionCandidate === candidate) return;
-    this.speakerPromotionCandidate = candidate;
-    if (this.speakerPromotionTimer) clearTimeout(this.speakerPromotionTimer);
-    this.speakerPromotionTimer = window.setTimeout(() => {
-      this.promotedSpeakerId.set(this.speakerPromotionCandidate);
-      this.speakerPromotionTimer = null;
-    }, SPEAKER_ORDER_SETTLE_MS);
-  }
-
   private shouldEnableBgPause(): boolean {
     return this.viewport.isMobile() && this.platform.isMobileUA();
   }
@@ -1574,7 +1543,6 @@ declare global {
       }[];
       shareLayoutActive?: boolean;
       shareStripCollapsed?: boolean;
-      promotedSpeakerId?: string | null;
       screenShareAttempts: number;
       lastVideoConstraints?: MediaStreamConstraints | null;
       audioContextActivated?: boolean;

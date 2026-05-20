@@ -11,7 +11,7 @@
 >
   <div class="tile-content">
     @if (showVideo()) {
-      <video #video autoplay playsinline [muted]="peer().isLocal"></video>
+      <video #video autoplay playsinline [muted]="peer().isLocal" [class.is-mirrored-self-view]="isMirroredSelfView()"></video>
     } @else {
       <div class="camera-off-avatar" [style.background]="avatarColor()">
         <span>{{ initials() }}</span>

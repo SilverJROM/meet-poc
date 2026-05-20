@@ -14,7 +14,7 @@ test.beforeAll(() => {
   fs.mkdirSync(path.resolve(process.cwd(), SCREENSHOT_DIR), { recursive: true });
 });
 
-test('FIXC3.1 share layout reflows, sorts active speaker, collapses, and returns to grid', async ({ browser, page, request }) => {
+test('FIXC3.1 share layout reflows, highlights active speaker without reordering, collapses, and returns to grid', async ({ browser, page, request }) => {
   await installFakeDisplayMedia(page);
   const room = await createFixRoom(request, 'share-layout');
   await loginAsJrom(page);
@@ -35,11 +35,21 @@ test('FIXC3.1 share layout reflows, sorts active speaker, collapses, and returns
 
   const canInjectSpeaker = await page.evaluate(() => !!window.__meetDebug?.injectActiveSpeakerStream);
   if (canInjectSpeaker) {
+    const stripOrder = await page.locator('.share-strip .strip-list app-tile .name-label').evaluateAll((elements) =>
+      elements.map((element) => element.textContent?.trim() ?? ''),
+    );
     await activateActiveSpeaker(page, 'guest-c');
     await expect.poll(() => page.evaluate(() => window.__meetDebug?.activeSpeakerId || ''), { timeout: 10000 }).toBeTruthy();
-    const firstStripName = page.locator('.share-strip .strip-list app-tile').first().locator('.name-label');
-    await expect(firstStripName).toContainText('guest-c', { timeout: 15000 });
-    await expect(page.locator('.share-strip .strip-list app-tile').first().locator('article.tile')).toHaveClass(/is-speaking/);
+    await expect(page.locator('.share-strip .strip-list app-tile').filter({ hasText: 'guest-c' }).locator('article.tile')).toHaveClass(/is-speaking/);
+    await expect
+      .poll(
+        () =>
+          page.locator('.share-strip .strip-list app-tile .name-label').evaluateAll((elements) =>
+            elements.map((element) => element.textContent?.trim() ?? ''),
+          ),
+        { timeout: 3000 },
+      )
+      .toEqual(stripOrder);
     await page.screenshot({ path: `${SCREENSHOT_DIR}/share-strip.png`, fullPage: true });
   }
 

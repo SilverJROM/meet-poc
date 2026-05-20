@@ -17,7 +17,7 @@ test.afterEach(() => {
   cleanupRecordingsByPrefix(DIAGG_PREFIX);
 });
 
-test('DR-17 renders lobby, device dialog, local tile, and remote tile without mirroring', async ({ browser, page, request }) => {
+test('DR-17/30 renders lobby/device previews true, mirrors only local self-view, and leaves remote tile unmirrored', async ({ browser, page, request }) => {
   const room = await createDiagRoom(request, 'orientation');
   await loginAsJrom(page);
   await page.goto(room.url);
@@ -31,14 +31,14 @@ test('DR-17 renders lobby, device dialog, local tile, and remote tile without mi
   await page.locator('#display-name').fill('host');
   await page.getByRole('button', { name: 'Join' }).click();
   await expect(page.locator('.call-panel')).toBeVisible();
-  await expectTrueOrientation(page.locator('app-tile').filter({ hasText: 'host' }).locator('video'), 'local tile');
+  await expectMirroredOrientation(page.locator('app-tile').filter({ hasText: 'host' }).locator('video'), 'local self-view tile');
 
   const { context } = await admitBrowserGuest(browser, page, room, 'guest-video');
   await expectTrueOrientation(page.locator('app-tile').filter({ hasText: 'guest-video' }).locator('video'), 'remote tile');
   await context.close();
 });
 
-test('DR-20 keeps speaking highlight live while share-strip ordering settles for about five seconds', async ({ browser, page, request }) => {
+test('DR-20/32 keeps speaking highlight live without changing gallery or share-strip order', async ({ browser, page, request }) => {
   test.setTimeout(60_000);
   await installFakeDisplayMedia(page);
   const room = await createDiagRoom(request, 'speaker-order');
@@ -58,14 +58,11 @@ test('DR-20 keeps speaking highlight live while share-strip ordering settles for
   await expect(page.locator('.share-strip app-tile').filter({ hasText: 'guest-a' }).locator('article.tile')).toHaveClass(/is-speaking/);
   await page.waitForTimeout(1_200);
   expect(await stripNames(page)).toEqual(initialStripOrder);
-  await expect.poll(() => firstStripName(page), { timeout: 7_000 }).toContain('guest-a');
 
-  const guestASettledOrder = await stripNames(page);
   await forceActiveSpeaker(page, 'guest-b');
   await expect(page.locator('.share-strip app-tile').filter({ hasText: 'guest-b' }).locator('article.tile')).toHaveClass(/is-speaking/);
   await page.waitForTimeout(1_200);
-  expect(await stripNames(page)).toEqual(guestASettledOrder);
-  await expect.poll(() => firstStripName(page), { timeout: 7_000 }).toContain('guest-b');
+  expect(await stripNames(page)).toEqual(initialStripOrder);
 
   await page.getByRole('button', { name: 'Stop sharing screen' }).click();
   await expect(page.locator('.tiles-grid app-tile')).toHaveCount(3);
@@ -132,6 +129,17 @@ async function expectTrueOrientation(video: Locator, label: string): Promise<voi
   expect(matrix.m22, `${label} must not flip vertically (${matrix.transform})`).toBeGreaterThan(0.99);
 }
 
+async function expectMirroredOrientation(video: Locator, label: string): Promise<void> {
+  await expect(video, `${label} video should render`).toBeVisible({ timeout: 15_000 });
+  const matrix = await video.first().evaluate((element) => {
+    const transform = getComputedStyle(element).transform;
+    const domMatrix = new DOMMatrixReadOnly(transform === 'none' ? undefined : transform);
+    return { transform, m11: domMatrix.m11, m22: domMatrix.m22 };
+  });
+  expect(matrix.m11, `${label} must flip horizontally (${matrix.transform})`).toBeLessThan(-0.99);
+  expect(matrix.m22, `${label} must not flip vertically (${matrix.transform})`).toBeGreaterThan(0.99);
+}
+
 async function forceActiveSpeaker(page: Page, name: string): Promise<void> {
   await page.evaluate((peerName) => {
     const debug = window.__meetDebug;
@@ -145,10 +153,6 @@ async function stripNames(page: Page): Promise<string[]> {
   return page.locator('.share-strip .strip-list app-tile .name-label').evaluateAll((elements) =>
     elements.map((element) => element.textContent?.trim() ?? ''),
   );
-}
-
-async function firstStripName(page: Page): Promise<string> {
-  return page.locator('.share-strip .strip-list app-tile .name-label').first().textContent().then((text) => text?.trim() ?? '');
 }
 
 async function gridNames(page: Page): Promise<string[]> {
