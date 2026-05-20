@@ -84,6 +84,7 @@ export class RoomPage implements OnDestroy {
   readonly selectedAudioId = signal(readStoredDevice(DEVICE_STORAGE.audioInput));
   readonly selectedAudioOutputId = signal(readStoredDevice(DEVICE_STORAGE.audioOutput));
   readonly selectedVideoId = signal(readStoredDevice(DEVICE_STORAGE.videoInput));
+  private readonly videoDevicePinned = signal(!!readStoredDevice(DEVICE_STORAGE.videoInput));
   readonly currentFacingMode = signal<'user' | 'environment'>('user');
   readonly lobbyDeviceDialogOpen = signal(true);
   readonly devicePermissionIntro = signal(true);
@@ -91,6 +92,7 @@ export class RoomPage implements OnDestroy {
   readonly deviceDialogBusy = signal(false);
   readonly deviceDialogError = signal<string | null>(null);
   readonly canSelectAudioOutput = signal(canSetSinkId());
+  readonly canFlipCamera = computed(() => this.viewport.isMobile() && (this.state() === 'in-call' ? this.media.cameraOn() : this.cameraRequested()));
   readonly permissionError = signal<LobbyError | null>(null);
   readonly hasBlockingLobbyError = computed(() => {
     const error = this.permissionError();
@@ -418,6 +420,7 @@ export class RoomPage implements OnDestroy {
 
   async changeVideoDevice(deviceId: string): Promise<void> {
     this.selectedVideoId.set(deviceId);
+    this.videoDevicePinned.set(!!deviceId);
     storeDevice(DEVICE_STORAGE.videoInput, deviceId);
     if (this.state() === 'in-call') {
       await this.replaceInCallVideo(deviceId);
@@ -460,9 +463,17 @@ export class RoomPage implements OnDestroy {
     await this.media.activateMicPreview(this.localStream());
   }
 
-  async flipLobbyCamera(): Promise<void> {
-    if (!this.viewport.isMobile() || !this.cameraRequested()) return;
+  async flipCamera(): Promise<void> {
+    const videoEnabled = this.state() === 'in-call' ? this.media.cameraOn() : this.cameraRequested();
+    if (!this.viewport.isMobile() || !videoEnabled) return;
+    this.videoDevicePinned.set(false);
+    this.selectedVideoId.set('');
+    storeDevice(DEVICE_STORAGE.videoInput, '');
     this.currentFacingMode.update((mode) => (mode === 'user' ? 'environment' : 'user'));
+    if (this.state() === 'in-call') {
+      await this.replaceInCallVideo('');
+      return;
+    }
     await this.reacquireLobbyStream();
   }
 
@@ -474,7 +485,10 @@ export class RoomPage implements OnDestroy {
 
   async toggleCamera(): Promise<void> {
     try {
-      const cam = await this.media.toggleCamera((track) => this.webrtc.replaceVideoTrack(track));
+      const cam = await this.media.toggleCamera((track) => this.webrtc.replaceVideoTrack(track), {
+        videoDeviceId: this.selectedVideoDeviceIdForRequest(),
+        facingMode: this.videoFacingModeForRequest(true),
+      });
       this.updateLocalMediaState();
       this.broadcastMediaState(this.media.micOn(), cam);
     } catch (err) {
@@ -897,7 +911,13 @@ export class RoomPage implements OnDestroy {
     this.setupWarning.set(null);
     this.error.set(null);
     try {
-      const stream = await this.media.preflight({ audio: true, video: this.cameraRequested(), facingMode: this.mobileFacingMode() });
+      const stream = await this.media.preflight({
+        audio: true,
+        video: this.cameraRequested(),
+        audioDeviceId: this.selectedAudioId() || undefined,
+        videoDeviceId: this.selectedVideoDeviceIdForRequest(),
+        facingMode: this.videoFacingModeForRequest(this.cameraRequested()),
+      });
       this.attachLocalTrackFailureHandlers(stream);
       this.applyLobbyMicPreference(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
@@ -922,8 +942,8 @@ export class RoomPage implements OnDestroy {
     try {
       const stream = await this.media.reacquire({
         audioDeviceId: this.selectedAudioId() || undefined,
-        videoDeviceId: this.selectedVideoId() || undefined,
-        facingMode: this.mobileFacingMode(),
+        videoDeviceId: this.selectedVideoDeviceIdForRequest(),
+        facingMode: this.videoFacingModeForRequest(this.cameraRequested()),
         video: this.cameraRequested(),
       });
       this.attachLocalTrackFailureHandlers(stream);
@@ -1006,7 +1026,7 @@ export class RoomPage implements OnDestroy {
     const mediaError = err as MediaError;
     if (videoRequested && mediaError.code === 'denied') {
       try {
-        const stream = await this.media.preflight({ audio: true, video: false });
+        const stream = await this.media.preflight({ audio: true, video: false, audioDeviceId: this.selectedAudioId() || undefined });
         this.cameraRequested.set(false);
         this.permissionError.set({ kind: 'video-denied-but-audio-ok' });
         this.error.set(null);
@@ -1041,8 +1061,12 @@ export class RoomPage implements OnDestroy {
     }
   }
 
-  private mobileFacingMode(): 'user' | 'environment' | undefined {
-    return this.viewport.isMobile() && this.cameraRequested() ? this.currentFacingMode() : undefined;
+  private selectedVideoDeviceIdForRequest(): string | undefined {
+    return this.videoDevicePinned() ? this.selectedVideoId() || undefined : undefined;
+  }
+
+  private videoFacingModeForRequest(video: boolean): 'user' | 'environment' | undefined {
+    return this.viewport.isMobile() && video && !this.selectedVideoDeviceIdForRequest() ? this.currentFacingMode() : undefined;
   }
 
   private cleanupCall(): void {
@@ -1106,7 +1130,11 @@ export class RoomPage implements OnDestroy {
     this.deviceDialogBusy.set(true);
     this.deviceDialogError.set(null);
     try {
-      const track = await this.media.replaceVideoTrack(deviceId || undefined, (nextTrack) => this.webrtc.replaceLocalSenderTrack('video', nextTrack), this.mobileFacingMode());
+      const track = await this.media.replaceVideoTrack(
+        this.selectedVideoDeviceIdForRequest(),
+        (nextTrack) => this.webrtc.replaceLocalSenderTrack('video', nextTrack),
+        this.videoFacingModeForRequest(true),
+      );
       if (track) {
         this.updateLocalMediaState();
         this.broadcastMediaState(this.media.micOn(), true);
@@ -1345,6 +1373,7 @@ function readStoredDevice(key: string): string {
 function storeDevice(key: string, value: string): void {
   try {
     if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
   } catch {
     // Best effort only; device persistence should not block joining.
   }

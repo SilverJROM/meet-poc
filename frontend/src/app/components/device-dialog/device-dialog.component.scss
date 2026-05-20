@@ -125,6 +125,25 @@ h2 {
   object-fit: cover;
 }
 
+.flip-camera-btn {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  width: 42px;
+  height: 42px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid rgba(248, 250, 252, 0.42);
+  border-radius: 6px;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.72);
+  cursor: pointer;
+}
+
+.flip-camera-btn ion-icon {
+  font-size: 22px;
+}
+
 .camera-placeholder {
   min-height: 230px;
   display: grid;

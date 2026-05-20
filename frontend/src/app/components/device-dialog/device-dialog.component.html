@@ -24,6 +24,18 @@
           <div class="preview-tile" [class.camera-off]="!stream()?.getVideoTracks()?.length">
             @if (stream()?.getVideoTracks()?.length) {
               <video #video autoplay muted playsinline></video>
+              @if (canFlipCamera()) {
+                <button
+                  type="button"
+                  class="flip-camera-btn"
+                  aria-label="Flip camera"
+                  [title]="facingMode() === 'user' ? 'Use rear camera' : 'Use front camera'"
+                  [disabled]="busy()"
+                  (click)="flipCamera.emit()"
+                >
+                  <ion-icon name="camera-reverse-outline"></ion-icon>
+                </button>
+              }
             } @else {
               <div class="camera-placeholder">Camera off</div>
             }

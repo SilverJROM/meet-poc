@@ -16,6 +16,14 @@ type ReacquireOptions = {
   video: boolean;
 };
 
+type PreflightOptions = {
+  audio: boolean;
+  video: boolean;
+  audioDeviceId?: string;
+  videoDeviceId?: string;
+  facingMode?: 'user' | 'environment';
+};
+
 @Injectable({ providedIn: 'root' })
 export class MediaService {
   private readonly viewport = inject(ViewportService);
@@ -41,10 +49,13 @@ export class MediaService {
     return this.preflight({ audio: true, video: cameraOn });
   }
 
-  async preflight(constraints: { audio: boolean; video: boolean; facingMode?: 'user' | 'environment' }): Promise<MediaStream> {
+  async preflight(constraints: PreflightOptions): Promise<MediaStream> {
     return this.acquire({
-      audio: constraints.audio ? true : false,
-      video: this.videoConstraints(constraints.video, constraints.facingMode),
+      audio: this.audioConstraints(constraints.audio, constraints.audioDeviceId),
+      video: this.videoConstraints(constraints.video, {
+        deviceId: constraints.videoDeviceId,
+        facingMode: constraints.facingMode,
+      }),
     });
   }
 
@@ -58,15 +69,11 @@ export class MediaService {
   }
 
   async reacquire(options: ReacquireOptions): Promise<MediaStream> {
-    const audio = options.audioDeviceId ? { deviceId: { exact: options.audioDeviceId } } : true;
-    const baseVideo = this.videoConstraints(true, options.facingMode) as MediaTrackConstraints;
-    const video = options.video
-      ? {
-          ...baseVideo,
-          // facingMode and deviceId can conflict on mobile browsers; facingMode wins.
-          ...(!options.facingMode && options.videoDeviceId ? { deviceId: { exact: options.videoDeviceId } } : {}),
-        }
-      : false;
+    const audio = this.audioConstraints(true, options.audioDeviceId);
+    const video = this.videoConstraints(options.video, {
+      deviceId: options.videoDeviceId,
+      facingMode: options.facingMode,
+    });
     return this.acquire({ audio, video });
   }
 
@@ -74,7 +81,7 @@ export class MediaService {
     const stream = this.localStream();
     if (!stream) return null;
     const oldTrack = stream.getAudioTracks()[0] ?? null;
-    const audio = deviceId ? { deviceId: { exact: deviceId } } : true;
+    const audio = this.audioConstraints(true, deviceId);
     const nextStream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
     registerDebugTracks(nextStream);
     const nextTrack = nextStream.getAudioTracks()[0];
@@ -101,11 +108,7 @@ export class MediaService {
     const stream = this.localStream();
     if (!stream) return null;
     const oldTrack = stream.getVideoTracks()[0] ?? null;
-    const baseVideo = this.videoConstraints(true, facingMode) as MediaTrackConstraints;
-    const video = {
-      ...baseVideo,
-      ...(!facingMode && deviceId ? { deviceId: { exact: deviceId } } : {}),
-    };
+    const video = this.videoConstraints(true, { deviceId, facingMode });
     const nextStream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
     registerDebugTracks(nextStream);
     const nextTrack = nextStream.getVideoTracks()[0];
@@ -194,7 +197,10 @@ export class MediaService {
     return false;
   }
 
-  async toggleCamera(onVideoTrackChanged: (track: MediaStreamTrack | null) => Promise<void>): Promise<boolean> {
+  async toggleCamera(
+    onVideoTrackChanged: (track: MediaStreamTrack | null) => Promise<void>,
+    options: { videoDeviceId?: string; facingMode?: 'user' | 'environment' } = {},
+  ): Promise<boolean> {
     const stream = this.localStream();
     if (!stream) return false;
     const existing = stream.getVideoTracks()[0];
@@ -206,7 +212,7 @@ export class MediaService {
     }
 
     const camStream = await navigator.mediaDevices.getUserMedia({
-      video: this.videoConstraints(true),
+      video: this.videoConstraints(true, options),
     });
     registerDebugTracks(camStream);
     const track = camStream.getVideoTracks()[0];
@@ -290,16 +296,25 @@ export class MediaService {
     this.micOn.set(true);
   }
 
-  private videoConstraints(video: boolean, facingMode?: 'user' | 'environment'): boolean | MediaTrackConstraints {
+  private audioConstraints(audio: boolean, deviceId?: string): boolean | MediaTrackConstraints {
+    if (!audio) return false;
+    return deviceId ? { deviceId: { exact: deviceId } } : true;
+  }
+
+  private videoConstraints(
+    video: boolean,
+    options: { deviceId?: string; facingMode?: 'user' | 'environment' } = {},
+  ): boolean | MediaTrackConstraints {
     if (!video) return false;
+    const target = options.deviceId ? { deviceId: { exact: options.deviceId } } : options.facingMode ? { facingMode: options.facingMode } : {};
     if (this.viewport.isMobile()) {
       return {
         width: { ideal: 854, max: 854 },
         height: { ideal: 480, max: 480 },
-        ...(facingMode ? { facingMode } : {}),
+        ...target,
       };
     }
-    return { width: { ideal: 1280 }, height: { ideal: 720 }, ...(facingMode ? { facingMode } : {}) };
+    return { width: { ideal: 1280 }, height: { ideal: 720 }, ...target };
   }
 }
 

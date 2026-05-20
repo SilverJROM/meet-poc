@@ -1,6 +1,6 @@
 import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, Signal, computed, effect, input, output, signal, viewChild } from '@angular/core';
 import { addIcons } from 'ionicons';
-import { closeOutline, volumeHighOutline } from 'ionicons/icons';
+import { cameraReverseOutline, closeOutline, volumeHighOutline } from 'ionicons/icons';
 import { MicMeterComponent } from '../mic-meter/mic-meter.component';
 
 export type DeviceDialogMode = 'lobby' | 'in-call';
@@ -28,6 +28,8 @@ export class DeviceDialogComponent {
   readonly selectedAudioOutputId = input('');
   readonly level = input<Signal<number>>(signal(0).asReadonly());
   readonly canSelectAudioOutput = input(false);
+  readonly canFlipCamera = input(false);
+  readonly facingMode = input<'user' | 'environment'>('user');
   readonly busy = input(false);
   readonly error = input<string | null>(null);
 
@@ -36,6 +38,7 @@ export class DeviceDialogComponent {
   readonly audioDeviceChange = output<string>();
   readonly videoDeviceChange = output<string>();
   readonly audioOutputChange = output<string>();
+  readonly flipCamera = output<void>();
   readonly testSpeaker = output<void>();
 
   readonly levelPercent = computed(() => `${Math.round(this.level()() * 100)}%`);
@@ -43,7 +46,7 @@ export class DeviceDialogComponent {
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
 
   constructor() {
-    addIcons({ closeOutline, volumeHighOutline });
+    addIcons({ cameraReverseOutline, closeOutline, volumeHighOutline });
     effect(() => {
       const video = this.video()?.nativeElement;
       if (video) video.srcObject = this.stream();

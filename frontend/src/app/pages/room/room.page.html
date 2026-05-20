@@ -75,11 +75,14 @@
         [selectedAudioOutputId]="selectedAudioOutputId()"
         [level]="micLevel()"
         [canSelectAudioOutput]="canSelectAudioOutput()"
+        [canFlipCamera]="canFlipCamera()"
+        [facingMode]="currentFacingMode()"
         [busy]="deviceDialogBusy()"
         [error]="deviceDialogError()"
         (audioDeviceChange)="changeAudioDevice($event)"
         (videoDeviceChange)="changeVideoDevice($event)"
         (audioOutputChange)="changeAudioOutputDevice($event)"
+        (flipCamera)="flipCamera()"
         (testSpeaker)="testSpeaker()"
         (close)="inCallDeviceDialogOpen.set(false)"
       />
@@ -279,7 +282,7 @@
           (audioDeviceChange)="changeAudioDevice($event)"
           (videoDeviceChange)="changeVideoDevice($event)"
           (enableMicPreview)="enableMicPreview()"
-          (flipCamera)="flipLobbyCamera()"
+          (flipCamera)="flipCamera()"
         />
       </div>
       <form class="join-form" novalidate (ngSubmit)="join()">
@@ -367,12 +370,15 @@
           [selectedAudioOutputId]="selectedAudioOutputId()"
           [level]="micLevel()"
           [canSelectAudioOutput]="canSelectAudioOutput()"
+          [canFlipCamera]="canFlipCamera()"
+          [facingMode]="currentFacingMode()"
           [busy]="deviceDialogBusy()"
           [error]="deviceDialogError()"
           (continuePermission)="continueDeviceSetup()"
           (audioDeviceChange)="changeAudioDevice($event)"
           (videoDeviceChange)="changeVideoDevice($event)"
           (audioOutputChange)="changeAudioOutputDevice($event)"
+          (flipCamera)="flipCamera()"
           (testSpeaker)="testSpeaker()"
           (close)="lobbyDeviceDialogOpen.set(false)"
         />
