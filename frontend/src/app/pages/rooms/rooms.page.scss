@@ -144,6 +144,10 @@ h3 {
   font-size: 12px;
 }
 
+.room-access-status {
+  font-weight: 800;
+}
+
 .room-main code {
   color: var(--text);
   background: var(--panel-bg);
@@ -158,6 +162,26 @@ h3 {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.wait-timeout-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: var(--panel-bg);
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.wait-timeout-control input {
+  width: 62px;
+  min-height: 28px;
+  padding: 3px 6px;
 }
 
 .copy-status {

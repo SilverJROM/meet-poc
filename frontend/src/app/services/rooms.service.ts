@@ -7,6 +7,8 @@ export type Room = {
   title: string;
   slug: string;
   ownerEmail: string;
+  isOpen: boolean;
+  waitTimeoutMinutes: number;
   createdAt: number;
 };
 
@@ -49,12 +51,23 @@ export class RoomsService {
     return { deleted: res.deleted, requested: res.requested };
   }
 
-  async exists(id: string): Promise<{ exists: boolean; id?: string; title?: string; slug?: string }> {
-    return firstValueFrom(this.http.get<{ exists: boolean; id?: string; title?: string; slug?: string }>(`/api/rooms/${encodeURIComponent(id)}/exists`));
+  async exists(id: string): Promise<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number }> {
+    return firstValueFrom(
+      this.http.get<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number }>(
+        `/api/rooms/${encodeURIComponent(id)}/exists`,
+      ),
+    );
   }
 
   async setSlug(id: string, slug: string): Promise<Room> {
     const res = await firstValueFrom(this.http.put<{ room: Room }>(`/api/rooms/${encodeURIComponent(id)}/slug`, { slug }));
+    return res.room;
+  }
+
+  async setAccess(id: string, isOpen: boolean, waitTimeoutMinutes: number): Promise<Room> {
+    const res = await firstValueFrom(
+      this.http.put<{ room: Room }>(`/api/rooms/${encodeURIComponent(id)}/access`, { isOpen, waitTimeoutMinutes }),
+    );
     return res.room;
   }
 }

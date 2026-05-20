@@ -7,6 +7,8 @@ export type Room = {
   title: string;
   slug: string;
   ownerEmail: string;
+  isOpen: boolean;
+  waitTimeoutMinutes: number;
   createdAt: number;
 };
 
@@ -15,6 +17,8 @@ type RoomRow = {
   title: string;
   slug: string | null;
   owner_email: string;
+  is_open: number;
+  wait_timeout_minutes: number;
   created_at: number;
 };
 
@@ -48,13 +52,15 @@ function toRoom(row: RoomRow): Room {
     title: row.title,
     slug: row.slug || row.id,
     ownerEmail: row.owner_email,
+    isOpen: row.is_open === 1,
+    waitTimeoutMinutes: Number(row.wait_timeout_minutes || 15),
     createdAt: row.created_at,
   };
 }
 
 export function getRoom(id: string, database: Database.Database = getDb()): Room | null {
   const row = database
-    .prepare('SELECT id, title, slug, owner_email, created_at FROM rooms WHERE id = ?')
+    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE id = ?')
     .get(id) as RoomRow | undefined;
   return row ? toRoom(row) : null;
 }
@@ -62,7 +68,7 @@ export function getRoom(id: string, database: Database.Database = getDb()): Room
 export function getRoomBySlugOrId(key: string, database: Database.Database = getDb()): Room | null {
   const roomKey = String(key || '').slice(0, MAX_SLUG_LENGTH);
   const bySlug = database
-    .prepare('SELECT id, title, slug, owner_email, created_at FROM rooms WHERE slug = ?')
+    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE slug = ?')
     .get(roomKey) as RoomRow | undefined;
   if (bySlug) return toRoom(bySlug);
   return getRoom(roomKey, database);
@@ -78,7 +84,7 @@ export function isOwnerOf(roomId: string | null, email: string | null | undefine
 
 export function listOwnedRooms(email: string, database: Database.Database = getDb()): Room[] {
   return database
-    .prepare('SELECT id, title, slug, owner_email, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC')
+    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC')
     .all(email)
     .map((row) => toRoom(row as RoomRow));
 }
@@ -94,7 +100,7 @@ export function listOwnedRoomsPage(
     .prepare('SELECT COUNT(*) AS total FROM rooms WHERE owner_email = ?')
     .get(email) as { total: number };
   const rooms = database
-    .prepare('SELECT id, title, slug, owner_email, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
+    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
     .all(email, pageSize, offset)
     .map((row) => toRoom(row as RoomRow));
   return { rooms, total: totalRow.total };
@@ -110,9 +116,29 @@ export function createRoom(titleInput: unknown, email: string, database: Databas
     const result = database
       .prepare('INSERT OR IGNORE INTO rooms (id, title, slug, owner_email, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(id, title, slug, email, createdAt);
-    if (result.changes === 1) return { id, title, slug, ownerEmail: email, createdAt };
+    if (result.changes === 1) return { id, title, slug, ownerEmail: email, isOpen: false, waitTimeoutMinutes: 15, createdAt };
   }
   throw new Error('failed to create unique room id and slug');
+}
+
+export function setRoomAccess(
+  roomId: string,
+  input: { isOpen?: unknown; waitTimeoutMinutes?: unknown },
+  email: string,
+  database: Database.Database = getDb(),
+): { ok: true; room: Room } | { ok: false; status: 400 | 403 | 404; error: string } {
+  const room = getRoom(roomId, database);
+  if (!room) return { ok: false, status: 404, error: 'not found' };
+  if (!isOwnerOf(room.id, email, database)) return { ok: false, status: 403, error: 'forbidden' };
+  const isOpen = typeof input.isOpen === 'boolean' ? input.isOpen : room.isOpen;
+  const waitTimeoutMinutes = input.waitTimeoutMinutes == null ? room.waitTimeoutMinutes : Number(input.waitTimeoutMinutes);
+  if (!Number.isFinite(waitTimeoutMinutes) || waitTimeoutMinutes <= 0 || waitTimeoutMinutes > 240) {
+    return { ok: false, status: 400, error: 'wait timeout invalid' };
+  }
+  database
+    .prepare('UPDATE rooms SET is_open = ?, wait_timeout_minutes = ? WHERE id = ?')
+    .run(isOpen ? 1 : 0, waitTimeoutMinutes, room.id);
+  return { ok: true, room: getRoom(room.id, database)! };
 }
 
 export function setRoomSlug(

@@ -8,7 +8,7 @@ import { getSessionUser } from '../auth/sessions.js';
 import { getRoom, getRoomBySlugOrId, isOwnerOf } from '../rooms/store.js';
 import { bumpPeak, closeSession, openSession } from '../sessions/store.js';
 
-type PeerState = 'idle' | 'admitted' | 'pending';
+type PeerState = 'idle' | 'admitted' | 'pending' | 'waiting';
 
 type PeerEntry = {
   ws: WebSocket;
@@ -21,9 +21,15 @@ type PeerEntry = {
   setState: (state: PeerState) => void;
 };
 
+type ClosedWaiterEntry = PeerEntry & {
+  expiresAt: number;
+  timer: ReturnType<typeof setTimeout>;
+};
+
 type LiveRoom = {
   admitted: Map<string, PeerEntry>;
   pending: Map<string, PeerEntry>;
+  closedWaiters: Map<string, ClosedWaiterEntry>;
   reconnectTickets: Map<string, ReconnectTicket>;
   reconnecting: Map<string, ReconnectingPeer>;
   currentSessionId: string | null;
@@ -78,7 +84,7 @@ const liveRooms = new Map<string, LiveRoom>();
 function getOrCreateLiveRoom(roomId: string): LiveRoom {
   let live = liveRooms.get(roomId);
   if (!live) {
-    live = { admitted: new Map(), pending: new Map(), reconnectTickets: new Map(), reconnecting: new Map(), currentSessionId: null };
+    live = { admitted: new Map(), pending: new Map(), closedWaiters: new Map(), reconnectTickets: new Map(), reconnecting: new Map(), currentSessionId: null };
     liveRooms.set(roomId, live);
   }
   return live;
@@ -161,7 +167,7 @@ function bumpAdmittedPeak(live: LiveRoom, database: Database.Database): void {
 }
 
 function maybeCloseEmptyRoom(roomId: string, live: LiveRoom, reason: 'host-disconnect-empty' | 'last-peer-left', database: Database.Database): void {
-  if (live.admitted.size > 0 || live.pending.size > 0 || live.reconnecting.size > 0) return;
+  if (live.admitted.size > 0 || live.pending.size > 0 || live.closedWaiters.size > 0 || live.reconnecting.size > 0) return;
   try {
     closeSession(live.currentSessionId, reason, database);
   } catch (err) {
@@ -251,6 +257,75 @@ function removeAdmittedPeer(roomId: string, clientId: string, live: LiveRoom, da
   }
   console.log(`[room ${roomId}] - ${entry.name} (${clientId})  admitted=${live.admitted.size}`);
   maybeCloseEmptyRoom(roomId, live, isHost ? 'host-disconnect-empty' : 'last-peer-left', database);
+}
+
+function removeClosedWaiter(roomId: string, clientId: string, live: LiveRoom, database: Database.Database): void {
+  const waiter = live.closedWaiters.get(clientId);
+  if (!waiter) return;
+  clearTimeout(waiter.timer);
+  live.closedWaiters.delete(clientId);
+  waiter.setState('idle');
+  maybeCloseEmptyRoom(roomId, live, 'last-peer-left', database);
+}
+
+function startClosedRoomWait(roomId: string, roomTitle: string, clientId: string, entry: PeerEntry, waitTimeoutMinutes: number, live: LiveRoom, database: Database.Database): void {
+  const waitTimeoutMs = Math.max(1, Math.round(waitTimeoutMinutes * 60_000));
+  const expiresAt = Date.now() + waitTimeoutMs;
+  const timer = setTimeout(() => {
+    const currentLive = liveRooms.get(roomId);
+    if (!currentLive) return;
+    const waiter = currentLive.closedWaiters.get(clientId);
+    if (!waiter) return;
+    currentLive.closedWaiters.delete(clientId);
+    waiter.setState('idle');
+    send(waiter.ws, {
+      type: 'waiting-timeout',
+      message: "This room wasn't opened by the host in time. Please try again later.",
+    });
+    try {
+      waiter.ws.close();
+    } catch {
+      // Best effort close after timeout message.
+    }
+    maybeCloseEmptyRoom(roomId, currentLive, 'last-peer-left', database);
+  }, waitTimeoutMs);
+  timer.unref?.();
+  live.closedWaiters.set(clientId, { ...entry, expiresAt, timer });
+  entry.setState('waiting');
+  send(entry.ws, {
+    type: 'waiting-room',
+    clientId,
+    roomTitle,
+    isOpen: false,
+    waitTimeoutMs,
+    expiresAt,
+  });
+}
+
+function promoteClosedWaiters(roomId: string, waitTimeoutMinutes: number, database: Database.Database): void {
+  const live = liveRooms.get(roomId);
+  const room = getRoom(roomId, database);
+  if (!live || !room || live.closedWaiters.size === 0) return;
+  ensureLiveSession(roomId, room.ownerEmail, live, database);
+  const waiters = [...live.closedWaiters.entries()];
+  for (const [clientId, waiter] of waiters) {
+    clearTimeout(waiter.timer);
+    live.closedWaiters.delete(clientId);
+    waiter.setState('pending');
+    live.pending.set(clientId, waiter);
+    send(waiter.ws, {
+      type: 'waiting-room',
+      clientId,
+      roomTitle: room.title,
+      isOpen: true,
+      waitTimeoutMs: null,
+      expiresAt: null,
+    });
+    send(waiter.ws, { type: 'knocking', clientId, roomTitle: room.title });
+    broadcastToOwners(live, roomId, { type: 'knock', clientId, name: waiter.name }, database);
+  }
+  broadcastPendingListToOwners(live, roomId, database);
+  console.log(`[room ${roomId}] OPENED promoted ${waiters.length} waiter(s) timeout=${waitTimeoutMinutes}`);
 }
 
 function admitPeer(roomId: string, clientId: string, database: Database.Database): void {
@@ -375,16 +450,6 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const resumeOldClientId = ownerGrace?.[0] ?? (canResume ? reconnectTicket.clientId : null);
         const resumeGrace = ownerGrace?.[1] ?? (resumeOldClientId ? live.reconnecting.get(resumeOldClientId) : null);
         const ownerResume = owner && !!ownerGrace;
-        if (!ownerResume && !canResume && declaredMobile && mobileAdmittedCount(live) >= MAX_MOBILE_ADMITTED) {
-          send(ws, { type: 'error', error: 'mobile room full (4 max)' });
-          ws.close();
-          return;
-        }
-        if (!ownerResume && !canResume && live.admitted.size + live.reconnecting.size >= MAX_ADMITTED) {
-          send(ws, { type: 'error', error: 'room full (max 8)' });
-          ws.close();
-          return;
-        }
         if (canResume) {
           live.reconnectTickets.delete(reconnectToken);
           myName = reconnectTicket.name;
@@ -403,6 +468,22 @@ export function attachSignaling(server: http.Server, database: Database.Database
             state = nextState;
           },
         };
+
+        if (!ownerResume && !canResume && !owner && !room.isOpen) {
+          startClosedRoomWait(roomId, room.title, clientId, entry, room.waitTimeoutMinutes, live, database);
+          console.log(`[room ${roomId}] WAIT ${myName} (${clientId}) timeout=${room.waitTimeoutMinutes}`);
+          return;
+        }
+        if (!ownerResume && !canResume && declaredMobile && mobileAdmittedCount(live) >= MAX_MOBILE_ADMITTED) {
+          send(ws, { type: 'error', error: 'mobile room full (4 max)' });
+          ws.close();
+          return;
+        }
+        if (!ownerResume && !canResume && live.admitted.size + live.reconnecting.size >= MAX_ADMITTED) {
+          send(ws, { type: 'error', error: 'room full (max 8)' });
+          ws.close();
+          return;
+        }
 
         if (owner || canResume) {
           if (resumeOldClientId) cleanupReconnectState(live, resumeOldClientId);
@@ -560,6 +641,8 @@ export function attachSignaling(server: http.Server, database: Database.Database
           state = 'idle';
           broadcastToOwners(live, currentRoom, { type: 'knock-cancelled', clientId }, database);
           broadcastPendingListToOwners(live, currentRoom, database);
+        } else if (state === 'waiting') {
+          removeClosedWaiter(currentRoom, clientId, live, database);
         }
         try {
           ws.close();
@@ -595,8 +678,11 @@ export function attachSignaling(server: http.Server, database: Database.Database
           console.warn(`[room ${currentRoom}] failed to broadcast knock cancellation`, err);
         }
         console.log(`[room ${currentRoom}] CANCEL ${myName} (${clientId})  pending=${live.pending.size}`);
+      } else if (state === 'waiting') {
+        removeClosedWaiter(currentRoom, clientId, live, database);
+        console.log(`[room ${currentRoom}] WAIT-CANCEL ${myName} (${clientId})  waiting=${live.closedWaiters.size}`);
       }
-      if (live.admitted.size === 0 && live.pending.size === 0 && live.reconnecting.size === 0) {
+      if (live.admitted.size === 0 && live.pending.size === 0 && live.closedWaiters.size === 0 && live.reconnecting.size === 0) {
         const reason =
           closingPeerWasHost && admittedBeforeClose <= 1 && pendingBeforeClose === 0
             ? 'host-disconnect-empty'
@@ -615,6 +701,11 @@ export function attachSignaling(server: http.Server, database: Database.Database
       wss.emit('connection', ws, req);
     });
   });
+}
+
+export function notifyRoomAccessChanged(roomId: string, isOpen: boolean, waitTimeoutMinutes: number, database: Database.Database = getDb()): void {
+  if (!isOpen) return;
+  promoteClosedWaiters(roomId, waitTimeoutMinutes, database);
 }
 
 export function getHostClientId(roomId: string, database: Database.Database = getDb()): string | null {

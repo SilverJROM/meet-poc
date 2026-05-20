@@ -185,8 +185,45 @@ describe('rooms API', () => {
       id: 'aaa111aaa111',
       slug: 'aaa111aaa111',
       title: 'Team sync',
+      isOpen: false,
+      waitTimeoutMinutes: 15,
     });
     await request(app).get('/api/rooms/missing/exists').expect(200, { exists: false });
+  });
+
+  it('DR-16 defaults rooms closed with a 15 minute wait and owner-gates access updates', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    db.prepare('INSERT INTO users (email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+      'other@silverjrom.app',
+      '00:00',
+      Date.now(),
+      Date.now(),
+    );
+    const app = createApp(db);
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const otherCookie = `session=${createSession('other@silverjrom.app', db)}`;
+    const created = await request(app).post('/api/rooms').set('Cookie', cookie).send({ title: 'Access gate' }).expect(200);
+
+    expect(created.body.room).toMatchObject({ isOpen: false, waitTimeoutMinutes: 15 });
+
+    const opened = await request(app)
+      .put(`/api/rooms/${created.body.room.id}/access`)
+      .set('Cookie', cookie)
+      .send({ isOpen: true, waitTimeoutMinutes: 0.5 })
+      .expect(200);
+    expect(opened.body.room).toMatchObject({ isOpen: true, waitTimeoutMinutes: 0.5 });
+
+    await request(app)
+      .put(`/api/rooms/${created.body.room.id}/access`)
+      .set('Cookie', otherCookie)
+      .send({ isOpen: false })
+      .expect(403, { error: 'forbidden' });
+    await request(app)
+      .put(`/api/rooms/${created.body.room.id}/access`)
+      .set('Cookie', cookie)
+      .send({ waitTimeoutMinutes: 0 })
+      .expect(400, { error: 'wait timeout invalid' });
   });
 
   it('DR-15 resolves rooms by slug or id and enforces custom slug ownership, validation, and uniqueness', async () => {
@@ -213,12 +250,16 @@ describe('rooms API', () => {
       id: first.body.room.id,
       slug: first.body.room.slug,
       title: 'Weekly Sync',
+      isOpen: false,
+      waitTimeoutMinutes: 15,
     });
     await request(app).get(`/api/rooms/${first.body.room.id}/exists`).expect(200, {
       exists: true,
       id: first.body.room.id,
       slug: first.body.room.slug,
       title: 'Weekly Sync',
+      isOpen: false,
+      waitTimeoutMinutes: 15,
     });
 
     const custom = await request(app)
@@ -287,10 +328,16 @@ describe('rooms API', () => {
       `);
 
       runMigrations(db);
-      const rows = db.prepare('SELECT id, slug FROM rooms ORDER BY id').all() as { id: string; slug: string }[];
+      const rows = db.prepare('SELECT id, slug, is_open, wait_timeout_minutes FROM rooms ORDER BY id').all() as {
+        id: string;
+        slug: string;
+        is_open: number;
+        wait_timeout_minutes: number;
+      }[];
 
       expect(rows.map((row) => row.slug)).toEqual(['same-title-aaa111', 'same-title-bbb222', 'test-room01-testro']);
       expect(new Set(rows.map((row) => row.slug)).size).toBe(3);
+      expect(rows.every((row) => row.is_open === 0 && row.wait_timeout_minutes === 15)).toBe(true);
       expect(db.prepare('PRAGMA index_list(rooms)').all().some((row) => (row as { name: string }).name === 'idx_rooms_slug_unique')).toBe(true);
     } finally {
       db.close();

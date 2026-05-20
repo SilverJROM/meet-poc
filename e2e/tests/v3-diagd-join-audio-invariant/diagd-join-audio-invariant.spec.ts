@@ -152,7 +152,7 @@ async function joinGuestWithCamera(page: Page, room: TestRoom, name: string): Pr
   await page.locator('#display-name').fill(name);
   await page.locator('input[name="cameraRequested"]').check({ force: true });
   await page.getByRole('button', { name: 'Ask to join' }).click();
-  await expect(page.getByText('Asking the host to admit you...')).toBeVisible();
+  await expect(page.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();
 }
 
 async function sampleQuality(page: Page, quality: 'good' | 'weak' | 'poor', count: number): Promise<void> {

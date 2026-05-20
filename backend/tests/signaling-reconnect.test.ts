@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
-import { createRoom } from '../src/modules/rooms/store.js';
+import { createRoom, setRoomAccess } from '../src/modules/rooms/store.js';
 import { createTestDb } from './helpers.js';
 import { closeServer, closeWs, connectWs, dropWs, nextMessage, startWsServer } from './signaling-helpers.js';
 
@@ -10,6 +10,7 @@ describe('signaling reconnect', () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);
     const owner = await connectWs(url, ownerCookie);
@@ -66,6 +67,7 @@ describe('signaling reconnect', () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);
     const owner = await connectWs(url, ownerCookie);
@@ -90,6 +92,7 @@ describe('signaling reconnect', () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Owner reconnect', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);
     const owner = await connectWs(url, ownerCookie);
@@ -124,6 +127,7 @@ describe('signaling reconnect', () => {
       Date.now(),
     );
     const room = createRoom('Secure reconnect', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const otherCookie = `session=${createSession('other@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);

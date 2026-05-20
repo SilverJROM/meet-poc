@@ -10,6 +10,8 @@ export type SignalingMessage =
       hostClientId?: string;
     }
   | { type: 'reconnect-token'; token: string; expiresAt: number }
+  | { type: 'waiting-room'; clientId: string; roomTitle?: string; isOpen: boolean; waitTimeoutMs: number | null; expiresAt: number | null }
+  | { type: 'waiting-timeout'; message: string }
   | { type: 'knocking'; clientId: string; roomTitle?: string }
   | { type: 'knock'; clientId: string; name: string }
   | { type: 'pending-list'; knockers: { id: string; name: string }[] }

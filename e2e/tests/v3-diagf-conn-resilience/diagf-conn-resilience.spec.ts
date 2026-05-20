@@ -55,7 +55,7 @@ test('DR-18/19/21 admitted peers and owners resume silently without duplicate or
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.roomState), { timeout: 10000 }).toBe('in-call');
   await expect.poll(() => page.evaluate((oldId) => window.__meetDebug?.myClientId !== oldId, ownerClientIdBefore), { timeout: 10000 }).toBe(true);
   await expect.poll(() => guest.evaluate(() => window.__meetDebug?.peers.filter((peer) => peer.name === 'host').length || 0), { timeout: 10000 }).toBe(1);
-  await expect(page.getByText('Asking the host to admit you...')).toHaveCount(0);
+  await expect(page.getByText(/Asking the host to admit you|The host is available/)).toHaveCount(0);
   await expect(page.locator('app-tile')).toHaveCount(2);
   await page.screenshot({ path: `${SCREENSHOT_DIR}/reconnect-no-ghost.png`, fullPage: true });
 

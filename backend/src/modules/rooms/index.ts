@@ -11,8 +11,10 @@ import {
   isOwnerOf,
   listOwnedRooms,
   listOwnedRoomsPage,
+  setRoomAccess,
   setRoomSlug,
 } from './store.js';
+import { notifyRoomAccessChanged } from '../signaling/index.js';
 
 function hasPaginationQuery(query: Record<string, unknown>): boolean {
   return query.page != null || query.pageSize != null;
@@ -66,6 +68,19 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
     return res.json({ room: result.room });
   });
 
+  router.put('/rooms/:id/access', auth, (req, res) => {
+    const authed = req as AuthenticatedRequest;
+    const result = setRoomAccess(
+      String(req.params.id),
+      { isOpen: req.body?.isOpen, waitTimeoutMinutes: req.body?.waitTimeoutMinutes },
+      authed.user.email,
+      database,
+    );
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    notifyRoomAccessChanged(result.room.id, result.room.isOpen, result.room.waitTimeoutMinutes, database);
+    return res.json({ room: result.room });
+  });
+
   router.post('/rooms/bulk-delete', auth, (req, res) => {
     const authed = req as AuthenticatedRequest;
     const raw = (req.body && Array.isArray(req.body.ids)) ? req.body.ids : null;
@@ -78,7 +93,7 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
   router.get('/rooms/:id/exists', (req, res) => {
     const room = getRoomBySlugOrId(String(req.params.id), database);
     if (!room) return res.json({ exists: false });
-    return res.json({ exists: true, id: room.id, title: room.title, slug: room.slug });
+    return res.json({ exists: true, id: room.id, title: room.title, slug: room.slug, isOpen: room.isOpen, waitTimeoutMinutes: room.waitTimeoutMinutes });
   });
 
   return router;

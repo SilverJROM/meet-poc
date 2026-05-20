@@ -27,15 +27,30 @@ export type TestRoom = {
   slug: string;
   title: string;
   url: string;
+  isOpen?: boolean;
+  waitTimeoutMinutes?: number;
 };
 
-export async function createRoomViaApi(request: APIRequestContext, title: string): Promise<TestRoom> {
+export async function createRoomViaApi(request: APIRequestContext, title: string, options: { open?: boolean } = { open: true }): Promise<TestRoom> {
   await request.post('/api/login', { data: { email, password: initialPassword() } });
   const res = await request.post('/api/rooms', { data: { title } });
   expect(res.ok()).toBeTruthy();
   const json = await res.json();
-  trackRoom(json.room.id);
-  return { id: json.room.id, slug: json.room.slug, title: json.room.title, url: `/room/${json.room.slug || json.room.id}` };
+  let room = json.room;
+  if (options.open !== false) {
+    const access = await request.put(`/api/rooms/${room.id}/access`, { data: { isOpen: true, waitTimeoutMinutes: room.waitTimeoutMinutes ?? 15 } });
+    expect(access.ok()).toBeTruthy();
+    room = (await access.json()).room;
+  }
+  trackRoom(room.id);
+  return {
+    id: room.id,
+    slug: room.slug,
+    title: room.title,
+    url: `/room/${room.slug || room.id}`,
+    isOpen: room.isOpen,
+    waitTimeoutMinutes: room.waitTimeoutMinutes,
+  };
 }
 
 export async function createRoomFromDashboard(page: Page, title: string): Promise<TestRoom> {
@@ -44,6 +59,8 @@ export async function createRoomFromDashboard(page: Page, title: string): Promis
   await page.getByRole('button', { name: 'Create room' }).click();
   const row = page.locator('.room-row').filter({ hasText: title }).first();
   await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'Open' }).click();
+  await expect(row).toContainText('Open for guests');
   const href = await row.getByRole('link', { name: 'Join' }).getAttribute('href');
   if (!href) throw new Error('room href missing');
   const key = href.split('/').pop() ?? '';
@@ -55,7 +72,7 @@ export async function createRoomFromDashboard(page: Page, title: string): Promis
     const id = room?.id ?? key;
     const slug = room?.slug || key;
     if (id) trackRoom(id);
-    return { id, slug, title, url: href };
+    return { id, slug, title, url: href, isOpen: true };
   } finally {
     db.close();
   }
@@ -93,7 +110,7 @@ export async function joinGuestAndWait(page: Page, room: TestRoom, name: string)
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Ask to join' }).click();
-  await expect(page.getByText('Asking the host to admit you...')).toBeVisible();
+  await expect(page.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();
 }
 
 export async function waitForOpen(ws: WebSocket): Promise<void> {

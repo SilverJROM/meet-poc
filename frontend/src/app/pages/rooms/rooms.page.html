@@ -75,9 +75,33 @@
             <div class="room-main">
               <h3>{{ room.title }}</h3>
               <p>Created {{ room.createdAt | date: 'medium' }}</p>
+              <p class="room-access-status">{{ room.isOpen ? 'Open for guests' : 'Closed to guests' }}</p>
               <code>{{ shareUrl(room) }}</code>
             </div>
             <div class="room-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+              <button
+                type="button"
+                class="secondary-btn access-toggle"
+                [disabled]="accessBusyId() === room.id"
+                [attr.aria-pressed]="room.isOpen"
+                (click)="toggleRoomOpen(room, $event)"
+              >
+                <ion-icon [name]="room.isOpen ? 'lock-open-outline' : 'lock-closed-outline'"></ion-icon>
+                {{ room.isOpen ? 'Close' : 'Open' }}
+              </button>
+              <label class="wait-timeout-control">
+                <span>Wait min</span>
+                <input
+                  type="number"
+                  min="0.01"
+                  max="240"
+                  step="1"
+                  [value]="room.waitTimeoutMinutes"
+                  [disabled]="accessBusyId() === room.id"
+                  (change)="updateWaitTimeout(room, $any($event.target).value, $event)"
+                  (click)="$event.stopPropagation()"
+                >
+              </label>
               <a class="primary-btn" [routerLink]="['/room', roomUrlKey(room)]">Join</a>
               <button type="button" class="secondary-btn" (click)="copyLink(room)">
                 <ion-icon name="clipboard-outline"></ion-icon>

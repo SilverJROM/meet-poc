@@ -21,11 +21,19 @@
       <p class="error-text">{{ error() }}</p>
       <a class="secondary-btn" routerLink="/app/rooms">Back to rooms</a>
     </section>
+  } @else if (state() === 'waiting-room') {
+    <section class="lobby-panel knocking-panel waiting-room-panel">
+      <app-knock-spinner />
+      <h1>{{ roomTitle() }}</h1>
+      <p class="muted">This room hasn't been opened by the host yet.</p>
+      <p class="wait-countdown" role="timer">{{ waitRemainingSeconds() }}s remaining</p>
+      <button type="button" class="secondary-btn" (click)="cancelKnock()">Cancel</button>
+    </section>
   } @else if (state() === 'knocking') {
     <section class="lobby-panel knocking-panel">
       <app-knock-spinner />
       <h1>{{ roomTitle() }}</h1>
-      <p class="muted">Asking the host to admit you...</p>
+      <p class="muted">{{ knockingMessage() }}</p>
       <button type="button" class="secondary-btn" (click)="cancelKnock()">Cancel</button>
     </section>
   } @else if (state() === 'in-call') {

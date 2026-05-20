@@ -99,7 +99,7 @@ async function joinGuestAndAdmit(host: Page, guest: Page, room: TestRoom, name: 
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill(name);
   await guest.getByRole('button', { name: 'Ask to join' }).click();
-  await expect(guest.getByText('Asking the host to admit you...')).toBeVisible();
+  await expect(guest.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();
   await host.getByRole('button', { name: 'Show participants' }).click();
   const row = host.getByLabel('Waiting to join').locator('li').filter({ hasText: name });
   await expect(row).toBeVisible();

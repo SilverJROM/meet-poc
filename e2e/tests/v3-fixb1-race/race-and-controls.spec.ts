@@ -143,14 +143,14 @@ async function joinGuestWithCamera(page: Page, room: TestRoom, name: string): Pr
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getVideoTracks().length || 0)).toBeGreaterThan(0);
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Ask to join' }).click();
-  await expect(page.getByText('Asking the host to admit you...')).toBeVisible();
+  await expect(page.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();
 }
 
 async function joinGuest(page: Page, room: TestRoom, name: string): Promise<void> {
   await page.goto(room.url);
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Ask to join' }).click();
-  await expect(page.getByText('Asking the host to admit you...')).toBeVisible();
+  await expect(page.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();
 }
 
 async function admitGuest(host: Page, name: string): Promise<void> {

@@ -23,7 +23,7 @@ import { ViewportService } from '../../services/viewport.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
 import { WebrtcService } from '../../services/webrtc.service';
 
-type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'knocking' | 'in-call' | 'rejected' | 'error';
+type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
 type BufferedSignal = { from: string; data: unknown };
 type LobbyError =
   | { kind: 'denied' }
@@ -68,6 +68,7 @@ export class RoomPage implements OnDestroy {
   readonly roomKey = this.route.snapshot.paramMap.get('slug') ?? this.route.snapshot.paramMap.get('id') ?? '';
   roomId = this.roomKey;
   readonly roomSlug = signal('');
+  readonly roomOpen = signal(false);
   readonly state = signal<RoomState>('checking');
   readonly roomTitle = signal('Checking room...');
   readonly displayName = signal('');
@@ -96,6 +97,9 @@ export class RoomPage implements OnDestroy {
   readonly micLevel = signal<Signal<number>>(signal(0).asReadonly());
   readonly error = signal<string | null>(null);
   readonly status = signal('');
+  readonly knockingMessage = signal('Asking the host to admit you...');
+  readonly waitExpiresAt = signal<number | null>(null);
+  readonly waitRemainingSeconds = signal(0);
   readonly deviceFailureNotice = signal<string | null>(null);
   readonly setupWarning = signal<string | null>(null);
   readonly joinPrereqPopout = signal<string | null>(null);
@@ -141,6 +145,7 @@ export class RoomPage implements OnDestroy {
   private visibilityListenerInstalled = false;
   private camOnBeforeBackground = false;
   private preflightTimer: ReturnType<typeof setTimeout> | null = null;
+  private waitingRoomTimer: ReturnType<typeof setInterval> | null = null;
   private speakerPromotionTimer: ReturnType<typeof setTimeout> | null = null;
   private speakerPromotionCandidate: string | null = null;
   private readonly pendingSignals = new Map<string, BufferedSignal[]>();
@@ -203,6 +208,7 @@ export class RoomPage implements OnDestroy {
         reconnectTokenPresent: !!this.reconnectToken(),
         myClientId: this.myId(),
         roomState: this.state(),
+        waitingRemainingSeconds: this.waitRemainingSeconds(),
         localAudioTrackId: this.media.localStream()?.getAudioTracks()[0]?.id,
         localVideoTrackId: this.media.localStream()?.getVideoTracks()[0]?.id,
         currentFacingMode: this.currentFacingMode(),
@@ -286,6 +292,7 @@ export class RoomPage implements OnDestroy {
       this.roomId = info.id ?? this.roomKey;
       this.roomSlug.set(info.slug ?? this.roomId);
       this.roomTitle.set(info.title ?? 'Untitled room');
+      this.roomOpen.set(!!info.isOpen);
       this.state.set('lobby');
       this.prepareLobbyDeviceCheck();
     } catch {
@@ -355,6 +362,7 @@ export class RoomPage implements OnDestroy {
   }
 
   cancelKnock(): void {
+    this.stopWaitingRoomCountdown();
     this.ws.close();
     this.media.stopLocal();
     this.state.set('lobby');
@@ -613,10 +621,38 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'knocking') {
+      this.stopWaitingRoomCountdown();
       this.myId.set(msg.clientId);
       if (msg.roomTitle) this.roomTitle.set(msg.roomTitle);
       this.state.set('knocking');
-      this.status.set('Asking the host to admit you...');
+      const message = this.roomOpen() ? 'The host is available — please wait to be admitted.' : 'Asking the host to admit you...';
+      this.knockingMessage.set(message);
+      this.status.set(message);
+      return;
+    }
+    if (msg.type === 'waiting-room') {
+      this.myId.set(msg.clientId);
+      if (msg.roomTitle) this.roomTitle.set(msg.roomTitle);
+      if (msg.isOpen) {
+        this.roomOpen.set(true);
+        this.stopWaitingRoomCountdown();
+        const message = 'The host is available — please wait to be admitted.';
+        this.knockingMessage.set(message);
+        this.status.set(message);
+        this.state.set('knocking');
+        return;
+      }
+      this.error.set(null);
+      this.state.set('waiting-room');
+      this.status.set("This room hasn't been opened by the host yet.");
+      this.startWaitingRoomCountdown(msg.expiresAt);
+      return;
+    }
+    if (msg.type === 'waiting-timeout') {
+      this.stopWaitingRoomCountdown();
+      this.ws.close();
+      this.error.set(msg.message);
+      this.state.set('error');
       return;
     }
     if (msg.type === 'rejected') {
@@ -781,6 +817,24 @@ export class RoomPage implements OnDestroy {
 
   private removeKnocker(clientId: string): void {
     this.knockers.set(this.knockers().filter((item) => item.id !== clientId));
+  }
+
+  private startWaitingRoomCountdown(expiresAt: number | null): void {
+    this.stopWaitingRoomCountdown();
+    this.waitExpiresAt.set(expiresAt);
+    const tick = () => {
+      const remaining = expiresAt ? Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)) : 0;
+      this.waitRemainingSeconds.set(remaining);
+    };
+    tick();
+    this.waitingRoomTimer = setInterval(tick, 1000);
+  }
+
+  private stopWaitingRoomCountdown(): void {
+    if (this.waitingRoomTimer) clearInterval(this.waitingRoomTimer);
+    this.waitingRoomTimer = null;
+    this.waitExpiresAt.set(null);
+    this.waitRemainingSeconds.set(0);
   }
 
   private playDoorbellForNewKnock(): void {
@@ -994,7 +1048,8 @@ export class RoomPage implements OnDestroy {
     this.speakerPromotionTimer = null;
     this.speakerPromotionCandidate = null;
     this.promotedSpeakerId.set(null);
-    if (this.state() === 'in-call' || this.state() === 'knocking') this.ws.send({ type: 'leave' });
+    this.stopWaitingRoomCountdown();
+    if (this.state() === 'in-call' || this.state() === 'knocking' || this.state() === 'waiting-room') this.ws.send({ type: 'leave' });
     this.ws.close();
     this.recorder.discard();
     this.media.stopLocal();
@@ -1355,6 +1410,7 @@ declare global {
       reconnectTokenPresent?: boolean;
       myClientId?: string | null;
       roomState?: string;
+      waitingRemainingSeconds?: number;
       localAudioTrackId?: string;
       localVideoTrackId?: string;
       currentFacingMode?: 'user' | 'environment';

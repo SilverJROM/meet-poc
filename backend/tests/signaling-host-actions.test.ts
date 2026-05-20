@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type Database from 'better-sqlite3';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
-import { createRoom } from '../src/modules/rooms/store.js';
+import { createRoom, setRoomAccess } from '../src/modules/rooms/store.js';
 import { getHostClientId, hasLiveRoom } from '../src/modules/signaling/index.js';
 import { createTestDb } from './helpers.js';
 import { closeServer, closeWs, connectWs, nextMessage, startWsServer } from './signaling-helpers.js';
@@ -86,6 +86,7 @@ describe('signaling host authority', () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);
     const owner = await joinOwner(url, ownerCookie, room.id);
@@ -113,6 +114,7 @@ describe('signaling host authority', () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);
     const owner = await joinOwner(url, ownerCookie, room.id);
@@ -148,6 +150,7 @@ describe('signaling host authority', () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);
     const owner = await joinOwner(url, ownerCookie, room.id);
@@ -170,6 +173,7 @@ describe('signaling host authority', () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);
     const owner = await joinOwner(url, ownerCookie, room.id);
@@ -198,6 +202,7 @@ describe('signaling host authority', () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);
     const owner = await joinOwner(url, ownerCookie, room.id);

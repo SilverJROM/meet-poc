@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { addIcons } from 'ionicons';
-import { clipboardOutline, trashOutline, videocamOutline } from 'ionicons/icons';
+import { clipboardOutline, lockClosedOutline, lockOpenOutline, trashOutline, videocamOutline } from 'ionicons/icons';
 import { PaginationComponent } from '../../components/pagination/pagination.component';
 import { Room, RoomsService } from '../../services/rooms.service';
 
@@ -30,6 +30,7 @@ export class RoomsPage implements OnDestroy {
   readonly total = signal(0);
   readonly loading = signal(true);
   readonly busy = signal(false);
+  readonly accessBusyId = signal<string | null>(null);
   readonly error = signal<string | null>(null);
   readonly copyStatus = signal<string | null>(null);
   readonly newTitle = signal('');
@@ -45,7 +46,7 @@ export class RoomsPage implements OnDestroy {
   });
 
   constructor() {
-    addIcons({ clipboardOutline, trashOutline, videocamOutline });
+    addIcons({ clipboardOutline, lockClosedOutline, lockOpenOutline, trashOutline, videocamOutline });
     this.querySub = this.route.queryParamMap.subscribe((params) => {
       this.page.set(readPositiveInt(params.get('page'), 1));
       this.pageSize.set(Math.min(readPositiveInt(params.get('pageSize'), DEFAULT_PAGE_SIZE), 100));
@@ -125,6 +126,18 @@ export class RoomsPage implements OnDestroy {
     await this.refreshRooms();
   }
 
+  async toggleRoomOpen(room: Room, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    await this.updateRoomAccess(room, !room.isOpen, room.waitTimeoutMinutes);
+  }
+
+  async updateWaitTimeout(room: Room, rawValue: string, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    const next = Number(rawValue);
+    if (!Number.isFinite(next) || next <= 0 || next > 240 || next === room.waitTimeoutMinutes) return;
+    await this.updateRoomAccess(room, room.isOpen, next);
+  }
+
   isSelected(id: string): boolean {
     return this.selectedIds().has(id);
   }
@@ -169,6 +182,21 @@ export class RoomsPage implements OnDestroy {
       this.error.set('Bulk delete failed');
     } finally {
       this.busy.set(false);
+    }
+  }
+
+  private async updateRoomAccess(room: Room, isOpen: boolean, waitTimeoutMinutes: number): Promise<void> {
+    if (this.accessBusyId()) return;
+    this.accessBusyId.set(room.id);
+    this.error.set(null);
+    try {
+      const updated = await this.roomsService.setAccess(room.id, isOpen, waitTimeoutMinutes);
+      this.rooms.update((rooms) => rooms.map((item) => (item.id === updated.id ? updated : item)));
+      this.copyStatus.set(updated.isOpen ? 'Room opened' : 'Room closed');
+    } catch {
+      this.error.set('Room access could not be updated');
+    } finally {
+      this.accessBusyId.set(null);
     }
   }
 
