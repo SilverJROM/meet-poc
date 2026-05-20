@@ -35,6 +35,7 @@ describe('signaling knock, admit, reject', () => {
       roomTitle: 'Team sync',
       isOwner: false,
       hostClientId: ownerAdmitted.clientId,
+      sessionId: ownerAdmitted.sessionId,
     });
     expect(peerJoined).toEqual({ type: 'peer-joined', clientId: knocking.clientId, name: 'Guest' });
     closeWs(guest);

@@ -3,7 +3,16 @@ import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
 import { countRecordingsBySessionForUser } from '../recording/index.js';
-import { listActiveForOwner, listEndedForOwner, type MeetingSession } from './store.js';
+import {
+  appendDiagnosticsEntry,
+  getDiagnosticsForSession,
+  listActiveForOwner,
+  listDiagnosticsSessionsForOwner,
+  listEndedForOwner,
+  type DiagnosticEntry,
+  type DiagnosticSessionSummary,
+  type MeetingSession,
+} from './store.js';
 
 function parsePositiveInt(value: unknown, fallback: number): number {
   const parsed = Number(value);
@@ -27,6 +36,31 @@ function mapSession(session: MeetingSession, includeEndedFields = false, recordi
     mapped.recordingsCount = recordingsCount;
   }
   return mapped;
+}
+
+function mapDiagnosticSummary(session: DiagnosticSessionSummary): Record<string, unknown> {
+  return {
+    ...mapSession(session, session.endedAt != null),
+    diagnosticCount: session.diagnosticCount,
+    lastDiagnosticAtIso: new Date(session.lastDiagnosticAt).toISOString(),
+    relayUsed: session.relayUsed,
+    candidateTypes: session.candidateTypes,
+  };
+}
+
+function mapDiagnosticEntry(entry: DiagnosticEntry): Record<string, unknown> {
+  return {
+    id: entry.id,
+    sessionId: entry.sessionId,
+    roomId: entry.roomId,
+    roomTitle: entry.roomTitle || '',
+    kind: entry.kind,
+    createdAtIso: new Date(entry.createdAt).toISOString(),
+    relayUsed: entry.relayUsed,
+    candidateTypes: entry.candidateTypes,
+    peerCount: entry.peerCount,
+    payload: entry.payload,
+  };
 }
 
 export function sessionsRouter(database: Database.Database = getDb()): Router {
@@ -60,6 +94,49 @@ export function sessionsRouter(database: Database.Database = getDb()): Router {
     }
 
     return res.status(400).json({ error: 'invalid status' });
+  });
+
+  router.get('/meeting-sessions/diagnostics-log', auth, (req, res) => {
+    const authed = req as AuthenticatedRequest;
+    const page = parsePositiveInt(req.query.page, 1);
+    const requestedPageSize = parsePositiveInt(req.query.pageSize, 20);
+    const pageSize = Math.min(requestedPageSize, 100);
+    const result = listDiagnosticsSessionsForOwner(authed.user.email, page, pageSize, database);
+    return res.json({
+      sessions: result.rows.map((session) => mapDiagnosticSummary(session)),
+      page,
+      pageSize,
+      total: result.total,
+    });
+  });
+
+  router.get('/meeting-sessions/:sessionId/diagnostics', auth, (req, res) => {
+    const authed = req as AuthenticatedRequest;
+    const result = getDiagnosticsForSession(authed.user.email, String(req.params.sessionId || ''), database);
+    if (!result) return res.status(404).json({ error: 'not found' });
+    return res.json({
+      session: mapSession(result.session, true),
+      entries: result.entries.map((entry) => mapDiagnosticEntry(entry)),
+    });
+  });
+
+  router.get('/meeting-sessions/:sessionId/diagnostics.json', auth, (req, res) => {
+    const authed = req as AuthenticatedRequest;
+    const result = getDiagnosticsForSession(authed.user.email, String(req.params.sessionId || ''), database);
+    if (!result) return res.status(404).json({ error: 'not found' });
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="meeting-diagnostics-${result.session.id}.json"`);
+    return res.json({
+      session: mapSession(result.session, true),
+      entries: result.entries.map((entry) => mapDiagnosticEntry(entry)),
+    });
+  });
+
+  router.post('/meeting-sessions/:sessionId/diagnostics', auth, (req, res) => {
+    const authed = req as AuthenticatedRequest;
+    const entry = appendDiagnosticsEntry(String(req.params.sessionId || ''), authed.user.email, req.body, database);
+    if (!entry) return res.status(404).json({ error: 'not found' });
+    return res.json({ ok: true, entry: mapDiagnosticEntry(entry) });
   });
 
   return router;

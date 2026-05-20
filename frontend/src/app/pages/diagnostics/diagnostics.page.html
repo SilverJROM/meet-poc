@@ -1,0 +1,96 @@
+<section class="diagnostics-page">
+  <div class="section-head">
+    <div>
+      <h2>Call diagnostics</h2>
+      <p>Per-call connection log with published sender tracks.</p>
+    </div>
+    <button type="button" class="secondary" (click)="refresh()">Refresh</button>
+  </div>
+
+  @if (error()) {
+    <p class="error-text">{{ error() }}</p>
+  }
+
+  @if (loading()) {
+    <p class="empty">Loading diagnostics...</p>
+  } @else if (sessions().length === 0) {
+    <p class="empty">No diagnostics captured yet.</p>
+  } @else {
+    <div class="diagnostics-layout">
+      <div class="session-list" aria-label="Diagnostic sessions">
+        @for (session of sessions(); track session.id) {
+          <button
+            type="button"
+            class="session-item"
+            [class.selected]="selectedSessionId() === session.id"
+            (click)="selectSession(session.id)"
+          >
+            <span class="room-title">{{ session.roomTitle || 'Untitled room' }}</span>
+            <span>{{ session.startedAtIso | date: 'medium' }}</span>
+            <span>{{ session.diagnosticCount }} samples · {{ relayLabel(session) }}</span>
+          </button>
+        }
+      </div>
+
+      <div class="detail-panel">
+        @if (detailLoading()) {
+          <p class="empty">Loading session detail...</p>
+        } @else if (detail()) {
+          <div class="detail-head">
+            <div>
+              <h3>{{ detail()?.session?.roomTitle || 'Untitled room' }}</h3>
+              <p>{{ detail()?.entries?.length || 0 }} diagnostic entries</p>
+            </div>
+            @if (selectedSessionId()) {
+              <a class="secondary link-button" [href]="downloadUrl(selectedSessionId()!)" download>Download JSON</a>
+            }
+          </div>
+
+          @if (latestEntry(); as latest) {
+            <div class="latest-grid" aria-label="Latest diagnostics sample">
+              <div>
+                <span class="label">Latest</span>
+                <strong>{{ latest.createdAtIso | date: 'mediumTime' }}</strong>
+              </div>
+              <div>
+                <span class="label">Candidate</span>
+                <strong>{{ candidateLabel(latest) }}</strong>
+              </div>
+              <div>
+                <span class="label">Audio sender</span>
+                <strong>{{ trackSummary(latest, 'audio') }}</strong>
+              </div>
+              <div>
+                <span class="label">Video sender</span>
+                <strong>{{ trackSummary(latest, 'video') }}</strong>
+              </div>
+            </div>
+          }
+
+          <div class="entry-list" aria-label="Diagnostics timeline">
+            @for (entry of detail()?.entries || []; track entry.id) {
+              <article class="entry">
+                <div class="entry-head">
+                  <strong>{{ entry.kind }}</strong>
+                  <span>{{ entry.createdAtIso | date: 'medium' }}</span>
+                  <span>{{ candidateLabel(entry) }} · {{ relayLabel(entry) }}</span>
+                </div>
+                <div class="peer-list">
+                  @for (peer of entry.payload.peers; track peer.id) {
+                    <div class="peer-row">
+                      <span class="peer-name">{{ peer.name }}</span>
+                      <span>{{ peer.connectionState }}/{{ peer.iceConnectionState }}</span>
+                      <span>quality {{ peer.quality }}</span>
+                      <span>audio {{ peer.outboundAudio.label || 'none' }} · {{ peer.outboundAudio.deviceId || 'no deviceId' }}</span>
+                      <span>video {{ peer.outboundVideo.label || 'none' }} · {{ peer.outboundVideo.deviceId || 'no deviceId' }}</span>
+                    </div>
+                  }
+                </div>
+              </article>
+            }
+          </div>
+        }
+      </div>
+    </div>
+  }
+</section>

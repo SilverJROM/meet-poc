@@ -7,7 +7,7 @@ import { createTestDb } from './helpers.js';
 import { closeServer, closeWs, connectWs, nextMessage, startWsServer } from './signaling-helpers.js';
 
 describe('signaling owner auto-admit', () => {
-  it('S2.6 admits an owner immediately with legacy message shape', async () => {
+  it('S2.6 admits an owner immediately with session diagnostics context', async () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
@@ -25,6 +25,7 @@ describe('signaling owner auto-admit', () => {
       roomTitle: 'Team sync',
       isOwner: true,
       hostClientId: expect.any(String),
+      sessionId: expect.any(String),
     });
     expect(admitted.hostClientId).toBe(admitted.clientId);
     closeWs(owner);

@@ -15,6 +15,8 @@ import { TileComponent } from '../../components/tile/tile.component';
 import { ActiveSpeakerService } from '../../services/active-speaker.service';
 import { AuthService } from '../../services/auth.service';
 import { MediaError, MediaService } from '../../services/media.service';
+import { MeetingSessionsService } from '../../services/meeting-sessions.service';
+import type { DiagnosticsPayload, DiagnosticsPeerSample } from '../../services/meeting-sessions.service';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
@@ -24,6 +26,8 @@ import { SignalingMessage, WsService } from '../../services/ws.service';
 import { WebrtcService } from '../../services/webrtc.service';
 
 const SPEAKER_ORDER_SETTLE_MS = 5_000;
+const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
+const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
 type BufferedSignal = { from: string; data: unknown };
@@ -59,6 +63,7 @@ export class RoomPage implements OnDestroy {
   private readonly router = inject(Router);
   readonly auth = inject(AuthService);
   private readonly rooms = inject(RoomsService);
+  private readonly meetingSessions = inject(MeetingSessionsService);
   private readonly ws = inject(WsService);
   private readonly iceConfig = inject(IceConfigService);
   readonly media = inject(MediaService);
@@ -157,6 +162,9 @@ export class RoomPage implements OnDestroy {
   private waitingRoomTimer: ReturnType<typeof setInterval> | null = null;
   private speakerPromotionTimer: ReturnType<typeof setTimeout> | null = null;
   private speakerPromotionCandidate: string | null = null;
+  private diagnosticsLogTimer: ReturnType<typeof setInterval> | null = null;
+  private lastDiagnosticsEventAt = 0;
+  private diagnosticsLogInFlight = false;
   private readonly pendingSignals = new Map<string, BufferedSignal[]>();
   private readonly reconnectToken = signal<string | null>(readReconnectToken(this.roomKey));
   private pendingListInitialized = false;
@@ -208,6 +216,7 @@ export class RoomPage implements OnDestroy {
         doorbellCount: window.__meetDebug?.doorbellCount ?? 0,
         waitingKnockers: this.knockers().map((knocker) => ({ ...knocker })),
         diagnostics: this.webrtc.diagnostics(),
+        diagnosticSnapshot: () => this.webrtc.diagnosticSnapshot(),
         forceRelay: this.webrtc.forceRelay(),
         manualAudioOnly: this.webrtc.manualAudioOnly(),
         lastPeerConnectionPolicy: this.webrtc.lastPeerConnectionPolicy(),
@@ -354,6 +363,7 @@ export class RoomPage implements OnDestroy {
           this.state.set('lobby');
         } else {
           this.status.set('Disconnected from signaling.');
+          this.queueDiagnosticsLog('error', 'signaling disconnected');
         }
       },
     );
@@ -613,11 +623,13 @@ export class RoomPage implements OnDestroy {
   async setForceRelay(enabled: boolean): Promise<void> {
     await this.webrtc.setForceRelay(enabled);
     this.status.set(enabled ? 'Force relay enabled. Recreated peer connections through TURN only.' : 'Force relay disabled. Recreated peer connections with default ICE.');
+    this.queueDiagnosticsLog('state-change');
   }
 
   async toggleAudioOnly(): Promise<void> {
     await this.webrtc.setManualAudioOnly(!this.webrtc.manualAudioOnly());
     this.status.set(this.webrtc.manualAudioOnly() ? 'Audio-only mode on.' : 'Audio-only mode off.');
+    this.queueDiagnosticsLog('state-change');
   }
 
   toggleShareStrip(): void {
@@ -723,6 +735,8 @@ export class RoomPage implements OnDestroy {
       const wasInCall = this.state() === 'in-call';
       this.myId.set(msg.clientId);
       this.isOwner.set(!!msg.isOwner);
+      this.currentSessionId.set(msg.sessionId || this.currentSessionId());
+      this.recorder.setSessionId(msg.sessionId || this.currentSessionId());
       if (msg.roomTitle) this.roomTitle.set(msg.roomTitle);
       const stream = this.media.localStream();
       if (stream) {
@@ -748,6 +762,8 @@ export class RoomPage implements OnDestroy {
         await this.drainPendingSignals(peer.id);
       }
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+      this.startDiagnosticsLogger();
+      this.queueDiagnosticsLog('state-change');
       if (wasInCall) this.status.set('Reconnected.');
       return;
     }
@@ -775,11 +791,13 @@ export class RoomPage implements OnDestroy {
         isHost: !!msg.host || msg.clientId === this.hostClientId(),
       });
       await this.drainPendingSignals(msg.clientId);
+      this.queueDiagnosticsLog('state-change');
       return;
     }
     if (msg.type === 'peer-reconnecting') {
       this.status.set(`${msg.name} is reconnecting.`);
       this.webrtc.markPeerReconnecting(msg.clientId);
+      this.queueDiagnosticsLog('reconnect');
       return;
     }
     if (msg.type === 'peer-resumed') {
@@ -796,10 +814,12 @@ export class RoomPage implements OnDestroy {
         isHost: !!msg.host || msg.clientId === this.hostClientId(),
       });
       await this.drainPendingSignals(msg.clientId);
+      this.queueDiagnosticsLog('reconnect');
       return;
     }
     if (msg.type === 'media-state') {
       this.webrtc.updatePeer(msg.clientId, { micEnabled: msg.mic, camEnabled: msg.cam, screenOn: !!msg.screenOn });
+      this.queueDiagnosticsLog('state-change');
       return;
     }
     if (msg.type === 'chat') {
@@ -823,6 +843,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'meeting-ended') {
+      this.flushDiagnosticsLog('call-end', { useBeacon: true });
       this.ws.close();
       if (!this.isHost()) {
         this.meetingEndedToastOpen.set(true);
@@ -846,6 +867,7 @@ export class RoomPage implements OnDestroy {
       this.webrtc.removePeer(msg.clientId);
       this.pendingSignals.delete(msg.clientId);
       this.removeKnocker(msg.clientId);
+      this.queueDiagnosticsLog('state-change');
       return;
     }
     if (msg.type === 'signal') {
@@ -859,6 +881,7 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'error') {
       this.error.set(msg.error === 'room full' ? 'Room full (max 8)' : msg.error);
       this.state.set(this.state() === 'in-call' ? 'in-call' : 'lobby');
+      this.queueDiagnosticsLog('error', msg.error);
     }
   }
 
@@ -1117,6 +1140,8 @@ export class RoomPage implements OnDestroy {
   }
 
   private cleanupCall(): void {
+    if (this.state() === 'in-call') this.flushDiagnosticsLog('call-end', { useBeacon: true });
+    this.stopDiagnosticsLogger();
     this.clearPreflightTimer();
     if (this.speakerPromotionTimer) clearTimeout(this.speakerPromotionTimer);
     this.speakerPromotionTimer = null;
@@ -1169,6 +1194,7 @@ export class RoomPage implements OnDestroy {
         this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([track])));
         this.updateLocalMediaState();
         this.broadcastMediaState(track.enabled, this.media.cameraOn());
+        this.queueDiagnosticsLog('state-change');
       }
     } catch (err) {
       this.deviceDialogError.set(`Microphone switch failed: ${err instanceof Error ? err.message : 'unknown error'}`);
@@ -1189,6 +1215,7 @@ export class RoomPage implements OnDestroy {
       if (track) {
         this.updateLocalMediaState();
         this.broadcastMediaState(this.media.micOn(), true);
+        this.queueDiagnosticsLog('state-change');
       }
     } catch (err) {
       this.deviceDialogError.set(`Camera switch failed: ${err instanceof Error ? err.message : 'unknown error'}`);
@@ -1235,10 +1262,76 @@ export class RoomPage implements OnDestroy {
     this.updateLocalMediaState();
     this.broadcastMediaState(false, this.media.cameraOn());
     this.deviceFailureNotice.set('Microphone disconnected. Please refresh to rejoin.');
+    this.queueDiagnosticsLog('error', 'local audio track failed');
   }
 
   private broadcastMediaState(mic: boolean, cam: boolean, screenOn = this.media.screenOn()): void {
     this.ws.send({ type: 'media-state', mic, cam, screenOn });
+    this.queueDiagnosticsLog('state-change');
+  }
+
+  private startDiagnosticsLogger(): void {
+    if (this.diagnosticsLogTimer || !this.currentSessionId() || !this.isOwner()) return;
+    this.diagnosticsLogTimer = window.setInterval(() => {
+      void this.flushDiagnosticsLog('sample');
+    }, DIAGNOSTICS_LOG_INTERVAL_MS);
+  }
+
+  private stopDiagnosticsLogger(): void {
+    if (this.diagnosticsLogTimer) clearInterval(this.diagnosticsLogTimer);
+    this.diagnosticsLogTimer = null;
+    this.lastDiagnosticsEventAt = 0;
+    this.diagnosticsLogInFlight = false;
+  }
+
+  private queueDiagnosticsLog(kind: DiagnosticsPayload['kind'], error?: string): void {
+    if (this.state() !== 'in-call' || !this.currentSessionId() || !this.isOwner()) return;
+    this.startDiagnosticsLogger();
+    if (kind === 'sample') {
+      void this.flushDiagnosticsLog(kind, { error });
+      return;
+    }
+    const now = Date.now();
+    if (now - this.lastDiagnosticsEventAt < DIAGNOSTICS_EVENT_THROTTLE_MS) return;
+    this.lastDiagnosticsEventAt = now;
+    void this.flushDiagnosticsLog(kind, { error });
+  }
+
+  private async flushDiagnosticsLog(
+    kind: DiagnosticsPayload['kind'],
+    options: { error?: string; useBeacon?: boolean } = {},
+  ): Promise<void> {
+    const sessionId = this.currentSessionId();
+    if (!sessionId || !this.isOwner()) return;
+    const payload = this.buildDiagnosticsPayload(kind, options.error);
+    if (options.useBeacon && this.meetingSessions.sendDiagnosticsBeacon(sessionId, payload)) return;
+    if (this.diagnosticsLogInFlight) return;
+    this.diagnosticsLogInFlight = true;
+    try {
+      await this.meetingSessions.appendDiagnostics(sessionId, payload);
+    } catch (err) {
+      console.debug('[diagnostics-log] append failed', err);
+    } finally {
+      this.diagnosticsLogInFlight = false;
+    }
+  }
+
+  private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string): DiagnosticsPayload {
+    const payload: DiagnosticsPayload = {
+      kind,
+      roomId: this.roomId,
+      roomTitle: this.roomTitle(),
+      clientId: this.myId(),
+      clientName: this.displayName().trim() || 'Anon',
+      createdAt: Date.now(),
+      wsStatus: this.ws.status(),
+      wsReconnectAttempts: this.ws.reconnectAttempts(),
+      forceRelay: this.webrtc.forceRelay(),
+      manualAudioOnly: this.webrtc.manualAudioOnly(),
+      peers: this.webrtc.diagnosticSnapshot().peers,
+    };
+    if (error) payload.error = error;
+    return payload;
   }
 
   private appendChatMessage(message: ChatMessage): void {
@@ -1499,6 +1592,7 @@ declare global {
         audioOnlyReason: 'auto-poor' | 'manual-audio-only' | 'remote-request' | null;
         updatedAt: number;
       }[];
+      diagnosticSnapshot?: () => { peers: DiagnosticsPeerSample[] };
       forceRelay?: boolean;
       manualAudioOnly?: boolean;
       lastPeerConnectionPolicy?: RTCIceTransportPolicy | 'all';

@@ -353,6 +353,7 @@ function admitPeer(roomId: string, clientId: string, database: Database.Database
     roomTitle: room.title,
     isOwner: isOwnerOf(roomId, pending.userEmail, database),
     hostClientId,
+    sessionId: live.currentSessionId,
   });
   issueReconnectToken(pending.ws, pending, pending.supportsReconnect);
   for (const [, peer] of live.admitted) {
@@ -495,7 +496,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
           state = 'admitted';
           const peers = peerSummaries(live, roomId, database).filter((peer) => peer.id !== clientId);
           const hostClientId = getHostClientId(roomId, database) || (owner ? clientId : null);
-          send(ws, { type: 'admitted', clientId, peers, roomTitle: room.title, isOwner: owner, hostClientId });
+          send(ws, { type: 'admitted', clientId, peers, roomTitle: room.title, isOwner: owner, hostClientId, sessionId: live.currentSessionId });
           issueReconnectToken(ws, entry, supportsReconnect);
           for (const [id, peer] of live.admitted) {
             if (id !== clientId) {

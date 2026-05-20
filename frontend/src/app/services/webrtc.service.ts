@@ -1,5 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { IceConfigService } from './ice-config.service';
+import type { DiagnosticsPeerSample, DiagnosticsTrackInfo } from './meeting-sessions.service';
 
 export type PeerState = {
   id: string;
@@ -369,6 +370,42 @@ export class WebrtcService {
           videoMaxBitrate: typeof videoEncoding?.maxBitrate === 'number' ? videoEncoding.maxBitrate : null,
         };
       });
+  }
+
+  diagnosticSnapshot(): { peers: DiagnosticsPeerSample[] } {
+    return {
+      peers: this.peerList().map((peer) => {
+        const senders = peer.pc?.getSenders() ?? [];
+        const audioSender = senders.find((sender) => sender.track?.kind === 'audio');
+        const videoSender = senders.find((sender) => sender.track?.kind === 'video') ?? this.videoSenders.get(peer.id) ?? null;
+        const fallbackAudio = this.localStream?.getAudioTracks()[0] ?? peer.stream?.getAudioTracks()[0] ?? null;
+        const fallbackVideo = this.localStream?.getVideoTracks()[0] ?? peer.stream?.getVideoTracks()[0] ?? null;
+        return {
+          id: peer.id,
+          name: peer.name,
+          isLocal: peer.isLocal,
+          isHost: peer.isHost,
+          connectionState: peer.connectionState,
+          iceConnectionState: peer.iceConnectionState,
+          iceGatheringState: peer.iceGatheringState,
+          signalingState: peer.signalingState,
+          selectedCandidateType: peer.selectedCandidateType,
+          relayUsed: peer.selectedCandidateType === 'relay' || this.forceRelay(),
+          quality: peer.quality,
+          packetLossPct: peer.packetLossPct,
+          jitterMs: peer.jitterMs,
+          rttMs: peer.rttMs,
+          availableOutgoingBitrateKbps: peer.availableOutgoingBitrateKbps,
+          audioOnlyReason: peer.audioOnlyReason,
+          micEnabled: peer.micEnabled,
+          camEnabled: peer.camEnabled,
+          screenOn: peer.screenOn,
+          outboundAudio: trackInfo(audioSender?.track ?? null, fallbackAudio, 'audio'),
+          outboundVideo: trackInfo(videoSender?.track ?? null, fallbackVideo, 'video'),
+          updatedAt: peer.updatedAt,
+        };
+      }),
+    };
   }
 
   async handleSignal(from: string, data: unknown): Promise<void> {
@@ -890,6 +927,34 @@ function classifyQuality(input: {
 
 function numberOrZero(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function trackInfo(senderTrack: MediaStreamTrack | null, fallbackTrack: MediaStreamTrack | null, kind: 'audio' | 'video'): DiagnosticsTrackInfo {
+  const track = senderTrack ?? fallbackTrack;
+  if (!track) {
+    return {
+      id: null,
+      kind,
+      deviceId: null,
+      label: null,
+      enabled: null,
+      muted: null,
+      readyState: null,
+      source: 'none',
+    };
+  }
+  const settings = typeof track.getSettings === 'function' ? track.getSettings() : {};
+  const debugTrack = track as MediaStreamTrack & { __diagDeviceId?: string; __diagiDeviceId?: string; __diagLabel?: string };
+  return {
+    id: track.id || null,
+    kind,
+    deviceId: debugTrack.__diagDeviceId || debugTrack.__diagiDeviceId || settings.deviceId || null,
+    label: debugTrack.__diagLabel || track.label || null,
+    enabled: track.enabled,
+    muted: track.muted,
+    readyState: track.readyState,
+    source: senderTrack ? 'sender' : 'stream',
+  };
 }
 
 async function selectedCandidateType(pc: RTCPeerConnection): Promise<string | null> {

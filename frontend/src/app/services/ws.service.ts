@@ -8,6 +8,7 @@ export type SignalingMessage =
       roomTitle?: string;
       isOwner: boolean;
       hostClientId?: string;
+      sessionId?: string | null;
     }
   | { type: 'reconnect-token'; token: string; expiresAt: number }
   | { type: 'waiting-room'; clientId: string; roomTitle?: string; isOpen: boolean; waitTimeoutMs: number | null; expiresAt: number | null }

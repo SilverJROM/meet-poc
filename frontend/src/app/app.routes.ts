@@ -19,6 +19,7 @@ export const routes: Routes = [
       { path: 'rooms', loadComponent: () => import('./pages/rooms/rooms.page').then((m) => m.RoomsPage) },
       { path: 'ongoing', loadComponent: () => import('./pages/ongoing/ongoing.page').then((m) => m.OngoingPage) },
       { path: 'past', loadComponent: () => import('./pages/past/past.page').then((m) => m.PastPage) },
+      { path: 'diagnostics', loadComponent: () => import('./pages/diagnostics/diagnostics.page').then((m) => m.DiagnosticsPage) },
       { path: 'recordings', loadComponent: () => import('./pages/recordings/recordings.page').then((m) => m.RecordingsPage) },
       { path: 'transcripts', loadComponent: () => import('./pages/transcripts/transcripts.page').then((m) => m.TranscriptsPage) },
       { path: 'settings', loadComponent: () => import('./pages/settings/settings.page').then((m) => m.SettingsPage) },
