@@ -15,6 +15,8 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 
 | E1 | diage1 — room access + URLs | DR-14 (clickable rooms), DR-15 (name-slug + custom owner slug URLs) | PENDING | Dispatch after DIAGD. |
 | E2 | diage2 — waiting room | DR-16 (host open/close toggle + wait-timeout param; closed=timed-wait+kick+reconnect, open=unlimited+host-available) | PENDING | Dispatch after E1. Host-opened = explicit toggle; wait default 15min host-set. |
+| F | diagf — reconnect + ghost tiles (PRIORITY) | DR-18 (silent sticky reconnect, no re-admit), DR-19 (no ghost/phantom tiles) | PENDING | Added 2026-05-20 from real-device report + screenshot. Same root cause; ties to DR-3 token not firing. Highest pain — consider before E2 if JROM reprioritizes. |
+| G | diagg — display polish | DR-17 (remove all mirroring), DR-20 (stable speaker order + ~5s settle) | PENDING | Added 2026-05-20. Small frontend display tweaks. |
 
 ## RUN CODE-COMPLETE (DR-1..DR-10, 2026-05-20) — DR-11+ added as follow-ons
 
