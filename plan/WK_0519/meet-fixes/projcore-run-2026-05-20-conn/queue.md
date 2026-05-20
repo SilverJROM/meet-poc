@@ -19,7 +19,7 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 | G | diagg — display polish | DR-17 (remove all mirroring), DR-20 (stable speaker order + ~5s settle) | PENDING | Added 2026-05-20. Small in-call display tweaks. |
 | H | diagh — rooms-list search | DR-23 (room-name search/filter on list) | PENDING | Added 2026-05-20. Small rooms-list UI. |
 | I | diagi — device switching | DR-25 | **PASS + DEPLOYED** | 23135a9. e2e 2/2 (lobby deviceId + in-call hot-swap, audio-priority preserved), backend 114/1-skip, deployed pre-freeze for the call. Minor: spec hardcodes :4710 fallback (test-only fix). |
-| Z | diagz — modularization audit (FINAL) | DR-24 (full modularization/coupling audit + boundary guards) | PENDING | Added 2026-05-20. GATED: only after DR-1..25 all VERIFIED. Likely [arch]-led. JROM reviews findings before refactors applied. |
+| Z | diagz — modularization audit (FINAL) | DR-24 | **PASS** | 933b3e7. modularization-audit.md delivered (god-object analysis + 8 ranked refactor recs, report-only). RUN COMPLETE. JROM reviews refactor recs. |
 
 ## RUN CODE-COMPLETE (DR-1..DR-10, 2026-05-20) — DR-11+ added as follow-ons
 

@@ -28,3 +28,9 @@ diag1 dispatched_at: 2026-05-20T04:30:00Z estimate_min: 75 bucket: LONG
 ## ✅ FREEZE LIFTED — 2026-05-20 (JROM cleared after call; used Google Meet for tonight)
 - Resuming. DR-1..25 all VERIFIED + deployed. Only DR-24 (Z modularization audit) remains.
 - Live deploys re-enabled.
+
+## 🎉 CONN-RUN COMPLETE — 2026-05-20
+- All requirements VERIFIED. DR-1..25 implemented + DEPLOYED (live build); DR-24 audit delivered.
+- Batches: A, A.cf, B1, B2, C, D, E1, E2, F, G, H, I, Z — all PASS.
+- 1 critical incident found+fixed: leaked /tmp test env on live backend (logged to JROM/decisions).
+- Pending JROM: (a) review DR-24 refactor recommendations; (b) real-hardware field confirms (cross-network relay, weak-link voice, multi-cam switching); (c) minor test-port typo in diagi spec (:4710→:4700).

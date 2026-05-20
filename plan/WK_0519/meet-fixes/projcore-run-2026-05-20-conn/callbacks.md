@@ -29,3 +29,4 @@ Codex appends one line per STATUS change as the final action of each reply:
 [projcore callback] diagi PROPOSED plan ready; root cause identified as first lobby preflight ignoring selected device IDs plus mobile facingMode overriding explicit camera picker deviceId, with lobby/in-call swap tests scoped
 [projcore callback] diagi DONE committed 23135a9; DR-25 implemented, backend 114/1-skip and npm run build pass; Playwright/e2e + live-deploy DEFERRED (freeze)
 [projcore callback] diagz PROPOSED audit approach ready; DR-24 report-only module map, coupling risk ranking, god-object analysis, and refactor recommendations scoped
+[projcore callback] diagz DONE committed 933b3e7; DR-24 modularization audit delivered, report-only with no production refactor or deploy
