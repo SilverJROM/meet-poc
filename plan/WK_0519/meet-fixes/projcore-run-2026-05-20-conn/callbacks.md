@@ -15,3 +15,4 @@ Codex appends one line per STATUS change as the final action of each reply:
 [projcore callback] diagc PROPOSED plan ready; DR-11 quality polling, receiver-video-control pause/resume signaling, hysteresis, and manual audio-only scoped
 [projcore callback] diagc DONE committed cbaa018; DR-11 voice-first resilience implemented, backend 103/1-skip, DIAGC 1/1, full Run-1+diag1+diagb1+diagb2+diagc 78/78 on isolated DB, pm2 restarted
 [projcore callback] diagd PROPOSED plan ready; DR-12 join-prereq popout plus DR-13 audio-priority invariant hardening scoped
+[projcore callback] diagd DONE committed 59be4c0; DR-12/13 implemented, backend 103/1-skip, DIAGD 5/5, clean Run-1+diag1+diagb1+diagb2+diagc+diagd 83/83, pm2 restarted

@@ -11,7 +11,7 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 | B2 | diagb2 — reliability/observability | DR-1 (screen-share helper), DR-2 (diagnostics panel + force-relay toggle), DR-3 (WS-reconnect + secure reconnect token) | **PASS** | 4567de7. backend 103/1-skip, full gate 77/77, reconnect token security-reviewed + tested. |
 
 | C | diagc — voice-first resilience | DR-11 (auto-degrade to audio-only + manual toggle + quality pill + audio-priority allocation) | **PASS** | cbaa018. Isolation 12/12, audio-priority code verified, codex 78/78 isolated DB. Live-DB gate had 12 data-spec failures = pollution/seed-drift (not DR-11); DB cleaned to TEST_ROOM01. |
-| D | diagd — join-prereqs popout | DR-12 (always-clickable Join + popout naming missing name/mic; supersedes DR-7 grey-out) | PENDING | Added 2026-05-20. Dispatch after DIAGC. |
+| D | diagd — join-popout + audio-invariant | DR-12 (always-clickable Join + popout), DR-13 (audio-bandwidth non-overridable invariant) | **PASS** | 59be4c0. codex 83/83 clean-DB; projcore 55/55 non-seed-flaky + diagd 5/5 + DR-13 invariant test. 4 live-DB FK/WAL seed-flakes (test-infra, not DR-12/13). |
 
 | E1 | diage1 — room access + URLs | DR-14 (clickable rooms), DR-15 (name-slug + custom owner slug URLs) | PENDING | Dispatch after DIAGD. |
 | E2 | diage2 — waiting room | DR-16 (host open/close toggle + wait-timeout param; closed=timed-wait+kick+reconnect, open=unlimited+host-available) | PENDING | Dispatch after E1. Host-opened = explicit toggle; wait default 15min host-set. |
