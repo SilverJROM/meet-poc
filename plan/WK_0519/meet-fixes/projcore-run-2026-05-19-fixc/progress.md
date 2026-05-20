@@ -113,3 +113,5 @@ fixc8 dispatched_at: 2026-05-20T03:43:50Z estimate_min: 60 bucket: MEDIUM
 - **Protocol transition mid-run:** FIXC1-7 on v1.0 (direct dispatch), FIXC8 on v2.0 (plan-handshake + callback-first watcher) per JROM's 2026-05-20 update
 - **Stacked branches:** fixc1→2→3→4→5→6→7→8, each off the prior; `fix/meet-fixc8-transcriber-config` contains the complete run
 - **Hard-cap breaches:** 0. **Send-back iterations:** 0.
+
+[projcore TEARDOWN] lkcdx-meet-v4 killed at 2026-05-20T04:06:05Z — run requirements-complete
