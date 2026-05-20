@@ -24,3 +24,7 @@ diag1 dispatched_at: 2026-05-20T04:30:00Z estimate_min: 75 bucket: LONG
 - DIAGI (DR-25) building: code+commit+backend-tests only; live e2e + deploy deferred to post-freeze.
 - Z (DR-24 audit) analysis can proceed (read-only); any refactors + deploy deferred.
 - Projcore validates batches via backend tests + code review during freeze; live e2e + deploy after JROM lifts.
+
+## ✅ FREEZE LIFTED — 2026-05-20 (JROM cleared after call; used Google Meet for tonight)
+- Resuming. DR-1..25 all VERIFIED + deployed. Only DR-24 (Z modularization audit) remains.
+- Live deploys re-enabled.
