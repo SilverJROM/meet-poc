@@ -11,6 +11,12 @@ export type PeerState = {
   iceGatheringState: RTCIceGatheringState | 'local';
   signalingState: RTCSignalingState | 'local';
   selectedCandidateType: string | null;
+  quality: ConnectionQuality;
+  packetLossPct: number | null;
+  jitterMs: number | null;
+  rttMs: number | null;
+  availableOutgoingBitrateKbps: number | null;
+  audioOnlyReason: AudioOnlyReason;
   updatedAt: number;
   isLocal: boolean;
   isHost: boolean;
@@ -19,9 +25,19 @@ export type PeerState = {
   screenOn: boolean;
 };
 
+export type ConnectionQuality = 'good' | 'weak' | 'poor';
+export type AudioOnlyReason = 'auto-poor' | 'manual-audio-only' | 'remote-request' | null;
+
 type SignalPayload = {
   sdp?: RTCSessionDescriptionInit;
   ice?: RTCIceCandidateInit;
+  control?: VideoControlPayload;
+};
+
+type VideoControlPayload = {
+  type?: string;
+  videoPaused?: boolean;
+  reason?: 'auto-poor' | 'manual-audio-only';
 };
 
 type PeerMeta = {
@@ -33,10 +49,38 @@ type PeerMeta = {
   lastRestartAt: number;
 };
 
+type QualityCounters = {
+  poor: number;
+  good: number;
+};
+
+type PreviousStats = {
+  packetsLost: number;
+  packetsReceived: number;
+};
+
+type QualityMetrics = {
+  quality: ConnectionQuality;
+  packetLossPct: number | null;
+  jitterMs: number | null;
+  rttMs: number | null;
+  availableOutgoingBitrateKbps: number | null;
+  hasInboundMedia: boolean;
+};
+
+type SenderEncoding = RTCRtpEncodingParameters & {
+  priority?: 'very-low' | 'low' | 'medium' | 'high';
+  networkPriority?: 'very-low' | 'low' | 'medium' | 'high';
+};
+
 const ICE_RESTART_DEBOUNCE_MS = 1200;
 const ICE_RESTART_COOLDOWN_MS = 3000;
 const MAX_ICE_RESTART_ATTEMPTS = 3;
 const FORCE_RELAY_STORAGE_KEY = 'meet-poc.forceRelay';
+const QUALITY_POLL_MS = 2500;
+const AUTO_DEGRADE_POOR_SAMPLES = 3;
+const AUTO_RESTORE_GOOD_SAMPLES = 5;
+const VIDEO_MAX_BITRATE_BPS = 700_000;
 
 @Injectable({ providedIn: 'root' })
 export class WebrtcService {
@@ -46,9 +90,18 @@ export class WebrtcService {
   private sendSignal: ((to: string, data: unknown) => void) | null = null;
   private localClientId: string | null = null;
   private readonly peerMeta = new Map<string, PeerMeta>();
+  private readonly qualityCounters = new Map<string, QualityCounters>();
+  private readonly previousStats = new Map<string, PreviousStats>();
+  private readonly autoPausedReceivers = new Set<string>();
+  private readonly remotePauseRequests = new Set<string>();
+  private readonly outboundVideoPaused = new Map<string, boolean>();
+  private readonly videoSenders = new Map<string, RTCRtpSender>();
+  private readonly fallbackVideoTracks = new Map<string, MediaStreamTrack | null>();
+  private qualityTimer: ReturnType<typeof setInterval> | null = null;
   readonly forceRelay = signal(readForceRelay());
   readonly lastPeerConnectionPolicy = signal<RTCIceTransportPolicy | 'all'>('all');
   readonly lastPeerConnectionConfig = signal<RTCConfiguration | null>(null);
+  readonly manualAudioOnly = signal(false);
 
   readonly peers = signal<Map<string, PeerState>>(new Map());
   readonly peerList = computed(() => Array.from(this.peers().values()));
@@ -63,6 +116,12 @@ export class WebrtcService {
         iceGatheringState: peer.iceGatheringState,
         signalingState: peer.signalingState,
         selectedCandidateType: peer.selectedCandidateType,
+        quality: peer.quality,
+        packetLossPct: peer.packetLossPct,
+        jitterMs: peer.jitterMs,
+        rttMs: peer.rttMs,
+        availableOutgoingBitrateKbps: peer.availableOutgoingBitrateKbps,
+        audioOnlyReason: peer.audioOnlyReason,
         updatedAt: peer.updatedAt,
       })),
   );
@@ -85,6 +144,12 @@ export class WebrtcService {
         iceGatheringState: 'local',
         signalingState: 'local',
         selectedCandidateType: null,
+        quality: 'good',
+        packetLossPct: null,
+        jitterMs: null,
+        rttMs: null,
+        availableOutgoingBitrateKbps: null,
+        audioOnlyReason: null,
         updatedAt: Date.now(),
         isLocal: true,
         isHost: options.isHost,
@@ -114,6 +179,12 @@ export class WebrtcService {
       iceGatheringState: pc.iceGatheringState,
       signalingState: pc.signalingState,
       selectedCandidateType: null,
+      quality: 'good',
+      packetLossPct: null,
+      jitterMs: null,
+      rttMs: null,
+      availableOutgoingBitrateKbps: null,
+      audioOnlyReason: null,
       updatedAt: Date.now(),
       isLocal: false,
       isHost: !!options.isHost,
@@ -124,8 +195,10 @@ export class WebrtcService {
     this.mutatePeers((peers) => peers.set(clientId, peer));
 
     for (const track of this.localStream.getTracks()) {
-      pc.addTrack(track, this.localStream);
+      const sender = pc.addTrack(track, this.localStream);
+      if (track.kind === 'video') this.videoSenders.set(clientId, sender);
     }
+    await this.applySenderBandwidthPreferences(pc);
 
     pc.onicecandidate = (event) => {
       if (event.candidate) this.sendSignal?.(clientId, { ice: event.candidate.toJSON() });
@@ -160,6 +233,7 @@ export class WebrtcService {
     if (isInitiator) {
       await this.sendOffer(clientId, pc, meta, false);
     }
+    this.startQualityPolling();
   }
 
   async setForceRelay(enabled: boolean): Promise<void> {
@@ -187,8 +261,77 @@ export class WebrtcService {
     }
   }
 
+  async setManualAudioOnly(enabled: boolean): Promise<void> {
+    if (this.manualAudioOnly() === enabled) return;
+    this.manualAudioOnly.set(enabled);
+    await this.applyAllVideoPolicies();
+    for (const peer of this.peerList()) {
+      if (peer.isLocal) continue;
+      const stillPaused = enabled || this.autoPausedReceivers.has(peer.id);
+      this.sendReceiverVideoPolicy(peer.id, stillPaused, enabled ? 'manual-audio-only' : 'auto-poor');
+    }
+  }
+
+  async sampleQualityNowForTest(quality?: ConnectionQuality): Promise<void> {
+    if (!quality) {
+      await this.sampleAllPeerQuality();
+      return;
+    }
+    await Promise.all(
+      this.peerList()
+        .filter((peer) => !peer.isLocal && peer.pc)
+        .map((peer) =>
+          this.handlePeerQualityMetrics(peer.id, {
+            quality,
+            packetLossPct: quality === 'poor' ? 20 : 0,
+            jitterMs: quality === 'poor' ? 120 : 5,
+            rttMs: quality === 'poor' ? 800 : 50,
+            availableOutgoingBitrateKbps: quality === 'poor' ? 140 : 1600,
+            hasInboundMedia: true,
+          }),
+        ),
+    );
+  }
+
+  debugSenderSnapshot(): {
+    id: string;
+    videoPaused: boolean;
+    audioActive: boolean;
+    videoActive: boolean;
+    audioPriority: unknown;
+    audioNetworkPriority: unknown;
+    videoPriority: unknown;
+    videoNetworkPriority: unknown;
+    videoMaxBitrate: number | null;
+  }[] {
+    return this.peerList()
+      .filter((peer) => !peer.isLocal && peer.pc)
+      .map((peer) => {
+        const senders = peer.pc?.getSenders() ?? [];
+        const audioSender = senders.find((sender) => sender.track?.kind === 'audio');
+        const videoSender = senders.find((sender) => sender.track?.kind === 'video') ?? this.videoSenders.get(peer.id);
+        const audioEncoding = audioSender?.getParameters().encodings?.[0] as SenderEncoding | undefined;
+        const videoEncoding = videoSender?.getParameters().encodings?.[0] as SenderEncoding | undefined;
+        return {
+          id: peer.id,
+          videoPaused: this.shouldPauseOutboundVideo(peer.id),
+          audioActive: !!audioSender?.track && audioSender.track.readyState === 'live',
+          videoActive: !!videoSender?.track && !this.shouldPauseOutboundVideo(peer.id),
+          audioPriority: audioEncoding?.priority ?? null,
+          audioNetworkPriority: audioEncoding?.networkPriority ?? null,
+          videoPriority: videoEncoding?.priority ?? null,
+          videoNetworkPriority: videoEncoding?.networkPriority ?? null,
+          videoMaxBitrate: typeof videoEncoding?.maxBitrate === 'number' ? videoEncoding.maxBitrate : null,
+        };
+      });
+  }
+
   async handleSignal(from: string, data: unknown): Promise<void> {
-    const payload = data as SignalPayload;
+    const payload = (data && typeof data === 'object' ? data : {}) as SignalPayload;
+    if (payload.control) {
+      await this.handleControlSignal(from, payload.control);
+      return;
+    }
     const peer = this.peers().get(from);
     const pc = peer?.pc;
     if (!pc) return;
@@ -226,9 +369,12 @@ export class WebrtcService {
       const sender = pc.getSenders().find((candidate) => candidate.track?.kind === kind);
       if (sender) {
         operations.push(sender.replaceTrack(track));
+        if (kind === 'video') this.videoSenders.set(peer.id, sender);
       } else if (track && this.localStream) {
-        pc.addTrack(track, this.localStream);
+        const added = pc.addTrack(track, this.localStream);
+        if (kind === 'video') this.videoSenders.set(peer.id, added);
       }
+      operations.push(this.applySenderBandwidthPreferences(pc));
     }
     await Promise.all(operations);
     const localPeer = this.peerList().find((peer) => peer.isLocal);
@@ -244,9 +390,17 @@ export class WebrtcService {
     const meta = this.peerMeta.get(clientId);
     if (meta?.restartTimer) clearTimeout(meta.restartTimer);
     this.peerMeta.delete(clientId);
+    this.qualityCounters.delete(clientId);
+    this.previousStats.delete(clientId);
+    this.autoPausedReceivers.delete(clientId);
+    this.remotePauseRequests.delete(clientId);
+    this.outboundVideoPaused.delete(clientId);
+    this.videoSenders.delete(clientId);
+    this.fallbackVideoTracks.delete(clientId);
     peer?.pc?.close();
     peer?.stream?.getTracks().forEach((track) => track.stop());
     this.mutatePeers((peers) => peers.delete(clientId));
+    if (!this.peerList().some((peerState) => !peerState.isLocal)) this.stopQualityPolling();
   }
 
   resetRemotePeers(): void {
@@ -285,6 +439,15 @@ export class WebrtcService {
       if (meta.restartTimer) clearTimeout(meta.restartTimer);
     }
     this.peerMeta.clear();
+    this.qualityCounters.clear();
+    this.previousStats.clear();
+    this.autoPausedReceivers.clear();
+    this.remotePauseRequests.clear();
+    this.outboundVideoPaused.clear();
+    this.videoSenders.clear();
+    this.fallbackVideoTracks.clear();
+    this.manualAudioOnly.set(false);
+    this.stopQualityPolling();
   }
 
   private touchPeer(clientId: string, patch: Partial<PeerState>): void {
@@ -364,12 +527,274 @@ export class WebrtcService {
     }
   }
 
+  private async handleControlSignal(from: string, control: VideoControlPayload): Promise<void> {
+    if (control.type !== 'receiver-video-policy') return;
+    if (control.videoPaused) this.remotePauseRequests.add(from);
+    else this.remotePauseRequests.delete(from);
+    await this.applyVideoPolicy(from);
+    this.updateAudioOnlyReason(from);
+  }
+
+  private startQualityPolling(): void {
+    if (this.qualityTimer) return;
+    this.qualityTimer = setInterval(() => {
+      void this.sampleAllPeerQuality();
+    }, QUALITY_POLL_MS);
+  }
+
+  private stopQualityPolling(): void {
+    if (this.qualityTimer) clearInterval(this.qualityTimer);
+    this.qualityTimer = null;
+  }
+
+  private async sampleAllPeerQuality(): Promise<void> {
+    const peers = this.peerList().filter((peer) => !peer.isLocal && peer.pc);
+    await Promise.all(peers.map((peer) => this.samplePeerQuality(peer.id, peer.pc!)));
+  }
+
+  private async samplePeerQuality(clientId: string, pc: RTCPeerConnection): Promise<void> {
+    if (pc.signalingState === 'closed') return;
+    try {
+      const metrics = await this.readQualityMetrics(clientId, pc);
+      await this.handlePeerQualityMetrics(clientId, metrics);
+    } catch (err) {
+      console.debug(`[webrtc] quality sample failed for ${clientId}`, err);
+    }
+  }
+
+  private async handlePeerQualityMetrics(clientId: string, metrics: QualityMetrics): Promise<void> {
+    const counters = this.qualityCounters.get(clientId) ?? { poor: 0, good: 0 };
+    if (metrics.quality === 'poor') {
+      counters.poor += 1;
+      counters.good = 0;
+    } else if (metrics.quality === 'good') {
+      counters.good += 1;
+      counters.poor = 0;
+    } else {
+      counters.poor = 0;
+      counters.good = 0;
+    }
+    this.qualityCounters.set(clientId, counters);
+    this.touchPeer(clientId, {
+      quality: metrics.quality,
+      packetLossPct: metrics.packetLossPct,
+      jitterMs: metrics.jitterMs,
+      rttMs: metrics.rttMs,
+      availableOutgoingBitrateKbps: metrics.availableOutgoingBitrateKbps,
+    });
+    if (metrics.quality === 'poor' && counters.poor >= AUTO_DEGRADE_POOR_SAMPLES && !this.autoPausedReceivers.has(clientId)) {
+      this.autoPausedReceivers.add(clientId);
+      await this.applyVideoPolicy(clientId);
+      this.sendReceiverVideoPolicy(clientId, true, 'auto-poor');
+      this.updateAudioOnlyReason(clientId);
+    }
+    if (metrics.quality === 'good' && counters.good >= AUTO_RESTORE_GOOD_SAMPLES && this.autoPausedReceivers.has(clientId)) {
+      this.autoPausedReceivers.delete(clientId);
+      await this.applyVideoPolicy(clientId);
+      if (!this.manualAudioOnly()) this.sendReceiverVideoPolicy(clientId, false, 'auto-poor');
+      this.updateAudioOnlyReason(clientId);
+    }
+  }
+
+  private async readQualityMetrics(clientId: string, pc: RTCPeerConnection): Promise<QualityMetrics> {
+    const stats = await pc.getStats();
+    let packetsLost: number | null = null;
+    let packetsReceived: number | null = null;
+    let jitterMs: number | null = null;
+    let rttMs: number | null = null;
+    let availableOutgoingBitrateKbps: number | null = null;
+    let hasInboundMedia = false;
+    let inboundPacketsReceivedTotal = 0;
+
+    for (const rawReport of stats.values()) {
+      const report = rawReport as RTCStats & Record<string, unknown>;
+      if (report.type === 'inbound-rtp' && !report['isRemote']) {
+        hasInboundMedia = true;
+        packetsLost = (packetsLost ?? 0) + numberOrZero(report['packetsLost']);
+        packetsReceived = (packetsReceived ?? 0) + numberOrZero(report['packetsReceived']);
+        inboundPacketsReceivedTotal += numberOrZero(report['packetsReceived']);
+        if (typeof report['jitter'] === 'number') jitterMs = Math.max(jitterMs ?? 0, report['jitter'] * 1000);
+      }
+      if (report.type === 'remote-inbound-rtp' && typeof report['roundTripTime'] === 'number') {
+        rttMs = Math.max(rttMs ?? 0, report['roundTripTime'] * 1000);
+      }
+      if (report.type === 'candidate-pair' && (report['selected'] || report['state'] === 'succeeded')) {
+        if (typeof report['currentRoundTripTime'] === 'number') rttMs = Math.max(rttMs ?? 0, report['currentRoundTripTime'] * 1000);
+        if (typeof report['availableOutgoingBitrate'] === 'number') {
+          availableOutgoingBitrateKbps = Math.round(report['availableOutgoingBitrate'] / 1000);
+        }
+      }
+      if (report.type === 'transport' && report['selectedCandidatePairId']) {
+        const pair = stats.get(String(report['selectedCandidatePairId'])) as (RTCStats & Record<string, unknown>) | undefined;
+        if (typeof pair?.['currentRoundTripTime'] === 'number') rttMs = Math.max(rttMs ?? 0, pair['currentRoundTripTime'] * 1000);
+        if (typeof pair?.['availableOutgoingBitrate'] === 'number') availableOutgoingBitrateKbps = Math.round(pair['availableOutgoingBitrate'] / 1000);
+      }
+    }
+
+    const previous = this.previousStats.get(clientId);
+    const currentLost = packetsLost ?? 0;
+    const currentReceived = packetsReceived ?? 0;
+    let packetLossPct: number | null = null;
+    if (packetsLost != null && packetsReceived != null) {
+      const lostDelta = Math.max(0, currentLost - (previous?.packetsLost ?? 0));
+      const receivedDelta = Math.max(0, currentReceived - (previous?.packetsReceived ?? 0));
+      const denominator = lostDelta + receivedDelta;
+      packetLossPct = denominator > 0 ? Math.round((lostDelta / denominator) * 1000) / 10 : 0;
+      this.previousStats.set(clientId, { packetsLost: currentLost, packetsReceived: currentReceived });
+    }
+
+    const quality = classifyQuality({
+      packetLossPct,
+      jitterMs,
+      rttMs,
+      availableOutgoingBitrateKbps,
+      hasInboundMedia,
+      inboundPacketsReceivedTotal,
+      connectionState: pc.connectionState,
+      iceConnectionState: pc.iceConnectionState,
+    });
+    return { quality, packetLossPct, jitterMs, rttMs, availableOutgoingBitrateKbps, hasInboundMedia };
+  }
+
+  private sendReceiverVideoPolicy(clientId: string, videoPaused: boolean, reason: 'auto-poor' | 'manual-audio-only'): void {
+    this.sendSignal?.(clientId, { control: { type: 'receiver-video-policy', videoPaused, reason } });
+  }
+
+  private async applyAllVideoPolicies(): Promise<void> {
+    await Promise.all(this.peerList().filter((peer) => !peer.isLocal).map((peer) => this.applyVideoPolicy(peer.id)));
+    this.mutatePeers((peers) => {
+      for (const peer of peers.values()) {
+        if (!peer.isLocal) peers.set(peer.id, { ...peer, audioOnlyReason: this.audioOnlyReasonFor(peer.id), updatedAt: Date.now() });
+      }
+    });
+  }
+
+  private async applyVideoPolicy(clientId: string): Promise<void> {
+    const peer = this.peers().get(clientId);
+    const pc = peer?.pc;
+    if (!pc) return;
+    await this.applySenderBandwidthPreferences(pc);
+    const shouldPause = this.shouldPauseOutboundVideo(clientId);
+    if (this.outboundVideoPaused.get(clientId) === shouldPause) return;
+    const sender = pc.getSenders().find((candidate) => candidate.track?.kind === 'video') ?? this.videoSenders.get(clientId);
+    if (!sender) return;
+    try {
+      await setVideoSenderActive(sender, !shouldPause);
+    } catch {
+      await this.replaceVideoSenderFallback(clientId, sender, shouldPause);
+    }
+    this.outboundVideoPaused.set(clientId, shouldPause);
+  }
+
+  private async replaceVideoSenderFallback(clientId: string, sender: RTCRtpSender, shouldPause: boolean): Promise<void> {
+    if (shouldPause) {
+      if (!this.fallbackVideoTracks.has(clientId)) this.fallbackVideoTracks.set(clientId, sender.track ?? null);
+      await sender.replaceTrack(null);
+      return;
+    }
+    const original = this.fallbackVideoTracks.get(clientId);
+    const fallback = this.localStream?.getVideoTracks()[0] ?? null;
+    await sender.replaceTrack(original?.readyState === 'live' ? original : fallback);
+    this.fallbackVideoTracks.delete(clientId);
+  }
+
+  private async applySenderBandwidthPreferences(pc: RTCPeerConnection): Promise<void> {
+    await Promise.all(
+      pc.getSenders().map(async (sender) => {
+        const kind = sender.track?.kind;
+        if (kind !== 'audio' && kind !== 'video') return;
+        try {
+          await setSenderBandwidthPreference(sender, kind);
+        } catch (err) {
+          console.debug(`[webrtc] ${kind} sender bandwidth preference unavailable`, err);
+        }
+      }),
+    );
+  }
+
+  private shouldPauseOutboundVideo(clientId: string): boolean {
+    return this.manualAudioOnly() || this.remotePauseRequests.has(clientId);
+  }
+
+  private updateAudioOnlyReason(clientId: string): void {
+    this.touchPeer(clientId, { audioOnlyReason: this.audioOnlyReasonFor(clientId) });
+  }
+
+  private audioOnlyReasonFor(clientId: string): AudioOnlyReason {
+    if (this.manualAudioOnly()) return 'manual-audio-only';
+    if (this.autoPausedReceivers.has(clientId)) return 'auto-poor';
+    if (this.remotePauseRequests.has(clientId)) return 'remote-request';
+    return null;
+  }
+
   private peerConnectionConfig(iceServers: RTCIceServer[]): RTCConfiguration {
     const config: RTCConfiguration = this.forceRelay() ? { iceServers, iceTransportPolicy: 'relay' } : { iceServers };
     this.lastPeerConnectionPolicy.set(config.iceTransportPolicy ?? 'all');
     this.lastPeerConnectionConfig.set(config);
     return config;
   }
+}
+
+async function setVideoSenderActive(sender: RTCRtpSender, active: boolean): Promise<void> {
+  const params = sender.getParameters();
+  if (!params.encodings?.length) throw new Error('sender encodings unavailable');
+  params.encodings = params.encodings.map((encoding) => ({ ...encoding, active }));
+  await sender.setParameters(params);
+}
+
+async function setSenderBandwidthPreference(sender: RTCRtpSender, kind: 'audio' | 'video'): Promise<void> {
+  const params = sender.getParameters();
+  const encodings = params.encodings?.length ? params.encodings : [{} as RTCRtpEncodingParameters];
+  params.encodings = encodings.map((encoding) => {
+    const next: SenderEncoding = { ...encoding };
+    if (kind === 'audio') {
+      next.priority = 'high';
+      next.networkPriority = 'high';
+      return next;
+    }
+    next.priority = 'low';
+    next.networkPriority = 'low';
+    next.maxBitrate = Math.min(typeof next.maxBitrate === 'number' ? next.maxBitrate : VIDEO_MAX_BITRATE_BPS, VIDEO_MAX_BITRATE_BPS);
+    return next;
+  });
+  await sender.setParameters(params);
+}
+
+function classifyQuality(input: {
+  packetLossPct: number | null;
+  jitterMs: number | null;
+  rttMs: number | null;
+  availableOutgoingBitrateKbps: number | null;
+  hasInboundMedia: boolean;
+  inboundPacketsReceivedTotal: number;
+  connectionState: RTCPeerConnectionState;
+  iceConnectionState: RTCIceConnectionState;
+}): ConnectionQuality {
+  if (input.connectionState === 'failed' || input.connectionState === 'disconnected' || input.iceConnectionState === 'failed' || input.iceConnectionState === 'disconnected') {
+    return 'poor';
+  }
+  if (input.hasInboundMedia && input.inboundPacketsReceivedTotal === 0) return 'poor';
+  if (
+    (input.packetLossPct != null && input.packetLossPct >= 12) ||
+    (input.rttMs != null && input.rttMs >= 650) ||
+    (input.jitterMs != null && input.jitterMs >= 80) ||
+    (input.availableOutgoingBitrateKbps != null && input.availableOutgoingBitrateKbps < 250)
+  ) {
+    return 'poor';
+  }
+  if (
+    (input.packetLossPct != null && input.packetLossPct >= 5) ||
+    (input.rttMs != null && input.rttMs >= 350) ||
+    (input.jitterMs != null && input.jitterMs >= 40) ||
+    (input.availableOutgoingBitrateKbps != null && input.availableOutgoingBitrateKbps < 650)
+  ) {
+    return 'weak';
+  }
+  return 'good';
+}
+
+function numberOrZero(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
 async function selectedCandidateType(pc: RTCPeerConnection): Promise<string | null> {

@@ -82,6 +82,11 @@
   background: rgba(59, 130, 246, 0.16);
 }
 
+.audio-only-btn.active {
+  border-color: rgba(14, 165, 233, 0.6);
+  background: rgba(14, 165, 233, 0.18);
+}
+
 .control-btn.is-off {
   border-color: rgba(220, 38, 38, 0.68);
   color: #fff;

@@ -61,6 +61,17 @@
     </button>
     <button
       type="button"
+      class="control-btn audio-only-btn"
+      [class.active]="audioOnly()"
+      [attr.aria-pressed]="audioOnly()"
+      [attr.aria-label]="audioOnly() ? 'Disable audio-only mode' : 'Enable audio-only mode'"
+      (click)="audioOnlyToggle.emit()"
+      [title]="audioOnly() ? 'Disable audio-only mode' : 'Enable audio-only mode'"
+    >
+      <ion-icon name="volume-high-outline"></ion-icon>
+    </button>
+    <button
+      type="button"
       class="control-btn"
       [class.active]="diagnosticsOpen()"
       [attr.aria-pressed]="diagnosticsOpen()"

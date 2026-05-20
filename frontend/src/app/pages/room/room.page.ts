@@ -127,6 +127,7 @@ export class RoomPage implements OnDestroy {
     });
   });
   readonly showPeerWarning = computed(() => this.peers().length >= 6 && !this.warningDismissed());
+  readonly weakAudioOnlyPeers = computed(() => this.peers().filter((peer) => !peer.isLocal && peer.audioOnlyReason === 'auto-poor'));
   readonly hostRecording = signal(false);
   readonly recordingStartedAt = signal<number | null>(null);
   readonly currentSessionId = signal<string | null>(null);
@@ -174,6 +175,8 @@ export class RoomPage implements OnDestroy {
             micEnabled: peer.micEnabled,
             camEnabled: peer.camEnabled,
             screenOn: peer.screenOn,
+            quality: peer.quality,
+            audioOnlyReason: peer.audioOnlyReason,
           };
         }),
         shareLayoutActive: this.shareLayoutActive(),
@@ -188,6 +191,7 @@ export class RoomPage implements OnDestroy {
         waitingKnockers: this.knockers().map((knocker) => ({ ...knocker })),
         diagnostics: this.webrtc.diagnostics(),
         forceRelay: this.webrtc.forceRelay(),
+        manualAudioOnly: this.webrtc.manualAudioOnly(),
         lastPeerConnectionPolicy: this.webrtc.lastPeerConnectionPolicy(),
         lastPeerConnectionConfig: this.webrtc.lastPeerConnectionConfig(),
         wsConnected: this.ws.connected(),
@@ -234,6 +238,8 @@ export class RoomPage implements OnDestroy {
         isIOS: () => this.platform.isIOS(),
         isAndroid: () => this.platform.isAndroid(),
         closeSignalingForTest: () => this.ws.debugDropForReconnect(),
+        sampleConnectionQualityForTest: (quality?: 'good' | 'weak' | 'poor') => this.webrtc.sampleQualityNowForTest(quality),
+        senderSnapshot: () => this.webrtc.debugSenderSnapshot(),
       };
       if (window.location.hostname === 'localhost') {
         debug.injectActiveSpeakerStream = (id: string, stream: MediaStream) => this.activeSpeaker.injectDebugStream(id, stream);
@@ -515,6 +521,11 @@ export class RoomPage implements OnDestroy {
   async setForceRelay(enabled: boolean): Promise<void> {
     await this.webrtc.setForceRelay(enabled);
     this.status.set(enabled ? 'Force relay enabled. Recreated peer connections through TURN only.' : 'Force relay disabled. Recreated peer connections with default ICE.');
+  }
+
+  async toggleAudioOnly(): Promise<void> {
+    await this.webrtc.setManualAudioOnly(!this.webrtc.manualAudioOnly());
+    this.status.set(this.webrtc.manualAudioOnly() ? 'Audio-only mode on.' : 'Audio-only mode off.');
   }
 
   toggleShareStrip(): void {
@@ -1199,6 +1210,8 @@ declare global {
         micEnabled?: boolean;
         camEnabled?: boolean;
         screenOn?: boolean;
+        quality?: 'good' | 'weak' | 'poor';
+        audioOnlyReason?: 'auto-poor' | 'manual-audio-only' | 'remote-request' | null;
       }[];
       shareLayoutActive?: boolean;
       shareStripCollapsed?: boolean;
@@ -1217,9 +1230,16 @@ declare global {
         iceGatheringState: string;
         signalingState: string;
         selectedCandidateType: string | null;
+        quality: 'good' | 'weak' | 'poor';
+        packetLossPct: number | null;
+        jitterMs: number | null;
+        rttMs: number | null;
+        availableOutgoingBitrateKbps: number | null;
+        audioOnlyReason: 'auto-poor' | 'manual-audio-only' | 'remote-request' | null;
         updatedAt: number;
       }[];
       forceRelay?: boolean;
+      manualAudioOnly?: boolean;
       lastPeerConnectionPolicy?: RTCIceTransportPolicy | 'all';
       lastPeerConnectionConfig?: RTCConfiguration | null;
       wsConnected?: boolean;
@@ -1256,6 +1276,18 @@ declare global {
       isIOS?: () => boolean;
       isAndroid?: () => boolean;
       closeSignalingForTest?: () => void;
+      sampleConnectionQualityForTest?: (quality?: 'good' | 'weak' | 'poor') => Promise<void>;
+      senderSnapshot?: () => {
+        id: string;
+        videoPaused: boolean;
+        audioActive: boolean;
+        videoActive: boolean;
+        audioPriority: unknown;
+        audioNetworkPriority: unknown;
+        videoPriority: unknown;
+        videoNetworkPriority: unknown;
+        videoMaxBitrate: number | null;
+      }[];
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
     };
   }

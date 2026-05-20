@@ -132,6 +132,7 @@ video {
 
 .host-badge,
 .mute-icon,
+.quality-pill,
 .name-label,
 .state {
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -156,6 +157,30 @@ video {
   place-items: center;
   color: #fecaca;
   background: rgba(127, 29, 29, 0.84);
+}
+
+.quality-pill {
+  padding: 5px 8px;
+  color: #ecfeff;
+  font-size: 11px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.quality-pill[data-quality='good'] {
+  color: #bbf7d0;
+  background: rgba(22, 101, 52, 0.82);
+}
+
+.quality-pill[data-quality='weak'] {
+  color: #fef3c7;
+  background: rgba(146, 64, 14, 0.86);
+}
+
+.quality-pill[data-quality='poor'],
+.quality-pill[data-quality='audio-only'] {
+  color: #fecaca;
+  background: rgba(127, 29, 29, 0.86);
 }
 
 .name-label {
@@ -187,7 +212,8 @@ video {
 }
 
 .strip-tile .name-label,
-.strip-tile .state {
+.strip-tile .state,
+.strip-tile .quality-pill {
   padding: 5px 7px;
   font-size: 11px;
 }
