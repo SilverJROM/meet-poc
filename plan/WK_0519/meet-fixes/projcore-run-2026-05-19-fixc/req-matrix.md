@@ -12,10 +12,10 @@ Status legend: `OPEN` / `IN_BATCH` / `IMPLEMENTED` / `VERIFIED`
 | R-C-6 | Transcript delete independent of audio | FIXC4 | **VERIFIED** | batch-fixc4/independent-validation.md — FIXC4.2/4.3 PASS |
 | R-C-7 | Past-meetings delete = rooms-bulk-delete (no new UI) | FIXC4 | **VERIFIED** | existing rooms-bulk-delete coverage in backend suite |
 | R-C-8 | LLM provider abstraction (Claude sonnet / Codex spark / Ollama) | FIXC5 | **VERIFIED** | batch-fixc5/independent-validation.md — live /api/llm/health returns all-true |
-| R-C-9 | Settings UI for LLM default (star to set) | FIXC7 | IMPLEMENTED | batch-fixc7/test-report.md — FIXC7.1/7.2 PASS, Run 1 64/64 |
+| R-C-9 | Settings UI for LLM default (star to set) | FIXC7 | **VERIFIED** | validation/batch-fixc7.md — FIXC7.1/7.2 PASS + screenshot shows starred Ollama default |
 | R-C-10 | Ollama benchmark — top 3 by accuracy then speed | FIXC6 | **VERIFIED** | decisions/2026-05-19-fixc-ollama-benchmark.md — top 3: mistral-nemo:12b / gpt-oss:20b / gemma2:9b |
-| R-C-11 | Question library CRUD | FIXC7 | IMPLEMENTED | batch-fixc7/test-report.md — FIXC7.3/7.4 PASS + backend tests |
-| R-C-12 | Question execution — auto on transcript-ready + manual Run button | FIXC7 | IMPLEMENTED | batch-fixc7/test-report.md — FIXC7.5/7.6 PASS + sidecar persistence |
+| R-C-11 | Question library CRUD | FIXC7 | **VERIFIED** | validation/batch-fixc7.md — FIXC7.3 create/edit/star/delete PASS + backend CRUD tests |
+| R-C-12 | Question execution — auto on transcript-ready + manual Run button | FIXC7 | **VERIFIED** | validation/batch-fixc7.md — FIXC7.4/7.5/7.6 PASS + sidecar persistence |
 | R-C-13 | Transcriber model dropdown (small/medium/large-v3) | FIXC8 | OPEN | — |
 
 Final acceptance: every row = VERIFIED.

@@ -78,13 +78,15 @@ R-C-1, R-C-2, R-C-3, R-C-4, R-C-5, R-C-6, R-C-7 all VERIFIED. Remaining: R-C-8 (
 - FIXC7 will default the Ollama provider to mistral-nemo:12b
 - See `batch-fixc6/independent-validation.md` + `decisions/2026-05-19-fixc-ollama-benchmark.md`
 
-### FIXC7 — Question library + Settings UI + analysis execution — **IMPLEMENTED, AWAITING INDEPENDENT VERIFICATION** (2026-05-20)
+### FIXC7 — Question library + Settings UI + analysis execution — **VERIFIED PASS** (2026-05-20, codex wall time 23m 11s)
 
 - Branch: `fix/meet-fixc7-question-library`
-- Backend: **91 passed / 1 skipped**
-- FIXC7 e2e: **6/6**
-- Build: PASS, PM2 restart: PASS, live DB migration: `questions` + `llm_settings` present
-- Run 1 regression: **64/64** (candidate R8.1 → 17 consecutive)
-- Screenshots: settings-question-library.png + transcript-with-analysis.png
-- R-C-9, R-C-11, R-C-12 → IMPLEMENTED pending projcore independent verification
-- See `batch-fixc7/test-report.md`
+- Commits: 356c326 feat: add question library analysis tools (27 files, 1997+/18-)
+- Backend: **91 passed / 1 skipped** (independent re-run), FIXC7 e2e: **6/6** (independent), Run 1 regression: **64/64** (R8.1 → 17 consecutive)
+- Migration applied to `data/meet-poc.sqlite`: `questions` + `llm_settings` tables, 2 seed questions, default_provider=ollama
+- Screenshots: settings-question-library.png (starred Ollama default + question table) + transcript-with-analysis.png (auto-run result surfaced)
+- Evidence Quality Gate (5Q) PASS; spec has 40 real DOM calls (§2.9)
+- R-C-9, R-C-11, R-C-12 → all VERIFIED
+- Minor: seed questions both is_default=0 (brief wanted Summarize pre-starred); star mechanism works, non-blocking
+- **Watcher miss:** pane-sentinel scrolled out of window during 23m run; switching to v2.0 callback-first watcher for FIXC8
+- See `validation/batch-fixc7.md`
