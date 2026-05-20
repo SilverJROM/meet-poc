@@ -18,7 +18,7 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 | F | diagf — connection resilience (PRIORITY) | DR-18/19/21/22 | **PASS** | 973dbce. diagf 2/2 isolation, backend 108/1-skip, signaling regression clean, security tests pass, 88/89 gate. UNCOVERED + FIXED critical leaked-/tmp-env on live backend (was corrupting the whole session's validation). |
 | G | diagg — display polish | DR-17 (remove all mirroring), DR-20 (stable speaker order + ~5s settle) | PENDING | Added 2026-05-20. Small in-call display tweaks. |
 | H | diagh — rooms-list search | DR-23 (room-name search/filter on list) | PENDING | Added 2026-05-20. Small rooms-list UI. |
-| I | diagi — device switching | DR-25 (fix camera/mic switch on multi-device + mobile; lobby + in-call) | PENDING | Added 2026-05-20. Real bug (FIXC2 device dialog doesn't switch device on real hw). Before Z. |
+| I | diagi — device switching | DR-25 | **PASS + DEPLOYED** | 23135a9. e2e 2/2 (lobby deviceId + in-call hot-swap, audio-priority preserved), backend 114/1-skip, deployed pre-freeze for the call. Minor: spec hardcodes :4710 fallback (test-only fix). |
 | Z | diagz — modularization audit (FINAL) | DR-24 (full modularization/coupling audit + boundary guards) | PENDING | Added 2026-05-20. GATED: only after DR-1..25 all VERIFIED. Likely [arch]-led. JROM reviews findings before refactors applied. |
 
 ## RUN CODE-COMPLETE (DR-1..DR-10, 2026-05-20) — DR-11+ added as follow-ons

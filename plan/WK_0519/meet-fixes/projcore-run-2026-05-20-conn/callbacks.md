@@ -27,3 +27,4 @@ Codex appends one line per STATUS change as the final action of each reply:
 [projcore callback] diagh PROPOSED plan ready; server-side room-name search via GET /api/rooms?q= scoped with pagination, slugs, row-click, and access controls preserved
 [projcore callback] diagh DONE committed 50ce481; DR-23 implemented, backend 114/1-skip, DIAGH 1/1, clean Run-1+diag gate 94/94, pm2 clean env verified
 [projcore callback] diagi PROPOSED plan ready; root cause identified as first lobby preflight ignoring selected device IDs plus mobile facingMode overriding explicit camera picker deviceId, with lobby/in-call swap tests scoped
+[projcore callback] diagi DONE committed 23135a9; DR-25 implemented, backend 114/1-skip and npm run build pass; Playwright/e2e + live-deploy DEFERRED (freeze)
