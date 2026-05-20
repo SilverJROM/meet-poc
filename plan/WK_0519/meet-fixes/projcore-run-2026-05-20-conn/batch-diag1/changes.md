@@ -49,3 +49,19 @@ The frontend previously constructed every `RTCPeerConnection` from a hardcoded f
 - No TURN credentials are hardcoded.
 - Cloudflare minting is intentionally a stub/TODO until JROM provides provider-specific details.
 - Batch B still owns DR-1, the full DR-2 visible diagnostics panel, and DR-3 WS auto-reconnect.
+
+## DIAG1CF Update
+
+- `backend/src/modules/ice-config/index.ts`
+  - Completes the Cloudflare mint path using JROM's exact `.env` names: `TURN_ID` for the Cloudflare TURN key id and `TURN_API_Key` for the bearer token.
+  - Calls `POST https://rtc.live.cloudflare.com/v1/turn/keys/${TURN_ID}/credentials/generate` with `{ "ttl": 86400 }`.
+  - Normalizes Cloudflare's single `iceServers` object into the existing `IceServerConfig[]` response shape.
+  - Caches minted credentials in memory until five minutes before the 24h TTL expires.
+  - Falls back to STUN-only plus any static TURN config on network, non-2xx, or malformed-response failure.
+  - Logs only status/error summaries and never logs the API token, minted username, or minted credential.
+
+- `backend/src/server.ts`, `backend/package.json`, `package-lock.json`
+  - Adds `dotenv/config` at backend boot so PM2/tsx reads the repo `.env` containing `TURN_ID` and `TURN_API_Key`.
+
+- `backend/tests/ice-config.test.ts`
+  - Adds mocked-fetch tests for successful Cloudflare mint, cache reuse, non-2xx fallback, and thrown network-error fallback.

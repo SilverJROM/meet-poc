@@ -32,3 +32,32 @@ The new Batch A tests passed in the full run. The failing tests were distributed
 ## Evidence
 
 - Screenshot: `screenshots/batch-a-call-connected.png`
+
+## DIAG1CF Cloudflare Completion
+
+- `npm test -w backend -- ice-config.test.ts`
+  - PASS, 7 passed.
+
+- `npm run build -w backend`
+  - PASS.
+
+- `npm test -w backend`
+  - PASS, 100 passed, 1 skipped.
+
+- `pm2 restart meet-poc-be`
+  - PASS, backend restarted and remained online.
+
+- Live mint check:
+  - Command used: `curl -s http://localhost:4720/api/ice-config`
+  - Evidence below lists URLs only; minted username/credential were intentionally not copied.
+  - Returned URLs:
+    - `stun:stun.l.google.com:19302`
+    - `stun:stun1.l.google.com:19302`
+    - `stun:stun.cloudflare.com:3478`
+    - `turn:turn.cloudflare.com:3478?transport=udp`
+    - `turn:turn.cloudflare.com:3478?transport=tcp`
+    - `turns:turn.cloudflare.com:5349?transport=tcp`
+
+- Run-1 regression with DIAG1:
+  - Command: `npm test -w e2e -- tests/v3-diag1-conn tests/v3-fixc8-transcriber-config tests/v3-fixc7-question-library tests/v3-fixc4-transcript-tools tests/v3-fixc3-share-reflow tests/v3-fixc2-device-modal tests/v3-fixc1-camera-light tests/v3-fixb4-transcripts tests/v3-fixb2-transcript tests/v2-b3-shell tests/v2-b4-tabs tests/v2-b5-lobby tests/v2-b6-grid tests/v2-b7-controls tests/v2-b8-sidebar --config=playwright.live.config.ts --workers=1`
+  - PASS, 69 passed.

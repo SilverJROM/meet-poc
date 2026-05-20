@@ -7,6 +7,15 @@ export type IceServerConfig = {
 };
 
 const DEFAULT_STUN_SERVERS: IceServerConfig[] = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+const CLOUDFLARE_TURN_TTL_SECONDS = 86_400;
+const CLOUDFLARE_CACHE_SKEW_MS = 5 * 60 * 1000;
+
+type CachedTurn = {
+  server: IceServerConfig;
+  expiresAtMs: number;
+};
+
+let cloudflareCache: CachedTurn | null = null;
 
 export function iceConfigRouter(): Router {
   const router = Router();
@@ -45,14 +54,59 @@ function readStaticTurn(env: NodeJS.ProcessEnv): IceServerConfig | null {
 }
 
 async function readCloudflareTurn(env: NodeJS.ProcessEnv): Promise<IceServerConfig | null> {
-  const token = firstPresent(env.MEET_CLOUDFLARE_TURN_TOKEN, env.CLOUDFLARE_TURN_TOKEN);
-  const serviceId = firstPresent(env.MEET_CLOUDFLARE_TURN_SERVICE_ID, env.CLOUDFLARE_TURN_SERVICE_ID);
-  if (!token && !serviceId) return null;
+  const keyId = firstPresent(env.TURN_ID, env.MEET_CLOUDFLARE_TURN_SERVICE_ID, env.CLOUDFLARE_TURN_SERVICE_ID);
+  const token = firstPresent(env.TURN_API_Key, env.MEET_CLOUDFLARE_TURN_TOKEN, env.CLOUDFLARE_TURN_TOKEN);
+  if (!keyId && !token) return null;
+  if (!keyId || !token) {
+    console.warn('[ice-config] ignoring incomplete Cloudflare TURN env; require TURN_ID and TURN_API_Key');
+    return null;
+  }
 
-  // TODO(DR-5): wire the exact Cloudflare TURN mint endpoint once JROM provides
-  // the account/service details. Static long-term TURN remains fully supported.
-  console.warn('[ice-config] Cloudflare TURN env present but mint API is not configured yet; serving STUN/static TURN only');
-  return null;
+  if (cloudflareCache && cloudflareCache.expiresAtMs > Date.now()) return cloudflareCache.server;
+
+  try {
+    const response = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ ttl: CLOUDFLARE_TURN_TTL_SECONDS }),
+    });
+    if (!response.ok) {
+      console.warn(`[ice-config] Cloudflare TURN mint failed with status ${response.status}`);
+      return null;
+    }
+
+    const json = (await response.json()) as { iceServers?: unknown };
+    const server = normalizeCloudflareIceServer(json.iceServers);
+    if (!server) {
+      console.warn('[ice-config] Cloudflare TURN mint returned malformed iceServers');
+      return null;
+    }
+
+    cloudflareCache = {
+      server,
+      expiresAtMs: Date.now() + CLOUDFLARE_TURN_TTL_SECONDS * 1000 - CLOUDFLARE_CACHE_SKEW_MS,
+    };
+    return server;
+  } catch (err) {
+    console.warn(`[ice-config] Cloudflare TURN mint request failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+    return null;
+  }
+}
+
+export function clearIceConfigCacheForTests(): void {
+  cloudflareCache = null;
+}
+
+function normalizeCloudflareIceServer(raw: unknown): IceServerConfig | null {
+  const value = raw as { urls?: unknown; username?: unknown; credential?: unknown };
+  const urls = Array.isArray(value?.urls) ? value.urls.filter((url): url is string => typeof url === 'string' && !!url.trim()) : [];
+  const username = typeof value?.username === 'string' ? value.username : '';
+  const credential = typeof value?.credential === 'string' ? value.credential : '';
+  if (urls.length === 0 || !username || !credential) return null;
+  return { urls, username, credential };
 }
 
 function parseUrlList(raw: string | undefined): string[] {
