@@ -83,9 +83,35 @@ export class RecordingsService {
     return firstValueFrom(this.http.get<Transcript>(`/api/recordings/${encodeURIComponent(filename)}/transcript`));
   }
 
+  async downloadTranscriptTxt(filename: string): Promise<void> {
+    const blob = await firstValueFrom(
+      this.http.get(`/api/recordings/${encodeURIComponent(filename)}/transcript.txt`, {
+        observe: 'response',
+        responseType: 'blob',
+      }),
+    );
+    const downloadName = transcriptDownloadName(filename);
+    const url = URL.createObjectURL(blob.body ?? new Blob([], { type: 'text/plain' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = downloadName;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async deleteTranscript(filename: string): Promise<void> {
+    await firstValueFrom(this.http.delete<void>(`/api/recordings/${encodeURIComponent(filename)}/transcript`));
+  }
+
   async transcribe(filename: string, force = false): Promise<void> {
     await firstValueFrom(
       this.http.post<{ ok: true; status: 'started' }>(`/api/recordings/${encodeURIComponent(filename)}/transcribe`, { force }),
     );
   }
+}
+
+function transcriptDownloadName(filename: string): string {
+  return filename.replace(/\.[^.]+$/, '') + '.txt';
 }

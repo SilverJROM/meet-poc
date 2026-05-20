@@ -124,6 +124,44 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     }
   });
 
+  router.get('/api/recordings/:filename/transcript.txt', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const filename = String(req.params.filename || '');
+    const ownership = ownedRecordingPath(filename, authReq.user.email, database);
+    if (ownership.status !== 200) return res.status(ownership.status).json({ error: ownership.error });
+    const transcriptPath = transcriptPathFor(filename);
+    if (!transcriptPath || !fs.existsSync(transcriptPath)) return res.status(404).json({ error: 'transcript not found' });
+    try {
+      const transcript = JSON.parse(fs.readFileSync(transcriptPath, 'utf8')) as { lines?: unknown };
+      const body = formatTranscriptText(transcript);
+      const basename = path.basename(filename, path.extname(filename));
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="${basename}.txt"`);
+      return res.send(body);
+    } catch {
+      return res.status(500).json({ error: 'transcript unreadable' });
+    }
+  });
+
+  router.delete('/api/recordings/:filename/transcript', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const filename = String(req.params.filename || '');
+    const ownership = ownedRecordingPath(filename, authReq.user.email, database);
+    if (ownership.status !== 200) return res.status(ownership.status).json({ error: ownership.error });
+    const transcriptPath = transcriptPathFor(filename);
+    if (!transcriptPath || !fs.existsSync(transcriptPath)) return res.status(404).json({ error: 'transcript not found' });
+    fs.unlinkSync(transcriptPath);
+    const lockPath = transcriptLockPathFor(filename);
+    if (lockPath) {
+      try {
+        fs.unlinkSync(lockPath);
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+      }
+    }
+    return res.status(204).send();
+  });
+
   router.post('/api/recordings/:filename/transcribe', requireAuth(database), (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const filename = String(req.params.filename || '');
@@ -223,6 +261,26 @@ function deleteRecordingSidecars(filename: string): void {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
   }
+}
+
+function formatTranscriptText(transcript: { lines?: unknown }): string {
+  const lines = Array.isArray(transcript.lines) ? transcript.lines : [];
+  return lines.map((line) => formatTranscriptLine(line)).join('\n') + (lines.length ? '\n' : '');
+}
+
+function formatTranscriptLine(value: unknown): string {
+  const line = value as { startMs?: unknown; name?: unknown; text?: unknown };
+  const startMs = typeof line.startMs === 'number' && Number.isFinite(line.startMs) ? line.startMs : 0;
+  const speaker = typeof line.name === 'string' && line.name.trim() && line.name.trim() !== '?' ? line.name.trim() : 'Speaker';
+  const text = typeof line.text === 'string' ? line.text.trim() : '';
+  return `[${formatTranscriptTimestamp(startMs)}] ${speaker}: ${text}`;
+}
+
+function formatTranscriptTimestamp(startMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(startMs / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
 function isMetadataObject(value: unknown): value is { schemaVersion?: unknown; participants?: unknown } {

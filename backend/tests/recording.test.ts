@@ -287,6 +287,102 @@ describe('recording API', () => {
     expect(res.body).toEqual(transcript);
   });
 
+  it('FIXC4 transcript txt endpoint returns subtitle-style plain text', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-05-19T06-10-00-000Z_aaa111aaa111_Mine_111111.webm';
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(5));
+    fs.writeFileSync(
+      path.join(dir, `${filename}.transcript.json`),
+      JSON.stringify({
+        schemaVersion: 1,
+        audioFile: filename,
+        language: 'en',
+        lines: [
+          { startMs: 0, endMs: 1000, clientId: 'a', name: 'Ari', text: 'hello team', confidence: 0.9 },
+          { startMs: 154_000, endMs: 155_000, clientId: 'b', name: '?', text: 'fallback speaker', confidence: 0.8 },
+        ],
+        words: [],
+      }),
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    const res = await request(createApp(db))
+      .get(`/api/recordings/${filename}/transcript.txt`)
+      .set('Cookie', cookie)
+      .expect('Content-Type', /text\/plain/)
+      .expect('Content-Disposition', /attachment; filename="2026-05-19T06-10-00-000Z_aaa111aaa111_Mine_111111\.txt"/)
+      .expect(200);
+
+    expect(res.text).toBe('[00:00] Ari: hello team\n[02:34] Speaker: fallback speaker\n');
+  });
+
+  it('FIXC4 transcript txt endpoint returns 404 when transcript is missing', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-05-19T06-11-00-000Z_aaa111aaa111_Mine_222222.webm';
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(5));
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db)).get(`/api/recordings/${filename}/transcript.txt`).set('Cookie', cookie).expect(404, { error: 'transcript not found' });
+  });
+
+  it('FIXC4 transcript delete removes only transcript and lock sidecars', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-05-19T06-12-00-000Z_aaa111aaa111_Mine_333333.webm';
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(5));
+    fs.writeFileSync(path.join(dir, `${filename}.meta.json`), '{}');
+    fs.writeFileSync(path.join(dir, `${filename}.transcript.json`), '{"lines":[]}');
+    fs.writeFileSync(path.join(dir, `${filename}.transcribe.lock`), '{}');
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db)).delete(`/api/recordings/${filename}/transcript`).set('Cookie', cookie).expect(204);
+
+    expect(fs.existsSync(path.join(dir, filename))).toBe(true);
+    expect(fs.existsSync(path.join(dir, `${filename}.meta.json`))).toBe(true);
+    expect(fs.existsSync(path.join(dir, `${filename}.transcript.json`))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${filename}.transcribe.lock`))).toBe(false);
+  });
+
+  it('FIXC4 transcript delete returns 404 when transcript is missing', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-05-19T06-13-00-000Z_aaa111aaa111_Mine_444444.webm';
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(5));
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db)).delete(`/api/recordings/${filename}/transcript`).set('Cookie', cookie).expect(404, { error: 'transcript not found' });
+  });
+
+  it('FIXC4 single recording delete still cascades transcript sidecars', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-05-19T06-14-00-000Z_aaa111aaa111_Mine_555555.webm';
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(5));
+    fs.writeFileSync(path.join(dir, `${filename}.meta.json`), '{}');
+    fs.writeFileSync(path.join(dir, `${filename}.transcript.json`), '{"lines":[]}');
+    fs.writeFileSync(path.join(dir, `${filename}.transcribe.lock`), '{}');
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db)).delete(`/api/recordings/${filename}`).set('Cookie', cookie).expect(200, { ok: true });
+
+    expect(fs.existsSync(path.join(dir, filename))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${filename}.meta.json`))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${filename}.transcript.json`))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${filename}.transcribe.lock`))).toBe(false);
+  });
+
   it('FIX-B4 manual transcribe spawns the configured worker', async () => {
     const db = createTestDb();
     seedUser(db);

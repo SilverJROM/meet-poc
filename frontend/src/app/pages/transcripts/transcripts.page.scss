@@ -102,6 +102,10 @@ h3 {
   gap: 8px;
 }
 
+.recording-actions {
+  flex-wrap: wrap;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;

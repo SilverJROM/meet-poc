@@ -1,7 +1,7 @@
 import { DatePipe } from '@angular/common';
 import { Component, CUSTOM_ELEMENTS_SCHEMA, OnDestroy, computed, inject, signal } from '@angular/core';
 import { addIcons } from 'ionicons';
-import { eyeOutline, playCircleOutline, refreshOutline } from 'ionicons/icons';
+import { downloadOutline, eyeOutline, playCircleOutline, refreshOutline, trashOutline } from 'ionicons/icons';
 import { Recording, RecordingsService, Transcript } from '../../services/recordings.service';
 
 @Component({
@@ -26,7 +26,7 @@ export class TranscriptsPage implements OnDestroy {
   readonly hasRows = computed(() => this.recordings().length > 0);
 
   constructor() {
-    addIcons({ eyeOutline, playCircleOutline, refreshOutline });
+    addIcons({ downloadOutline, eyeOutline, playCircleOutline, refreshOutline, trashOutline });
     void this.refreshRecordings();
   }
 
@@ -75,6 +75,40 @@ export class TranscriptsPage implements OnDestroy {
       await this.refreshRecordings();
     } catch {
       this.error.set('Transcription could not be started');
+    } finally {
+      this.busyFilename.set(null);
+    }
+  }
+
+  async downloadTranscript(recording: Recording): Promise<void> {
+    this.busyFilename.set(recording.filename);
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      await this.recordingsService.downloadTranscriptTxt(recording.filename);
+      this.status.set('Transcript download started');
+    } catch {
+      this.error.set('Transcript could not be downloaded');
+    } finally {
+      this.busyFilename.set(null);
+    }
+  }
+
+  async deleteTranscript(recording: Recording): Promise<void> {
+    if (!window.confirm(`Delete transcript for ${recording.roomTitle}? The recording audio will stay available.`)) return;
+    this.busyFilename.set(recording.filename);
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      await this.recordingsService.deleteTranscript(recording.filename);
+      if (this.selectedFilename() === recording.filename) {
+        this.selectedFilename.set(null);
+        this.selectedTranscript.set(null);
+      }
+      this.status.set('Transcript deleted');
+      await this.refreshRecordings();
+    } catch {
+      this.error.set('Transcript could not be deleted');
     } finally {
       this.busyFilename.set(null);
     }

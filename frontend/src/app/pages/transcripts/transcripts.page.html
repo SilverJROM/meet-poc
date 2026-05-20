@@ -38,6 +38,14 @@
                 <ion-icon name="eye-outline"></ion-icon>
                 View
               </button>
+              <button type="button" class="secondary-btn" (click)="downloadTranscript(recording)" [disabled]="busyFilename() === recording.filename">
+                <ion-icon name="download-outline"></ion-icon>
+                Download
+              </button>
+              <button type="button" class="danger-btn" (click)="deleteTranscript(recording)" [disabled]="busyFilename() === recording.filename">
+                <ion-icon name="trash-outline"></ion-icon>
+                Delete transcript
+              </button>
             } @else {
               <button type="button" class="secondary-btn" (click)="transcribe(recording)" [disabled]="recording.transcribeStatus === 'pending' || busyFilename() === recording.filename">
                 <ion-icon name="play-circle-outline"></ion-icon>
