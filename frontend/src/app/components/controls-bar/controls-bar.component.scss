@@ -1,102 +1,229 @@
 @use 'breakpoints' as bp;
 
+:host {
+  pointer-events: none;
+}
+
 .controls-bar {
-  min-height: 62px;
+  position: fixed;
+  z-index: 24;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  min-height: calc(86px + env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: minmax(140px, 1fr) auto;
-  align-items: center;
+  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+  align-items: end;
   gap: 14px;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--line-soft);
-  background: rgba(255, 255, 255, 0.92);
+  padding: 14px 18px max(14px, env(safe-area-inset-bottom));
+  color: #f8fafc;
+  background: linear-gradient(180deg, rgba(10, 10, 12, 0), rgba(10, 10, 12, 0.88) 42%, rgba(10, 10, 12, 0.96));
+  pointer-events: none;
+}
+
+.meeting-corner,
+.controls,
+.control-btn,
+.control-chevron,
+.leave-btn,
+.corner-btn {
+  pointer-events: auto;
+}
+
+.meeting-corner {
+  min-width: 0;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.meeting-corner-left {
+  justify-self: start;
+  padding-bottom: 6px;
+}
+
+.meeting-corner-right {
+  justify-self: end;
+  padding-bottom: 3px;
+}
+
+.meeting-clock {
+  color: #f8fafc;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .room-label {
   min-width: 0;
+  max-width: 260px;
   overflow: hidden;
-  color: #0b1220;
-  font-size: 16px;
-  font-weight: 800;
+  color: #f8fafc;
+  font-size: 18px;
+  font-weight: 900;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.meeting-clock::after {
+  content: '';
+  display: inline-block;
+  width: 1px;
+  height: 28px;
+  margin-left: 12px;
+  vertical-align: middle;
+  background: rgba(248, 250, 252, 0.55);
+}
+
 .controls {
+  min-width: 0;
+  max-width: min(100%, 760px);
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 8px;
+  justify-content: center;
+  gap: 10px;
+}
+
+.split-control {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 18px;
+  background: #2f3338;
 }
 
 .control-btn,
-.leave-btn {
-  width: 46px;
-  min-width: 46px;
-  min-height: 46px;
-  border-radius: 6px;
+.control-chevron,
+.leave-btn,
+.corner-btn {
+  min-width: 48px;
+  height: 48px;
+  border: 0;
   padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(15, 23, 42, 0.28);
-  color: #0b1220;
-  background: var(--panel-soft);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  color: #f8fafc;
+  background: #2f3338;
   cursor: pointer;
   transition:
-    border-color 140ms ease,
     background 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
+    color 140ms ease,
+    transform 140ms ease,
+    opacity 140ms ease,
+    box-shadow 140ms ease;
+}
+
+.control-btn,
+.leave-btn {
+  border-radius: 999px;
+}
+
+.split-control .control-btn {
+  border-radius: 999px 0 0 999px;
+}
+
+.control-chevron {
+  min-width: 34px;
+  border-left: 1px solid rgba(248, 250, 252, 0.12);
+  border-radius: 0 999px 999px 0;
 }
 
 .control-btn ion-icon,
-.leave-btn ion-icon {
+.control-chevron ion-icon,
+.leave-btn ion-icon,
+.corner-btn ion-icon {
   font-size: 24px;
-  color: #0b1220;
+  color: currentColor;
   --ionicon-stroke-width: 40px;
 }
 
-.leave-btn ion-icon {
-  color: #b91c1c;
+.control-chevron ion-icon {
+  font-size: 17px;
 }
 
-.control-btn:hover {
-  border-color: var(--blue);
-  background: #f6f8fb;
+.control-btn:hover,
+.control-chevron:hover,
+.corner-btn:hover {
+  background: #454a50;
   transform: translateY(-1px);
 }
 
 .leave-btn:hover {
+  background: #ef4444;
   transform: translateY(-1px);
 }
 
 .control-btn:focus-visible,
-.leave-btn:focus-visible {
-  outline: 2px solid rgba(96, 165, 250, 0.95);
-  outline-offset: 2px;
+.control-chevron:focus-visible,
+.leave-btn:focus-visible,
+.corner-btn:focus-visible {
+  outline: 2px solid rgba(147, 197, 253, 0.95);
+  outline-offset: 3px;
 }
 
-.control-btn.active {
-  border-color: rgba(59, 130, 246, 0.55);
-  background: rgba(59, 130, 246, 0.16);
+.control-btn.active,
+.corner-btn.active {
+  background: #3f4752;
+  box-shadow: inset 0 0 0 1px rgba(248, 250, 252, 0.16);
 }
 
 .audio-only-btn.active {
-  border-color: rgba(14, 165, 233, 0.6);
-  background: rgba(14, 165, 233, 0.18);
+  color: #dff6ff;
+  background: #075985;
 }
 
-.control-btn.is-off {
-  border-color: rgba(220, 38, 38, 0.68);
-  color: #fff;
-  background: #991b1b;
+.control-btn.is-off,
+.split-control.is-off .control-btn,
+.split-control.is-off .control-chevron {
+  color: #7f1d1d;
+  background: #fee2e2;
 }
 
 .control-btn.recording {
-  border-color: rgba(220, 38, 38, 0.65);
-  background: #7f1d1d;
   color: #fff;
+  background: #7f1d1d;
+}
+
+.control-btn:disabled {
+  cursor: not-allowed;
+  color: #9ca3af;
+  background: #262a2f;
+  opacity: 0.7;
+}
+
+.leave-btn {
+  min-width: 76px;
+  color: #fff;
+  background: #ea4335;
+}
+
+.leave-btn ion-icon {
+  transform: rotate(135deg);
+}
+
+.corner-btn {
+  position: relative;
+  min-width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.corner-btn:hover {
+  background: rgba(248, 250, 252, 0.14);
+}
+
+.chat-placeholder {
+  cursor: not-allowed;
+  color: rgba(248, 250, 252, 0.42);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px rgba(248, 250, 252, 0.18);
+}
+
+.chat-placeholder:hover {
+  background: transparent;
+  transform: none;
 }
 
 .participant-toggle {
@@ -109,7 +236,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(17, 24, 39, 0.42);
   border-radius: 999px;
   color: #fff;
   font-size: 10px;
@@ -118,19 +245,19 @@
 }
 
 .count-badge {
-  right: -5px;
-  bottom: -5px;
-  min-width: 20px;
-  height: 20px;
-  background: var(--blue);
+  right: -2px;
+  bottom: -2px;
+  min-width: 19px;
+  height: 19px;
+  background: #2563eb;
 }
 
 .waiting-badge {
-  right: -6px;
-  top: -6px;
+  right: -4px;
+  top: -4px;
   min-width: 18px;
   height: 18px;
-  background: var(--red);
+  background: #dc2626;
 }
 
 .participant-toggle.has-waiting .waiting-badge {
@@ -151,49 +278,65 @@
   }
 }
 
-.control-btn:disabled {
-  cursor: not-allowed;
-  color: #334155;
-  background: var(--panel-soft);
-}
-
-.leave-btn {
-  border-color: rgba(220, 38, 38, 0.52);
-  color: #b91c1c;
-  background: rgba(220, 38, 38, 0.08);
-}
-
-@include bp.mobile {
+@include bp.max(900px) {
   .controls-bar {
-    position: fixed;
-    z-index: 24;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    grid-template-columns: 1fr;
-    min-height: calc(64px + env(safe-area-inset-bottom));
-    border-top: 1px solid var(--line-soft);
-    border-bottom: 0;
-    background: var(--panel-bg);
-    padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+    grid-template-columns: 1fr auto;
+    align-items: end;
   }
 
-  .room-label {
+  .meeting-corner-left {
     display: none;
   }
 
   .controls {
-    flex-wrap: nowrap;
-    justify-content: center;
+    grid-column: 1 / -1;
+    grid-row: 1;
+    justify-content: flex-start;
     overflow-x: auto;
-    padding: 2px;
+    overscroll-behavior-x: contain;
+    padding: 4px 2px 8px;
+    scrollbar-width: thin;
+  }
+
+  .meeting-corner-right {
+    position: fixed;
+    z-index: 25;
+    top: max(8px, env(safe-area-inset-top));
+    right: 10px;
+    min-height: 42px;
+    padding: 0;
+    border-radius: 999px;
+    background: rgba(19, 22, 27, 0.72);
+    backdrop-filter: blur(14px);
+  }
+}
+
+@include bp.mobile {
+  .controls-bar {
+    min-height: calc(76px + env(safe-area-inset-bottom));
+    padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+  }
+
+  .controls {
+    gap: 8px;
   }
 
   .control-btn,
   .leave-btn {
-    flex: 0 0 48px;
-    width: 48px;
     min-width: 48px;
-    min-height: 48px;
+    height: 48px;
+  }
+
+  .leave-btn {
+    min-width: 58px;
+  }
+
+  .control-chevron {
+    min-width: 30px;
+  }
+
+  .corner-btn {
+    min-width: 40px;
+    height: 40px;
   }
 }

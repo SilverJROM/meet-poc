@@ -40,6 +40,7 @@
     <section class="call-panel" [class.share-layout]="shareLayoutActive()" [class.strip-collapsed]="shareStripCollapsed()" aria-label="Call">
       <app-controls-bar
         [roomLabel]="roomTitle()"
+        [elapsedLabel]="formattedElapsed()"
         [micOn]="media.micOn()"
         [cameraOn]="media.cameraOn()"
         [screenOn]="media.screenOn()"
@@ -186,9 +187,6 @@
           </div>
         </section>
       }
-      <div class="meeting-meta">
-        <span class="meeting-clock" aria-label="Meeting elapsed time">{{ formattedElapsed() }}</span>
-      </div>
       <app-recording-banner [recording]="hostRecording()" [startedAt]="recordingStartedAt()" />
       <p class="call-status" role="status">{{ status() }}</p>
       <div class="call-content" [class.sidebar-open]="sidebarOpen()" [class.share-content]="shareLayoutActive()" [class.strip-collapsed]="shareStripCollapsed()">

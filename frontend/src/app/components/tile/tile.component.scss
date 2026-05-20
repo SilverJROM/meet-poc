@@ -11,23 +11,25 @@
   min-height: 220px;
   aspect-ratio: 16 / 9;
   overflow: hidden;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: #0b0d11;
-  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.22);
+  border: 2px solid transparent;
+  border-radius: 18px;
+  background: #1f2933;
+  box-shadow: 0 20px 46px rgba(0, 0, 0, 0.34);
 }
 
 .tile.strip-tile {
   min-height: 110px;
+  border-radius: 14px;
   aspect-ratio: 16 / 10;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.16);
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.28);
 }
 
 .tile.share-main-tile {
   width: 100%;
   min-height: min(68vh, 720px);
+  border-radius: 16px;
   background: #05070b;
-  box-shadow: 0 18px 50px rgba(15, 23, 42, 0.24);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
 }
 
 @include bp.mobile {
@@ -49,31 +51,32 @@
 }
 
 .tile.is-speaking {
-  border-color: rgba(96, 165, 250, 0.95);
+  border-color: #f4a261;
   box-shadow:
-    0 0 0 3px rgba(96, 165, 250, 0.86),
-    0 18px 40px rgba(0, 0, 0, 0.22);
+    0 0 0 1px rgba(244, 162, 97, 0.8),
+    0 0 0 4px rgba(244, 162, 97, 0.28),
+    0 18px 42px rgba(0, 0, 0, 0.36);
 }
 
 .tile.strip-tile.is-speaking {
   animation: speaking-pulse 1.2s ease-in-out infinite;
   box-shadow:
-    0 0 0 2px rgba(37, 99, 235, 0.45),
-    0 8px 18px rgba(15, 23, 42, 0.16);
+    0 0 0 2px rgba(244, 162, 97, 0.46),
+    0 8px 18px rgba(0, 0, 0, 0.28);
 }
 
 @keyframes speaking-pulse {
   0%,
   100% {
     box-shadow:
-      0 0 0 2px rgba(37, 99, 235, 0.38),
-      0 8px 18px rgba(15, 23, 42, 0.16);
+      0 0 0 2px rgba(244, 162, 97, 0.38),
+      0 8px 18px rgba(0, 0, 0, 0.28);
   }
 
   50% {
     box-shadow:
-      0 0 0 5px rgba(37, 99, 235, 0.18),
-      0 8px 18px rgba(15, 23, 42, 0.16);
+      0 0 0 5px rgba(244, 162, 97, 0.18),
+      0 8px 18px rgba(0, 0, 0, 0.28);
   }
 }
 
@@ -102,9 +105,9 @@ video {
   display: grid;
   place-items: center;
   border-radius: 999px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   color: #fff;
-  background: rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.22);
   font-size: clamp(40px, 6vw, 64px);
   font-weight: 900;
 }
@@ -135,9 +138,9 @@ video {
 .quality-pill,
 .name-label,
 .state {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  background: rgba(10, 12, 16, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(10, 12, 16, 0.72);
   backdrop-filter: blur(10px);
 }
 
@@ -151,12 +154,12 @@ video {
 }
 
 .mute-icon {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   display: grid;
   place-items: center;
   color: #fecaca;
-  background: rgba(127, 29, 29, 0.84);
+  background: rgba(127, 29, 29, 0.9);
 }
 
 .quality-pill {
@@ -186,10 +189,10 @@ video {
 .name-label {
   min-width: 0;
   max-width: min(72%, 420px);
-  padding: 7px 9px;
+  padding: 8px 12px;
   overflow: hidden;
   color: #fff;
-  font-size: 13px;
+  font-size: 15px;
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;

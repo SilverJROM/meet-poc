@@ -1,10 +1,13 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, inject, input, output } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, input, output } from '@angular/core';
 import { addIcons } from 'ionicons';
 import {
+  chatboxOutline,
   callOutline,
+  chevronUpOutline,
   desktopOutline,
   ellipseOutline,
   ellipse,
+  informationCircleOutline,
   micOffOutline,
   micOutline,
   peopleOutline,
@@ -14,7 +17,6 @@ import {
   videocamOutline,
   volumeHighOutline,
 } from 'ionicons/icons';
-import { ViewportService } from '../../services/viewport.service';
 
 @Component({
   selector: 'app-controls-bar',
@@ -24,9 +26,8 @@ import { ViewportService } from '../../services/viewport.service';
   styleUrl: './controls-bar.component.scss',
 })
 export class ControlsBarComponent {
-  private readonly viewport = inject(ViewportService);
-
   readonly roomLabel = input.required<string>();
+  readonly elapsedLabel = input('');
   readonly micOn = input.required<boolean>();
   readonly cameraOn = input.required<boolean>();
   readonly screenOn = input.required<boolean>();
@@ -47,14 +48,16 @@ export class ControlsBarComponent {
   readonly audioOnlyToggle = output<void>();
   readonly devices = output<void>();
   readonly leave = output<void>();
-  readonly isMobile = this.viewport.isMobile;
 
   constructor() {
     addIcons({
+      chatboxOutline,
       callOutline,
+      chevronUpOutline,
       desktopOutline,
       ellipse,
       ellipseOutline,
+      informationCircleOutline,
       micOffOutline,
       micOutline,
       peopleOutline,

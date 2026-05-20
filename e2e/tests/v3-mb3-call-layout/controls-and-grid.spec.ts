@@ -26,7 +26,7 @@ test('S2.3 mobile controls are docked at the bottom above the safe-area gutter',
   await page.screenshot({ path: `${MB3_SCREENSHOT_DIR}/mobile-controls-docked.png`, fullPage: true });
 });
 
-test('S2.3 desktop controls remain top mounted', async ({ page }) => {
+test('S2.3 desktop controls are Meet-like bottom mounted', async ({ page }) => {
   await page.setViewportSize({ width: 1920, height: 1080 });
   await createAndJoinOwner(page, 'desktop-controls');
 
@@ -34,10 +34,10 @@ test('S2.3 desktop controls remain top mounted', async ({ page }) => {
   await expect(bar).toBeVisible();
   const box = await bar.boundingBox();
   expect(box).not.toBeNull();
-  expect(box!.y).toBeLessThan(32);
-  expect(box!.y + box!.height).toBeLessThan(120);
+  expect(box!.y).toBeGreaterThan(960);
+  expect(Math.abs(box!.y + box!.height - 1080)).toBeLessThanOrEqual(4);
   await expect(page.locator('.room-label')).toBeVisible();
-  await page.screenshot({ path: `${MB3_SCREENSHOT_DIR}/desktop-controls-top.png`, fullPage: true });
+  await page.screenshot({ path: `${MB3_SCREENSHOT_DIR}/desktop-controls-bottom.png`, fullPage: true });
 });
 
 test('S2.4 mobile one-peer grid uses the full call area without a desktop max cap', async ({ page }) => {
@@ -92,11 +92,11 @@ test('S2.4 mobile three/four-peer grid uses two compact columns', async ({ brows
   await guestC.context().close();
 });
 
-test('S2.5 screen-share control is absent on mobile', async ({ page }) => {
+test('S2.5 screen-share control remains reachable on mobile', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await createAndJoinOwner(page, 'screen-share-mobile');
-  await expect(page.getByRole('button', { name: 'Share screen' })).toHaveCount(0);
-  await page.screenshot({ path: `${MB3_SCREENSHOT_DIR}/screen-share-hidden-mobile.png`, fullPage: true });
+  await expect(page.getByRole('button', { name: 'Share screen' })).toBeVisible();
+  await page.screenshot({ path: `${MB3_SCREENSHOT_DIR}/screen-share-visible-mobile.png`, fullPage: true });
 });
 
 test('S2.5 screen-share control remains present on desktop', async ({ page }) => {

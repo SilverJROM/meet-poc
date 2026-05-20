@@ -24,7 +24,8 @@ export class TileComponent {
     const name = this.peer().name || 'x';
     let hash = 0;
     for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) & 0xffff;
-    return `hsl(${hash % 360}, 45%, 30%)`;
+    const hue = hash % 360;
+    return `linear-gradient(135deg, hsl(${hue}, 48%, 24%), hsl(${(hue + 34) % 360}, 42%, 34%))`;
   });
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
 

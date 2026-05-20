@@ -1,41 +1,68 @@
-<header class="controls-bar">
-  <div class="room-label">{{ roomLabel() }}</div>
-  <div class="controls">
-    <button
-      type="button"
-      class="control-btn"
-      [class.is-off]="!micOn()"
-      [attr.aria-pressed]="micOn()"
-      [attr.aria-label]="micOn() ? 'Mute microphone' : 'Unmute microphone'"
-      (click)="mute.emit()"
-      [title]="micOn() ? 'Mute microphone' : 'Unmute microphone'"
-    >
-      <ion-icon [name]="micOn() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
-    </button>
-    <button
-      type="button"
-      class="control-btn"
-      [class.is-off]="!cameraOn()"
-      [attr.aria-pressed]="cameraOn()"
-      [attr.aria-label]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
-      (click)="camera.emit()"
-      [title]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
-    >
-      <ion-icon [name]="cameraOn() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
-    </button>
-    @if (!isMobile()) {
+<header class="controls-bar" aria-label="Call controls">
+  <div class="meeting-corner meeting-corner-left">
+    <span class="meeting-clock" aria-label="Meeting elapsed time">{{ elapsedLabel() }}</span>
+    <span class="room-label">{{ roomLabel() }}</span>
+  </div>
+
+  <div class="controls" aria-label="Primary call controls">
+    <div class="split-control" [class.is-off]="!micOn()">
       <button
         type="button"
-        class="control-btn"
-        [class.active]="screenOn()"
-        [attr.aria-pressed]="screenOn()"
-        [attr.aria-label]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
-        (click)="screen.emit()"
-        [title]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
+        class="control-btn primary-toggle"
+        [class.is-off]="!micOn()"
+        [attr.aria-pressed]="micOn()"
+        [attr.aria-label]="micOn() ? 'Mute microphone' : 'Unmute microphone'"
+        (click)="mute.emit()"
+        [title]="micOn() ? 'Mute microphone' : 'Unmute microphone'"
       >
-        <ion-icon name="desktop-outline"></ion-icon>
+        <ion-icon [name]="micOn() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
       </button>
-    }
+      <button
+        type="button"
+        class="control-chevron"
+        aria-label="Microphone device settings"
+        title="Microphone device settings"
+        (click)="devices.emit()"
+      >
+        <ion-icon name="chevron-up-outline"></ion-icon>
+      </button>
+    </div>
+
+    <div class="split-control" [class.is-off]="!cameraOn()">
+      <button
+        type="button"
+        class="control-btn primary-toggle"
+        [class.is-off]="!cameraOn()"
+        [attr.aria-pressed]="cameraOn()"
+        [attr.aria-label]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
+        (click)="camera.emit()"
+        [title]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
+      >
+        <ion-icon [name]="cameraOn() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
+      </button>
+      <button
+        type="button"
+        class="control-chevron"
+        aria-label="Camera device settings"
+        title="Camera device settings"
+        (click)="devices.emit()"
+      >
+        <ion-icon name="chevron-up-outline"></ion-icon>
+      </button>
+    </div>
+
+    <button
+      type="button"
+      class="control-btn"
+      [class.active]="screenOn()"
+      [attr.aria-pressed]="screenOn()"
+      [attr.aria-label]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
+      (click)="screen.emit()"
+      [title]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
+    >
+      <ion-icon name="desktop-outline"></ion-icon>
+    </button>
+
     @if (isHost()) {
       <button
         type="button"
@@ -50,6 +77,7 @@
         <ion-icon [name]="recording() ? 'ellipse' : 'ellipse-outline'"></ion-icon>
       </button>
     }
+
     <button
       type="button"
       class="control-btn"
@@ -59,6 +87,7 @@
     >
       <ion-icon name="settings-outline"></ion-icon>
     </button>
+
     <button
       type="button"
       class="control-btn audio-only-btn"
@@ -70,6 +99,7 @@
     >
       <ion-icon name="volume-high-outline"></ion-icon>
     </button>
+
     <button
       type="button"
       class="control-btn"
@@ -81,9 +111,37 @@
     >
       <ion-icon name="pulse-outline"></ion-icon>
     </button>
+
+    <button type="button" class="leave-btn" (click)="leave.emit()" aria-label="Leave call" title="Leave call">
+      <ion-icon name="call-outline"></ion-icon>
+    </button>
+  </div>
+
+  <div class="meeting-corner meeting-corner-right" aria-label="Meeting tools">
     <button
       type="button"
-      class="control-btn participant-toggle"
+      class="corner-btn"
+      [class.active]="diagnosticsOpen()"
+      [attr.aria-pressed]="diagnosticsOpen()"
+      [attr.aria-label]="diagnosticsOpen() ? 'Hide meeting info' : 'Show meeting info'"
+      (click)="diagnostics.emit()"
+      [title]="diagnosticsOpen() ? 'Hide meeting info' : 'Show meeting info'"
+    >
+      <ion-icon name="information-circle-outline"></ion-icon>
+    </button>
+    <button
+      type="button"
+      class="corner-btn chat-placeholder"
+      disabled
+      aria-disabled="true"
+      aria-label="Chat unavailable until chat is enabled"
+      title="Chat will be enabled in the next batch"
+    >
+      <ion-icon name="chatbox-outline"></ion-icon>
+    </button>
+    <button
+      type="button"
+      class="corner-btn participant-toggle"
       [class.active]="sidebarOpen()"
       [class.has-waiting]="waitingCount() > 0"
       [attr.aria-pressed]="sidebarOpen()"
@@ -96,9 +154,6 @@
       @if (waitingCount() > 0) {
         <span class="waiting-badge">{{ waitingCount() }}</span>
       }
-    </button>
-    <button type="button" class="leave-btn" (click)="leave.emit()" aria-label="Leave call" title="Leave call">
-      <ion-icon name="call-outline"></ion-icon>
     </button>
   </div>
 </header>

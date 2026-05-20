@@ -106,19 +106,14 @@ test.describe('Phase 2 two-axis matrix (R8.3) — live URL', () => {
     expect(box!.y).toBeGreaterThan(844 / 2);
   });
 
-  test('mobile: screen-share button is NOT rendered (R2.4)', async ({ page }) => {
-    // Screen-share button only exists in the in-call controls-bar component.
-    // On mobile, @if(!isMobile()) hides it. We assert toHaveCount(0) by
-    // checking the lobby DOM (controls-bar with screen-share key is mounted
-    // when in-call). For the lobby-only public test we additionally confirm
-    // the controls-bar component does not expose a 'Share screen' button.
+  test('mobile: lobby does not render the in-call screen-share button', async ({ page }) => {
+    // Screen-share exists only in the in-call controls bar.
     await page.setViewportSize({ width: 390, height: 844 });
     await loginLive(page);
     const roomId = await findTestRoomId(page);
     await page.goto(`${LIVE_BASE}/room/${roomId}`);
     await expect(page.locator('app-lobby-preview')).toBeVisible();
 
-    // No share-screen control should be rendered anywhere in the mobile DOM.
     await expect(
       page.getByRole('button', { name: /Share screen|Stop sharing screen/ }),
     ).toHaveCount(0);
@@ -177,7 +172,7 @@ test.describe('Phase 2 two-axis matrix (R8.3) — live URL', () => {
   //
   // The next two tests join TEST_ROOM01 as host so the in-call controls
   // bar + participant sidebar component mount. This is where screen-share
-  // is hidden on mobile and the bottom-sheet appears on mobile.
+  // stays reachable on mobile and the bottom-sheet appears on mobile.
 
   async function joinAsHost(page: Page, roomId: string): Promise<void> {
     await page.goto(`${LIVE_BASE}/room/${roomId}`);
@@ -191,17 +186,17 @@ test.describe('Phase 2 two-axis matrix (R8.3) — live URL', () => {
     await expect(page.locator('.call-panel')).toBeVisible({ timeout: 15_000 });
   }
 
-  test('mobile in-call: screen-share button is HIDDEN; sidebar opens as bottom-sheet (R2.1 + R2.4)', async ({ page }) => {
+  test('mobile in-call: screen-share is reachable; sidebar opens as bottom-sheet (DR-26 + R2.1)', async ({ page }) => {
     test.setTimeout(90_000);
     await page.setViewportSize({ width: 390, height: 844 });
     await loginLive(page);
     const roomId = await findTestRoomId(page);
     await joinAsHost(page, roomId);
 
-    // R2.4 — screen-share NOT rendered on mobile in-call
+    // DR-26 — mobile bottom bar keeps screen-share reachable.
     await expect(
       page.getByRole('button', { name: /Share screen|Stop sharing screen/ }),
-    ).toHaveCount(0);
+    ).toBeVisible();
 
     // R2.2 — controls bar bottom-docked. The Angular host `app-controls-bar`
     // can be a zero-height wrapper on mobile (the inner `.controls-bar` is
@@ -255,7 +250,7 @@ test.describe('Phase 2 two-axis matrix (R8.3) — live URL', () => {
     await page.getByRole('button', { name: 'Leave call' }).click({ timeout: 3000 }).catch(() => undefined);
   });
 
-  test('desktop in-call: screen-share button IS visible; sidebar is NOT a bottom-sheet (R2.4 + R2.1 desktop-unaffected)', async ({ page }) => {
+  test('desktop in-call: screen-share is visible; controls are bottom-mounted; sidebar is not a bottom-sheet', async ({ page }) => {
     test.setTimeout(90_000);
     await page.setViewportSize({ width: 1920, height: 1080 });
     await loginLive(page);
@@ -267,14 +262,12 @@ test.describe('Phase 2 two-axis matrix (R8.3) — live URL', () => {
       page.getByRole('button', { name: /Share screen|Stop sharing screen/ }),
     ).toBeVisible();
 
-    // R2.2 (desktop unaffected) — controls bar is NOT docked at the bottom of the viewport.
-    // On desktop the controls bar lives near the top of the call-panel.
+    // DR-26 — desktop controls are Meet-like bottom-mounted.
     const controlsBar = page.locator('app-controls-bar .controls-bar');
     await expect(controlsBar).toBeVisible();
     const cbBox = await controlsBar.boundingBox();
     expect(cbBox).not.toBeNull();
-    // Desktop: controls bar is in the upper half of the viewport (NOT bottom-fixed).
-    expect(cbBox!.y).toBeLessThan(1080 / 2);
+    expect(cbBox!.y + cbBox!.height).toBeGreaterThan(1080 * 0.92);
 
     // R2.1 (desktop unaffected) — sidebar is a top-anchored fixed sidebar, NOT a bottom-sheet
     await page.getByRole('button', { name: 'Show participants' }).click();
