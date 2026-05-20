@@ -1,5 +1,7 @@
 import { defineConfig, devices } from '@playwright/test';
 
+const baseURL = process.env.E2E_BASE_URL || 'http://localhost:4710';
+
 export default defineConfig({
   testDir: './tests',
   outputDir: './test-results',
@@ -8,7 +10,7 @@ export default defineConfig({
     timeout: 8_000,
   },
   use: {
-    baseURL: 'http://localhost:4710',
+    baseURL,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     launchOptions: {
@@ -24,7 +26,7 @@ export default defineConfig({
   webServer: {
     command: 'npm run seed && npm run e2e:webserver',
     cwd: '..',
-    url: 'http://localhost:4710/login',
+    url: `${baseURL}/login`,
     timeout: 120_000,
     reuseExistingServer: false,
   },

@@ -8,6 +8,7 @@ import { ensureRecordingsDir, recordingRouter } from './modules/recording/index.
 import { roomsRouter } from './modules/rooms/index.js';
 import { sessionsRouter } from './modules/sessions/index.js';
 import { attachSignaling } from './modules/signaling/index.js';
+import { iceConfigRouter } from './modules/ice-config/index.js';
 import { LlmService, llmRouter, logBootAvailability } from './modules/llm/index.js';
 import { questionsRouter } from './modules/questions/index.js';
 import { migrateFromJson } from '../scripts/migrate-from-json.js';
@@ -21,6 +22,7 @@ export function createApp(database = getDb(), options: CreateAppOptions = {}): e
   app.set('trust proxy', true);
   app.use(express.json({ limit: '1mb' }));
   app.use('/api', authRouter(database));
+  app.use('/api', iceConfigRouter());
   app.use('/api', roomsRouter(database));
   app.use('/api', sessionsRouter(database));
   app.use('/api', llmRouter(database, options.llmService));

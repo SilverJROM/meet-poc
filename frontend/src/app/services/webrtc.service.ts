@@ -1,5 +1,5 @@
-import { Injectable, computed, signal } from '@angular/core';
-import { environment } from '../../environments/environment';
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { IceConfigService } from './ice-config.service';
 
 export type PeerState = {
   id: string;
@@ -19,10 +19,27 @@ type SignalPayload = {
   ice?: RTCIceCandidateInit;
 };
 
+type PeerMeta = {
+  polite: boolean;
+  makingOffer: boolean;
+  ignoreOffer: boolean;
+  restartAttempts: number;
+  restartTimer: ReturnType<typeof setTimeout> | null;
+  lastRestartAt: number;
+};
+
+const ICE_RESTART_DEBOUNCE_MS = 1200;
+const ICE_RESTART_COOLDOWN_MS = 3000;
+const MAX_ICE_RESTART_ATTEMPTS = 3;
+
 @Injectable({ providedIn: 'root' })
 export class WebrtcService {
+  private readonly iceConfig = inject(IceConfigService);
+
   private localStream: MediaStream | null = null;
   private sendSignal: ((to: string, data: unknown) => void) | null = null;
+  private localClientId: string | null = null;
+  private readonly peerMeta = new Map<string, PeerMeta>();
 
   readonly peers = signal<Map<string, PeerState>>(new Map());
   readonly peerList = computed(() => Array.from(this.peers().values()));
@@ -33,6 +50,7 @@ export class WebrtcService {
   }
 
   setLocalPeer(clientId: string, name: string, options: { isHost: boolean; micEnabled: boolean; camEnabled: boolean; screenOn: boolean }): void {
+    this.localClientId = clientId;
     this.mutatePeers((peers) => {
       peers.set(clientId, {
         id: clientId,
@@ -51,7 +69,10 @@ export class WebrtcService {
 
   async addPeer(clientId: string, name: string, isInitiator: boolean, options: { isHost?: boolean } = {}): Promise<void> {
     if (!this.localStream || !this.sendSignal || this.peers().has(clientId)) return;
-    const pc = new RTCPeerConnection({ iceServers: environment.iceServers });
+    const iceServers = await this.iceConfig.getIceServers();
+    const pc = new RTCPeerConnection({ iceServers });
+    const meta = this.createPeerMeta(clientId);
+    this.peerMeta.set(clientId, meta);
     const peer: PeerState = {
       id: clientId,
       name,
@@ -81,12 +102,24 @@ export class WebrtcService {
     };
     pc.onconnectionstatechange = () => {
       this.touchPeer(clientId, { connectionState: pc.connectionState });
+      console.log(`[webrtc] peer ${clientId} connectionState=${pc.connectionState} at ${new Date().toISOString()}`);
+      void this.logSelectedCandidateType(clientId, pc);
+      this.maybeScheduleIceRestart(clientId, pc);
+    };
+    pc.oniceconnectionstatechange = () => {
+      console.log(`[webrtc] peer ${clientId} iceConnectionState=${pc.iceConnectionState} at ${new Date().toISOString()}`);
+      void this.logSelectedCandidateType(clientId, pc);
+      this.maybeScheduleIceRestart(clientId, pc);
+    };
+    pc.onicegatheringstatechange = () => {
+      console.log(`[webrtc] peer ${clientId} iceGatheringState=${pc.iceGatheringState} at ${new Date().toISOString()}`);
+    };
+    pc.onsignalingstatechange = () => {
+      console.log(`[webrtc] peer ${clientId} signalingState=${pc.signalingState} at ${new Date().toISOString()}`);
     };
 
     if (isInitiator) {
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-      this.sendSignal(clientId, { sdp: pc.localDescription?.toJSON() });
+      await this.sendOffer(clientId, pc, meta, false);
     }
   }
 
@@ -95,17 +128,23 @@ export class WebrtcService {
     const peer = this.peers().get(from);
     const pc = peer?.pc;
     if (!pc) return;
+    const meta = this.peerMeta.get(from) ?? this.createPeerMeta(from);
+    this.peerMeta.set(from, meta);
     if (payload.sdp) {
-      await pc.setRemoteDescription(payload.sdp);
-      if (payload.sdp.type === 'offer') {
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        this.sendSignal?.(from, { sdp: pc.localDescription?.toJSON() });
+      const offerCollision = payload.sdp.type === 'offer' && (meta.makingOffer || pc.signalingState !== 'stable');
+      meta.ignoreOffer = !meta.polite && offerCollision;
+      if (meta.ignoreOffer) {
+        console.warn(`[webrtc] ignored colliding offer from ${from}`);
+        return;
       }
+      meta.ignoreOffer = false;
+      await pc.setRemoteDescription(payload.sdp);
+      if (payload.sdp.type === 'offer') await this.sendAnswer(from, pc);
     } else if (payload.ice) {
       try {
         await pc.addIceCandidate(payload.ice);
       } catch (err) {
+        if (meta.ignoreOffer) return;
         console.warn('addIceCandidate failed', err);
       }
     }
@@ -138,6 +177,9 @@ export class WebrtcService {
 
   removePeer(clientId: string): void {
     const peer = this.peers().get(clientId);
+    const meta = this.peerMeta.get(clientId);
+    if (meta?.restartTimer) clearTimeout(meta.restartTimer);
+    this.peerMeta.delete(clientId);
     peer?.pc?.close();
     peer?.stream?.getTracks().forEach((track) => track.stop());
     this.mutatePeers((peers) => peers.delete(clientId));
@@ -167,6 +209,11 @@ export class WebrtcService {
     this.peers.set(new Map());
     this.localStream = null;
     this.sendSignal = null;
+    this.localClientId = null;
+    for (const meta of this.peerMeta.values()) {
+      if (meta.restartTimer) clearTimeout(meta.restartTimer);
+    }
+    this.peerMeta.clear();
   }
 
   private touchPeer(clientId: string, patch: Partial<PeerState>): void {
@@ -181,4 +228,83 @@ export class WebrtcService {
     change(next);
     this.peers.set(next);
   }
+
+  private createPeerMeta(clientId: string): PeerMeta {
+    return {
+      polite: this.localClientId ? this.localClientId < clientId : false,
+      makingOffer: false,
+      ignoreOffer: false,
+      restartAttempts: 0,
+      restartTimer: null,
+      lastRestartAt: 0,
+    };
+  }
+
+  private async sendOffer(clientId: string, pc: RTCPeerConnection, meta: PeerMeta, iceRestart: boolean): Promise<void> {
+    try {
+      meta.makingOffer = true;
+      const offer = await pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
+      await pc.setLocalDescription(offer);
+      this.sendSignal?.(clientId, { sdp: pc.localDescription?.toJSON() });
+    } finally {
+      meta.makingOffer = false;
+    }
+  }
+
+  private async sendAnswer(clientId: string, pc: RTCPeerConnection): Promise<void> {
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    this.sendSignal?.(clientId, { sdp: pc.localDescription?.toJSON() });
+  }
+
+  private maybeScheduleIceRestart(clientId: string, pc: RTCPeerConnection): void {
+    if (pc.connectionState !== 'failed' && pc.connectionState !== 'disconnected' && pc.iceConnectionState !== 'failed' && pc.iceConnectionState !== 'disconnected') return;
+    const meta = this.peerMeta.get(clientId);
+    if (!meta || meta.restartTimer || meta.restartAttempts >= MAX_ICE_RESTART_ATTEMPTS || pc.signalingState === 'closed') return;
+
+    meta.restartTimer = setTimeout(() => {
+      meta.restartTimer = null;
+      void this.restartIce(clientId, pc, meta);
+    }, ICE_RESTART_DEBOUNCE_MS);
+  }
+
+  private async restartIce(clientId: string, pc: RTCPeerConnection, meta: PeerMeta): Promise<void> {
+    const now = Date.now();
+    if (now - meta.lastRestartAt < ICE_RESTART_COOLDOWN_MS || pc.signalingState !== 'stable') {
+      this.maybeScheduleIceRestart(clientId, pc);
+      return;
+    }
+    meta.restartAttempts += 1;
+    meta.lastRestartAt = now;
+    console.warn(`[webrtc] restarting ICE for peer ${clientId}; attempt=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS}`);
+    pc.restartIce();
+    await this.sendOffer(clientId, pc, meta, true);
+  }
+
+  private async logSelectedCandidateType(clientId: string, pc: RTCPeerConnection): Promise<void> {
+    try {
+      const candidateType = await selectedCandidateType(pc);
+      if (candidateType) console.log(`[webrtc] peer ${clientId} selectedCandidateType=${candidateType}`);
+    } catch (err) {
+      console.debug(`[webrtc] selected candidate lookup failed for ${clientId}`, err);
+    }
+  }
+}
+
+async function selectedCandidateType(pc: RTCPeerConnection): Promise<string | null> {
+  const stats = await pc.getStats();
+  for (const report of stats.values()) {
+    if (report.type !== 'transport' || !report.selectedCandidatePairId) continue;
+    const pair = stats.get(report.selectedCandidatePairId);
+    const candidateId = pair?.localCandidateId || pair?.remoteCandidateId;
+    const candidate = candidateId ? stats.get(candidateId) : null;
+    return candidate?.candidateType ?? null;
+  }
+  for (const report of stats.values()) {
+    if (report.type !== 'candidate-pair' || !report.selected) continue;
+    const candidateId = report.localCandidateId || report.remoteCandidateId;
+    const candidate = candidateId ? stats.get(candidateId) : null;
+    return candidate?.candidateType ?? null;
+  }
+  return null;
 }

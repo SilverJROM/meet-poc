@@ -27,11 +27,15 @@ function shutdown(code = 0) {
 process.on('SIGINT', () => shutdown(0));
 process.on('SIGTERM', () => shutdown(0));
 
-start('backend', 'npx', ['tsx', 'backend/src/server.ts'], { PORT: '4720', NODE_ENV: 'development' });
-start('angular', 'npm', ['run', 'start', '-w', 'frontend', '--', '--host', '127.0.0.1', '--port', '4711', '--proxy-config', 'proxy.conf.json']);
+const backendPort = process.env.E2E_BACKEND_PORT || '4720';
+const frontendPort = process.env.E2E_FRONTEND_PORT || '4711';
+const proxyPort = process.env.E2E_PROXY_PORT || '4710';
+
+start('backend', 'npx', ['tsx', 'backend/src/server.ts'], { PORT: backendPort, NODE_ENV: 'development' });
+start('angular', 'npm', ['run', 'start', '-w', 'frontend', '--', '--host', '127.0.0.1', '--port', frontendPort, '--proxy-config', 'proxy.conf.json']);
 start('proxy', 'node', ['scripts/serve.js'], {
-  PORT: '4710',
+  PORT: proxyPort,
   NODE_ENV: 'development',
-  BACKEND_ORIGIN: 'http://localhost:4720',
-  FRONTEND_ORIGIN: 'http://localhost:4711',
+  BACKEND_ORIGIN: `http://localhost:${backendPort}`,
+  FRONTEND_ORIGIN: `http://localhost:${frontendPort}`,
 });
