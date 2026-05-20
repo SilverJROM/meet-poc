@@ -18,7 +18,8 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 | F | diagf — connection resilience (PRIORITY) | DR-18 (silent sticky reconnect), DR-19 (no ghost tiles), DR-21 (host auto-admit on reconnect), DR-22 (disconnect grace/tolerance) | PENDING | Added 2026-05-20 from real-device report + screenshot. All same root: reconnect/teardown handling. Highest pain — recommend before E2. |
 | G | diagg — display polish | DR-17 (remove all mirroring), DR-20 (stable speaker order + ~5s settle) | PENDING | Added 2026-05-20. Small in-call display tweaks. |
 | H | diagh — rooms-list search | DR-23 (room-name search/filter on list) | PENDING | Added 2026-05-20. Small rooms-list UI. |
-| Z | diagz — modularization audit (FINAL) | DR-24 (full modularization/coupling audit + boundary guards) | PENDING | Added 2026-05-20. GATED: only after DR-1..23 all VERIFIED. Likely [arch]-led. JROM reviews findings before refactors applied. |
+| I | diagi — device switching | DR-25 (fix camera/mic switch on multi-device + mobile; lobby + in-call) | PENDING | Added 2026-05-20. Real bug (FIXC2 device dialog doesn't switch device on real hw). Before Z. |
+| Z | diagz — modularization audit (FINAL) | DR-24 (full modularization/coupling audit + boundary guards) | PENDING | Added 2026-05-20. GATED: only after DR-1..25 all VERIFIED. Likely [arch]-led. JROM reviews findings before refactors applied. |
 
 ## RUN CODE-COMPLETE (DR-1..DR-10, 2026-05-20) — DR-11+ added as follow-ons
 
