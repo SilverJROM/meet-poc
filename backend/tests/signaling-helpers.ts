@@ -59,5 +59,10 @@ export function nextMessage(ws: WebSocket, predicate: (msg: WsMessage) => boolea
 }
 
 export function closeWs(ws: WebSocket): void {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'leave' }));
+  if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
+}
+
+export function dropWs(ws: WebSocket): void {
   if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) ws.close();
 }

@@ -14,6 +14,8 @@ export type SignalingMessage =
   | { type: 'knock'; clientId: string; name: string }
   | { type: 'pending-list'; knockers: { id: string; name: string }[] }
   | { type: 'peer-joined'; clientId: string; name: string; host?: boolean }
+  | { type: 'peer-reconnecting'; clientId: string; name: string; host?: boolean }
+  | { type: 'peer-resumed'; oldClientId: string; clientId: string; name: string; host?: boolean }
   | { type: 'peer-left'; clientId: string }
   | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean; screenOn?: boolean }
   | { type: 'recording-started'; clientId: string; sessionId: string }
@@ -35,7 +37,8 @@ export type OutgoingSignalingMessage =
   | { type: 'recording-state'; state: 'started' | 'stopped' }
   | { type: 'meeting-ended-by-host' }
   | { type: 'mute-target'; clientId: string }
-  | { type: 'remove-peer'; clientId: string };
+  | { type: 'remove-peer'; clientId: string }
+  | { type: 'leave' };
 
 @Injectable({ providedIn: 'root' })
 export class WsService {
@@ -54,7 +57,7 @@ export class WsService {
   readonly status = signal<'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('idle');
 
   connect(roomId: string, onMessage: (msg: SignalingMessage) => void, onOpen: () => void, onError: () => void): void {
-    this.closeCurrentSocket();
+    this.closeCurrentSocket(false);
     this.clearReconnectTimer();
     this.roomId = roomId;
     this.onMessage = onMessage;
@@ -75,7 +78,7 @@ export class WsService {
   close(): void {
     this.intentionallyClosed = true;
     this.clearReconnectTimer();
-    this.closeCurrentSocket();
+    this.closeCurrentSocket(true);
     this.roomId = '';
     this.onMessage = null;
     this.onOpen = null;
@@ -133,11 +136,11 @@ export class WsService {
     };
   }
 
-  private closeCurrentSocket(): void {
+  private closeCurrentSocket(explicitLeave: boolean): void {
     const ws = this.socket;
     this.socket = null;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      ws.close();
+      ws.close(explicitLeave ? 4001 : 1000, explicitLeave ? 'explicit leave' : undefined);
     }
   }
 

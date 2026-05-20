@@ -25,15 +25,30 @@ type LiveRoom = {
   admitted: Map<string, PeerEntry>;
   pending: Map<string, PeerEntry>;
   reconnectTickets: Map<string, ReconnectTicket>;
+  reconnecting: Map<string, ReconnectingPeer>;
   currentSessionId: string | null;
 };
 
 type ReconnectTicket = {
+  clientId: string;
   name: string;
   userEmail: string | null;
   isMobile: boolean;
   sessionId: string | null;
   expiresAt: number;
+};
+
+type ReconnectingPeer = {
+  name: string;
+  userEmail: string | null;
+  isMobile: boolean;
+  supportsReconnect: boolean;
+  reconnectToken: string | null;
+  reconnectExpiresAt: number | null;
+  sessionId: string | null;
+  isHost: boolean;
+  expiresAt: number;
+  timer: ReturnType<typeof setTimeout> | null;
 };
 
 type IncomingMessage = {
@@ -56,13 +71,14 @@ type IncomingMessage = {
 const MAX_ADMITTED = 8;
 const MAX_MOBILE_ADMITTED = 4;
 const RECONNECT_TOKEN_TTL_MS = 2 * 60 * 1000;
+const DISCONNECT_GRACE_MS = RECONNECT_TOKEN_TTL_MS;
 
 const liveRooms = new Map<string, LiveRoom>();
 
 function getOrCreateLiveRoom(roomId: string): LiveRoom {
   let live = liveRooms.get(roomId);
   if (!live) {
-    live = { admitted: new Map(), pending: new Map(), reconnectTickets: new Map(), currentSessionId: null };
+    live = { admitted: new Map(), pending: new Map(), reconnectTickets: new Map(), reconnecting: new Map(), currentSessionId: null };
     liveRooms.set(roomId, live);
   }
   return live;
@@ -101,15 +117,25 @@ function issueReconnectToken(ws: WebSocket, entry: PeerEntry, supportsReconnect:
   send(ws, { type: 'reconnect-token', token, expiresAt });
 }
 
-function stashReconnectTicket(live: LiveRoom, entry: PeerEntry): void {
+function stashReconnectTicket(live: LiveRoom, clientId: string, entry: PeerEntry): void {
   if (!entry.reconnectToken || !entry.reconnectExpiresAt || entry.reconnectExpiresAt <= Date.now()) return;
   live.reconnectTickets.set(entry.reconnectToken, {
+    clientId,
     name: entry.name,
     userEmail: entry.userEmail,
     isMobile: entry.isMobile,
     sessionId: live.currentSessionId,
     expiresAt: entry.reconnectExpiresAt,
   });
+}
+
+function cleanupReconnectState(live: LiveRoom, clientId: string): void {
+  const reconnecting = live.reconnecting.get(clientId);
+  if (reconnecting?.timer) clearTimeout(reconnecting.timer);
+  live.reconnecting.delete(clientId);
+  for (const [token, ticket] of live.reconnectTickets) {
+    if (ticket.clientId === clientId) live.reconnectTickets.delete(token);
+  }
 }
 
 function rejectForRoomFull(roomId: string, clientId: string, pending: PeerEntry, live: LiveRoom, database: Database.Database): void {
@@ -134,6 +160,17 @@ function bumpAdmittedPeak(live: LiveRoom, database: Database.Database): void {
   bumpPeak(live.currentSessionId, live.admitted.size, database);
 }
 
+function maybeCloseEmptyRoom(roomId: string, live: LiveRoom, reason: 'host-disconnect-empty' | 'last-peer-left', database: Database.Database): void {
+  if (live.admitted.size > 0 || live.pending.size > 0 || live.reconnecting.size > 0) return;
+  try {
+    closeSession(live.currentSessionId, reason, database);
+  } catch (err) {
+    console.warn(`[room ${roomId}] failed to close meeting session`, err);
+  }
+  live.currentSessionId = null;
+  liveRooms.delete(roomId);
+}
+
 function logRejectedHostCommand(command: string, userEmail: string | null, roomId: string | null): void {
   console.info('[host-cmd-rejected]', command, userEmail, roomId);
 }
@@ -144,7 +181,7 @@ function isMobileUserAgent(userAgent: string | string[] | undefined): boolean {
 }
 
 function mobileAdmittedCount(live: LiveRoom): number {
-  return [...live.admitted.values()].filter((peer) => peer.isMobile).length;
+  return [...live.admitted.values()].filter((peer) => peer.isMobile).length + [...live.reconnecting.values()].filter((peer) => peer.isMobile).length;
 }
 
 function getLiveAdmittedRoom(currentRoom: string | null, state: PeerState): LiveRoom | null {
@@ -164,6 +201,56 @@ function peerSummaries(live: LiveRoom, roomId: string, database: Database.Databa
     name: p.name,
     host: isOwnerOf(roomId, p.userEmail, database),
   }));
+}
+
+function expireReconnectingPeer(roomId: string, clientId: string, database: Database.Database): void {
+  const live = liveRooms.get(roomId);
+  if (!live) return;
+  const reconnecting = live.reconnecting.get(clientId);
+  if (!reconnecting) return;
+  cleanupReconnectState(live, clientId);
+  for (const [, peer] of live.admitted) {
+    send(peer.ws, { type: 'peer-left', clientId });
+  }
+  console.log(`[room ${roomId}] EXPIRED ${reconnecting.name} (${clientId})  admitted=${live.admitted.size}`);
+  maybeCloseEmptyRoom(roomId, live, reconnecting.isHost ? 'host-disconnect-empty' : 'last-peer-left', database);
+}
+
+function startReconnectGrace(roomId: string, clientId: string, entry: PeerEntry, isHost: boolean, live: LiveRoom, database: Database.Database): void {
+  cleanupReconnectState(live, clientId);
+  const expiresAt = Date.now() + DISCONNECT_GRACE_MS;
+  const timer = setTimeout(() => expireReconnectingPeer(roomId, clientId, database), DISCONNECT_GRACE_MS);
+  timer.unref?.();
+  live.reconnecting.set(clientId, {
+    name: entry.name,
+    userEmail: entry.userEmail,
+    isMobile: entry.isMobile,
+    supportsReconnect: entry.supportsReconnect,
+    reconnectToken: entry.reconnectToken,
+    reconnectExpiresAt: entry.reconnectExpiresAt,
+    sessionId: live.currentSessionId,
+    isHost,
+    expiresAt,
+    timer,
+  });
+  stashReconnectTicket(live, clientId, entry);
+  for (const [, peer] of live.admitted) {
+    send(peer.ws, { type: 'peer-reconnecting', clientId, name: entry.name, host: isHost });
+  }
+}
+
+function removeAdmittedPeer(roomId: string, clientId: string, live: LiveRoom, database: Database.Database): void {
+  cleanupReconnectState(live, clientId);
+  const entry = live.admitted.get(clientId);
+  if (!entry) return;
+  const isHost = isOwnerOf(roomId, entry.userEmail, database);
+  live.admitted.delete(clientId);
+  entry.setState('idle');
+  for (const [, peer] of live.admitted) {
+    send(peer.ws, { type: 'peer-left', clientId });
+  }
+  console.log(`[room ${roomId}] - ${entry.name} (${clientId})  admitted=${live.admitted.size}`);
+  maybeCloseEmptyRoom(roomId, live, isHost ? 'host-disconnect-empty' : 'last-peer-left', database);
 }
 
 function admitPeer(roomId: string, clientId: string, database: Database.Database): void {
@@ -266,36 +353,49 @@ export function attachSignaling(server: http.Server, database: Database.Database
             userAgent: req.headers['user-agent'] || '',
           });
         }
-        if (declaredMobile && mobileAdmittedCount(live) >= MAX_MOBILE_ADMITTED) {
-          send(ws, { type: 'error', error: 'mobile room full (4 max)' });
-          ws.close();
-          return;
-        }
-        if (live.admitted.size >= MAX_ADMITTED) {
-          send(ws, { type: 'error', error: 'room full (max 8)' });
-          ws.close();
-          return;
-        }
         currentRoom = roomId;
         myName = joinName;
         ensureLiveSession(roomId, room.ownerEmail, live, database);
         const owner = isOwnerOf(roomId, userEmail, database);
         currentRoomOwner = owner;
         const reconnectTicket = reconnectToken ? live.reconnectTickets.get(reconnectToken) : null;
+        const tokenGrace = reconnectTicket ? live.reconnecting.get(reconnectTicket.clientId) : null;
+        const ownerGrace = owner
+          ? [...live.reconnecting.entries()].find(([, peer]) => peer.userEmail === room.ownerEmail && peer.isHost)
+          : null;
         const canResume =
           !!reconnectTicket &&
+          !!tokenGrace &&
           reconnectTicket.expiresAt > Date.now() &&
+          tokenGrace.expiresAt > Date.now() &&
           reconnectTicket.sessionId === live.currentSessionId &&
-          reconnectTicket.userEmail === userEmail;
+          tokenGrace.sessionId === live.currentSessionId &&
+          reconnectTicket.userEmail === userEmail &&
+          tokenGrace.userEmail === userEmail;
+        const resumeOldClientId = ownerGrace?.[0] ?? (canResume ? reconnectTicket.clientId : null);
+        const resumeGrace = ownerGrace?.[1] ?? (resumeOldClientId ? live.reconnecting.get(resumeOldClientId) : null);
+        const ownerResume = owner && !!ownerGrace;
+        if (!ownerResume && !canResume && declaredMobile && mobileAdmittedCount(live) >= MAX_MOBILE_ADMITTED) {
+          send(ws, { type: 'error', error: 'mobile room full (4 max)' });
+          ws.close();
+          return;
+        }
+        if (!ownerResume && !canResume && live.admitted.size + live.reconnecting.size >= MAX_ADMITTED) {
+          send(ws, { type: 'error', error: 'room full (max 8)' });
+          ws.close();
+          return;
+        }
         if (canResume) {
           live.reconnectTickets.delete(reconnectToken);
           myName = reconnectTicket.name;
+        } else if (owner && resumeGrace) {
+          myName = resumeGrace.name;
         }
         const entry = {
           ws,
           name: myName,
           userEmail,
-          isMobile: canResume ? reconnectTicket.isMobile : declaredMobile,
+          isMobile: resumeGrace ? resumeGrace.isMobile : declaredMobile,
           supportsReconnect,
           reconnectToken: null,
           reconnectExpiresAt: null,
@@ -305,6 +405,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
         };
 
         if (owner || canResume) {
+          if (resumeOldClientId) cleanupReconnectState(live, resumeOldClientId);
           live.admitted.set(clientId, entry);
           bumpAdmittedPeak(live, database);
           state = 'admitted';
@@ -314,7 +415,14 @@ export function attachSignaling(server: http.Server, database: Database.Database
           issueReconnectToken(ws, entry, supportsReconnect);
           for (const [id, peer] of live.admitted) {
             if (id !== clientId) {
-              send(peer.ws, owner && supportsReconnect ? { type: 'peer-joined', clientId, name: myName, host: true } : { type: 'peer-joined', clientId, name: myName });
+              send(
+                peer.ws,
+                resumeOldClientId
+                  ? { type: 'peer-resumed', oldClientId: resumeOldClientId, clientId, name: myName, host: owner }
+                  : owner && supportsReconnect
+                    ? { type: 'peer-joined', clientId, name: myName, host: true }
+                    : { type: 'peer-joined', clientId, name: myName },
+              );
             }
           }
           if (owner && live.pending.size > 0) {
@@ -433,29 +541,51 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const target = live.admitted.get(targetId);
         if (!target) return;
         send(target.ws, { type: 'peer-removed', reason: 'removed by host' });
+        removeAdmittedPeer(currentRoom, targetId, live, database);
         try {
           target.ws.close();
         } catch {
           // Best effort close after the removal message.
         }
+        return;
+      }
+
+      if (msg.type === 'leave') {
+        if (!currentRoom) return;
+        const live = liveRooms.get(currentRoom);
+        if (!live) return;
+        if (state === 'admitted') removeAdmittedPeer(currentRoom, clientId, live, database);
+        else if (state === 'pending') {
+          live.pending.delete(clientId);
+          state = 'idle';
+          broadcastToOwners(live, currentRoom, { type: 'knock-cancelled', clientId }, database);
+          broadcastPendingListToOwners(live, currentRoom, database);
+        }
+        try {
+          ws.close();
+        } catch {
+          // Best effort close after explicit leave.
+        }
       }
     });
 
-    ws.on('close', () => {
+    ws.on('close', (code, reasonBuffer) => {
       if (!currentRoom) return;
       const live = liveRooms.get(currentRoom);
       if (!live) return;
+      const explicitLeave = code === 4001 || reasonBuffer.toString() === 'explicit leave';
+      if (explicitLeave && state === 'admitted') {
+        removeAdmittedPeer(currentRoom, clientId, live, database);
+        return;
+      }
       const admittedBeforeClose = live.admitted.size;
       const pendingBeforeClose = live.pending.size;
       const closingPeerWasHost = currentRoomOwner;
       if (state === 'admitted') {
         const closingEntry = live.admitted.get(clientId);
-        if (closingEntry) stashReconnectTicket(live, closingEntry);
+        if (closingEntry) startReconnectGrace(currentRoom, clientId, closingEntry, closingPeerWasHost, live, database);
         live.admitted.delete(clientId);
-        for (const [, peer] of live.admitted) {
-          send(peer.ws, { type: 'peer-left', clientId });
-        }
-        console.log(`[room ${currentRoom}] - ${myName} (${clientId})  admitted=${live.admitted.size}`);
+        console.log(`[room ${currentRoom}] RECONNECTING ${myName} (${clientId})  admitted=${live.admitted.size}`);
       } else if (state === 'pending') {
         live.pending.delete(clientId);
         try {
@@ -466,18 +596,12 @@ export function attachSignaling(server: http.Server, database: Database.Database
         }
         console.log(`[room ${currentRoom}] CANCEL ${myName} (${clientId})  pending=${live.pending.size}`);
       }
-      if (live.admitted.size === 0 && live.pending.size === 0) {
+      if (live.admitted.size === 0 && live.pending.size === 0 && live.reconnecting.size === 0) {
         const reason =
           closingPeerWasHost && admittedBeforeClose <= 1 && pendingBeforeClose === 0
             ? 'host-disconnect-empty'
             : 'last-peer-left';
-        try {
-          closeSession(live.currentSessionId, reason, database);
-        } catch (err) {
-          console.warn(`[room ${currentRoom}] failed to close meeting session`, err);
-        }
-        live.currentSessionId = null;
-        liveRooms.delete(currentRoom);
+        maybeCloseEmptyRoom(currentRoom, live, reason, database);
       }
     });
   });

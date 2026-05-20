@@ -144,7 +144,7 @@ export class RoomPage implements OnDestroy {
   private speakerPromotionTimer: ReturnType<typeof setTimeout> | null = null;
   private speakerPromotionCandidate: string | null = null;
   private readonly pendingSignals = new Map<string, BufferedSignal[]>();
-  private readonly reconnectToken = signal<string | null>(null);
+  private readonly reconnectToken = signal<string | null>(readReconnectToken(this.roomKey));
   private pendingListInitialized = false;
   private lastDoorbellAt = 0;
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
@@ -200,6 +200,7 @@ export class RoomPage implements OnDestroy {
         wsConnected: this.ws.connected(),
         wsStatus: this.ws.status(),
         wsReconnectAttempts: this.ws.reconnectAttempts(),
+        reconnectTokenPresent: !!this.reconnectToken(),
         myClientId: this.myId(),
         roomState: this.state(),
         localAudioTrackId: this.media.localStream()?.getAudioTracks()[0]?.id,
@@ -246,6 +247,8 @@ export class RoomPage implements OnDestroy {
       };
       if (window.location.hostname === 'localhost') {
         debug.injectActiveSpeakerStream = (id: string, stream: MediaStream) => this.activeSpeaker.injectDebugStream(id, stream);
+        debug.markPeerReconnectingForTest = (id: string) => this.webrtc.markPeerReconnecting(id);
+        debug.markPeerRecoveredForTest = (id: string) => this.webrtc.debugMarkPeerRecoveredForTest(id);
       }
       window.__meetDebug = debug;
     });
@@ -606,6 +609,7 @@ export class RoomPage implements OnDestroy {
   private async handleMessage(msg: SignalingMessage): Promise<void> {
     if (msg.type === 'reconnect-token') {
       this.reconnectToken.set(msg.token);
+      storeReconnectToken(this.roomKey, msg.token);
       return;
     }
     if (msg.type === 'knocking') {
@@ -671,6 +675,27 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'peer-joined') {
       this.status.set(`${msg.name} joined.`);
       await this.webrtc.addPeer(msg.clientId, msg.name, false, { isHost: !!msg.host || msg.clientId === this.hostClientId() });
+      this.recorder.notifyParticipantJoined({
+        clientId: msg.clientId,
+        displayName: msg.name,
+        isHost: !!msg.host || msg.clientId === this.hostClientId(),
+      });
+      await this.drainPendingSignals(msg.clientId);
+      return;
+    }
+    if (msg.type === 'peer-reconnecting') {
+      this.status.set(`${msg.name} is reconnecting.`);
+      this.webrtc.markPeerReconnecting(msg.clientId);
+      return;
+    }
+    if (msg.type === 'peer-resumed') {
+      this.status.set(`${msg.name} reconnected.`);
+      await this.webrtc.resumePeer(msg.oldClientId, msg.clientId, msg.name, false, { isHost: !!msg.host || msg.clientId === this.hostClientId() });
+      const queued = this.pendingSignals.get(msg.oldClientId);
+      if (queued?.length) {
+        this.pendingSignals.delete(msg.oldClientId);
+        this.pendingSignals.set(msg.clientId, queued);
+      }
       this.recorder.notifyParticipantJoined({
         clientId: msg.clientId,
         displayName: msg.name,
@@ -969,6 +994,7 @@ export class RoomPage implements OnDestroy {
     this.speakerPromotionTimer = null;
     this.speakerPromotionCandidate = null;
     this.promotedSpeakerId.set(null);
+    if (this.state() === 'in-call' || this.state() === 'knocking') this.ws.send({ type: 'leave' });
     this.ws.close();
     this.recorder.discard();
     this.media.stopLocal();
@@ -976,6 +1002,8 @@ export class RoomPage implements OnDestroy {
     this.pendingSignals.clear();
     this.knockers.set([]);
     this.pendingListInitialized = false;
+    clearReconnectToken(this.roomKey);
+    this.reconnectToken.set(null);
     this.isOwner.set(false);
     this.myId.set(null);
     this.hostClientId.set(null);
@@ -1220,6 +1248,34 @@ const DEVICE_STORAGE = {
   videoInput: 'meet-poc.device.videoInput',
 } as const;
 
+function reconnectTokenKey(roomKey: string): string {
+  return `meet-poc.reconnect.${roomKey}`;
+}
+
+function readReconnectToken(roomKey: string): string | null {
+  try {
+    return window.sessionStorage.getItem(reconnectTokenKey(roomKey));
+  } catch {
+    return null;
+  }
+}
+
+function storeReconnectToken(roomKey: string, token: string): void {
+  try {
+    window.sessionStorage.setItem(reconnectTokenKey(roomKey), token);
+  } catch {
+    // Best effort only; in-memory token still handles normal WS reconnects.
+  }
+}
+
+function clearReconnectToken(roomKey: string): void {
+  try {
+    window.sessionStorage.removeItem(reconnectTokenKey(roomKey));
+  } catch {
+    // Best effort only.
+  }
+}
+
 function readStoredDevice(key: string): string {
   try {
     return window.localStorage.getItem(key) || '';
@@ -1296,6 +1352,7 @@ declare global {
       wsConnected?: boolean;
       wsStatus?: string;
       wsReconnectAttempts?: number;
+      reconnectTokenPresent?: boolean;
       myClientId?: string | null;
       roomState?: string;
       localAudioTrackId?: string;
@@ -1340,6 +1397,8 @@ declare global {
         videoMaxBitrate: number | null;
       }[];
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
+      markPeerReconnectingForTest?: (id: string) => void;
+      markPeerRecoveredForTest?: (id: string) => void;
     };
   }
 }

@@ -176,11 +176,13 @@ describe('signaling host authority', () => {
     const guest1 = await joinAndAdmitGuest(owner.ws, url, room.id, 'Guest One');
     const guest2 = await joinAndAdmitGuest(owner.ws, url, room.id, 'Guest Two');
 
+    const ownerPeerLeftPromise = nextMessage(owner.ws, (msg) => msg.type === 'peer-left');
+    const guest2PeerLeftPromise = nextMessage(guest2.ws, (msg) => msg.type === 'peer-left');
     owner.ws.send(JSON.stringify({ type: 'remove-peer', clientId: guest1.clientId }));
     const removed = await nextMessage(guest1.ws, (msg) => msg.type === 'peer-removed');
     await waitForClose(guest1.ws);
-    const ownerPeerLeft = await nextMessage(owner.ws, (msg) => msg.type === 'peer-left');
-    const guest2PeerLeft = await nextMessage(guest2.ws, (msg) => msg.type === 'peer-left');
+    const ownerPeerLeft = await ownerPeerLeftPromise;
+    const guest2PeerLeft = await guest2PeerLeftPromise;
 
     expect(removed).toEqual({ type: 'peer-removed', reason: 'removed by host' });
     expect(ownerPeerLeft).toEqual({ type: 'peer-left', clientId: guest1.clientId });

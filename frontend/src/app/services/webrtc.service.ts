@@ -46,6 +46,7 @@ type PeerMeta = {
   ignoreOffer: boolean;
   restartAttempts: number;
   restartTimer: ReturnType<typeof setTimeout> | null;
+  recoveryTimer: ReturnType<typeof setTimeout> | null;
   lastRestartAt: number;
 };
 
@@ -163,7 +164,7 @@ export class WebrtcService {
     });
   }
 
-  async addPeer(clientId: string, name: string, isInitiator: boolean, options: { isHost?: boolean } = {}): Promise<void> {
+  async addPeer(clientId: string, name: string, isInitiator: boolean, options: { isHost?: boolean; stream?: MediaStream } = {}): Promise<void> {
     if (!this.localStream || !this.sendSignal || this.peers().has(clientId)) return;
     const iceServers = await this.iceConfig.getIceServers();
     const pc = new RTCPeerConnection(this.peerConnectionConfig(iceServers));
@@ -173,7 +174,7 @@ export class WebrtcService {
       id: clientId,
       name,
       pc,
-      stream: new MediaStream(),
+      stream: options.stream ?? new MediaStream(),
       connectionState: pc.connectionState,
       iceConnectionState: pc.iceConnectionState,
       iceGatheringState: pc.iceGatheringState,
@@ -212,12 +213,14 @@ export class WebrtcService {
     pc.onconnectionstatechange = () => {
       this.touchPeer(clientId, { connectionState: pc.connectionState });
       console.log(`[webrtc] peer ${clientId} connectionState=${pc.connectionState} at ${new Date().toISOString()}`);
+      this.updateRecoveryState(clientId, pc);
       void this.logSelectedCandidateType(clientId, pc);
       this.maybeScheduleIceRestart(clientId, pc);
     };
     pc.oniceconnectionstatechange = () => {
       this.touchPeer(clientId, { iceConnectionState: pc.iceConnectionState });
       console.log(`[webrtc] peer ${clientId} iceConnectionState=${pc.iceConnectionState} at ${new Date().toISOString()}`);
+      this.updateRecoveryState(clientId, pc);
       void this.logSelectedCandidateType(clientId, pc);
       this.maybeScheduleIceRestart(clientId, pc);
     };
@@ -234,6 +237,48 @@ export class WebrtcService {
       await this.sendOffer(clientId, pc, meta, false);
     }
     this.startQualityPolling();
+  }
+
+  async resumePeer(oldClientId: string, clientId: string, name: string, isInitiator: boolean, options: { isHost?: boolean } = {}): Promise<void> {
+    if (oldClientId === clientId) {
+      this.updatePeer(clientId, { name, isHost: !!options.isHost });
+      return;
+    }
+    const oldPeer = this.peers().get(oldClientId);
+    const preservedStream = oldPeer?.stream ?? new MediaStream();
+    const oldMeta = this.peerMeta.get(oldClientId);
+    if (oldMeta?.restartTimer) clearTimeout(oldMeta.restartTimer);
+    if (oldMeta?.recoveryTimer) clearTimeout(oldMeta.recoveryTimer);
+    oldPeer?.pc?.close();
+    this.peerMeta.delete(oldClientId);
+    this.qualityCounters.delete(oldClientId);
+    this.previousStats.delete(oldClientId);
+    this.autoPausedReceivers.delete(oldClientId);
+    this.remotePauseRequests.delete(oldClientId);
+    this.outboundVideoPaused.delete(oldClientId);
+    this.videoSenders.delete(oldClientId);
+    this.fallbackVideoTracks.delete(oldClientId);
+    this.mutatePeers((peers) => peers.delete(oldClientId));
+    await this.addPeer(clientId, name, isInitiator, { ...options, stream: preservedStream });
+  }
+
+  markPeerReconnecting(clientId: string): void {
+    this.touchPeer(clientId, {
+      connectionState: 'disconnected',
+      iceConnectionState: 'disconnected',
+      quality: 'weak',
+    });
+  }
+
+  debugMarkPeerRecoveredForTest(clientId: string): void {
+    const meta = this.peerMeta.get(clientId);
+    if (meta?.recoveryTimer) clearTimeout(meta.recoveryTimer);
+    if (meta) meta.recoveryTimer = null;
+    this.touchPeer(clientId, {
+      connectionState: 'connected',
+      iceConnectionState: 'connected',
+      quality: 'good',
+    });
   }
 
   async setForceRelay(enabled: boolean): Promise<void> {
@@ -393,6 +438,7 @@ export class WebrtcService {
     const peer = this.peers().get(clientId);
     const meta = this.peerMeta.get(clientId);
     if (meta?.restartTimer) clearTimeout(meta.restartTimer);
+    if (meta?.recoveryTimer) clearTimeout(meta.recoveryTimer);
     this.peerMeta.delete(clientId);
     this.qualityCounters.delete(clientId);
     this.previousStats.delete(clientId);
@@ -441,6 +487,7 @@ export class WebrtcService {
     this.localClientId = null;
     for (const meta of this.peerMeta.values()) {
       if (meta.restartTimer) clearTimeout(meta.restartTimer);
+      if (meta.recoveryTimer) clearTimeout(meta.recoveryTimer);
     }
     this.peerMeta.clear();
     this.qualityCounters.clear();
@@ -474,8 +521,41 @@ export class WebrtcService {
       ignoreOffer: false,
       restartAttempts: 0,
       restartTimer: null,
+      recoveryTimer: null,
       lastRestartAt: 0,
     };
+  }
+
+  private updateRecoveryState(clientId: string, pc: RTCPeerConnection): void {
+    const meta = this.peerMeta.get(clientId);
+    if (!meta) return;
+    const disconnected =
+      pc.connectionState === 'disconnected' ||
+      pc.iceConnectionState === 'disconnected' ||
+      pc.connectionState === 'failed' ||
+      pc.iceConnectionState === 'failed';
+    if (!disconnected) {
+      if (meta.recoveryTimer) clearTimeout(meta.recoveryTimer);
+      meta.recoveryTimer = null;
+      if (pc.connectionState === 'connected' || pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        meta.restartAttempts = 0;
+      }
+      return;
+    }
+    this.touchPeer(clientId, { quality: 'weak' });
+    if (meta.recoveryTimer) return;
+    meta.recoveryTimer = setTimeout(() => {
+      meta.recoveryTimer = null;
+      const peer = this.peers().get(clientId);
+      const current = peer?.pc;
+      if (!current) return;
+      const stillDisconnected =
+        current.connectionState === 'disconnected' ||
+        current.iceConnectionState === 'disconnected' ||
+        current.connectionState === 'failed' ||
+        current.iceConnectionState === 'failed';
+      if (stillDisconnected) this.touchPeer(clientId, { quality: 'poor' });
+    }, 20_000);
   }
 
   private async sendOffer(clientId: string, pc: RTCPeerConnection, meta: PeerMeta, iceRestart: boolean): Promise<void> {

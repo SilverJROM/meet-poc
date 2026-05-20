@@ -50,7 +50,7 @@ test('FIX-B2.2 two-peer recording captures both speakers in segments', async ({ 
   const room = await createFixRoom(request, 'two-speaker');
   await loginAsJrom(page);
   await joinOwner(page, room, 'host-two');
-  const guestContext = await joinGuest(browser, page, room, 'guest-two');
+  const guestSession = await joinGuest(browser, page, room, 'guest-two');
 
   await page.getByRole('button', { name: 'Record' }).click();
   await expect(page.locator('app-recording-banner')).toContainText('Host is recording');
@@ -68,19 +68,19 @@ test('FIX-B2.2 two-peer recording captures both speakers in segments', async ({ 
   expect(speakerIds.has(ids.guest)).toBe(true);
   expect(meta.segments.reduce((total, segment) => total + (segment.endMs - segment.startMs), 0)).toBeGreaterThan(0);
 
-  await guestContext.close();
+  await guestSession.context.close();
 });
 
 test('FIX-B2.3 mid-recording peer leave is captured', async ({ browser, page, request }) => {
   const room = await createFixRoom(request, 'peer-leave');
   await loginAsJrom(page);
   await joinOwner(page, room, 'host-leave');
-  const guestContext = await joinGuest(browser, page, room, 'guest-leave');
+  const guestSession = await joinGuest(browser, page, room, 'guest-leave');
 
   await page.getByRole('button', { name: 'Record' }).click();
   await expect(page.locator('app-recording-banner')).toContainText('Host is recording');
   await page.waitForTimeout(1900);
-  await guestContext.close();
+  await guestSession.page.getByRole('button', { name: 'Leave call' }).click();
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.peers.some((peer) => peer.name === 'guest-leave') ?? true)).toBe(false);
   const { meta } = await stopAndReadMeta(page, 3100);
 
@@ -89,6 +89,7 @@ test('FIX-B2.3 mid-recording peer leave is captured', async ({ browser, page, re
   expect(guest?.leftAtMs).toBeGreaterThan(1500);
   expect(guest?.leftAtMs).toBeLessThan(3000);
   expect(host?.leftAtMs).toBeNull();
+  await guestSession.context.close();
 });
 
 test('FIX-B2.4 recordings list exposes hasMetadata and speakerCount', async ({ page, request }) => {
@@ -137,7 +138,7 @@ async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void
   await expect(page.locator('.call-panel')).toBeVisible();
 }
 
-async function joinGuest(browser: Browser, host: Page, room: TestRoom, name: string): Promise<BrowserContext> {
+async function joinGuest(browser: Browser, host: Page, room: TestRoom, name: string): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext();
   const guest = await context.newPage();
   await guest.goto(room.url);
@@ -150,7 +151,7 @@ async function joinGuest(browser: Browser, host: Page, room: TestRoom, name: str
   await row.getByRole('button', { name: 'Admit' }).click();
   await expect(guest.locator('.call-panel')).toBeVisible();
   await expect.poll(() => host.evaluate((guestName) => window.__meetDebug?.peers.some((peer) => peer.name === guestName) ?? false, name)).toBe(true);
-  return context;
+  return { context, page: guest };
 }
 
 async function recordAndReadMeta(page: Page, durationMs: number): Promise<{ file: string; meta: RecordingMeta }> {
