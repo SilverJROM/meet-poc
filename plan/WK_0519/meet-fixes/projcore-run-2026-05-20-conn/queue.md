@@ -13,11 +13,12 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 | C | diagc — voice-first resilience | DR-11 (auto-degrade to audio-only + manual toggle + quality pill + audio-priority allocation) | **PASS** | cbaa018. Isolation 12/12, audio-priority code verified, codex 78/78 isolated DB. Live-DB gate had 12 data-spec failures = pollution/seed-drift (not DR-11); DB cleaned to TEST_ROOM01. |
 | D | diagd — join-popout + audio-invariant | DR-12 (always-clickable Join + popout), DR-13 (audio-bandwidth non-overridable invariant) | **PASS** | 59be4c0. codex 83/83 clean-DB; projcore 55/55 non-seed-flaky + diagd 5/5 + DR-13 invariant test. 4 live-DB FK/WAL seed-flakes (test-infra, not DR-12/13). |
 
-| E1 | diage1 — room access + URLs | DR-14 (clickable rooms), DR-15 (name-slug + custom owner slug URLs) | PENDING | Dispatch after DIAGD. |
+| E1 | diage1 — room access + URLs | DR-14 (clickable rooms), DR-15 (name-slug + custom owner slug URLs) | **PASS** | f63b158. backend 106/1-skip, e2e 4/4, clean-DB 87/87, fresh-room slug+id resolution both work, targeted gate 17/17. Minor: TEST_ROOM01 migration-backfill slug file/runtime cosmetic mismatch (resolves via id; flagged). |
 | E2 | diage2 — waiting room | DR-16 (host open/close toggle + wait-timeout param; closed=timed-wait+kick+reconnect, open=unlimited+host-available) | PENDING | Dispatch after E1. Host-opened = explicit toggle; wait default 15min host-set. |
 | F | diagf — connection resilience (PRIORITY) | DR-18 (silent sticky reconnect), DR-19 (no ghost tiles), DR-21 (host auto-admit on reconnect), DR-22 (disconnect grace/tolerance) | PENDING | Added 2026-05-20 from real-device report + screenshot. All same root: reconnect/teardown handling. Highest pain — recommend before E2. |
 | G | diagg — display polish | DR-17 (remove all mirroring), DR-20 (stable speaker order + ~5s settle) | PENDING | Added 2026-05-20. Small in-call display tweaks. |
 | H | diagh — rooms-list search | DR-23 (room-name search/filter on list) | PENDING | Added 2026-05-20. Small rooms-list UI. |
+| Z | diagz — modularization audit (FINAL) | DR-24 (full modularization/coupling audit + boundary guards) | PENDING | Added 2026-05-20. GATED: only after DR-1..23 all VERIFIED. Likely [arch]-led. JROM reviews findings before refactors applied. |
 
 ## RUN CODE-COMPLETE (DR-1..DR-10, 2026-05-20) — DR-11+ added as follow-ons
 

@@ -17,3 +17,4 @@ Codex appends one line per STATUS change as the final action of each reply:
 [projcore callback] diagd PROPOSED plan ready; DR-12 join-prereq popout plus DR-13 audio-priority invariant hardening scoped
 [projcore callback] diagd DONE committed 59be4c0; DR-12/13 implemented, backend 103/1-skip, DIAGD 5/5, clean Run-1+diag1+diagb1+diagb2+diagc+diagd 83/83, pm2 restarted
 [projcore callback] diage1 PROPOSED plan ready; DR-14 clickable room rows plus DR-15 slug migration/backfill, resolve-by-slug-or-id, and WS slug-to-id mapping scoped
+[projcore callback] diage1 DONE committed f63b158; DR-14/15 implemented, backend 106/1-skip, DIAGE1 4/4, clean Run-1+diag1+diagb1+diagb2+diagc+diagd+diage1 87/87, live DB migration ok TEST_ROOM01 slugged, pm2 restarted
