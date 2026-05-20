@@ -93,15 +93,23 @@ R-C-1, R-C-2, R-C-3, R-C-4, R-C-5, R-C-6, R-C-7 all VERIFIED. Remaining: R-C-8 (
 
 fixc8 dispatched_at: 2026-05-20T03:43:50Z estimate_min: 60 bucket: MEDIUM
 
-### FIXC8 — Transcriber model dropdown — **IMPLEMENTED / AWAITING PROJCORE VALIDATION** (2026-05-20)
+### FIXC8 — Configurable transcriber model — **VERIFIED PASS** (2026-05-20, v2.0 plan-handshake)
 
 - Branch: `fix/meet-fixc8-transcriber-config`
-- Reused `llm_settings` for `transcriber_model` with default `medium`
-- Settings page now exposes a real `small` / `medium` / `large-v3` dropdown and persists selection
-- Backend transcription spawn passes persisted value as `WHISPER_MODEL`; orphan/missing-room fallback is `medium`
-- `transcribe.py` accepts `--model` or `WHISPER_MODEL` and writes selected model into the transcript sidecar
-- Backend: **93 passed / 1 skipped**
-- FIXC8 e2e: **3/3**
-- Run 1 regression: **67/67** (R8.1 → 18 consecutive if accepted)
-- Screenshot: `batch-fixc8/screenshots/settings-transcriber-dropdown.png`
-- See `batch-fixc8/independent-validation.md`
+- Commits: b004d09 feat: add transcriber model setting (23 files, 652+/17-)
+- v2.0 handshake: STATUS: PROPOSED → projcore APPROVED-PLAN (owner-fallback note) → DONE. Callback-first watcher caught completion cleanly.
+- Backend: **93 passed / 1 skipped** (independent re-run), FIXC8 e2e: **3/3**, Run 1 regression: **67/67** (R8.1 → 18 consecutive)
+- `transcriber_model` persisted in llm_settings (default medium); transcribe.py reads WHISPER_MODEL; FIXC8.3 proves persisted→spawn→worker→sidecar chain
+- Screenshot: settings-transcriber-dropdown.png (3-option dropdown, medium default)
+- R-C-13 → VERIFIED
+- See `validation/batch-fixc8.md`
+
+## 🎉 RUN COMPLETE — ALL 13 REQUIREMENTS VERIFIED (2026-05-20)
+
+- **8/8 batches PASS** (all on iteration 1 — zero send-back loops, zero 3× FAILs)
+- **13/13 requirements VERIFIED** (R-C-1 through R-C-13)
+- **R8.1: 18 consecutive Run-1 regression passes** (49 → 67 as specs accreted)
+- **Backend suite:** 59 → 93 tests (+34 across the run), 1 skip (LLM_SMOKE gate)
+- **Protocol transition mid-run:** FIXC1-7 on v1.0 (direct dispatch), FIXC8 on v2.0 (plan-handshake + callback-first watcher) per JROM's 2026-05-20 update
+- **Stacked branches:** fixc1→2→3→4→5→6→7→8, each off the prior; `fix/meet-fixc8-transcriber-config` contains the complete run
+- **Hard-cap breaches:** 0. **Send-back iterations:** 0.
