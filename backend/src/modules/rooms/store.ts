@@ -82,10 +82,12 @@ export function isOwnerOf(roomId: string | null, email: string | null | undefine
   return !!row;
 }
 
-export function listOwnedRooms(email: string, database: Database.Database = getDb()): Room[] {
+export function listOwnedRooms(email: string, database: Database.Database = getDb(), searchQuery = ''): Room[] {
+  const search = normalizeRoomSearch(searchQuery);
+  const filter = titleSearchFilter(search);
   return database
-    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC')
-    .all(email)
+    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC`)
+    .all(email, ...filter.params)
     .map((row) => toRoom(row as RoomRow));
 }
 
@@ -94,14 +96,17 @@ export function listOwnedRoomsPage(
   page: number,
   pageSize: number,
   database: Database.Database = getDb(),
+  searchQuery = '',
 ): { rooms: Room[]; total: number } {
   const offset = (page - 1) * pageSize;
+  const search = normalizeRoomSearch(searchQuery);
+  const filter = titleSearchFilter(search);
   const totalRow = database
-    .prepare('SELECT COUNT(*) AS total FROM rooms WHERE owner_email = ?')
-    .get(email) as { total: number };
+    .prepare(`SELECT COUNT(*) AS total FROM rooms WHERE owner_email = ?${filter.sql}`)
+    .get(email, ...filter.params) as { total: number };
   const rooms = database
-    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
-    .all(email, pageSize, offset)
+    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .all(email, ...filter.params, pageSize, offset)
     .map((row) => toRoom(row as RoomRow));
   return { rooms, total: totalRow.total };
 }
@@ -201,6 +206,19 @@ function slugBase(value: string): string {
     .replace(/^-+|-+$/g, '')
     .replace(/-{2,}/g, '-');
   return (base || 'room').slice(0, 48).replace(/-+$/g, '') || 'room';
+}
+
+function normalizeRoomSearch(value: string): string {
+  return String(value || '').trim().slice(0, 100);
+}
+
+function titleSearchFilter(search: string): { sql: string; params: string[] } {
+  if (!search) return { sql: '', params: [] };
+  return { sql: " AND title COLLATE NOCASE LIKE ? ESCAPE '\\'", params: [`%${escapeLike(search)}%`] };
+}
+
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
 function validateCustomSlug(input: unknown): SlugValidationResult {

@@ -28,11 +28,22 @@
       <h2>Your rooms</h2>
       <span class="muted">{{ total() }} total</span>
     </div>
+    <div class="rooms-search">
+      <label for="rooms-search">Search rooms</label>
+      <input
+        id="rooms-search"
+        name="roomsSearch"
+        type="search"
+        placeholder="Search by room name"
+        [ngModel]="searchQuery()"
+        (ngModelChange)="updateSearchQuery($event)"
+      >
+    </div>
 
     @if (loading()) {
       <p class="empty">Loading rooms...</p>
     } @else if (!hasRooms()) {
-      <p class="empty">No rooms yet. Create one above to get a shareable join link.</p>
+      <p class="empty">{{ searchQuery() ? 'No rooms match your search.' : 'No rooms yet. Create one above to get a shareable join link.' }}</p>
     } @else {
       <div class="bulk-bar" [class.active]="selectedCount() > 0">
         <label class="bulk-select-all">

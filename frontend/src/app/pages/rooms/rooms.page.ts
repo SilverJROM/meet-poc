@@ -34,6 +34,7 @@ export class RoomsPage implements OnDestroy {
   readonly error = signal<string | null>(null);
   readonly copyStatus = signal<string | null>(null);
   readonly newTitle = signal('');
+  readonly searchQuery = signal('');
   readonly origin = window.location.origin;
   readonly hasRooms = computed(() => this.rooms().length > 0);
   readonly selectedIds = signal<ReadonlySet<string>>(new Set());
@@ -50,6 +51,7 @@ export class RoomsPage implements OnDestroy {
     this.querySub = this.route.queryParamMap.subscribe((params) => {
       this.page.set(readPositiveInt(params.get('page'), 1));
       this.pageSize.set(Math.min(readPositiveInt(params.get('pageSize'), DEFAULT_PAGE_SIZE), 100));
+      this.searchQuery.set((params.get('q') || '').trim());
       void this.refreshRooms();
     });
   }
@@ -80,7 +82,7 @@ export class RoomsPage implements OnDestroy {
     this.loading.set(true);
     this.error.set(null);
     try {
-      const result = await this.roomsService.list({ page: this.page(), pageSize: this.pageSize() });
+      const result = await this.roomsService.list({ page: this.page(), pageSize: this.pageSize(), q: this.searchQuery() });
       this.rooms.set(result.rooms);
       this.total.set(result.total);
     } catch {
@@ -88,6 +90,16 @@ export class RoomsPage implements OnDestroy {
     } finally {
       this.loading.set(false);
     }
+  }
+
+  async updateSearchQuery(value: string): Promise<void> {
+    const q = value.trim();
+    this.searchQuery.set(value);
+    await this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { q: q || null, page: 1 },
+      queryParamsHandling: 'merge',
+    });
   }
 
   async createRoom(): Promise<void> {

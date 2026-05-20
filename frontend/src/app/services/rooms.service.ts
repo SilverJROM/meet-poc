@@ -23,13 +23,15 @@ export type PaginatedRooms = {
 export class RoomsService {
   private readonly http = inject(HttpClient);
 
-  async list(options: { page: number; pageSize: number }): Promise<PaginatedRooms> {
+  async list(options: { page: number; pageSize: number; q?: string }): Promise<PaginatedRooms> {
+    const params: Record<string, string> = {
+      page: String(options.page),
+      pageSize: String(options.pageSize),
+    };
+    if (options.q?.trim()) params['q'] = options.q.trim();
     const res = await firstValueFrom(
       this.http.get<PaginatedRooms>('/api/rooms', {
-        params: {
-          page: String(options.page),
-          pageSize: String(options.pageSize),
-        },
+        params,
       }),
     );
     return res;

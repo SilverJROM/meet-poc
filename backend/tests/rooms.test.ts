@@ -81,6 +81,33 @@ describe('rooms API', () => {
     expect(page2.body.rooms).toHaveLength(5);
   });
 
+  it('DR-23 filters owned rooms by title for legacy and paginated lists', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    db.prepare('INSERT INTO users (email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+      'other@silverjrom.app',
+      '00:00',
+      Date.now(),
+      Date.now(),
+    );
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('aaa111aaa111', 'Alpha Planning', 'jrom@silverjrom.app', 1);
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('bbb222bbb222', 'Beta Review', 'jrom@silverjrom.app', 2);
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('ccc333ccc333', 'Quarterly alpha', 'jrom@silverjrom.app', 3);
+    db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('ddd444ddd444', 'Alpha Other Owner', 'other@silverjrom.app', 4);
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    const legacy = await request(app).get('/api/rooms?q=ALPHA').set('Cookie', cookie).expect(200);
+    const page1 = await request(app).get('/api/rooms?page=1&pageSize=1&q=alpha').set('Cookie', cookie).expect(200);
+    const page2 = await request(app).get('/api/rooms?page=2&pageSize=1&q=alpha').set('Cookie', cookie).expect(200);
+
+    expect(legacy.body.rooms.map((room: { title: string }) => room.title)).toEqual(['Quarterly alpha', 'Alpha Planning']);
+    expect(page1.body).toMatchObject({ page: 1, pageSize: 1, total: 2 });
+    expect(page1.body.rooms.map((room: { title: string }) => room.title)).toEqual(['Quarterly alpha']);
+    expect(page2.body).toMatchObject({ page: 2, pageSize: 1, total: 2 });
+    expect(page2.body.rooms.map((room: { title: string }) => room.title)).toEqual(['Alpha Planning']);
+  });
+
   it('bulk-delete cascades meeting_sessions to satisfy FK constraint', async () => {
     const db = createTestDb();
     seedUser(db);

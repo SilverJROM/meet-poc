@@ -24,3 +24,4 @@ Codex appends one line per STATUS change as the final action of each reply:
 [projcore callback] diage2 DONE committed f0f7416; DR-16 implemented, backend 113/1-skip, DIAGE2 2/2, clean Run-1+diag gate 91/91, pm2 clean env verified
 [projcore callback] diagg PROPOSED plan ready; DR-17 true-orientation video surfaces plus DR-20 five-second active-speaker order settle scoped
 [projcore callback] diagg DONE committed 24162c4; DR-17/20 implemented, backend 113/1-skip, DIAGG+FIXC3 4/4, clean Run-1+diag gate 93/93, pm2 clean env verified
+[projcore callback] diagh PROPOSED plan ready; server-side room-name search via GET /api/rooms?q= scoped with pagination, slugs, row-click, and access controls preserved

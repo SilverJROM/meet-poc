@@ -26,6 +26,11 @@ function parsePagination(query: Record<string, unknown>): { page: number; pageSi
   return { page, pageSize };
 }
 
+function parseSearchQuery(value: unknown): string {
+  const raw = Array.isArray(value) ? value[0] : value;
+  return String(raw || '').trim().slice(0, 100);
+}
+
 function parsePositiveInt(value: unknown, fallback: number): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed >= 1 ? parsed : fallback;
@@ -43,12 +48,13 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
 
   router.get('/rooms', auth, (req, res) => {
     const authed = req as AuthenticatedRequest;
+    const q = parseSearchQuery(req.query.q);
     if (hasPaginationQuery(req.query)) {
       const { page, pageSize } = parsePagination(req.query);
-      const result = listOwnedRoomsPage(authed.user.email, page, pageSize, database);
+      const result = listOwnedRoomsPage(authed.user.email, page, pageSize, database, q);
       return res.json({ rooms: result.rooms, page, pageSize, total: result.total });
     }
-    return res.json({ rooms: listOwnedRooms(authed.user.email, database) });
+    return res.json({ rooms: listOwnedRooms(authed.user.email, database, q) });
   });
 
   router.delete('/rooms/:id', auth, (req, res) => {
