@@ -76,6 +76,41 @@
         }
       </div>
     </section>
+
+    <section class="analysis-panel" aria-label="Transcript analysis">
+      <div class="viewer-head">
+        <div>
+          <h3>Analysis</h3>
+          <span>{{ questions().length }} library questions</span>
+        </div>
+      </div>
+      <div class="analysis-list">
+        @for (question of questions(); track question.id) {
+          <div class="analysis-row">
+            <div class="analysis-main">
+              <strong>{{ question.name }}</strong>
+              <span>{{ question.autoRun ? 'Auto-run' : 'Manual' }} · {{ question.providerOverride || 'default provider' }}</span>
+              @if (analysisByQuestionId().get(question.id); as analysis) {
+                <p>{{ analysis.text }}</p>
+                <small>{{ analysis.provider }} · {{ analysis.model }} · {{ analysis.ranAtIso | date: 'short' }}</small>
+              } @else {
+                <p class="muted-line">No saved analysis yet.</p>
+              }
+            </div>
+            <button type="button" class="secondary-btn" (click)="runAnalysis(question)" [disabled]="busyQuestionId() === question.id">
+              @if (busyQuestionId() === question.id) {
+                <span class="spinner"></span>
+              } @else {
+                <ion-icon name="sparkles-outline"></ion-icon>
+              }
+              Run
+            </button>
+          </div>
+        } @empty {
+          <p class="empty">No questions configured.</p>
+        }
+      </div>
+    </section>
   }
 
   <div class="recording-status" role="status">{{ status() || '' }}</div>

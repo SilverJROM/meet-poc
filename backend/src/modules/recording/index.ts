@@ -6,6 +6,7 @@ import type Database from 'better-sqlite3';
 import express from 'express';
 import { getDb, getRepoRoot } from '../../db.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
+import { runAutoAnalysesForRecording } from '../questions/index.js';
 import { getRoom, isOwnerOf } from '../rooms/store.js';
 import { getOpenSessionFor } from '../sessions/store.js';
 
@@ -69,7 +70,7 @@ export function recordingRouter(database: Database.Database = getDb()): express.
       }
       console.log(`[rec] saved ${filename} (${(body.length / 1024).toFixed(1)} KB)`);
       res.json({ ok: true, file: filename, bytes: body.length } satisfies UploadResponse);
-      scheduleTranscription(filename);
+      scheduleTranscription(filename, database);
     });
   });
 
@@ -167,7 +168,7 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     const filename = String(req.params.filename || '');
     const ownership = ownedRecordingPath(filename, authReq.user.email, database);
     if (ownership.status !== 200) return res.status(ownership.status).json({ error: ownership.error });
-    spawnTranscription(filename, { force: req.body?.force === true });
+    spawnTranscription(filename, { force: req.body?.force === true }, database);
     return res.json({ ok: true, status: 'started' });
   });
 
@@ -261,6 +262,20 @@ function deleteRecordingSidecars(filename: string): void {
       if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     }
   }
+  deleteAnalysisSidecars(filename);
+}
+
+function deleteAnalysisSidecars(filename: string): void {
+  const dir = ensureRecordingsDir();
+  const prefix = `${filename}.analysis.`;
+  for (const entry of fs.readdirSync(dir)) {
+    if (!entry.startsWith(prefix) || !entry.endsWith('.json')) continue;
+    try {
+      fs.unlinkSync(path.join(dir, entry));
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
 }
 
 function formatTranscriptText(transcript: { lines?: unknown }): string {
@@ -333,7 +348,7 @@ function ownedRecordingPath(
   return { status: 200, filepath };
 }
 
-function spawnTranscription(filename: string, options: { force: boolean }): void {
+function spawnTranscription(filename: string, options: { force: boolean }, database: Database.Database = getDb()): void {
   if (process.env.MEET_TRANSCRIBE_DISABLED === '1') return;
   const filepath = safeRecordingPath(filename);
   const lockPath = transcriptLockPathFor(filename);
@@ -363,14 +378,20 @@ function spawnTranscription(filename: string, options: { force: boolean }): void
   });
   child.on('close', (code) => {
     cleanupTranscribeLock(lockPath);
-    if (code === 0) console.log(`[transcribe] finished ${filename}`);
-    else console.error(`[transcribe] exited ${code} for ${filename}`);
+    if (code === 0) {
+      console.log(`[transcribe] finished ${filename}`);
+      if (process.env.NODE_ENV !== 'test' || process.env.MEET_LLM_ANALYZE_FAKE === '1') {
+        void runAutoAnalysesForRecording(filename, database).catch((err) => console.error(`[analysis] auto queue failed ${filename}`, err));
+      }
+    } else {
+      console.error(`[transcribe] exited ${code} for ${filename}`);
+    }
   });
 }
 
-function scheduleTranscription(filename: string): void {
+function scheduleTranscription(filename: string, database: Database.Database): void {
   const delayMs = Number(process.env.MEET_TRANSCRIBE_UPLOAD_DELAY_MS || 1500);
-  windowlessSetTimeout(() => spawnTranscription(filename, { force: false }), Number.isFinite(delayMs) ? Math.max(0, delayMs) : 1500);
+  windowlessSetTimeout(() => spawnTranscription(filename, { force: false }, database), Number.isFinite(delayMs) ? Math.max(0, delayMs) : 1500);
 }
 
 function windowlessSetTimeout(callback: () => void, delayMs: number): void {

@@ -9,10 +9,11 @@ import { roomsRouter } from './modules/rooms/index.js';
 import { sessionsRouter } from './modules/sessions/index.js';
 import { attachSignaling } from './modules/signaling/index.js';
 import { LlmService, llmRouter, logBootAvailability } from './modules/llm/index.js';
+import { questionsRouter } from './modules/questions/index.js';
 import { migrateFromJson } from '../scripts/migrate-from-json.js';
 
 interface CreateAppOptions {
-  llmService?: Pick<LlmService, 'availability'>;
+  llmService?: Pick<LlmService, 'availability'> & Partial<Pick<LlmService, 'get'>>;
 }
 
 export function createApp(database = getDb(), options: CreateAppOptions = {}): express.Express {
@@ -23,6 +24,11 @@ export function createApp(database = getDb(), options: CreateAppOptions = {}): e
   app.use('/api', roomsRouter(database));
   app.use('/api', sessionsRouter(database));
   app.use('/api', llmRouter(database, options.llmService));
+  const analysisService =
+    options.llmService && typeof options.llmService.get === 'function'
+      ? (options.llmService as Pick<LlmService, 'get'>)
+      : undefined;
+  app.use('/api', questionsRouter(database, analysisService));
   app.use('/', recordingRouter(database));
   app.get('/health', (_req, res) => res.json({ ok: true }));
   return app;

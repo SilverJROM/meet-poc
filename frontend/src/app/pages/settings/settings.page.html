@@ -1,0 +1,118 @@
+<section class="settings-page">
+  <div class="section-head">
+    <h2>Settings</h2>
+  </div>
+
+  @if (error()) {
+    <p class="error-text">{{ error() }}</p>
+  }
+
+  @if (loading()) {
+    <p class="empty">Loading settings...</p>
+  } @else {
+    <section class="panel-section" aria-label="LLM provider default">
+      <div class="section-head compact">
+        <div>
+          <h3>LLM Provider Default</h3>
+          <p>Ollama uses {{ defaultOllamaModel() }}</p>
+        </div>
+      </div>
+      <div class="provider-list">
+        @for (provider of providers; track provider.id) {
+          <button type="button" class="provider-row" [class.active]="defaultProvider() === provider.id" [disabled]="saving()" (click)="setDefaultProvider(provider.id)">
+            <ion-icon [name]="defaultProvider() === provider.id ? 'star' : 'star-outline'"></ion-icon>
+            <span>
+              <strong>{{ provider.label }}</strong>
+              <small>{{ provider.detail }}</small>
+            </span>
+          </button>
+        }
+      </div>
+    </section>
+
+    <section class="panel-section" aria-label="Question library">
+      <div class="section-head compact">
+        <div>
+          <h3>Question Library</h3>
+          <p>{{ questions().length }} saved questions</p>
+        </div>
+      </div>
+
+      <form class="question-form" (ngSubmit)="saveQuestion()">
+        <div class="field">
+          <label for="question-name">Name</label>
+          <input id="question-name" name="name" [ngModel]="form().name" (ngModelChange)="updateForm('name', $event)" required>
+        </div>
+        <div class="field wide">
+          <label for="question-prompt">Prompt</label>
+          <textarea id="question-prompt" name="prompt" [ngModel]="form().prompt" (ngModelChange)="updateForm('prompt', $event)" rows="4" required></textarea>
+        </div>
+        <label class="toggle-row">
+          <input type="checkbox" name="autoRun" [ngModel]="form().autoRun" (ngModelChange)="updateForm('autoRun', $event)">
+          Auto-run on transcribe
+        </label>
+        <div class="field">
+          <label for="provider-override">Provider override</label>
+          <select id="provider-override" name="providerOverride" [ngModel]="form().providerOverride" (ngModelChange)="updateForm('providerOverride', $event || null)">
+            <option [ngValue]="null">Default provider</option>
+            @for (provider of providers; track provider.id) {
+              <option [ngValue]="provider.id">{{ provider.label }}</option>
+            }
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="submit" class="primary-btn" [disabled]="saving() || !form().name.trim() || !form().prompt.trim()">
+            <ion-icon name="save-outline"></ion-icon>
+            {{ editing() ? 'Update' : 'Create' }}
+          </button>
+          @if (editing()) {
+            <button type="button" class="secondary-btn" (click)="resetForm()" [disabled]="saving()">
+              <ion-icon name="close-outline"></ion-icon>
+              Cancel
+            </button>
+          }
+        </div>
+      </form>
+
+      <div class="question-table" role="table">
+        <div class="question-row head" role="row">
+          <span>Name</span>
+          <span>Prompt</span>
+          <span>Auto-run</span>
+          <span>Provider</span>
+          <span>Actions</span>
+        </div>
+        @for (question of questions(); track question.id) {
+          <div class="question-row" role="row">
+            <strong>{{ question.name }}</strong>
+            <span class="truncate">{{ question.prompt }}</span>
+            <span>{{ question.autoRun ? 'On' : 'Off' }}</span>
+            <span>{{ providerLabel(question.providerOverride) }}</span>
+            <span class="row-actions">
+              <button type="button" class="icon-btn" [class.starred]="question.isDefault" (click)="starQuestion(question)" [disabled]="saving()" aria-label="Set default question">
+                <ion-icon [name]="question.isDefault ? 'star' : 'star-outline'"></ion-icon>
+              </button>
+              <button type="button" class="icon-btn" (click)="edit(question)" [disabled]="saving()" aria-label="Edit question">
+                <ion-icon name="create-outline"></ion-icon>
+              </button>
+              <button type="button" class="icon-btn danger" (click)="deleteQuestion(question)" [disabled]="saving()" aria-label="Delete question">
+                <ion-icon name="trash-outline"></ion-icon>
+              </button>
+            </span>
+          </div>
+        }
+      </div>
+    </section>
+
+    <section class="panel-section" aria-label="Transcriber model">
+      <div class="section-head compact">
+        <div>
+          <h3>Transcriber Model</h3>
+          <p>Local Whisper transcription is managed by the backend runtime.</p>
+        </div>
+      </div>
+    </section>
+  }
+
+  <div class="settings-status" role="status">{{ status() || '' }}</div>
+</section>

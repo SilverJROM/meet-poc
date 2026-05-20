@@ -148,6 +148,13 @@ h3 {
   background: #ffffff;
 }
 
+.analysis-panel {
+  margin-top: 16px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #ffffff;
+}
+
 .viewer-head {
   display: flex;
   justify-content: space-between;
@@ -160,6 +167,43 @@ h3 {
   display: grid;
   gap: 9px;
   padding: 14px;
+}
+
+.analysis-list {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+}
+
+.analysis-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--page-bg);
+  padding: 12px;
+}
+
+.analysis-main {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.analysis-main span,
+.analysis-main small,
+.muted-line {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.analysis-main p {
+  color: #111827;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 
 .transcript-line {
@@ -210,6 +254,10 @@ h3 {
 
   .transcript-line {
     grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .analysis-row {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .transcript-line .text {

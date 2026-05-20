@@ -1,7 +1,8 @@
 import { DatePipe } from '@angular/common';
 import { Component, CUSTOM_ELEMENTS_SCHEMA, OnDestroy, computed, inject, signal } from '@angular/core';
 import { addIcons } from 'ionicons';
-import { downloadOutline, eyeOutline, playCircleOutline, refreshOutline, trashOutline } from 'ionicons/icons';
+import { downloadOutline, eyeOutline, playCircleOutline, refreshOutline, sparklesOutline, trashOutline } from 'ionicons/icons';
+import { Analysis, Question, QuestionsService } from '../../services/questions.service';
 import { Recording, RecordingsService, Transcript } from '../../services/recordings.service';
 
 @Component({
@@ -14,20 +15,30 @@ import { Recording, RecordingsService, Transcript } from '../../services/recordi
 })
 export class TranscriptsPage implements OnDestroy {
   private readonly recordingsService = inject(RecordingsService);
+  private readonly questionsService = inject(QuestionsService);
   private pollTimer: ReturnType<typeof window.setInterval> | null = null;
 
   readonly recordings = signal<Recording[]>([]);
+  readonly questions = signal<Question[]>([]);
+  readonly analyses = signal<Analysis[]>([]);
   readonly selectedFilename = signal<string | null>(null);
   readonly selectedTranscript = signal<Transcript | null>(null);
   readonly loading = signal(true);
   readonly busyFilename = signal<string | null>(null);
+  readonly busyQuestionId = signal<string | null>(null);
   readonly error = signal<string | null>(null);
   readonly status = signal<string | null>(null);
   readonly hasRows = computed(() => this.recordings().length > 0);
+  readonly analysisByQuestionId = computed(() => {
+    const map = new Map<string, Analysis>();
+    for (const analysis of this.analyses()) map.set(analysis.questionId, analysis);
+    return map;
+  });
 
   constructor() {
-    addIcons({ downloadOutline, eyeOutline, playCircleOutline, refreshOutline, trashOutline });
+    addIcons({ downloadOutline, eyeOutline, playCircleOutline, refreshOutline, sparklesOutline, trashOutline });
     void this.refreshRecordings();
+    void this.loadQuestions();
   }
 
   ngOnDestroy(): void {
@@ -58,6 +69,7 @@ export class TranscriptsPage implements OnDestroy {
       const transcript = await this.recordingsService.getTranscript(recording.filename);
       this.selectedFilename.set(recording.filename);
       this.selectedTranscript.set(transcript);
+      await this.refreshAnalyses(recording.filename);
     } catch {
       this.error.set('Transcript could not be opened');
     } finally {
@@ -104,6 +116,7 @@ export class TranscriptsPage implements OnDestroy {
       if (this.selectedFilename() === recording.filename) {
         this.selectedFilename.set(null);
         this.selectedTranscript.set(null);
+        this.analyses.set([]);
       }
       this.status.set('Transcript deleted');
       await this.refreshRecordings();
@@ -135,10 +148,47 @@ export class TranscriptsPage implements OnDestroy {
     return `hsl(${hash} 64% 42%)`;
   }
 
+  async runAnalysis(question: Question): Promise<void> {
+    const filename = this.selectedFilename();
+    if (!filename) return;
+    this.busyQuestionId.set(question.id);
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      const analysis = await this.questionsService.analyze(filename, question.id);
+      this.analyses.update((current) => [...current.filter((item) => item.questionId !== question.id), analysis]);
+      this.status.set('Analysis saved');
+    } catch {
+      this.error.set('Analysis could not be completed');
+    } finally {
+      this.busyQuestionId.set(null);
+    }
+  }
+
+  private async loadQuestions(): Promise<void> {
+    try {
+      this.questions.set(await this.questionsService.list());
+    } catch {
+      this.questions.set([]);
+    }
+  }
+
+  private async refreshAnalyses(filename: string): Promise<void> {
+    try {
+      this.analyses.set(await this.questionsService.listAnalyses(filename));
+    } catch {
+      this.analyses.set([]);
+    }
+  }
+
   private updatePolling(): void {
     const hasPending = this.recordings().some((recording) => recording.transcribeStatus === 'pending');
     if (hasPending && !this.pollTimer) {
-      this.pollTimer = window.setInterval(() => void this.refreshRecordings(), 5000);
+      this.pollTimer = window.setInterval(() => {
+        void this.refreshRecordings();
+        const filename = this.selectedFilename();
+        if (filename) void this.refreshAnalyses(filename);
+      }, 5000);
     } else if (!hasPending) {
       this.stopPolling();
     }
