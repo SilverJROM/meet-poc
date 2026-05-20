@@ -43,6 +43,7 @@ test('FIXC2.2 preview, mic meter, speaker test, and persistence work in lobby', 
   await page.screenshot({ path: `${SCREENSHOT_DIR}/lobby-modal.png`, fullPage: true });
 
   await page.goto(`/join/${room.id}`);
+  await page.getByRole('button', { name: 'Test / configure devices' }).click();
   await expect.poll(() => page.locator('app-device-dialog .mic-select').inputValue(), { timeout: 8000 }).toBe(micValue);
 });
 

@@ -171,73 +171,114 @@
         }
       }
       @if (!hasBlockingLobbyError()) {
-        <app-device-dialog
-          [open]="lobbyDeviceDialogOpen()"
-          mode="lobby"
-          presentation="inline"
-          [permissionIntro]="devicePermissionIntro()"
-          [stream]="localStream()"
-          [audioInputs]="audioInputs()"
-          [videoInputs]="videoInputs()"
-          [audioOutputs]="audioOutputs()"
-          [selectedAudioId]="selectedAudioId()"
-          [selectedVideoId]="selectedVideoId()"
-          [selectedAudioOutputId]="selectedAudioOutputId()"
-          [level]="micLevel()"
-          [canSelectAudioOutput]="canSelectAudioOutput()"
-          [busy]="deviceDialogBusy()"
-          [error]="deviceDialogError()"
-          (continuePermission)="continueDeviceSetup()"
-          (audioDeviceChange)="changeAudioDevice($event)"
-          (videoDeviceChange)="changeVideoDevice($event)"
-          (audioOutputChange)="changeAudioOutputDevice($event)"
-          (testSpeaker)="testSpeaker()"
-          (close)="lobbyDeviceDialogOpen.set(false)"
-        />
-        <app-lobby-preview
-          [stream]="localStream()"
-          [audioInputs]="audioInputs()"
-          [videoInputs]="videoInputs()"
-          [selectedAudioId]="selectedAudioId()"
-          [selectedVideoId]="selectedVideoId()"
-          [videoEnabled]="cameraRequested()"
-          [level]="micLevel()"
-          [audioContextActivated]="media.audioContextActivated()"
-          [facingMode]="currentFacingMode()"
-          (audioDeviceChange)="changeAudioDevice($event)"
-          (videoDeviceChange)="changeVideoDevice($event)"
-          (enableMicPreview)="enableMicPreview()"
-          (flipCamera)="flipLobbyCamera()"
-        />
-        <form class="join-form" (ngSubmit)="join()">
+        <div class="quick-join">
+          <app-lobby-preview
+            [stream]="localStream()"
+            [audioInputs]="audioInputs()"
+            [videoInputs]="videoInputs()"
+            [selectedAudioId]="selectedAudioId()"
+            [selectedVideoId]="selectedVideoId()"
+            [videoEnabled]="cameraRequested()"
+            [compact]="true"
+            [level]="micLevel()"
+            [audioContextActivated]="media.audioContextActivated()"
+            [facingMode]="currentFacingMode()"
+            (audioDeviceChange)="changeAudioDevice($event)"
+            (videoDeviceChange)="changeVideoDevice($event)"
+            (enableMicPreview)="enableMicPreview()"
+            (flipCamera)="flipLobbyCamera()"
+          />
+        </div>
+        <form class="join-form" novalidate (ngSubmit)="join()">
           <div class="field">
             <label for="display-name">Name</label>
             <input
+              #displayNameInput
               id="display-name"
               name="displayName"
               type="text"
               autocomplete="name"
               maxlength="80"
               required
+              [class.invalid]="!!nameError()"
+              [attr.aria-invalid]="!!nameError()"
+              [attr.aria-describedby]="nameError() ? 'display-name-error' : (!displayName().trim() ? 'display-name-hint' : null)"
               [ngModel]="displayName()"
-              (ngModelChange)="displayName.set($event)"
+              (ngModelChange)="updateDisplayName($event)"
               [disabled]="state() === 'connecting'"
             >
+            @if (nameError()) {
+              <p id="display-name-error" class="inline-error" role="alert">{{ nameError() }}</p>
+            } @else if (!displayName().trim()) {
+              <p id="display-name-hint" class="field-hint">Enter your name to join.</p>
+            }
           </div>
-          <label class="check-row">
-            <input
-              name="cameraRequested"
-              type="checkbox"
-              [ngModel]="cameraRequested()"
-              (ngModelChange)="setCameraRequested($event)"
-              [disabled]="state() === 'connecting'"
-            >
-            <span>Start with camera on</span>
-          </label>
-          <button type="submit" class="primary-btn" [disabled]="state() === 'connecting' || hasBlockingLobbyError() || !displayName().trim()">
+          <div class="quick-toggles" aria-label="Join settings">
+            <label class="toggle-row">
+              <input
+                name="microphoneRequested"
+                type="checkbox"
+                [ngModel]="microphoneRequested()"
+                (ngModelChange)="setLobbyMicEnabled($event)"
+                [disabled]="state() === 'connecting'"
+              >
+              <ion-icon [name]="microphoneRequested() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
+              <span>{{ microphoneRequested() ? 'Microphone on' : 'Microphone off' }}</span>
+            </label>
+            <label class="toggle-row">
+              <input
+                name="cameraRequested"
+                type="checkbox"
+                [ngModel]="cameraRequested()"
+                (ngModelChange)="setCameraRequested($event)"
+                [disabled]="state() === 'connecting'"
+              >
+              <ion-icon [name]="cameraRequested() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
+              <span>Start with camera on</span>
+            </label>
+          </div>
+          @if (setupWarning()) {
+            <div class="lobby-warning" role="status">
+              <p>{{ setupWarning() }}</p>
+            </div>
+          }
+          <button
+            type="submit"
+            class="primary-btn"
+            [class.disabled-look]="!displayName().trim()"
+            [disabled]="state() === 'connecting' || hasBlockingLobbyError()"
+          >
             {{ auth.user() ? 'Join' : 'Ask to join' }}
           </button>
         </form>
+        <button type="button" class="configure-toggle" [attr.aria-expanded]="lobbyDeviceDialogOpen()" (click)="toggleLobbyDeviceDialog()">
+          {{ lobbyDeviceDialogOpen() ? 'Hide device test' : 'Test / configure devices' }}
+        </button>
+        @if (lobbyDeviceDialogOpen()) {
+          <app-device-dialog
+            [open]="true"
+            mode="lobby"
+            presentation="inline"
+            [permissionIntro]="devicePermissionIntro()"
+            [stream]="localStream()"
+            [audioInputs]="audioInputs()"
+            [videoInputs]="videoInputs()"
+            [audioOutputs]="audioOutputs()"
+            [selectedAudioId]="selectedAudioId()"
+            [selectedVideoId]="selectedVideoId()"
+            [selectedAudioOutputId]="selectedAudioOutputId()"
+            [level]="micLevel()"
+            [canSelectAudioOutput]="canSelectAudioOutput()"
+            [busy]="deviceDialogBusy()"
+            [error]="deviceDialogError()"
+            (continuePermission)="continueDeviceSetup()"
+            (audioDeviceChange)="changeAudioDevice($event)"
+            (videoDeviceChange)="changeVideoDevice($event)"
+            (audioOutputChange)="changeAudioOutputDevice($event)"
+            (testSpeaker)="testSpeaker()"
+            (close)="lobbyDeviceDialogOpen.set(false)"
+          />
+        }
         <p class="error-text">{{ error() || '' }}</p>
       } @else {
         <div class="join-form disabled-lobby">

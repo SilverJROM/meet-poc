@@ -21,6 +21,7 @@ export class LobbyPreviewComponent {
   readonly selectedAudioId = input<string>('');
   readonly selectedVideoId = input<string>('');
   readonly videoEnabled = input(false);
+  readonly compact = input(false);
   readonly level = input<Signal<number>>(signal(0).asReadonly());
   readonly audioContextActivated = input(false);
   readonly facingMode = input<'user' | 'environment'>('user');

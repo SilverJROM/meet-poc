@@ -33,6 +33,7 @@ test('S3.1 mobile lobby shows camera switch and sends facingMode constraint on f
 test('S3.3 mobile lobby device selectors stack in one column', async ({ page, request }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoOwnedMb4Lobby(page, request, 'selectors-mobile');
+  await page.getByRole('button', { name: 'Test / configure devices' }).click();
 
   const mic = page.locator('.mic-select');
   const camera = page.locator('.camera-select');
@@ -46,19 +47,15 @@ test('S3.3 mobile lobby device selectors stack in one column', async ({ page, re
   await page.screenshot({ path: `${MB4_SCREENSHOT_DIR}/mobile-selectors-single-column.png`, fullPage: true });
 });
 
-test('S3.4 mobile lobby gates AudioContext mic preview behind a user gesture', async ({ page, request }) => {
+test('S3.4 mobile quick-join keeps mic preview hidden until device configuration is expanded', async ({ page, request }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await gotoOwnedMb4Lobby(page, request, 'audiocontext-gate');
+  await expect(page.getByRole('button', { name: 'Tap to enable mic preview' })).toHaveCount(0);
+  await page.getByRole('button', { name: 'Test / configure devices' }).click();
 
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.audioContextActivated)).toBe(false);
-  await expect(page.getByRole('button', { name: 'Tap to enable mic preview' })).toBeVisible();
-  await expect(page.locator('app-mic-meter .bar.is-active')).toHaveCount(0);
+  await expect(page.locator('app-device-dialog .vu-panel')).toBeVisible();
   await page.screenshot({ path: `${MB4_SCREENSHOT_DIR}/mobile-lobby-with-pill.png`, fullPage: true });
-
-  await page.getByRole('button', { name: 'Tap to enable mic preview' }).click();
-  await expect.poll(() => page.evaluate(() => window.__meetDebug?.audioContextActivated)).toBe(true);
-  await expect.poll(() => page.locator('app-mic-meter .bar.is-active').count(), { timeout: 2500 }).toBeGreaterThan(0);
-  await page.screenshot({ path: `${MB4_SCREENSHOT_DIR}/mobile-lobby-after-tap.png`, fullPage: true });
 });
 
 test('S3.1 desktop lobby does not render the mobile camera switch', async ({ page, request }) => {

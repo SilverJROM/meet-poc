@@ -66,8 +66,9 @@ test('M1.3 mobile lobby and call controls meet the 48px narrowed touch target co
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
 
   await expectTouchTarget(page.locator('#display-name'), 'lobby display name');
-  await expectTouchTarget(page.locator('.check-row'), 'camera checkbox row');
+  await expectTouchTarget(page.locator('.toggle-row').filter({ hasText: 'Start with camera on' }), 'camera checkbox row');
   await expectTouchTarget(page.getByRole('button', { name: 'Join' }), 'lobby join button');
+  await page.getByRole('button', { name: 'Test / configure devices' }).click();
   await expectTouchTarget(page.locator('.mic-select'), 'microphone selector');
   await expectTouchTarget(page.locator('.camera-select'), 'camera selector');
   await page.screenshot({ path: `${MB1_SCREENSHOT_DIR}/mobile-lobby-390x844.png`, fullPage: true });

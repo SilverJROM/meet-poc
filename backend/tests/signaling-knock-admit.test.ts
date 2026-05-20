@@ -67,4 +67,28 @@ describe('signaling knock, admit, reject', () => {
     closeWs(owner);
     await closeServer(server);
   });
+
+  it('broadcasts an authoritative pending-list when a guest knocks after the owner is admitted', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner' }));
+    await nextMessage(owner, (msg) => msg.type === 'admitted');
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Late Guest' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    const pendingListPromise = nextMessage(owner, (msg) => msg.type === 'pending-list');
+    await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === knocking.clientId);
+    const pendingList = await pendingListPromise;
+
+    expect(pendingList).toEqual({ type: 'pending-list', knockers: [{ id: knocking.clientId, name: 'Late Guest' }] });
+
+    closeWs(guest);
+    closeWs(owner);
+    await closeServer(server);
+  });
 });

@@ -1,4 +1,4 @@
-<section class="lobby-preview" aria-label="Lobby device preview">
+<section class="lobby-preview" [class.compact]="compact()" aria-label="Lobby device preview">
   <div class="preview-tile" [class.camera-off]="!videoEnabled()">
     @if (videoEnabled() && stream()?.getVideoTracks()?.length) {
       <video #video autoplay muted playsinline></video>
@@ -18,32 +18,34 @@
     }
   </div>
 
-  <div class="meter-row">
-    <span>Mic level</span>
-    @if (audioContextActivated()) {
-      <app-mic-meter [level]="level()" />
-    } @else {
-      <button type="button" class="meter-activate" (click)="enableMicPreview.emit()">Tap to enable mic preview</button>
-    }
-  </div>
+  @if (!compact()) {
+    <div class="meter-row">
+      <span>Mic level</span>
+      @if (audioContextActivated()) {
+        <app-mic-meter [level]="level()" />
+      } @else {
+        <button type="button" class="meter-activate" (click)="enableMicPreview.emit()">Tap to enable mic preview</button>
+      }
+    </div>
 
-  <div class="device-grid">
-    <label>
-      <span>Microphone</span>
-      <select class="device-select mic-select" [value]="selectedAudioId()" (change)="onAudioChange($event)">
-        @for (device of audioInputs(); track device.deviceId) {
-          <option [value]="device.deviceId">{{ device.label || 'Microphone' }}</option>
-        }
-      </select>
-    </label>
+    <div class="device-grid">
+      <label>
+        <span>Microphone</span>
+        <select class="device-select mic-select" [value]="selectedAudioId()" (change)="onAudioChange($event)">
+          @for (device of audioInputs(); track device.deviceId) {
+            <option [value]="device.deviceId">{{ device.label || 'Microphone' }}</option>
+          }
+        </select>
+      </label>
 
-    <label>
-      <span>Camera</span>
-      <select class="device-select camera-select" [value]="selectedVideoId()" (change)="onVideoChange($event)">
-        @for (device of videoInputs(); track device.deviceId) {
-          <option [value]="device.deviceId">{{ device.label || 'Camera' }}</option>
-        }
-      </select>
-    </label>
-  </div>
+      <label>
+        <span>Camera</span>
+        <select class="device-select camera-select" [value]="selectedVideoId()" (change)="onVideoChange($event)">
+          @for (device of videoInputs(); track device.deviceId) {
+            <option [value]="device.deviceId">{{ device.label || 'Camera' }}</option>
+          }
+        </select>
+      </label>
+    </div>
+  }
 </section>

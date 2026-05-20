@@ -57,6 +57,7 @@ test.describe('Phase 2 two-axis matrix (R8.3) — live URL', () => {
     const roomId = await findTestRoomId(page);
     await page.goto(`${LIVE_BASE}/room/${roomId}`);
     await expect(page.locator('app-lobby-preview')).toBeVisible();
+    await page.getByRole('button', { name: 'Test / configure devices' }).click();
 
     // R3.4: mobile lobby must show the AudioContext gesture pill BEFORE any user gesture
     const pill = page.getByRole('button', { name: 'Tap to enable mic preview' });
@@ -72,6 +73,7 @@ test.describe('Phase 2 two-axis matrix (R8.3) — live URL', () => {
     await loginLive(page);
     const roomId = await findTestRoomId(page);
     await page.goto(`${LIVE_BASE}/room/${roomId}`);
+    await page.getByRole('button', { name: 'Test / configure devices' }).click();
 
     const mic = page.locator('.mic-select');
     const camera = page.locator('.camera-select');
@@ -147,6 +149,7 @@ test.describe('Phase 2 two-axis matrix (R8.3) — live URL', () => {
     await loginLive(page);
     const roomId = await findTestRoomId(page);
     await page.goto(`${LIVE_BASE}/room/${roomId}`);
+    await page.getByRole('button', { name: 'Test / configure devices' }).click();
 
     const mic = page.locator('.mic-select');
     const camera = page.locator('.camera-select');

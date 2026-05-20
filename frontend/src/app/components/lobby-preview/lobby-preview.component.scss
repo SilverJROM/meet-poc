@@ -5,6 +5,10 @@
   gap: 14px;
 }
 
+.lobby-preview.compact {
+  gap: 0;
+}
+
 .preview-tile {
   position: relative;
   aspect-ratio: 16 / 10;
@@ -12,6 +16,11 @@
   border: 1px solid var(--line-soft);
   border-radius: 8px;
   background: #07090d;
+}
+
+.compact .preview-tile {
+  aspect-ratio: 16 / 9;
+  min-height: 168px;
 }
 
 .preview-tile video {
@@ -100,6 +109,10 @@
 }
 
 @include bp.mobile {
+  .compact .preview-tile {
+    min-height: 150px;
+  }
+
   .device-grid {
     grid-template-columns: 1fr;
   }
@@ -127,6 +140,12 @@
   .preview-tile {
     aspect-ratio: 16 / 6;
     max-height: 108px;
+  }
+
+  .compact .preview-tile {
+    aspect-ratio: 16 / 8;
+    min-height: 116px;
+    max-height: none;
   }
 
   .meter-row {

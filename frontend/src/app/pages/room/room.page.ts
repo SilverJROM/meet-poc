@@ -1,6 +1,8 @@
-import { Component, OnDestroy, Signal, computed, effect, inject, signal } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, OnDestroy, Signal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { addIcons } from 'ionicons';
+import { micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
 import { ControlsBarComponent } from '../../components/controls-bar/controls-bar.component';
 import { DeviceDialogComponent } from '../../components/device-dialog/device-dialog.component';
 import { LeaveDialogComponent } from '../../components/leave-dialog/leave-dialog.component';
@@ -13,6 +15,7 @@ import { TileComponent } from '../../components/tile/tile.component';
 import { ActiveSpeakerService } from '../../services/active-speaker.service';
 import { AuthService } from '../../services/auth.service';
 import { MediaError, MediaService } from '../../services/media.service';
+import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
 import { RoomsService } from '../../services/rooms.service';
@@ -31,6 +34,7 @@ type LobbyError =
 @Component({
   selector: 'app-room',
   standalone: true,
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
   imports: [
     FormsModule,
     RouterLink,
@@ -53,6 +57,7 @@ export class RoomPage implements OnDestroy {
   readonly auth = inject(AuthService);
   private readonly rooms = inject(RoomsService);
   private readonly ws = inject(WsService);
+  private readonly iceConfig = inject(IceConfigService);
   readonly media = inject(MediaService);
   readonly recorder = inject(RecorderService);
   readonly webrtc = inject(WebrtcService);
@@ -64,6 +69,8 @@ export class RoomPage implements OnDestroy {
   readonly state = signal<RoomState>('checking');
   readonly roomTitle = signal('Checking room...');
   readonly displayName = signal('');
+  readonly nameError = signal<string | null>(null);
+  readonly microphoneRequested = signal(true);
   readonly cameraRequested = signal(false);
   readonly localStream = this.media.localStream;
   readonly audioInputs = signal<MediaDeviceInfo[]>([]);
@@ -88,6 +95,7 @@ export class RoomPage implements OnDestroy {
   readonly error = signal<string | null>(null);
   readonly status = signal('');
   readonly deviceFailureNotice = signal<string | null>(null);
+  readonly setupWarning = signal<string | null>(null);
   readonly myId = signal<string | null>(null);
   readonly hostClientId = signal<string | null>(null);
   readonly isOwner = signal(false);
@@ -130,6 +138,9 @@ export class RoomPage implements OnDestroy {
   private speakerPromotionTimer: ReturnType<typeof setTimeout> | null = null;
   private speakerPromotionCandidate: string | null = null;
   private readonly pendingSignals = new Map<string, BufferedSignal[]>();
+  private pendingListInitialized = false;
+  private lastDoorbellAt = 0;
+  private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
   readonly formattedElapsed = computed(() => {
     this.clockTick();
     const start = this.callStartMs();
@@ -142,6 +153,7 @@ export class RoomPage implements OnDestroy {
   });
 
   constructor() {
+    addIcons({ micOffOutline, micOutline, videocamOffOutline, videocamOutline });
     this.installPageLifecycleCleanup();
     void this.bootstrap();
     effect(() => {
@@ -169,6 +181,8 @@ export class RoomPage implements OnDestroy {
         lastVideoConstraints: this.media.lastVideoConstraints(),
         audioContextActivated: this.media.audioContextActivated(),
         speakerTestCount: window.__meetDebug?.speakerTestCount ?? 0,
+        doorbellCount: window.__meetDebug?.doorbellCount ?? 0,
+        waitingKnockers: this.knockers().map((knocker) => ({ ...knocker })),
         localAudioTrackId: this.media.localStream()?.getAudioTracks()[0]?.id,
         localVideoTrackId: this.media.localStream()?.getVideoTracks()[0]?.id,
         currentFacingMode: this.currentFacingMode(),
@@ -248,8 +262,14 @@ export class RoomPage implements OnDestroy {
 
   async join(): Promise<void> {
     const name = this.displayName().trim();
-    if (!name || this.state() === 'connecting') return;
+    if (this.state() === 'connecting') return;
+    if (!name) {
+      this.nameError.set('Enter your name to join');
+      this.displayNameInput()?.nativeElement.focus();
+      return;
+    }
     this.activeSpeaker.unlock();
+    this.nameError.set(null);
     this.error.set(null);
     this.status.set('Connecting...');
     this.state.set('connecting');
@@ -260,6 +280,8 @@ export class RoomPage implements OnDestroy {
       this.state.set('lobby');
       return;
     }
+    this.applyLobbyMicPreference();
+    await this.checkIceConfigForJoin();
     this.ws.connect(
       this.roomId,
       (msg) => void this.handleMessage(msg),
@@ -273,6 +295,11 @@ export class RoomPage implements OnDestroy {
         }
       },
     );
+  }
+
+  updateDisplayName(value: string): void {
+    this.displayName.set(value);
+    if (value.trim()) this.nameError.set(null);
   }
 
   cancelKnock(): void {
@@ -290,6 +317,25 @@ export class RoomPage implements OnDestroy {
 
   async continueDeviceSetup(): Promise<void> {
     await this.startLobbyPreflight();
+  }
+
+  async toggleLobbyDeviceDialog(): Promise<void> {
+    this.lobbyDeviceDialogOpen.update((open) => !open);
+    this.devicePermissionIntro.set(false);
+    if (this.lobbyDeviceDialogOpen()) {
+      this.deviceDialogError.set(null);
+      await this.refreshDevices();
+    }
+  }
+
+  async setLobbyMicEnabled(value: boolean): Promise<void> {
+    this.microphoneRequested.set(value);
+    const stream = this.media.localStream();
+    if (!stream) {
+      await this.startLobbyPreflight();
+      return;
+    }
+    this.applyLobbyMicPreference(stream);
   }
 
   async setCameraRequested(value: boolean): Promise<void> {
@@ -526,11 +572,13 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'pending-list') {
-      this.knockers.set((msg.knockers || []).map((knocker) => ({ id: knocker.id, name: knocker.name })));
+      this.syncKnockers(msg.knockers || []);
       return;
     }
     if (msg.type === 'knock') {
+      const wasKnown = this.knockers().some((knocker) => knocker.id === msg.clientId);
       this.upsertKnocker({ id: msg.clientId, name: msg.name });
+      if (!wasKnown) this.playDoorbellForNewKnock();
       this.status.set(`${msg.name} is asking to join.`);
       return;
     }
@@ -612,8 +660,51 @@ export class RoomPage implements OnDestroy {
     this.knockers.set(next);
   }
 
+  private syncKnockers(knockers: Knocker[]): void {
+    const known = new Set(this.knockers().map((knocker) => knocker.id));
+    const next = knockers.map((knocker) => ({ id: knocker.id, name: knocker.name }));
+    const hasNewKnocker = next.some((knocker) => !known.has(knocker.id));
+    const callAgeMs = this.callStartMs() ? Date.now() - this.callStartMs()! : 0;
+    const initialSnapshot = !this.pendingListInitialized && callAgeMs < 2000;
+    this.knockers.set(next);
+    if (hasNewKnocker && !initialSnapshot) this.playDoorbellForNewKnock();
+    this.pendingListInitialized = true;
+  }
+
   private removeKnocker(clientId: string): void {
     this.knockers.set(this.knockers().filter((item) => item.id !== clientId));
+  }
+
+  private playDoorbellForNewKnock(): void {
+    if (!this.isHost()) return;
+    const now = Date.now();
+    if (now - this.lastDoorbellAt < 1500) return;
+    this.lastDoorbellAt = now;
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (window.__meetDebug) window.__meetDebug.doorbellCount = (window.__meetDebug.doorbellCount ?? 0) + 1;
+    if (!AudioContextCtor) return;
+    try {
+      const context = new AudioContextCtor();
+      const gain = context.createGain();
+      const first = context.createOscillator();
+      const second = context.createOscillator();
+      gain.gain.value = 0.035;
+      first.frequency.value = 660;
+      second.frequency.value = 880;
+      first.connect(gain);
+      second.connect(gain);
+      gain.connect(context.destination);
+      void context.resume();
+      first.start();
+      first.stop(context.currentTime + 0.11);
+      second.start(context.currentTime + 0.13);
+      second.stop(context.currentTime + 0.26);
+      window.setTimeout(() => {
+        void context.close();
+      }, 380);
+    } catch (err) {
+      console.debug('[doorbell] chime failed', err);
+    }
   }
 
   private remoteStreams(): Map<string, MediaStream> {
@@ -638,10 +729,12 @@ export class RoomPage implements OnDestroy {
     this.deviceDialogBusy.set(true);
     this.deviceDialogError.set(null);
     this.permissionError.set(null);
+    this.setupWarning.set(null);
     this.error.set(null);
     try {
       const stream = await this.media.preflight({ audio: true, video: this.cameraRequested(), facingMode: this.mobileFacingMode() });
       this.attachLocalTrackFailureHandlers(stream);
+      this.applyLobbyMicPreference(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
       await this.refreshDevices();
     } catch (err) {
@@ -659,6 +752,7 @@ export class RoomPage implements OnDestroy {
     this.deviceDialogBusy.set(true);
     this.deviceDialogError.set(null);
     this.permissionError.set(null);
+    this.setupWarning.set(null);
     this.error.set(null);
     try {
       const stream = await this.media.reacquire({
@@ -668,6 +762,7 @@ export class RoomPage implements OnDestroy {
         video: this.cameraRequested(),
       });
       this.attachLocalTrackFailureHandlers(stream);
+      this.applyLobbyMicPreference(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
       await this.refreshDevices();
     } catch (err) {
@@ -679,10 +774,11 @@ export class RoomPage implements OnDestroy {
   }
 
   private prepareLobbyDeviceCheck(): void {
-    this.lobbyDeviceDialogOpen.set(true);
-    this.devicePermissionIntro.set(true);
+    const manualSetup = this.route.snapshot.queryParamMap.get('manualDeviceSetup') === '1';
+    this.lobbyDeviceDialogOpen.set(manualSetup);
+    this.devicePermissionIntro.set(manualSetup);
     this.clearPreflightTimer();
-    if (this.route.snapshot.queryParamMap.get('manualDeviceSetup') === '1') return;
+    if (manualSetup) return;
     this.preflightTimer = window.setTimeout(() => {
       if (this.state() === 'lobby' && !this.media.localStream()) void this.startLobbyPreflight();
     }, 650);
@@ -691,6 +787,26 @@ export class RoomPage implements OnDestroy {
   private clearPreflightTimer(): void {
     if (this.preflightTimer) clearTimeout(this.preflightTimer);
     this.preflightTimer = null;
+  }
+
+  private applyLobbyMicPreference(stream = this.media.localStream()): void {
+    const track = stream?.getAudioTracks()[0];
+    if (!track) {
+      this.media.micOn.set(false);
+      return;
+    }
+    track.enabled = this.microphoneRequested();
+    this.media.micOn.set(track.enabled);
+  }
+
+  private async checkIceConfigForJoin(): Promise<void> {
+    await this.iceConfig.getIceServers();
+    const fetchError = this.iceConfig.lastFetchError();
+    this.setupWarning.set(
+      fetchError
+        ? 'Connection relay configuration could not be loaded. The call will use fallback STUN servers; if joining fails, retry or contact support.'
+        : null,
+    );
   }
 
   private async handleLobbyMediaError(err: unknown, videoRequested: boolean): Promise<void> {
@@ -702,6 +818,7 @@ export class RoomPage implements OnDestroy {
         this.permissionError.set({ kind: 'video-denied-but-audio-ok' });
         this.error.set(null);
         this.attachLocalTrackFailureHandlers(stream);
+        this.applyLobbyMicPreference(stream);
         this.micLevel.set(this.media.getMicLevel(stream));
         await this.refreshDevices();
         return;
@@ -747,6 +864,7 @@ export class RoomPage implements OnDestroy {
     this.webrtc.reset();
     this.pendingSignals.clear();
     this.knockers.set([]);
+    this.pendingListInitialized = false;
     this.isOwner.set(false);
     this.myId.set(null);
     this.hostClientId.set(null);
@@ -757,6 +875,8 @@ export class RoomPage implements OnDestroy {
     this.meetingEndedToastOpen.set(false);
     this.deviceFailureNotice.set(null);
     this.actionNotice.set(null);
+    this.setupWarning.set(null);
+    this.nameError.set(null);
     this.hostRecording.set(false);
     this.recordingStartedAt.set(null);
     this.currentFacingMode.set('user');
@@ -1017,6 +1137,8 @@ declare global {
       lastVideoConstraints?: MediaStreamConstraints | null;
       audioContextActivated?: boolean;
       speakerTestCount?: number;
+      doorbellCount?: number;
+      waitingKnockers?: { id: string; name: string }[];
       localAudioTrackId?: string;
       localVideoTrackId?: string;
       currentFacingMode?: 'user' | 'environment';

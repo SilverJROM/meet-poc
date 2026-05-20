@@ -63,6 +63,14 @@ function broadcastToOwners(live: LiveRoom, roomId: string, msg: Record<string, u
   }
 }
 
+function pendingSummaries(live: LiveRoom): { id: string; name: string }[] {
+  return [...live.pending.entries()].map(([id, p]) => ({ id, name: p.name }));
+}
+
+function broadcastPendingListToOwners(live: LiveRoom, roomId: string, database: Database.Database): void {
+  broadcastToOwners(live, roomId, { type: 'pending-list', knockers: pendingSummaries(live) }, database);
+}
+
 function rejectForRoomFull(roomId: string, clientId: string, pending: PeerEntry, live: LiveRoom, database: Database.Database): void {
   live.pending.delete(clientId);
   pending.setState('idle');
@@ -73,6 +81,7 @@ function rejectForRoomFull(roomId: string, clientId: string, pending: PeerEntry,
     // Best effort close mirrors the legacy reject path.
   }
   broadcastToOwners(live, roomId, { type: 'knock-cancelled', clientId }, database);
+  broadcastPendingListToOwners(live, roomId, database);
 }
 
 function ensureLiveSession(roomId: string, hostEmail: string, live: LiveRoom, database: Database.Database): void {
@@ -145,6 +154,7 @@ function admitPeer(roomId: string, clientId: string, database: Database.Database
   live.admitted.set(clientId, pending);
   bumpAdmittedPeak(live, database);
   broadcastToOwners(live, roomId, { type: 'knock-cancelled', clientId }, database);
+  broadcastPendingListToOwners(live, roomId, database);
   console.log(`[room ${roomId}] ADMITTED ${pending.name} (${clientId})  admitted=${live.admitted.size} pending=${live.pending.size}`);
 }
 
@@ -162,6 +172,7 @@ function rejectPeer(roomId: string, clientId: string, database: Database.Databas
     // Best effort close mirrors the legacy implementation.
   }
   broadcastToOwners(live, roomId, { type: 'knock-cancelled', clientId }, database);
+  broadcastPendingListToOwners(live, roomId, database);
   console.log(`[room ${roomId}] REJECTED ${pending.name} (${clientId})`);
 }
 
@@ -236,8 +247,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
             if (id !== clientId) send(peer.ws, { type: 'peer-joined', clientId, name: myName });
           }
           if (live.pending.size > 0) {
-            const pendingList = [...live.pending.entries()].map(([id, p]) => ({ id, name: p.name }));
-            send(ws, { type: 'pending-list', knockers: pendingList });
+            send(ws, { type: 'pending-list', knockers: pendingSummaries(live) });
           }
           console.log(`[room ${roomId}] + OWNER ${myName} (${clientId})  admitted=${live.admitted.size}`);
         } else {
@@ -245,6 +255,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
           state = 'pending';
           send(ws, { type: 'knocking', clientId, roomTitle: room.title });
           broadcastToOwners(live, roomId, { type: 'knock', clientId, name: myName }, database);
+          broadcastPendingListToOwners(live, roomId, database);
           console.log(`[room ${roomId}] KNOCK ${myName} (${clientId})  pending=${live.pending.size}`);
         }
         return;
@@ -376,6 +387,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
         live.pending.delete(clientId);
         try {
           broadcastToOwners(live, currentRoom, { type: 'knock-cancelled', clientId }, database);
+          broadcastPendingListToOwners(live, currentRoom, database);
         } catch (err) {
           console.warn(`[room ${currentRoom}] failed to broadcast knock cancellation`, err);
         }
