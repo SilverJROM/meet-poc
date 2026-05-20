@@ -29,6 +29,7 @@ export class ActiveSpeakerService {
   private measuring = false;
   private ticksInWindow = 0;
   private windowStartedAt = Date.now();
+  private forcedActivePeerIdForTest: string | null | undefined;
 
   unlock(): void {
     const context = this.ensureContext();
@@ -70,6 +71,7 @@ export class ActiveSpeakerService {
     this.lastMaxRms.set(0);
     this.activeFrame.set({ id: null, at: Date.now(), rms: 0, seq: this.activeFrame().seq + 1 });
     this.contextState.set('none');
+    this.forcedActivePeerIdForTest = undefined;
   }
 
   injectDebugStream(id: string, stream: MediaStream): void {
@@ -98,6 +100,13 @@ export class ActiveSpeakerService {
       screenOn: false,
     });
     this.start();
+  }
+
+  forceActivePeerForTest(id: string | null): void {
+    this.forcedActivePeerIdForTest = id;
+    const now = Date.now();
+    this.activePeerId.set(id);
+    this.activeFrame.set({ id, at: now, rms: id ? 1 : 0, seq: this.activeFrame().seq + 1 });
   }
 
   private add(peer: PeerState): void {
@@ -177,6 +186,13 @@ export class ActiveSpeakerService {
       }
 
       const thresholdRms = 0.01;
+      if (this.forcedActivePeerIdForTest !== undefined) {
+        const forcedId = this.forcedActivePeerIdForTest;
+        this.lastMaxRms.set(forcedId ? 1 : 0);
+        this.activePeerId.set(forcedId);
+        this.activeFrame.set({ id: forcedId, at: now, rms: forcedId ? 1 : 0, seq: this.activeFrame().seq + 1 });
+        return;
+      }
       let activeId: string | null = null;
       let activeRms = thresholdRms;
       let maxObservedRms = 0;

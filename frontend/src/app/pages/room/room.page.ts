@@ -23,6 +23,8 @@ import { ViewportService } from '../../services/viewport.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
 import { WebrtcService } from '../../services/webrtc.service';
 
+const SPEAKER_ORDER_SETTLE_MS = 5_000;
+
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
 type BufferedSignal = { from: string; data: unknown };
 type LobbyError =
@@ -125,7 +127,7 @@ export class RoomPage implements OnDestroy {
     return peer.isLocal ? this.media.screenStream() : peer.stream;
   });
   readonly orderedStripPeers = computed(() => {
-    const promoted = this.promotedSpeakerId() ?? this.activeSpeaker.activePeerId();
+    const promoted = this.promotedSpeakerId();
     return [...this.peers()].sort((left, right) => {
       if (left.id === promoted && right.id !== promoted) return -1;
       if (right.id === promoted && left.id !== promoted) return 1;
@@ -253,6 +255,7 @@ export class RoomPage implements OnDestroy {
       };
       if (window.location.hostname === 'localhost') {
         debug.injectActiveSpeakerStream = (id: string, stream: MediaStream) => this.activeSpeaker.injectDebugStream(id, stream);
+        debug.forceActiveSpeakerForTest = (id: string | null) => this.activeSpeaker.forceActivePeerForTest(id);
         debug.markPeerReconnectingForTest = (id: string) => this.webrtc.markPeerReconnecting(id);
         debug.markPeerRecoveredForTest = (id: string) => this.webrtc.debugMarkPeerRecoveredForTest(id);
       }
@@ -1209,7 +1212,7 @@ export class RoomPage implements OnDestroy {
     this.speakerPromotionTimer = window.setTimeout(() => {
       this.promotedSpeakerId.set(this.speakerPromotionCandidate);
       this.speakerPromotionTimer = null;
-    }, 500);
+    }, SPEAKER_ORDER_SETTLE_MS);
   }
 
   private shouldEnableBgPause(): boolean {
@@ -1453,6 +1456,7 @@ declare global {
         videoMaxBitrate: number | null;
       }[];
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
+      forceActiveSpeakerForTest?: (id: string | null) => void;
       markPeerReconnectingForTest?: (id: string) => void;
       markPeerRecoveredForTest?: (id: string) => void;
     };

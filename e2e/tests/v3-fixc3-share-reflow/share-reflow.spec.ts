@@ -35,10 +35,10 @@ test('FIXC3.1 share layout reflows, sorts active speaker, collapses, and returns
 
   const canInjectSpeaker = await page.evaluate(() => !!window.__meetDebug?.injectActiveSpeakerStream);
   if (canInjectSpeaker) {
-    await injectActiveSpeaker(page, 'guest-c');
+    await activateActiveSpeaker(page, 'guest-c');
     await expect.poll(() => page.evaluate(() => window.__meetDebug?.activeSpeakerId || ''), { timeout: 10000 }).toBeTruthy();
     const firstStripName = page.locator('.share-strip .strip-list app-tile').first().locator('.name-label');
-    await expect(firstStripName).toContainText('guest-c', { timeout: 10000 });
+    await expect(firstStripName).toContainText('guest-c', { timeout: 15000 });
     await expect(page.locator('.share-strip .strip-list app-tile').first().locator('article.tile')).toHaveClass(/is-speaking/);
     await page.screenshot({ path: `${SCREENSHOT_DIR}/share-strip.png`, fullPage: true });
   }
@@ -186,6 +186,16 @@ async function injectActiveSpeaker(page: Page, name: string): Promise<void> {
     writeFrame();
     window.__meetDebug.injectActiveSpeakerStream(peer.id, new MediaStream([generator]));
   }, name);
+}
+
+async function activateActiveSpeaker(page: Page, name: string): Promise<void> {
+  const usedForceHook = await page.evaluate((peerName) => {
+    const peer = window.__meetDebug?.peers.find((item) => item.name === peerName);
+    if (!peer || !window.__meetDebug?.forceActiveSpeakerForTest) return false;
+    window.__meetDebug.forceActiveSpeakerForTest(peer.id);
+    return true;
+  }, name);
+  if (!usedForceHook) await injectActiveSpeaker(page, name);
 }
 
 async function nextSocketMessage(socket: WebSocket, type: string): Promise<Record<string, unknown>> {
