@@ -34,5 +34,5 @@ test('S4.2 create room form stays on Rooms tab', async ({ page }) => {
   await expect(page).toHaveURL(/\/app\/rooms/);
   const row = page.locator('.room-row').filter({ hasText: title }).first();
   await expect(row).toBeVisible();
-  await expect(row.getByRole('link', { name: 'Join' })).toHaveAttribute('href', /\/room\/[a-f0-9]{12}$/);
+  await expect(row.getByRole('link', { name: 'Join' })).toHaveAttribute('href', /\/room\/b4-create-room-\d+-[a-z0-9]{6}$/);
 });

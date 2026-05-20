@@ -55,8 +55,16 @@
       </div>
       <ul class="room-list">
         @for (room of rooms(); track room.id) {
-          <li class="room-row" [class.selected]="isSelected(room.id)">
-            <label class="room-select">
+          <li
+            class="room-row"
+            role="button"
+            tabindex="0"
+            [class.selected]="isSelected(room.id)"
+            [attr.aria-label]="'Open room ' + room.title"
+            (click)="openRoom(room)"
+            (keydown)="onRoomRowKeydown($event, room)"
+          >
+            <label class="room-select" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
               <input
                 type="checkbox"
                 [checked]="isSelected(room.id)"
@@ -69,8 +77,8 @@
               <p>Created {{ room.createdAt | date: 'medium' }}</p>
               <code>{{ shareUrl(room) }}</code>
             </div>
-            <div class="room-actions">
-              <a class="primary-btn" [routerLink]="['/room', room.id]">Join</a>
+            <div class="room-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+              <a class="primary-btn" [routerLink]="['/room', roomUrlKey(room)]">Join</a>
               <button type="button" class="secondary-btn" (click)="copyLink(room)">
                 <ion-icon name="clipboard-outline"></ion-icon>
                 Copy link

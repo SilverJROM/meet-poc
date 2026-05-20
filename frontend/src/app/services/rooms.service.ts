@@ -5,6 +5,7 @@ import { firstValueFrom } from 'rxjs';
 export type Room = {
   id: string;
   title: string;
+  slug: string;
   ownerEmail: string;
   createdAt: number;
 };
@@ -48,7 +49,12 @@ export class RoomsService {
     return { deleted: res.deleted, requested: res.requested };
   }
 
-  async exists(id: string): Promise<{ exists: boolean; title?: string }> {
-    return firstValueFrom(this.http.get<{ exists: boolean; title?: string }>(`/api/rooms/${encodeURIComponent(id)}/exists`));
+  async exists(id: string): Promise<{ exists: boolean; id?: string; title?: string; slug?: string }> {
+    return firstValueFrom(this.http.get<{ exists: boolean; id?: string; title?: string; slug?: string }>(`/api/rooms/${encodeURIComponent(id)}/exists`));
+  }
+
+  async setSlug(id: string, slug: string): Promise<Room> {
+    const res = await firstValueFrom(this.http.put<{ room: Room }>(`/api/rooms/${encodeURIComponent(id)}/slug`, { slug }));
+    return res.room;
   }
 }

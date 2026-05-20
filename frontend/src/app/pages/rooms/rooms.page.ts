@@ -58,7 +58,21 @@ export class RoomsPage implements OnDestroy {
   }
 
   shareUrl(room: Room): string {
-    return `${this.origin}/room/${room.id}`;
+    return `${this.origin}/room/${this.roomUrlKey(room)}`;
+  }
+
+  roomUrlKey(room: Room): string {
+    return room.slug || room.id;
+  }
+
+  async openRoom(room: Room): Promise<void> {
+    await this.router.navigate(['/room', this.roomUrlKey(room)]);
+  }
+
+  async onRoomRowKeydown(event: KeyboardEvent, room: Room): Promise<void> {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    await this.openRoom(room);
   }
 
   async refreshRooms(): Promise<void> {

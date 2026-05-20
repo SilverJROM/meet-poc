@@ -5,6 +5,7 @@ import { getDb } from '../../db.js';
 export type Room = {
   id: string;
   title: string;
+  slug: string;
   ownerEmail: string;
   createdAt: number;
 };
@@ -12,14 +13,40 @@ export type Room = {
 type RoomRow = {
   id: string;
   title: string;
+  slug: string | null;
   owner_email: string;
   created_at: number;
 };
+
+type SlugValidationResult =
+  | { ok: true; slug: string }
+  | { ok: false; error: 'slug invalid' | 'slug reserved' | 'slug too long' };
+
+const MAX_SLUG_LENGTH = 80;
+const RESERVED_SLUGS = new Set([
+  'api',
+  'app',
+  'dashboard',
+  'health',
+  'join',
+  'login',
+  'ongoing',
+  'past',
+  'recording',
+  'recordings',
+  'room',
+  'rooms',
+  'settings',
+  'transcript',
+  'transcripts',
+  'ws',
+]);
 
 function toRoom(row: RoomRow): Room {
   return {
     id: row.id,
     title: row.title,
+    slug: row.slug || row.id,
     ownerEmail: row.owner_email,
     createdAt: row.created_at,
   };
@@ -27,9 +54,18 @@ function toRoom(row: RoomRow): Room {
 
 export function getRoom(id: string, database: Database.Database = getDb()): Room | null {
   const row = database
-    .prepare('SELECT id, title, owner_email, created_at FROM rooms WHERE id = ?')
+    .prepare('SELECT id, title, slug, owner_email, created_at FROM rooms WHERE id = ?')
     .get(id) as RoomRow | undefined;
   return row ? toRoom(row) : null;
+}
+
+export function getRoomBySlugOrId(key: string, database: Database.Database = getDb()): Room | null {
+  const roomKey = String(key || '').slice(0, MAX_SLUG_LENGTH);
+  const bySlug = database
+    .prepare('SELECT id, title, slug, owner_email, created_at FROM rooms WHERE slug = ?')
+    .get(roomKey) as RoomRow | undefined;
+  if (bySlug) return toRoom(bySlug);
+  return getRoom(roomKey, database);
 }
 
 export function isOwnerOf(roomId: string | null, email: string | null | undefined, database: Database.Database = getDb()): boolean {
@@ -42,7 +78,7 @@ export function isOwnerOf(roomId: string | null, email: string | null | undefine
 
 export function listOwnedRooms(email: string, database: Database.Database = getDb()): Room[] {
   return database
-    .prepare('SELECT id, title, owner_email, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC')
+    .prepare('SELECT id, title, slug, owner_email, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC')
     .all(email)
     .map((row) => toRoom(row as RoomRow));
 }
@@ -58,7 +94,7 @@ export function listOwnedRoomsPage(
     .prepare('SELECT COUNT(*) AS total FROM rooms WHERE owner_email = ?')
     .get(email) as { total: number };
   const rooms = database
-    .prepare('SELECT id, title, owner_email, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
+    .prepare('SELECT id, title, slug, owner_email, created_at FROM rooms WHERE owner_email = ? ORDER BY created_at DESC LIMIT ? OFFSET ?')
     .all(email, pageSize, offset)
     .map((row) => toRoom(row as RoomRow));
   return { rooms, total: totalRow.total };
@@ -67,15 +103,35 @@ export function listOwnedRoomsPage(
 export function createRoom(titleInput: unknown, email: string, database: Database.Database = getDb()): Room {
   const title =
     String(titleInput || '').slice(0, 100).trim() || `Room ${new Date().toISOString().slice(0, 10)}`;
-  for (let i = 0; i < 5; i += 1) {
+  for (let i = 0; i < 10; i += 1) {
     const id = crypto.randomBytes(6).toString('hex');
+    const slug = createAutoSlug(title);
     const createdAt = Date.now();
     const result = database
-      .prepare('INSERT OR IGNORE INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)')
-      .run(id, title, email, createdAt);
-    if (result.changes === 1) return { id, title, ownerEmail: email, createdAt };
+      .prepare('INSERT OR IGNORE INTO rooms (id, title, slug, owner_email, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(id, title, slug, email, createdAt);
+    if (result.changes === 1) return { id, title, slug, ownerEmail: email, createdAt };
   }
-  throw new Error('failed to create unique room id');
+  throw new Error('failed to create unique room id and slug');
+}
+
+export function setRoomSlug(
+  roomId: string,
+  slugInput: unknown,
+  email: string,
+  database: Database.Database = getDb(),
+): { ok: true; room: Room } | { ok: false; status: 400 | 403 | 404 | 409; error: string } {
+  const room = getRoom(roomId, database);
+  if (!room) return { ok: false, status: 404, error: 'not found' };
+  if (!isOwnerOf(room.id, email, database)) return { ok: false, status: 403, error: 'forbidden' };
+  const validation = validateCustomSlug(slugInput);
+  if (!validation.ok) return { ok: false, status: 400, error: validation.error };
+  const conflict = database
+    .prepare('SELECT id FROM rooms WHERE (slug = ? OR id = ?) AND id <> ?')
+    .get(validation.slug, validation.slug, room.id) as { id: string } | undefined;
+  if (conflict) return { ok: false, status: 409, error: 'slug taken' };
+  database.prepare('UPDATE rooms SET slug = ? WHERE id = ?').run(validation.slug, room.id);
+  return { ok: true, room: getRoom(room.id, database)! };
 }
 
 export function deleteRoom(id: string, database: Database.Database = getDb()): boolean {
@@ -103,4 +159,29 @@ export function bulkDeleteOwnedRooms(
       .run(email, ...unique).changes;
   });
   return { deleted: tx(), requested: unique.length };
+}
+
+function createAutoSlug(title: string): string {
+  const suffix = crypto.randomBytes(3).toString('hex');
+  return `${slugBase(title)}-${suffix}`;
+}
+
+function slugBase(value: string): string {
+  const base = value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+  return (base || 'room').slice(0, 48).replace(/-+$/g, '') || 'room';
+}
+
+function validateCustomSlug(input: unknown): SlugValidationResult {
+  const slug = String(input || '').trim().toLowerCase();
+  if (!slug) return { ok: false, error: 'slug invalid' };
+  if (slug.length > MAX_SLUG_LENGTH) return { ok: false, error: 'slug too long' };
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug)) return { ok: false, error: 'slug invalid' };
+  if (RESERVED_SLUGS.has(slug) || /^[a-f0-9]{12}$/.test(slug)) return { ok: false, error: 'slug reserved' };
+  return { ok: true, slug };
 }

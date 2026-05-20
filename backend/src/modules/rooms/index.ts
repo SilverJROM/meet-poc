@@ -2,7 +2,17 @@ import { Router } from 'express';
 import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
-import { bulkDeleteOwnedRooms, createRoom, deleteRoom, getRoom, isOwnerOf, listOwnedRooms, listOwnedRoomsPage } from './store.js';
+import {
+  bulkDeleteOwnedRooms,
+  createRoom,
+  deleteRoom,
+  getRoom,
+  getRoomBySlugOrId,
+  isOwnerOf,
+  listOwnedRooms,
+  listOwnedRoomsPage,
+  setRoomSlug,
+} from './store.js';
 
 function hasPaginationQuery(query: Record<string, unknown>): boolean {
   return query.page != null || query.pageSize != null;
@@ -49,6 +59,13 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
     return res.json({ ok: true });
   });
 
+  router.put('/rooms/:id/slug', auth, (req, res) => {
+    const authed = req as AuthenticatedRequest;
+    const result = setRoomSlug(String(req.params.id), req.body?.slug, authed.user.email, database);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json({ room: result.room });
+  });
+
   router.post('/rooms/bulk-delete', auth, (req, res) => {
     const authed = req as AuthenticatedRequest;
     const raw = (req.body && Array.isArray(req.body.ids)) ? req.body.ids : null;
@@ -59,9 +76,9 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
   });
 
   router.get('/rooms/:id/exists', (req, res) => {
-    const room = getRoom(String(req.params.id), database);
+    const room = getRoomBySlugOrId(String(req.params.id), database);
     if (!room) return res.json({ exists: false });
-    return res.json({ exists: true, title: room.title });
+    return res.json({ exists: true, id: room.id, title: room.title, slug: room.slug });
   });
 
   return router;

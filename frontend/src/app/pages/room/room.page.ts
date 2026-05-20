@@ -65,7 +65,9 @@ export class RoomPage implements OnDestroy {
   private readonly platform = inject(PlatformService);
   private readonly viewport = inject(ViewportService);
 
-  readonly roomId = this.route.snapshot.paramMap.get('id') ?? '';
+  readonly roomKey = this.route.snapshot.paramMap.get('slug') ?? this.route.snapshot.paramMap.get('id') ?? '';
+  roomId = this.roomKey;
+  readonly roomSlug = signal('');
   readonly state = signal<RoomState>('checking');
   readonly roomTitle = signal('Checking room...');
   readonly displayName = signal('');
@@ -272,12 +274,14 @@ export class RoomPage implements OnDestroy {
     const user = this.auth.user();
     if (user && !this.displayName()) this.displayName.set(user.email.split('@')[0] || user.email);
     try {
-      const info = await this.rooms.exists(this.roomId);
+      const info = await this.rooms.exists(this.roomKey);
       if (!info.exists) {
         this.roomTitle.set('Room not found');
         this.state.set('not-found');
         return;
       }
+      this.roomId = info.id ?? this.roomKey;
+      this.roomSlug.set(info.slug ?? this.roomId);
       this.roomTitle.set(info.title ?? 'Untitled room');
       this.state.set('lobby');
       this.prepareLobbyDeviceCheck();

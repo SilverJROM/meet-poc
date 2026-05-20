@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { getDb } from '../../db.js';
 import { parseCookies } from '../../lib/cookies.js';
 import { getSessionUser } from '../auth/sessions.js';
-import { getRoom, isOwnerOf } from '../rooms/store.js';
+import { getRoom, getRoomBySlugOrId, isOwnerOf } from '../rooms/store.js';
 import { bumpPeak, closeSession, openSession } from '../sessions/store.js';
 
 type PeerState = 'idle' | 'admitted' | 'pending';
@@ -241,13 +241,14 @@ export function attachSignaling(server: http.Server, database: Database.Database
       }
 
       if (msg.type === 'join') {
-        const roomId = String(msg.room || '').slice(0, 64);
-        const room = getRoom(roomId, database);
+        const roomKey = String(msg.room || '').slice(0, 128);
+        const room = getRoomBySlugOrId(roomKey, database);
         if (!room) {
           send(ws, { type: 'error', error: 'room not found' });
           ws.close();
           return;
         }
+        const roomId = room.id;
         const joinName = String(msg.name || 'Anon').slice(0, 64);
         const live = getOrCreateLiveRoom(roomId);
         pruneReconnectTickets(live);

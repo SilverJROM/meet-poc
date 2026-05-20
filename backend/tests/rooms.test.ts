@@ -1,6 +1,11 @@
 import request from 'supertest';
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { seedUser } from '../scripts/seed.js';
+import { runMigrations } from '../src/db.js';
 import { createApp } from '../src/server.js';
 import { createSession } from '../src/modules/auth/sessions.js';
 import { createTestDb } from './helpers.js';
@@ -15,6 +20,7 @@ describe('rooms API', () => {
 
     expect(res.body.room).toMatchObject({
       title: 'Team sync',
+      slug: expect.stringMatching(/^team-sync-[a-z0-9]{6}$/),
       ownerEmail: 'jrom@silverjrom.app',
     });
     expect(res.body.room.id).toMatch(/^[a-f0-9]{12}$/);
@@ -174,7 +180,121 @@ describe('rooms API', () => {
     db.prepare('INSERT INTO rooms (id, title, owner_email, created_at) VALUES (?, ?, ?, ?)').run('aaa111aaa111', 'Team sync', 'jrom@silverjrom.app', 1);
     const app = createApp(db);
 
-    await request(app).get('/api/rooms/aaa111aaa111/exists').expect(200, { exists: true, title: 'Team sync' });
+    await request(app).get('/api/rooms/aaa111aaa111/exists').expect(200, {
+      exists: true,
+      id: 'aaa111aaa111',
+      slug: 'aaa111aaa111',
+      title: 'Team sync',
+    });
     await request(app).get('/api/rooms/missing/exists').expect(200, { exists: false });
+  });
+
+  it('DR-15 resolves rooms by slug or id and enforces custom slug ownership, validation, and uniqueness', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    db.prepare('INSERT INTO users (email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
+      'other@silverjrom.app',
+      '00:00',
+      Date.now(),
+      Date.now(),
+    );
+    const app = createApp(db);
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const otherCookie = `session=${createSession('other@silverjrom.app', db)}`;
+    const first = await request(app).post('/api/rooms').set('Cookie', cookie).send({ title: 'Weekly Sync' }).expect(200);
+    const second = await request(app).post('/api/rooms').set('Cookie', cookie).send({ title: 'Weekly Sync' }).expect(200);
+
+    expect(first.body.room.slug).toMatch(/^weekly-sync-[a-z0-9]{6}$/);
+    expect(second.body.room.slug).toMatch(/^weekly-sync-[a-z0-9]{6}$/);
+    expect(first.body.room.slug).not.toBe(second.body.room.slug);
+
+    await request(app).get(`/api/rooms/${first.body.room.slug}/exists`).expect(200, {
+      exists: true,
+      id: first.body.room.id,
+      slug: first.body.room.slug,
+      title: 'Weekly Sync',
+    });
+    await request(app).get(`/api/rooms/${first.body.room.id}/exists`).expect(200, {
+      exists: true,
+      id: first.body.room.id,
+      slug: first.body.room.slug,
+      title: 'Weekly Sync',
+    });
+
+    const custom = await request(app)
+      .put(`/api/rooms/${first.body.room.id}/slug`)
+      .set('Cookie', cookie)
+      .send({ slug: 'Custom-Room' })
+      .expect(200);
+    expect(custom.body.room.slug).toBe('custom-room');
+    await request(app)
+      .put(`/api/rooms/${second.body.room.id}/slug`)
+      .set('Cookie', cookie)
+      .send({ slug: 'custom-room' })
+      .expect(409, { error: 'slug taken' });
+    await request(app)
+      .put(`/api/rooms/${first.body.room.id}/slug`)
+      .set('Cookie', cookie)
+      .send({ slug: 'app' })
+      .expect(400, { error: 'slug reserved' });
+    await request(app)
+      .put(`/api/rooms/${first.body.room.id}/slug`)
+      .set('Cookie', cookie)
+      .send({ slug: 'not valid' })
+      .expect(400, { error: 'slug invalid' });
+    await request(app)
+      .put(`/api/rooms/${first.body.room.id}/slug`)
+      .set('Cookie', cookie)
+      .send({ slug: 'x'.repeat(81) })
+      .expect(400, { error: 'slug too long' });
+    await request(app)
+      .put(`/api/rooms/${first.body.room.id}/slug`)
+      .set('Cookie', otherCookie)
+      .send({ slug: 'other-owner' })
+      .expect(403, { error: 'forbidden' });
+  });
+
+  it('DR-15 migration backfills unique slugs for legacy rooms before adding the unique index', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'meet-poc-slug-migration-'));
+    const db = new Database(path.join(root, 'legacy.sqlite'));
+    try {
+      db.exec(`
+        CREATE TABLE _migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL);
+        INSERT INTO _migrations (name, applied_at) VALUES
+          ('0001_init.sql', 1),
+          ('0002_rooms.sql', 1),
+          ('0003_meeting_sessions.sql', 1),
+          ('0004_questions_and_llm_settings.sql', 1);
+        CREATE TABLE users (
+          email TEXT PRIMARY KEY,
+          password_hash TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE rooms (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          owner_email TEXT NOT NULL,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (owner_email) REFERENCES users(email)
+        );
+        INSERT INTO users (email, password_hash, created_at, updated_at)
+          VALUES ('jrom@silverjrom.app', '00:00', 1, 1);
+        INSERT INTO rooms (id, title, owner_email, created_at) VALUES
+          ('aaa111aaa111', 'Same Title', 'jrom@silverjrom.app', 1),
+          ('bbb222bbb222', 'Same Title', 'jrom@silverjrom.app', 2),
+          ('testroom01001', 'TEST_ROOM01', 'jrom@silverjrom.app', 3);
+      `);
+
+      runMigrations(db);
+      const rows = db.prepare('SELECT id, slug FROM rooms ORDER BY id').all() as { id: string; slug: string }[];
+
+      expect(rows.map((row) => row.slug)).toEqual(['same-title-aaa111', 'same-title-bbb222', 'test-room01-testro']);
+      expect(new Set(rows.map((row) => row.slug)).size).toBe(3);
+      expect(db.prepare('PRAGMA index_list(rooms)').all().some((row) => (row as { name: string }).name === 'idx_rooms_slug_unique')).toBe(true);
+    } finally {
+      db.close();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });

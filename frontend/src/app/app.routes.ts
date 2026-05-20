@@ -25,11 +25,11 @@ export const routes: Routes = [
     ],
   },
   {
-    path: 'room/:id',
+    path: 'room/:slug',
     loadComponent: () => import('./pages/room/room.page').then((m) => m.RoomPage),
   },
   {
-    path: 'join/:id',
+    path: 'join/:slug',
     loadComponent: () => import('./pages/room/room.page').then((m) => m.RoomPage),
   },
   { path: '**', redirectTo: 'app/rooms' },

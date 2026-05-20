@@ -3,6 +3,7 @@ import path from 'node:path';
 import { expect, type APIRequestContext, type Page } from '@playwright/test';
 import WebSocket from 'ws';
 import { email, initialPassword, loginAsJrom } from './auth';
+import { openE2eDb } from './db';
 
 const TRACK_FILE = path.resolve(process.cwd(), '.test-rooms.json');
 
@@ -23,6 +24,7 @@ function trackRoom(id: string): void {
 
 export type TestRoom = {
   id: string;
+  slug: string;
   title: string;
   url: string;
 };
@@ -33,7 +35,7 @@ export async function createRoomViaApi(request: APIRequestContext, title: string
   expect(res.ok()).toBeTruthy();
   const json = await res.json();
   trackRoom(json.room.id);
-  return { id: json.room.id, title: json.room.title, url: `/room/${json.room.id}` };
+  return { id: json.room.id, slug: json.room.slug, title: json.room.title, url: `/room/${json.room.slug || json.room.id}` };
 }
 
 export async function createRoomFromDashboard(page: Page, title: string): Promise<TestRoom> {
@@ -44,9 +46,19 @@ export async function createRoomFromDashboard(page: Page, title: string): Promis
   await expect(row).toBeVisible();
   const href = await row.getByRole('link', { name: 'Join' }).getAttribute('href');
   if (!href) throw new Error('room href missing');
-  const id = href.split('/').pop() ?? '';
-  if (id) trackRoom(id);
-  return { id, title, url: href };
+  const key = href.split('/').pop() ?? '';
+  const db = openE2eDb();
+  try {
+    const room = db.prepare('SELECT id, slug FROM rooms WHERE title = ? ORDER BY created_at DESC LIMIT 1').get(title) as
+      | { id: string; slug: string | null }
+      | undefined;
+    const id = room?.id ?? key;
+    const slug = room?.slug || key;
+    if (id) trackRoom(id);
+    return { id, slug, title, url: href };
+  } finally {
+    db.close();
+  }
 }
 
 export async function ownerSessionCookie(request: APIRequestContext): Promise<string> {
