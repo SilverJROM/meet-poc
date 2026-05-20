@@ -15,13 +15,25 @@ type PeerEntry = {
   name: string;
   userEmail: string | null;
   isMobile: boolean;
+  supportsReconnect: boolean;
+  reconnectToken: string | null;
+  reconnectExpiresAt: number | null;
   setState: (state: PeerState) => void;
 };
 
 type LiveRoom = {
   admitted: Map<string, PeerEntry>;
   pending: Map<string, PeerEntry>;
+  reconnectTickets: Map<string, ReconnectTicket>;
   currentSessionId: string | null;
+};
+
+type ReconnectTicket = {
+  name: string;
+  userEmail: string | null;
+  isMobile: boolean;
+  sessionId: string | null;
+  expiresAt: number;
 };
 
 type IncomingMessage = {
@@ -37,17 +49,20 @@ type IncomingMessage = {
   clientId?: unknown;
   reason?: unknown;
   mobile?: unknown;
+  supportsReconnect?: unknown;
+  reconnectToken?: unknown;
 };
 
 const MAX_ADMITTED = 8;
 const MAX_MOBILE_ADMITTED = 4;
+const RECONNECT_TOKEN_TTL_MS = 2 * 60 * 1000;
 
 const liveRooms = new Map<string, LiveRoom>();
 
 function getOrCreateLiveRoom(roomId: string): LiveRoom {
   let live = liveRooms.get(roomId);
   if (!live) {
-    live = { admitted: new Map(), pending: new Map(), currentSessionId: null };
+    live = { admitted: new Map(), pending: new Map(), reconnectTickets: new Map(), currentSessionId: null };
     liveRooms.set(roomId, live);
   }
   return live;
@@ -69,6 +84,32 @@ function pendingSummaries(live: LiveRoom): { id: string; name: string }[] {
 
 function broadcastPendingListToOwners(live: LiveRoom, roomId: string, database: Database.Database): void {
   broadcastToOwners(live, roomId, { type: 'pending-list', knockers: pendingSummaries(live) }, database);
+}
+
+function pruneReconnectTickets(live: LiveRoom, now = Date.now()): void {
+  for (const [token, ticket] of live.reconnectTickets) {
+    if (ticket.expiresAt <= now) live.reconnectTickets.delete(token);
+  }
+}
+
+function issueReconnectToken(ws: WebSocket, entry: PeerEntry, supportsReconnect: boolean): void {
+  if (!supportsReconnect) return;
+  const token = crypto.randomBytes(24).toString('base64url');
+  const expiresAt = Date.now() + RECONNECT_TOKEN_TTL_MS;
+  entry.reconnectToken = token;
+  entry.reconnectExpiresAt = expiresAt;
+  send(ws, { type: 'reconnect-token', token, expiresAt });
+}
+
+function stashReconnectTicket(live: LiveRoom, entry: PeerEntry): void {
+  if (!entry.reconnectToken || !entry.reconnectExpiresAt || entry.reconnectExpiresAt <= Date.now()) return;
+  live.reconnectTickets.set(entry.reconnectToken, {
+    name: entry.name,
+    userEmail: entry.userEmail,
+    isMobile: entry.isMobile,
+    sessionId: live.currentSessionId,
+    expiresAt: entry.reconnectExpiresAt,
+  });
 }
 
 function rejectForRoomFull(roomId: string, clientId: string, pending: PeerEntry, live: LiveRoom, database: Database.Database): void {
@@ -148,6 +189,7 @@ function admitPeer(roomId: string, clientId: string, database: Database.Database
     isOwner: isOwnerOf(roomId, pending.userEmail, database),
     hostClientId,
   });
+  issueReconnectToken(pending.ws, pending, pending.supportsReconnect);
   for (const [, peer] of live.admitted) {
     send(peer.ws, { type: 'peer-joined', clientId, name: pending.name });
   }
@@ -208,7 +250,10 @@ export function attachSignaling(server: http.Server, database: Database.Database
         }
         const joinName = String(msg.name || 'Anon').slice(0, 64);
         const live = getOrCreateLiveRoom(roomId);
+        pruneReconnectTickets(live);
         const declaredMobile = Boolean(msg.mobile);
+        const supportsReconnect = Boolean(msg.supportsReconnect);
+        const reconnectToken = typeof msg.reconnectToken === 'string' ? msg.reconnectToken : '';
         const hasMobileDeclaration = Object.prototype.hasOwnProperty.call(msg, 'mobile');
         const uaMobile = isMobileUserAgent(req.headers['user-agent']);
         if (hasMobileDeclaration && declaredMobile !== uaMobile) {
@@ -235,21 +280,46 @@ export function attachSignaling(server: http.Server, database: Database.Database
         ensureLiveSession(roomId, room.ownerEmail, live, database);
         const owner = isOwnerOf(roomId, userEmail, database);
         currentRoomOwner = owner;
-        const entry = { ws, name: myName, userEmail, isMobile: declaredMobile, setState: (nextState: PeerState) => { state = nextState; } };
+        const reconnectTicket = reconnectToken ? live.reconnectTickets.get(reconnectToken) : null;
+        const canResume =
+          !!reconnectTicket &&
+          reconnectTicket.expiresAt > Date.now() &&
+          reconnectTicket.sessionId === live.currentSessionId &&
+          reconnectTicket.userEmail === userEmail;
+        if (canResume) {
+          live.reconnectTickets.delete(reconnectToken);
+          myName = reconnectTicket.name;
+        }
+        const entry = {
+          ws,
+          name: myName,
+          userEmail,
+          isMobile: canResume ? reconnectTicket.isMobile : declaredMobile,
+          supportsReconnect,
+          reconnectToken: null,
+          reconnectExpiresAt: null,
+          setState: (nextState: PeerState) => {
+            state = nextState;
+          },
+        };
 
-        if (owner) {
+        if (owner || canResume) {
           live.admitted.set(clientId, entry);
           bumpAdmittedPeak(live, database);
           state = 'admitted';
           const peers = peerSummaries(live, roomId, database).filter((peer) => peer.id !== clientId);
-          send(ws, { type: 'admitted', clientId, peers, roomTitle: room.title, isOwner: true, hostClientId: clientId });
+          const hostClientId = getHostClientId(roomId, database) || (owner ? clientId : null);
+          send(ws, { type: 'admitted', clientId, peers, roomTitle: room.title, isOwner: owner, hostClientId });
+          issueReconnectToken(ws, entry, supportsReconnect);
           for (const [id, peer] of live.admitted) {
-            if (id !== clientId) send(peer.ws, { type: 'peer-joined', clientId, name: myName });
+            if (id !== clientId) {
+              send(peer.ws, owner && supportsReconnect ? { type: 'peer-joined', clientId, name: myName, host: true } : { type: 'peer-joined', clientId, name: myName });
+            }
           }
-          if (live.pending.size > 0) {
+          if (owner && live.pending.size > 0) {
             send(ws, { type: 'pending-list', knockers: pendingSummaries(live) });
           }
-          console.log(`[room ${roomId}] + OWNER ${myName} (${clientId})  admitted=${live.admitted.size}`);
+          console.log(`[room ${roomId}] + ${owner ? 'OWNER' : 'RESUME'} ${myName} (${clientId})  admitted=${live.admitted.size}`);
         } else {
           live.pending.set(clientId, entry);
           state = 'pending';
@@ -378,6 +448,8 @@ export function attachSignaling(server: http.Server, database: Database.Database
       const pendingBeforeClose = live.pending.size;
       const closingPeerWasHost = currentRoomOwner;
       if (state === 'admitted') {
+        const closingEntry = live.admitted.get(clientId);
+        if (closingEntry) stashReconnectTicket(live, closingEntry);
         live.admitted.delete(clientId);
         for (const [, peer] of live.admitted) {
           send(peer.ws, { type: 'peer-left', clientId });

@@ -61,6 +61,17 @@
     </button>
     <button
       type="button"
+      class="control-btn"
+      [class.active]="diagnosticsOpen()"
+      [attr.aria-pressed]="diagnosticsOpen()"
+      [attr.aria-label]="diagnosticsOpen() ? 'Hide connection diagnostics' : 'Show connection diagnostics'"
+      (click)="diagnostics.emit()"
+      [title]="diagnosticsOpen() ? 'Hide connection diagnostics' : 'Show connection diagnostics'"
+    >
+      <ion-icon name="pulse-outline"></ion-icon>
+    </button>
+    <button
+      type="button"
       class="control-btn participant-toggle"
       [class.active]="sidebarOpen()"
       [class.has-waiting]="waitingCount() > 0"

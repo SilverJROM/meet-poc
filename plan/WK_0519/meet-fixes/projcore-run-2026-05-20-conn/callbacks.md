@@ -10,3 +10,4 @@ Codex appends one line per STATUS change as the final action of each reply:
 [projcore callback] diagb1 PROPOSED plan ready; DR-9 needs small backend pending-list resync plus frontend quick-join/validation/doorbell work
 [projcore callback] diagb1 DONE committed e92e514; DR-6/7/9/10 implemented with build/backend/e2e verification and pm2 restart complete
 [projcore callback] diagb1 DONE iter1 committed f53da9a; Run-1 plus DIAGB1 gate passed 74/74 after mic-meter expander fix
+[projcore callback] diagb2 PROPOSED plan ready; DR-1 helper plus DR-2 diagnostics/force-relay and DR-3 reconnect/resync scoped

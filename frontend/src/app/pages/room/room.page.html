@@ -41,11 +41,13 @@
         [participantCount]="peers().length"
         [waitingCount]="knockers().length"
         [sidebarOpen]="sidebarOpen()"
+        [diagnosticsOpen]="diagnosticsOpen()"
         (mute)="toggleMic()"
         (camera)="toggleCamera()"
         (screen)="toggleScreen()"
         (record)="toggleRecording()"
         (sidebar)="toggleSidebar()"
+        (diagnostics)="toggleDiagnostics()"
         (devices)="openInCallDeviceDialog()"
         (leave)="leave()"
       />
@@ -88,6 +90,55 @@
           <span>{{ actionNotice() }}</span>
           <button type="button" (click)="actionNotice.set(null)">Dismiss</button>
         </div>
+      }
+      @if (screenShareHelp()) {
+        <div class="screen-share-help" role="alert" aria-label="Screen share permission help">
+          <h2>Screen sharing needs macOS permission</h2>
+          <p>Enable Screen Recording for Chrome in System Settings, then fully quit and reopen Chrome with Cmd+Q before trying again.</p>
+          <button type="button" (click)="screenShareHelp.set(null)">Dismiss</button>
+        </div>
+      }
+      @if (diagnosticsOpen()) {
+        <section class="diagnostics-panel" aria-label="Connection diagnostics">
+          <div class="diagnostics-header">
+            <h2>Connection diagnostics</h2>
+            <label class="relay-toggle">
+              <input type="checkbox" [checked]="webrtc.forceRelay()" (change)="setForceRelay($any($event.target).checked)">
+              <span>Force relay</span>
+            </label>
+          </div>
+          <div class="diagnostics-list">
+            @for (peer of webrtc.diagnostics(); track peer.id) {
+              <article class="diagnostic-peer">
+                <h3>{{ peer.name }}</h3>
+                <dl>
+                  <div>
+                    <dt>Connection</dt>
+                    <dd>{{ peer.connectionState }}</dd>
+                  </div>
+                  <div>
+                    <dt>ICE</dt>
+                    <dd>{{ peer.iceConnectionState }}</dd>
+                  </div>
+                  <div>
+                    <dt>Gathering</dt>
+                    <dd>{{ peer.iceGatheringState }}</dd>
+                  </div>
+                  <div>
+                    <dt>Signaling</dt>
+                    <dd>{{ peer.signalingState }}</dd>
+                  </div>
+                  <div>
+                    <dt>Candidate</dt>
+                    <dd>{{ peer.selectedCandidateType || 'unknown' }}</dd>
+                  </div>
+                </dl>
+              </article>
+            } @empty {
+              <p class="diagnostics-empty">No remote peers connected.</p>
+            }
+          </div>
+        </section>
       }
       <div class="meeting-meta">
         <span class="meeting-clock" aria-label="Meeting elapsed time">{{ formattedElapsed() }}</span>

@@ -116,7 +116,8 @@ async function admitBrowserGuest(browser: Browser, owner: Page, room: TestRoom, 
 }
 
 async function admitSocketGuest(owner: Page, room: TestRoom, name: string): Promise<WebSocket> {
-  const socket = new WebSocket('ws://localhost:4700/ws');
+  const wsOrigin = process.env.E2E_WS_ORIGIN || 'ws://localhost:4700';
+  const socket = new WebSocket(`${wsOrigin}/ws`);
   await new Promise<void>((resolve, reject) => {
     socket.once('open', resolve);
     socket.once('error', reject);

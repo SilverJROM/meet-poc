@@ -7,6 +7,11 @@ export type PeerState = {
   pc: RTCPeerConnection | null;
   stream: MediaStream | null;
   connectionState: RTCPeerConnectionState | 'local';
+  iceConnectionState: RTCIceConnectionState | 'local';
+  iceGatheringState: RTCIceGatheringState | 'local';
+  signalingState: RTCSignalingState | 'local';
+  selectedCandidateType: string | null;
+  updatedAt: number;
   isLocal: boolean;
   isHost: boolean;
   micEnabled: boolean;
@@ -31,6 +36,7 @@ type PeerMeta = {
 const ICE_RESTART_DEBOUNCE_MS = 1200;
 const ICE_RESTART_COOLDOWN_MS = 3000;
 const MAX_ICE_RESTART_ATTEMPTS = 3;
+const FORCE_RELAY_STORAGE_KEY = 'meet-poc.forceRelay';
 
 @Injectable({ providedIn: 'root' })
 export class WebrtcService {
@@ -40,9 +46,26 @@ export class WebrtcService {
   private sendSignal: ((to: string, data: unknown) => void) | null = null;
   private localClientId: string | null = null;
   private readonly peerMeta = new Map<string, PeerMeta>();
+  readonly forceRelay = signal(readForceRelay());
+  readonly lastPeerConnectionPolicy = signal<RTCIceTransportPolicy | 'all'>('all');
+  readonly lastPeerConnectionConfig = signal<RTCConfiguration | null>(null);
 
   readonly peers = signal<Map<string, PeerState>>(new Map());
   readonly peerList = computed(() => Array.from(this.peers().values()));
+  readonly diagnostics = computed(() =>
+    this.peerList()
+      .filter((peer) => !peer.isLocal)
+      .map((peer) => ({
+        id: peer.id,
+        name: peer.name,
+        connectionState: peer.connectionState,
+        iceConnectionState: peer.iceConnectionState,
+        iceGatheringState: peer.iceGatheringState,
+        signalingState: peer.signalingState,
+        selectedCandidateType: peer.selectedCandidateType,
+        updatedAt: peer.updatedAt,
+      })),
+  );
 
   configure(localStream: MediaStream, sendSignal: (to: string, data: unknown) => void): void {
     this.localStream = localStream;
@@ -58,19 +81,27 @@ export class WebrtcService {
         pc: null,
         stream: this.localStream,
         connectionState: 'local',
+        iceConnectionState: 'local',
+        iceGatheringState: 'local',
+        signalingState: 'local',
+        selectedCandidateType: null,
+        updatedAt: Date.now(),
         isLocal: true,
         isHost: options.isHost,
         micEnabled: options.micEnabled,
         camEnabled: options.camEnabled,
         screenOn: options.screenOn,
       });
+      for (const [id, peer] of peers) {
+        if (peer.isLocal && id !== clientId) peers.delete(id);
+      }
     });
   }
 
   async addPeer(clientId: string, name: string, isInitiator: boolean, options: { isHost?: boolean } = {}): Promise<void> {
     if (!this.localStream || !this.sendSignal || this.peers().has(clientId)) return;
     const iceServers = await this.iceConfig.getIceServers();
-    const pc = new RTCPeerConnection({ iceServers });
+    const pc = new RTCPeerConnection(this.peerConnectionConfig(iceServers));
     const meta = this.createPeerMeta(clientId);
     this.peerMeta.set(clientId, meta);
     const peer: PeerState = {
@@ -79,6 +110,11 @@ export class WebrtcService {
       pc,
       stream: new MediaStream(),
       connectionState: pc.connectionState,
+      iceConnectionState: pc.iceConnectionState,
+      iceGatheringState: pc.iceGatheringState,
+      signalingState: pc.signalingState,
+      selectedCandidateType: null,
+      updatedAt: Date.now(),
       isLocal: false,
       isHost: !!options.isHost,
       micEnabled: true,
@@ -107,19 +143,47 @@ export class WebrtcService {
       this.maybeScheduleIceRestart(clientId, pc);
     };
     pc.oniceconnectionstatechange = () => {
+      this.touchPeer(clientId, { iceConnectionState: pc.iceConnectionState });
       console.log(`[webrtc] peer ${clientId} iceConnectionState=${pc.iceConnectionState} at ${new Date().toISOString()}`);
       void this.logSelectedCandidateType(clientId, pc);
       this.maybeScheduleIceRestart(clientId, pc);
     };
     pc.onicegatheringstatechange = () => {
+      this.touchPeer(clientId, { iceGatheringState: pc.iceGatheringState });
       console.log(`[webrtc] peer ${clientId} iceGatheringState=${pc.iceGatheringState} at ${new Date().toISOString()}`);
     };
     pc.onsignalingstatechange = () => {
+      this.touchPeer(clientId, { signalingState: pc.signalingState });
       console.log(`[webrtc] peer ${clientId} signalingState=${pc.signalingState} at ${new Date().toISOString()}`);
     };
 
     if (isInitiator) {
       await this.sendOffer(clientId, pc, meta, false);
+    }
+  }
+
+  async setForceRelay(enabled: boolean): Promise<void> {
+    if (this.forceRelay() === enabled) return;
+    this.forceRelay.set(enabled);
+    storeForceRelay(enabled);
+    await this.recreateRemotePeerConnections();
+  }
+
+  async recreateRemotePeerConnections(): Promise<void> {
+    const remotes = this.peerList()
+      .filter((peer) => !peer.isLocal)
+      .map((peer) => ({
+        id: peer.id,
+        name: peer.name,
+        isHost: peer.isHost,
+        micEnabled: peer.micEnabled,
+        camEnabled: peer.camEnabled,
+        screenOn: peer.screenOn,
+      }));
+    for (const peer of remotes) this.removePeer(peer.id);
+    for (const peer of remotes) {
+      await this.addPeer(peer.id, peer.name, true, { isHost: peer.isHost });
+      this.updatePeer(peer.id, { micEnabled: peer.micEnabled, camEnabled: peer.camEnabled, screenOn: peer.screenOn });
     }
   }
 
@@ -185,6 +249,13 @@ export class WebrtcService {
     this.mutatePeers((peers) => peers.delete(clientId));
   }
 
+  resetRemotePeers(): void {
+    const remoteIds = this.peerList()
+      .filter((peer) => !peer.isLocal)
+      .map((peer) => peer.id);
+    for (const id of remoteIds) this.removePeer(id);
+  }
+
   stopLocalSenderTracks(): void {
     const stopped = new Set<MediaStreamTrack>();
     for (const peer of this.peers().values()) {
@@ -219,7 +290,7 @@ export class WebrtcService {
   private touchPeer(clientId: string, patch: Partial<PeerState>): void {
     this.mutatePeers((peers) => {
       const current = peers.get(clientId);
-      if (current) peers.set(clientId, { ...current, ...patch });
+      if (current) peers.set(clientId, { ...current, ...patch, updatedAt: Date.now() });
     });
   }
 
@@ -284,10 +355,20 @@ export class WebrtcService {
   private async logSelectedCandidateType(clientId: string, pc: RTCPeerConnection): Promise<void> {
     try {
       const candidateType = await selectedCandidateType(pc);
-      if (candidateType) console.log(`[webrtc] peer ${clientId} selectedCandidateType=${candidateType}`);
+      if (candidateType) {
+        this.touchPeer(clientId, { selectedCandidateType: candidateType });
+        console.log(`[webrtc] peer ${clientId} selectedCandidateType=${candidateType}`);
+      }
     } catch (err) {
       console.debug(`[webrtc] selected candidate lookup failed for ${clientId}`, err);
     }
+  }
+
+  private peerConnectionConfig(iceServers: RTCIceServer[]): RTCConfiguration {
+    const config: RTCConfiguration = this.forceRelay() ? { iceServers, iceTransportPolicy: 'relay' } : { iceServers };
+    this.lastPeerConnectionPolicy.set(config.iceTransportPolicy ?? 'all');
+    this.lastPeerConnectionConfig.set(config);
+    return config;
   }
 }
 
@@ -307,4 +388,21 @@ async function selectedCandidateType(pc: RTCPeerConnection): Promise<string | nu
     return candidate?.candidateType ?? null;
   }
   return null;
+}
+
+function readForceRelay(): boolean {
+  try {
+    return window.localStorage.getItem(FORCE_RELAY_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function storeForceRelay(enabled: boolean): void {
+  try {
+    if (enabled) window.localStorage.setItem(FORCE_RELAY_STORAGE_KEY, '1');
+    else window.localStorage.removeItem(FORCE_RELAY_STORAGE_KEY);
+  } catch {
+    // Best effort; relay diagnostics still work for this session.
+  }
 }

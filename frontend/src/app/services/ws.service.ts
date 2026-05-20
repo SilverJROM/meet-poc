@@ -9,6 +9,7 @@ export type SignalingMessage =
       isOwner: boolean;
       hostClientId?: string;
     }
+  | { type: 'reconnect-token'; token: string; expiresAt: number }
   | { type: 'knocking'; clientId: string; roomTitle?: string }
   | { type: 'knock'; clientId: string; name: string }
   | { type: 'pending-list'; knockers: { id: string; name: string }[] }
@@ -26,7 +27,7 @@ export type SignalingMessage =
   | { type: 'error'; error: string };
 
 export type OutgoingSignalingMessage =
-  | { type: 'join'; room: string; name: string; mobile?: boolean }
+  | { type: 'join'; room: string; name: string; mobile?: boolean; supportsReconnect?: boolean; reconnectToken?: string }
   | { type: 'signal'; to: string; data: unknown }
   | { type: 'admit'; clientId: string }
   | { type: 'reject'; clientId: string; reason?: string }
@@ -39,39 +40,30 @@ export type OutgoingSignalingMessage =
 @Injectable({ providedIn: 'root' })
 export class WsService {
   private socket: WebSocket | null = null;
+  private roomId = '';
+  private onMessage: ((msg: SignalingMessage) => void) | null = null;
+  private onOpen: (() => void) | null = null;
+  private onError: (() => void) | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectAttempt = 0;
+  private intentionallyClosed = true;
 
   readonly connected = signal(false);
   readonly disconnected = signal(false);
+  readonly reconnectAttempts = signal(0);
+  readonly status = signal<'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('idle');
 
   connect(roomId: string, onMessage: (msg: SignalingMessage) => void, onOpen: () => void, onError: () => void): void {
-    this.close();
+    this.closeCurrentSocket();
+    this.clearReconnectTimer();
+    this.roomId = roomId;
+    this.onMessage = onMessage;
+    this.onOpen = onOpen;
+    this.onError = onError;
+    this.reconnectAttempt = 0;
+    this.intentionallyClosed = false;
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const ws = new WebSocket(`${proto}://${window.location.host}/ws`);
-    this.socket = ws;
-    this.connected.set(false);
-    this.disconnected.set(false);
-
-    ws.onopen = () => {
-      if (this.socket !== ws) return;
-      this.connected.set(true);
-      onOpen();
-    };
-    ws.onmessage = (evt) => {
-      if (this.socket !== ws) return;
-      try {
-        onMessage(JSON.parse(evt.data) as SignalingMessage);
-      } catch {
-        onError();
-      }
-    };
-    ws.onerror = () => {
-      if (this.socket === ws) onError();
-    };
-    ws.onclose = () => {
-      if (this.socket !== ws) return;
-      this.connected.set(false);
-      this.disconnected.set(true);
-    };
+    this.openSocket(`${proto}://${window.location.host}/ws`, false);
   }
 
   send(msg: OutgoingSignalingMessage): void {
@@ -81,11 +73,92 @@ export class WsService {
   }
 
   close(): void {
+    this.intentionallyClosed = true;
+    this.clearReconnectTimer();
+    this.closeCurrentSocket();
+    this.roomId = '';
+    this.onMessage = null;
+    this.onOpen = null;
+    this.onError = null;
+    this.reconnectAttempt = 0;
+    this.connected.set(false);
+    this.status.set('idle');
+  }
+
+  debugDropForReconnect(): void {
+    if (this.socket && (this.socket.readyState === WebSocket.OPEN || this.socket.readyState === WebSocket.CONNECTING)) {
+      this.socket.close(4000, 'debug reconnect');
+      return;
+    }
+    if (!this.intentionallyClosed) this.scheduleReconnect();
+  }
+
+  private openSocket(url: string, reconnecting: boolean): void {
+    const ws = new WebSocket(url);
+    this.socket = ws;
+    this.connected.set(false);
+    this.status.set(reconnecting ? 'reconnecting' : 'connecting');
+    if (!reconnecting) this.disconnected.set(false);
+    console.info(`[signaling] ${reconnecting ? 'reconnecting' : 'connecting'} room=${this.roomId}`);
+
+    ws.onopen = () => {
+      if (this.socket !== ws) return;
+      const wasReconnect = this.reconnectAttempt > 0 || reconnecting;
+      this.connected.set(true);
+      this.disconnected.set(false);
+      this.status.set('connected');
+      this.reconnectAttempt = 0;
+      console.info(`[signaling] ${wasReconnect ? 'reconnected' : 'connected'} room=${this.roomId}`);
+      this.onOpen?.();
+    };
+    ws.onmessage = (evt) => {
+      if (this.socket !== ws) return;
+      try {
+        this.onMessage?.(JSON.parse(evt.data) as SignalingMessage);
+      } catch {
+        this.onError?.();
+      }
+    };
+    ws.onerror = () => {
+      if (this.socket === ws) this.onError?.();
+    };
+    ws.onclose = () => {
+      if (this.socket !== ws) return;
+      this.socket = null;
+      this.connected.set(false);
+      this.disconnected.set(true);
+      this.status.set('disconnected');
+      console.warn(`[signaling] disconnected room=${this.roomId}`);
+      if (!this.intentionallyClosed) this.scheduleReconnect();
+    };
+  }
+
+  private closeCurrentSocket(): void {
     const ws = this.socket;
     this.socket = null;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       ws.close();
     }
-    this.connected.set(false);
+  }
+
+  private scheduleReconnect(): void {
+    if (this.reconnectTimer || !this.onOpen || !this.onMessage) return;
+    const attempt = this.reconnectAttempt + 1;
+    const delay = Math.min(30_000, 500 * 2 ** Math.min(attempt - 1, 6));
+    this.reconnectAttempt = attempt;
+    this.reconnectAttempts.update((count) => count + 1);
+    this.status.set('reconnecting');
+    console.info(`[signaling] reconnect scheduled room=${this.roomId} attempt=${attempt} delayMs=${delay}`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.intentionallyClosed) return;
+      const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      this.openSocket(`${proto}://${window.location.host}/ws`, true);
+    }, delay);
+  }
+
+  private clearReconnectTimer(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
   }
 }

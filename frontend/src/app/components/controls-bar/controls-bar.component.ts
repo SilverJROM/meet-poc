@@ -8,6 +8,7 @@ import {
   micOffOutline,
   micOutline,
   peopleOutline,
+  pulseOutline,
   settingsOutline,
   videocamOffOutline,
   videocamOutline,
@@ -34,11 +35,13 @@ export class ControlsBarComponent {
   readonly participantCount = input(0);
   readonly waitingCount = input(0);
   readonly sidebarOpen = input(false);
+  readonly diagnosticsOpen = input(false);
   readonly mute = output<void>();
   readonly camera = output<void>();
   readonly screen = output<void>();
   readonly record = output<void>();
   readonly sidebar = output<void>();
+  readonly diagnostics = output<void>();
   readonly devices = output<void>();
   readonly leave = output<void>();
   readonly isMobile = this.viewport.isMobile;
@@ -52,6 +55,7 @@ export class ControlsBarComponent {
       micOffOutline,
       micOutline,
       peopleOutline,
+      pulseOutline,
       settingsOutline,
       videocamOffOutline,
       videocamOutline,

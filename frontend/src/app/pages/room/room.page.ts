@@ -103,6 +103,8 @@ export class RoomPage implements OnDestroy {
   readonly sidebarOpen = signal(false);
   readonly leaveDialogOpen = signal(false);
   readonly meetingEndedToastOpen = signal(false);
+  readonly diagnosticsOpen = signal(false);
+  readonly screenShareHelp = signal<string | null>(null);
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
   readonly peers = this.webrtc.peerList;
@@ -138,6 +140,7 @@ export class RoomPage implements OnDestroy {
   private speakerPromotionTimer: ReturnType<typeof setTimeout> | null = null;
   private speakerPromotionCandidate: string | null = null;
   private readonly pendingSignals = new Map<string, BufferedSignal[]>();
+  private readonly reconnectToken = signal<string | null>(null);
   private pendingListInitialized = false;
   private lastDoorbellAt = 0;
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
@@ -183,6 +186,15 @@ export class RoomPage implements OnDestroy {
         speakerTestCount: window.__meetDebug?.speakerTestCount ?? 0,
         doorbellCount: window.__meetDebug?.doorbellCount ?? 0,
         waitingKnockers: this.knockers().map((knocker) => ({ ...knocker })),
+        diagnostics: this.webrtc.diagnostics(),
+        forceRelay: this.webrtc.forceRelay(),
+        lastPeerConnectionPolicy: this.webrtc.lastPeerConnectionPolicy(),
+        lastPeerConnectionConfig: this.webrtc.lastPeerConnectionConfig(),
+        wsConnected: this.ws.connected(),
+        wsStatus: this.ws.status(),
+        wsReconnectAttempts: this.ws.reconnectAttempts(),
+        myClientId: this.myId(),
+        roomState: this.state(),
         localAudioTrackId: this.media.localStream()?.getAudioTracks()[0]?.id,
         localVideoTrackId: this.media.localStream()?.getVideoTracks()[0]?.id,
         currentFacingMode: this.currentFacingMode(),
@@ -201,7 +213,14 @@ export class RoomPage implements OnDestroy {
         peerConnectionStates: () =>
           this.peers()
             .filter((peer) => !peer.isLocal && peer.pc)
-            .map((peer) => ({ id: peer.id, state: peer.pc?.connectionState ?? peer.connectionState })),
+            .map((peer) => ({
+              id: peer.id,
+              state: peer.pc?.connectionState ?? peer.connectionState,
+              iceConnectionState: peer.pc?.iceConnectionState ?? peer.iceConnectionState,
+              iceGatheringState: peer.pc?.iceGatheringState ?? peer.iceGatheringState,
+              signalingState: peer.pc?.signalingState ?? peer.signalingState,
+              selectedCandidateType: peer.selectedCandidateType,
+            })),
         remoteMedia: () =>
           this.peers()
             .filter((peer) => !peer.isLocal)
@@ -214,6 +233,7 @@ export class RoomPage implements OnDestroy {
         isMobile: () => this.viewport.isMobile(),
         isIOS: () => this.platform.isIOS(),
         isAndroid: () => this.platform.isAndroid(),
+        closeSignalingForTest: () => this.ws.debugDropForReconnect(),
       };
       if (window.location.hostname === 'localhost') {
         debug.injectActiveSpeakerStream = (id: string, stream: MediaStream) => this.activeSpeaker.injectDebugStream(id, stream);
@@ -285,7 +305,7 @@ export class RoomPage implements OnDestroy {
     this.ws.connect(
       this.roomId,
       (msg) => void this.handleMessage(msg),
-      () => this.ws.send({ type: 'join', room: this.roomId, name, mobile: this.viewport.isMobile() }),
+      () => this.sendJoin(name),
       () => {
         if (this.state() !== 'in-call') {
           this.error.set('Signaling connection error.');
@@ -422,10 +442,19 @@ export class RoomPage implements OnDestroy {
   async toggleScreen(): Promise<void> {
     try {
       await this.media.toggleScreen((track) => this.webrtc.replaceVideoTrack(track));
+      this.screenShareHelp.set(null);
       this.updateLocalMediaState();
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
       this.status.set(this.media.screenOn() ? 'Screen sharing.' : 'Screen sharing stopped.');
     } catch (err) {
+      if (isDisplayMediaPermissionError(err)) {
+        this.screenShareHelp.set(
+          'Enable Screen Recording for Chrome in macOS System Settings, then fully quit and reopen Chrome with Cmd+Q before sharing again.',
+        );
+        this.status.set('Screen sharing needs macOS Screen Recording permission.');
+        return;
+      }
+      this.screenShareHelp.set(null);
       this.status.set(`Screen share failed: ${err instanceof Error ? err.message : 'not available'}`);
     }
   }
@@ -477,6 +506,15 @@ export class RoomPage implements OnDestroy {
 
   toggleSidebar(): void {
     this.sidebarOpen.update((open) => !open);
+  }
+
+  toggleDiagnostics(): void {
+    this.diagnosticsOpen.update((open) => !open);
+  }
+
+  async setForceRelay(enabled: boolean): Promise<void> {
+    await this.webrtc.setForceRelay(enabled);
+    this.status.set(enabled ? 'Force relay enabled. Recreated peer connections through TURN only.' : 'Force relay disabled. Recreated peer connections with default ICE.');
   }
 
   toggleShareStrip(): void {
@@ -532,6 +570,10 @@ export class RoomPage implements OnDestroy {
   }
 
   private async handleMessage(msg: SignalingMessage): Promise<void> {
+    if (msg.type === 'reconnect-token') {
+      this.reconnectToken.set(msg.token);
+      return;
+    }
     if (msg.type === 'knocking') {
       this.myId.set(msg.clientId);
       if (msg.roomTitle) this.roomTitle.set(msg.roomTitle);
@@ -546,6 +588,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'admitted') {
+      const wasInCall = this.state() === 'in-call';
       this.myId.set(msg.clientId);
       this.isOwner.set(!!msg.isOwner);
       if (msg.roomTitle) this.roomTitle.set(msg.roomTitle);
@@ -553,6 +596,10 @@ export class RoomPage implements OnDestroy {
       if (stream) {
         this.webrtc.configure(stream, (to, data) => this.ws.send({ type: 'signal', to, data }));
         this.hostClientId.set(msg.hostClientId || (msg.isOwner ? msg.clientId : null));
+        if (wasInCall) {
+          this.pendingSignals.clear();
+          this.webrtc.resetRemotePeers();
+        }
         this.webrtc.setLocalPeer(msg.clientId, this.displayName().trim() || 'Anon', {
           isHost: msg.isOwner,
           micEnabled: this.media.micOn(),
@@ -562,13 +609,14 @@ export class RoomPage implements OnDestroy {
       }
       this.state.set('in-call');
       this.installMobileVisibilityPause();
-      this.startClock();
-      this.status.set(`You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
+      if (!this.callStartMs()) this.startClock();
+      this.status.set(wasInCall ? 'Reconnected to signaling. Syncing peers...' : `You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
       for (const peer of msg.peers) {
         await this.webrtc.addPeer(peer.id, peer.name, true, { isHost: !!peer.host || peer.id === this.hostClientId() });
         await this.drainPendingSignals(peer.id);
       }
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+      if (wasInCall) this.status.set('Reconnected.');
       return;
     }
     if (msg.type === 'pending-list') {
@@ -616,6 +664,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'meeting-ended') {
+      this.ws.close();
       if (!this.isHost()) {
         this.meetingEndedToastOpen.set(true);
       }
@@ -875,6 +924,8 @@ export class RoomPage implements OnDestroy {
     this.meetingEndedToastOpen.set(false);
     this.deviceFailureNotice.set(null);
     this.actionNotice.set(null);
+    this.screenShareHelp.set(null);
+    this.diagnosticsOpen.set(false);
     this.setupWarning.set(null);
     this.nameError.set(null);
     this.hostRecording.set(false);
@@ -1042,6 +1093,17 @@ export class RoomPage implements OnDestroy {
     }
   }
 
+  private sendJoin(name: string): void {
+    this.ws.send({
+      type: 'join',
+      room: this.roomId,
+      name,
+      mobile: this.viewport.isMobile(),
+      supportsReconnect: true,
+      reconnectToken: this.reconnectToken() || undefined,
+    });
+  }
+
   private startClock(): void {
     this.stopClock();
     this.callStartMs.set(Date.now());
@@ -1080,6 +1142,14 @@ function signalKind(data: unknown): string {
   if (payload?.sdp?.type) return payload.sdp.type;
   if (payload?.ice) return 'ice';
   return 'unknown';
+}
+
+function isDisplayMediaPermissionError(err: unknown): boolean {
+  if (!(err instanceof Error || err instanceof DOMException)) return false;
+  const name = err.name || '';
+  const message = err.message || '';
+  if (['NotAllowedError', 'PermissionDeniedError', 'SecurityError', 'NotReadableError'].includes(name)) return true;
+  return /(permission|screen recording|system settings|denied|blocked|restart chrome|not allowed)/i.test(message);
 }
 
 const DEVICE_STORAGE = {
@@ -1139,6 +1209,24 @@ declare global {
       speakerTestCount?: number;
       doorbellCount?: number;
       waitingKnockers?: { id: string; name: string }[];
+      diagnostics?: {
+        id: string;
+        name: string;
+        connectionState: string;
+        iceConnectionState: string;
+        iceGatheringState: string;
+        signalingState: string;
+        selectedCandidateType: string | null;
+        updatedAt: number;
+      }[];
+      forceRelay?: boolean;
+      lastPeerConnectionPolicy?: RTCIceTransportPolicy | 'all';
+      lastPeerConnectionConfig?: RTCConfiguration | null;
+      wsConnected?: boolean;
+      wsStatus?: string;
+      wsReconnectAttempts?: number;
+      myClientId?: string | null;
+      roomState?: string;
       localAudioTrackId?: string;
       localVideoTrackId?: string;
       currentFacingMode?: 'user' | 'environment';
@@ -1155,11 +1243,19 @@ declare global {
       activeSpeakerAnalyzerCount?: number;
       activeSpeakerLastMaxRms?: number;
       activeSpeakerContextState?: string;
-      peerConnectionStates?: () => { id: string; state: RTCPeerConnectionState | 'local' }[];
+      peerConnectionStates?: () => {
+        id: string;
+        state: RTCPeerConnectionState | 'local';
+        iceConnectionState: RTCIceConnectionState | 'local';
+        iceGatheringState: RTCIceGatheringState | 'local';
+        signalingState: RTCSignalingState | 'local';
+        selectedCandidateType: string | null;
+      }[];
       remoteMedia?: () => { id: string; audioTracks: number; videoTracks: number; hasVideoSrcObject: boolean }[];
       isMobile?: () => boolean;
       isIOS?: () => boolean;
       isAndroid?: () => boolean;
+      closeSignalingForTest?: () => void;
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
     };
   }
