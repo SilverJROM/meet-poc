@@ -43,3 +43,16 @@
 - Screenshots: share-strip.png + share-collapsed.png (active-speaker float visible, soft-light conforming)
 - R-C-4 → VERIFIED (single-sender caveat noted: remote camera tile is replaced by screen share when remote peer shares; local sharer unaffected)
 - See `batch-fixc3/independent-validation.md`
+
+### FIXC4 — Transcript delete + subtitle-style .txt download — **VERIFIED PASS** (2026-05-20, codex wall time 7m 35s)
+
+- Branch: `fix/meet-fixc4-transcript-tools`
+- Commits: 6823e9d fix(transcripts): add txt download and transcript delete (14 files, 616+/2-)
+- Backend: **65/65** (+5 new endpoint tests), FIXC4 e2e: 3/3, Run 1 regression: **58/58** (R8.1 → 14 consecutive)
+- Screenshot: transcripts-with-download-delete.png
+- R-C-5 + R-C-6 + R-C-7 → all VERIFIED (R-C-7 by existing rooms-bulk-delete coverage)
+- See `batch-fixc4/independent-validation.md`
+
+## Halfway gate (4/8 batches, 7/13 requirements verified)
+
+R-C-1, R-C-2, R-C-3, R-C-4, R-C-5, R-C-6, R-C-7 all VERIFIED. Remaining: R-C-8 (LLM providers), R-C-9 (settings UI), R-C-10 (Ollama benchmark), R-C-11/12 (question library), R-C-13 (transcriber dropdown). Run 1 holds at 14 consecutive PASS.
