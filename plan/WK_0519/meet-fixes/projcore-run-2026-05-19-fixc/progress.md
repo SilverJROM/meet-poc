@@ -66,3 +66,14 @@ R-C-1, R-C-2, R-C-3, R-C-4, R-C-5, R-C-6, R-C-7 all VERIFIED. Remaining: R-C-8 (
 - Run 1 regression: **58/58** (R8.1 → 15 consecutive)
 - R-C-8 → VERIFIED
 - See `batch-fixc5/independent-validation.md`
+
+### FIXC6 — Ollama benchmark — **VERIFIED PASS** (2026-05-20, codex wall time 17m 00s)
+
+- Branch: `fix/meet-fixc6-ollama-benchmark`
+- Commits: b9ee080 docs: add ollama benchmark results (27 files, 709+)
+- Pulls: qwen2.5:14b-instruct, mistral-nemo:12b, gemma2:9b — all succeeded
+- Backend: 81/1-skip (no regression), Run 1: **58/58** (R8.1 → 16 consecutive)
+- **Top 3:** ★ mistral-nemo:12b (acc 5.0, 58.1s) → ★ gpt-oss:20b (acc 5.0, 75.3s) → ★ gemma2:9b (acc 4.5, 37.7s)
+- R-C-10 → VERIFIED
+- FIXC7 will default the Ollama provider to mistral-nemo:12b
+- See `batch-fixc6/independent-validation.md` + `decisions/2026-05-19-fixc-ollama-benchmark.md`
