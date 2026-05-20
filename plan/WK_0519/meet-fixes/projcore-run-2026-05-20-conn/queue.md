@@ -9,6 +9,10 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 | A.cf | diag1cf — Cloudflare mint completion | DR-5 Cloudflare path | **PASS** | 7a03c9d. Reads TURN_ID+TURN_API_Key, mints+caches+falls back. backend 100/1-skip, ice-config 7/7, Run-1 69/69, PC re-run 8/8. |
 | B | diag2 — UX + observability + pre-join | DR-1 (screen-share helper), DR-2 (diagnostics panel), DR-3 (WS-reconnect), DR-6 (minimal quick-join, self-preview), **DR-7 (pre-join validation + clear errors)** | PENDING | Next dispatch. DR-6 + DR-7 added 2026-05-20. DR-6/DR-7 share the pre-join surface. |
 
+## DR-8 — cross-network asymmetric media (PH↔US)
+
+Same root cause as same-WiFi failure (NAT asymmetry, no relay). Primary fix = DR-5 TURN relay (deployed). **Needs JROM cross-network re-test with relay live.** If it persists: add force-relay (`iceTransportPolicy:'relay'`) diagnostic toggle + DR-2 diagnostics to pin it. Likely no NEW code if relay resolves it; tracked here per JROM request.
+
 ## External dependency
 
 TURN credentials from JROM (managed provider — Metered or Cloudflare, pick pending). Batch A builds the plumbing; relay activates when creds are dropped into backend env. Repo stays STUN-only by default.
