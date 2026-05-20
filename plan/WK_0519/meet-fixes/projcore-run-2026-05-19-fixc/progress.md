@@ -34,3 +34,12 @@
 - R-C-1 → VERIFIED (with 650ms auto-start nuance flagged for JROM hardware smoke)
 - R-C-2 → VERIFIED
 - See `batch-fixc2/independent-validation.md`
+
+### FIXC3 — Screen-share layout reflow — **VERIFIED PASS** (2026-05-19/20, codex wall time 18m 58s)
+
+- Branch: `fix/meet-fixc3-share-reflow`
+- Commits: 2894e40 fix(frontend): reflow screen share layout (21 files, 758+/21-)
+- Backend: **60/60** (+1 new signaling test), FIXC3 e2e: 2/2, Run 1 regression: **55/55** (R8.1 → 13 consecutive)
+- Screenshots: share-strip.png + share-collapsed.png (active-speaker float visible, soft-light conforming)
+- R-C-4 → VERIFIED (single-sender caveat noted: remote camera tile is replaced by screen share when remote peer shares; local sharer unaffected)
+- See `batch-fixc3/independent-validation.md`
