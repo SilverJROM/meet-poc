@@ -1,0 +1,27 @@
+{
+  "qwen2.5:14b-instruct": {
+    "summaryAccuracy": 4,
+    "actionsAccuracy": 4,
+    "notes": "Clear and usable, but missed the provider-abstraction context, the one-minute speed threshold, and some action-item detail."
+  },
+  "mistral-nemo:12b": {
+    "summaryAccuracy": 5,
+    "actionsAccuracy": 5,
+    "notes": "Most complete output; captured provider readiness, accuracy priority, speed concern, decision rule, non-scope, and all action items."
+  },
+  "phi4:14b": {
+    "summaryAccuracy": 4,
+    "actionsAccuracy": 5,
+    "notes": "Excellent action items and concise summary, but the summary omitted provider-abstraction readiness and the explicit one-minute speed concern."
+  },
+  "gpt-oss:20b": {
+    "summaryAccuracy": 5,
+    "actionsAccuracy": 5,
+    "notes": "Complete and faithful; slightly slower than mistral-nemo, so it loses the tie on speed."
+  },
+  "gemma2:9b": {
+    "summaryAccuracy": 4,
+    "actionsAccuracy": 5,
+    "notes": "Fastest by a wide margin with accurate action items; summary missed provider-abstraction readiness and softened the no-UI deliverable wording."
+  }
+}

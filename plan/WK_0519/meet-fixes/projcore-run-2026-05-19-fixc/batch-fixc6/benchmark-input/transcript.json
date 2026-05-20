@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "source": "synthetic-fallback",
+  "reason": "The specified JROM Test transcript was mostly mic-test fragments and the FIX-B4 synthetic transcript had only three short lines, so this hand-written 60-second multi-speaker transcript is used for meaningful summary/action-item scoring.",
+  "language": "en",
+  "lines": [
+    {
+      "startMs": 0,
+      "endMs": 6000,
+      "clientId": "maria",
+      "name": "Maria",
+      "text": "Thanks everyone. The purpose of this meeting is to decide how we will roll out the transcript cleanup feature for the meet prototype."
+    },
+    {
+      "startMs": 6000,
+      "endMs": 12000,
+      "clientId": "leo",
+      "name": "Leo",
+      "text": "From engineering, the provider abstraction is ready. Claude, Codex, and Ollama can all be called through the same service, but we still need a default Ollama model."
+    },
+    {
+      "startMs": 12000,
+      "endMs": 19000,
+      "clientId": "nina",
+      "name": "Nina",
+      "text": "For product, accuracy matters more than speed. If the model misses action items or invents decisions, the cleanup button will not be useful to customers."
+    },
+    {
+      "startMs": 19000,
+      "endMs": 26000,
+      "clientId": "omar",
+      "name": "Omar",
+      "text": "I tested the local machine this morning. It can run the larger models, but anything over about one minute per transcript will feel too slow for a first version."
+    },
+    {
+      "startMs": 26000,
+      "endMs": 33000,
+      "clientId": "maria",
+      "name": "Maria",
+      "text": "Decision: we will benchmark five Ollama candidates today and choose the top three by accuracy first, then speed as the tiebreaker."
+    },
+    {
+      "startMs": 33000,
+      "endMs": 40000,
+      "clientId": "leo",
+      "name": "Leo",
+      "text": "I will run the benchmark script, save every model output, and write the ranking document with timing and scoring notes."
+    },
+    {
+      "startMs": 40000,
+      "endMs": 47000,
+      "clientId": "nina",
+      "name": "Nina",
+      "text": "I will review the top three outputs tomorrow and pick the default model for the transcript cleanup workflow."
+    },
+    {
+      "startMs": 47000,
+      "endMs": 54000,
+      "clientId": "omar",
+      "name": "Omar",
+      "text": "I will monitor CPU and memory during the first customer demo so we know whether we need a smaller fallback model."
+    },
+    {
+      "startMs": 54000,
+      "endMs": 60000,
+      "clientId": "maria",
+      "name": "Maria",
+      "text": "Great. We are not adding UI in this batch. The only deliverable is the benchmark report and the installed models for the next cleanup feature."
+    }
+  ]
+}

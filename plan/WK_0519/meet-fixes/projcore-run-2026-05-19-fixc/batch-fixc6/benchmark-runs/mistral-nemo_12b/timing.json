@@ -1,0 +1,7 @@
+{
+  "model": "mistral-nemo:12b",
+  "summaryMs": 39207,
+  "actionsMs": 18879,
+  "totalMs": 58086,
+  "ranAtIso": "2026-05-20T00:41:38.184Z"
+}

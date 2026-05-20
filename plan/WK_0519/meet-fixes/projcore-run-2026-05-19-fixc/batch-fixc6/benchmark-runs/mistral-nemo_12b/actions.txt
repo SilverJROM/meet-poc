@@ -1,0 +1,3 @@
+- Leo: Run the benchmark script, save every model output, and write the ranking document with timing and scoring notes.
+- Nina: Review the top three outputs tomorrow and pick the default model for the transcript cleanup workflow.
+- Omar: Monitor CPU and memory during the first customer demo so we know whether we need a smaller fallback model.

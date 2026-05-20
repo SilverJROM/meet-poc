@@ -1,0 +1,3 @@
+- Leo: Run the benchmark script and write the ranking document
+- Nina: Review the top three outputs and pick the default model
+- Omar: Monitor CPU and memory during the first customer demo

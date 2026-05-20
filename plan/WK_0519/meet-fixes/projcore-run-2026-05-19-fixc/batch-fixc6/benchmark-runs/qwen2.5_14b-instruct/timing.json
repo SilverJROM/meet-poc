@@ -1,0 +1,7 @@
+{
+  "model": "qwen2.5:14b-instruct",
+  "summaryMs": 36999,
+  "actionsMs": 20043,
+  "totalMs": 57042,
+  "ranAtIso": "2026-05-20T00:40:40.097Z"
+}

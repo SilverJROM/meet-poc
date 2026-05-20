@@ -1,0 +1,7 @@
+{
+  "model": "gemma2:9b",
+  "summaryMs": 22308,
+  "actionsMs": 15429,
+  "totalMs": 37737,
+  "ranAtIso": "2026-05-20T00:44:37.563Z"
+}

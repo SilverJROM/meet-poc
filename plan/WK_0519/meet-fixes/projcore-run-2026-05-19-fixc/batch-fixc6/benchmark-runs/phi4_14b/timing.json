@@ -1,0 +1,7 @@
+{
+  "model": "phi4:14b",
+  "summaryMs": 40646,
+  "actionsMs": 25722,
+  "totalMs": 66368,
+  "ranAtIso": "2026-05-20T00:42:44.554Z"
+}
