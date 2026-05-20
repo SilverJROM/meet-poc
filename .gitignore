@@ -17,3 +17,4 @@ INITIAL_PASSWORD.txt
 *.log
 .DS_Store
 e2e/.test-rooms.json
+.env
