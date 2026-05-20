@@ -13,7 +13,10 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 | C | diagc — voice-first resilience | DR-11 (auto-degrade to audio-only + manual toggle + quality pill + audio-priority allocation) | **PASS** | cbaa018. Isolation 12/12, audio-priority code verified, codex 78/78 isolated DB. Live-DB gate had 12 data-spec failures = pollution/seed-drift (not DR-11); DB cleaned to TEST_ROOM01. |
 | D | diagd — join-prereqs popout | DR-12 (always-clickable Join + popout naming missing name/mic; supersedes DR-7 grey-out) | PENDING | Added 2026-05-20. Dispatch after DIAGC. |
 
-## RUN CODE-COMPLETE (DR-1..DR-10, 2026-05-20) — DR-11 added as follow-on
+| E1 | diage1 — room access + URLs | DR-14 (clickable rooms), DR-15 (name-slug + custom owner slug URLs) | PENDING | Dispatch after DIAGD. |
+| E2 | diage2 — waiting room | DR-16 (host open/close toggle + wait-timeout param; closed=timed-wait+kick+reconnect, open=unlimited+host-available) | PENDING | Dispatch after E1. Host-opened = explicit toggle; wait default 15min host-set. |
+
+## RUN CODE-COMPLETE (DR-1..DR-10, 2026-05-20) — DR-11+ added as follow-ons
 
 DR-1..DR-10 all implemented + projcore-verified. R8.1 → 21 consecutive (77/77). Only **DR-8 cross-network field-proof** outstanding — needs JROM live PH↔US re-test (equipped now with diagnostics panel + force-relay toggle). Codex session lkcdx-meet-v5 parked (not torn down) until DR-8 confirmed.
 
