@@ -16,6 +16,6 @@ Status legend: `OPEN` / `IN_BATCH` / `IMPLEMENTED` / `VERIFIED`
 | R-C-10 | Ollama benchmark — top 3 by accuracy then speed | FIXC6 | **VERIFIED** | decisions/2026-05-19-fixc-ollama-benchmark.md — top 3: mistral-nemo:12b / gpt-oss:20b / gemma2:9b |
 | R-C-11 | Question library CRUD | FIXC7 | **VERIFIED** | validation/batch-fixc7.md — FIXC7.3 create/edit/star/delete PASS + backend CRUD tests |
 | R-C-12 | Question execution — auto on transcript-ready + manual Run button | FIXC7 | **VERIFIED** | validation/batch-fixc7.md — FIXC7.4/7.5/7.6 PASS + sidecar persistence |
-| R-C-13 | Transcriber model dropdown (small/medium/large-v3) | FIXC8 | IMPLEMENTED | batch-fixc8/independent-validation.md — backend 93/1-skip, FIXC8 3/3, R1 67/67 |
+| R-C-13 | Transcriber model dropdown (small/medium/large-v3) | FIXC8 | **VERIFIED** | validation/batch-fixc8.md — FIXC8.1/8.2/8.3 PASS, sidecar-model chain proven, R1 67/67 |
 
-Final acceptance: every row = VERIFIED.
+Final acceptance: every row = VERIFIED. ✅ **ALL 13 REQUIREMENTS VERIFIED (2026-05-20).**

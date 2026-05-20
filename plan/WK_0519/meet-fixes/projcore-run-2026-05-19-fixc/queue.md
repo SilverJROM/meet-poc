@@ -12,6 +12,6 @@ Status legend: `PENDING` / `IN_PROGRESS` / `VALIDATING` / `PASS` / `FAIL` / `BLO
 | 5 | FIXC5 — LLM provider abstraction | `fix/meet-fixc5-llm-providers` | **PASS** | R-C-8 |
 | 6 | FIXC6 — Ollama benchmark | `fix/meet-fixc6-ollama-benchmark` | **PASS** | R-C-10 |
 | 7 | FIXC7 — question library | `fix/meet-fixc7-question-library` | **PASS** | R-C-9, R-C-11, R-C-12 |
-| 8 | FIXC8 — transcriber dropdown | `fix/meet-fixc8-transcriber-config` | VALIDATING | R-C-13 |
+| 8 | FIXC8 — transcriber dropdown | `fix/meet-fixc8-transcriber-config` | **PASS** | R-C-13 |
 
 Sequential dispatch — no concurrent batches in this codex session.
