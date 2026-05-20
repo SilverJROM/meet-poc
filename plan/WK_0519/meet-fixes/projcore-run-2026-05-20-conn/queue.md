@@ -10,7 +10,7 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 | B1 | diagb1 — lobby/pre-join | DR-6, DR-7, DR-9, DR-10 | **PASS** | e92e514 + f53da9a (1 send-back: missed lobby-mic-meter expander). 74/74 gate, backend 101/1-skip. |
 | B2 | diagb2 — reliability/observability | DR-1 (screen-share helper), DR-2 (diagnostics panel + force-relay toggle), DR-3 (WS-reconnect + secure reconnect token) | **PASS** | 4567de7. backend 103/1-skip, full gate 77/77, reconnect token security-reviewed + tested. |
 
-| C | diagc — voice-first resilience | DR-11 (auto-degrade to audio-only + manual toggle + quality pill + audio-priority allocation) | IN_PROGRESS | Added 2026-05-20 after weak-signal real-call report. JROM scope = auto-degrade + manual. Audio-priority (DR-11e) folded in mid-build. |
+| C | diagc — voice-first resilience | DR-11 (auto-degrade to audio-only + manual toggle + quality pill + audio-priority allocation) | **PASS** | cbaa018. Isolation 12/12, audio-priority code verified, codex 78/78 isolated DB. Live-DB gate had 12 data-spec failures = pollution/seed-drift (not DR-11); DB cleaned to TEST_ROOM01. |
 | D | diagd — join-prereqs popout | DR-12 (always-clickable Join + popout naming missing name/mic; supersedes DR-7 grey-out) | PENDING | Added 2026-05-20. Dispatch after DIAGC. |
 
 ## RUN CODE-COMPLETE (DR-1..DR-10, 2026-05-20) — DR-11 added as follow-on
