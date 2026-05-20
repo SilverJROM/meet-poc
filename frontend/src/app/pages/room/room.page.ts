@@ -110,6 +110,7 @@ export class RoomPage implements OnDestroy {
   readonly waitExpiresAt = signal<number | null>(null);
   readonly waitRemainingSeconds = signal(0);
   readonly deviceFailureNotice = signal<string | null>(null);
+  readonly remoteAudioBlocked = signal(false);
   readonly setupWarning = signal<string | null>(null);
   readonly joinPrereqPopout = signal<string | null>(null);
   readonly myId = signal<string | null>(null);
@@ -252,6 +253,9 @@ export class RoomPage implements OnDestroy {
               audioTracks: peer.stream?.getAudioTracks().length ?? 0,
               videoTracks: peer.stream?.getVideoTracks().length ?? 0,
               hasVideoSrcObject: !!peer.stream?.getVideoTracks().length,
+              hasRemoteAudioElement: !!document.querySelector(`article.tile[data-peer="${peer.id}"] audio[data-remote-audio]`),
+              remoteAudioUsesPeerStream:
+                (document.querySelector(`article.tile[data-peer="${peer.id}"] audio[data-remote-audio]`) as HTMLAudioElement | null)?.srcObject === peer.stream,
             })),
         isMobile: () => this.viewport.isMobile(),
         isIOS: () => this.platform.isIOS(),
@@ -271,6 +275,14 @@ export class RoomPage implements OnDestroy {
     });
     effect(() => {
       this.activeSpeaker.observe(this.peers());
+    });
+    effect(() => {
+      const deviceId = this.selectedAudioOutputId();
+      this.peers();
+      if (this.state() !== 'in-call' || !deviceId) return;
+      window.setTimeout(() => {
+        void this.applySpeakerDevice(deviceId).catch((err) => console.debug('[devices] speaker routing refresh failed', err));
+      }, 0);
     });
     effect(() => {
       const activePeerIds = new Set<string>();
@@ -441,6 +453,34 @@ export class RoomPage implements OnDestroy {
     this.selectedAudioOutputId.set(deviceId);
     storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
     await this.applySpeakerDevice(deviceId);
+  }
+
+  handleRemoteAudioBlocked(): void {
+    if (this.state() === 'in-call') this.remoteAudioBlocked.set(true);
+  }
+
+  async enableRemoteAudio(): Promise<void> {
+    const audios = Array.from(document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio]'));
+    let blocked = false;
+    const deviceId = this.selectedAudioOutputId();
+    if (deviceId) {
+      try {
+        await this.applySpeakerDevice(deviceId);
+      } catch (err) {
+        console.debug('[devices] speaker routing for remote audio failed', err);
+      }
+    }
+    await Promise.all(
+      audios.map(async (audio) => {
+        try {
+          await audio.play();
+        } catch (err) {
+          blocked = true;
+          console.debug('[media] remote audio still blocked after user gesture', err);
+        }
+      }),
+    );
+    this.remoteAudioBlocked.set(blocked);
   }
 
   async testSpeaker(): Promise<void> {
@@ -1717,7 +1757,14 @@ declare global {
         signalingState: RTCSignalingState | 'local';
         selectedCandidateType: string | null;
       }[];
-      remoteMedia?: () => { id: string; audioTracks: number; videoTracks: number; hasVideoSrcObject: boolean }[];
+      remoteMedia?: () => {
+        id: string;
+        audioTracks: number;
+        videoTracks: number;
+        hasVideoSrcObject: boolean;
+        hasRemoteAudioElement: boolean;
+        remoteAudioUsesPeerStream: boolean;
+      }[];
       isMobile?: () => boolean;
       isIOS?: () => boolean;
       isAndroid?: () => boolean;

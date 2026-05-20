@@ -19,3 +19,6 @@ Codex appends one line per STATUS change: `[projcore callback] <batch-id> <STATE
 [projcore callback] diaglog-recv PROPOSED DR-33 plan ready: add receive-side inboundAudio from audio inbound-rtp plus receiver track state, keep combined quality stats unchanged, display Audio recv, no migration expected; waiting for APPROVED-PLAN.
 [projcore callback] diaglog-recv APPROVED-PLAN DR-33 plan approved; implementing capture/display/test without changing media or quality behavior.
 [projcore callback] diaglog-recv DONE DR-33 inboundAudio diagnostics implemented; backend diagnostics test PASS; build PASS; isolated 48xx e2e PASS; pm2 restarted clean with no env leak.
+[projcore callback] audiofix PROPOSED dedicated remote audio sink in tile; room-level autoplay unblock prompt; preserve sink routing
+[projcore callback] audiofix APPROVED-PLAN live peer stream binding; all video muted; implement DR-34 now
+[projcore callback] audiofix DONE DR-34 remote audio decoupled from camera-gated video; live stream audio sink; autoplay prompt; setSinkId preserved; build/e2e/pm2 PASS

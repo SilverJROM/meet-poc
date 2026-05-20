@@ -238,7 +238,8 @@ h1 {
   padding: 10px 12px;
 }
 
-.device-notice {
+.device-notice,
+.audio-unblock-notice {
   margin: 12px 0 0;
   display: flex;
   align-items: center;
@@ -251,10 +252,23 @@ h1 {
   padding: 10px 12px;
 }
 
-.device-notice button {
+.audio-unblock-notice {
+  border-color: rgba(59, 130, 246, 0.52);
+  background: rgba(59, 130, 246, 0.14);
+  color: #dbeafe;
+}
+
+.audio-unblock-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.device-notice button,
+.audio-unblock-notice button {
   border: 0;
   background: transparent;
-  color: #991b1b;
+  color: inherit;
   cursor: pointer;
   font-weight: 700;
 }

@@ -108,6 +108,15 @@
           <button type="button" (click)="actionNotice.set(null)">Dismiss</button>
         </div>
       }
+      @if (remoteAudioBlocked()) {
+        <div class="audio-unblock-notice" role="status">
+          <span>Tap to enable audio</span>
+          <div class="audio-unblock-actions">
+            <button type="button" (click)="enableRemoteAudio()">Enable audio</button>
+            <button type="button" (click)="remoteAudioBlocked.set(false)">Dismiss</button>
+          </div>
+        </div>
+      }
       @if (webrtc.manualAudioOnly()) {
         <div class="weak-connection-banner" role="status">
           <span>Audio-only mode is on</span>
@@ -200,7 +209,14 @@
       >
         @if (shareLayoutActive() && sharingPeer(); as presenter) {
           <div class="share-stage" aria-label="Shared screen">
-            <app-tile [peer]="presenter" [displayStream]="shareStream()" [forceVideo]="true" variant="share-main" [speaking]="activeSpeaker.activePeerId() === presenter.id" />
+            <app-tile
+              [peer]="presenter"
+              [displayStream]="shareStream()"
+              [forceVideo]="true"
+              variant="share-main"
+              [speaking]="activeSpeaker.activePeerId() === presenter.id"
+              (remoteAudioBlocked)="handleRemoteAudioBlocked()"
+            />
           </div>
           <aside class="share-strip" [class.collapsed]="shareStripCollapsed()" aria-label="Participants during screen share">
             <button
@@ -214,7 +230,7 @@
             @if (!shareStripCollapsed()) {
               <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
                 @for (peer of orderedStripPeers(); track peer.participantId) {
-                  <app-tile [peer]="peer" variant="strip" [speaking]="activeSpeaker.activePeerId() === peer.id" />
+                  <app-tile [peer]="peer" variant="strip" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
                 }
               </div>
             }
@@ -222,7 +238,7 @@
         } @else {
           <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
             @for (peer of peers(); track peer.participantId) {
-              <app-tile [peer]="peer" [speaking]="activeSpeaker.activePeerId() === peer.id" />
+              <app-tile [peer]="peer" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
             }
           </div>
         }

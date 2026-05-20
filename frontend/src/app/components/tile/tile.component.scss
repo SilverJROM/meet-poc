@@ -93,6 +93,14 @@ video {
   object-fit: cover;
 }
 
+.remote-audio-sink {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 video.is-mirrored-self-view {
   transform: scaleX(-1);
 }
