@@ -2,8 +2,10 @@ import { DatePipe } from '@angular/common';
 import { Component, inject, signal } from '@angular/core';
 import {
   DiagnosticEntry,
+  DiagnosticsInboundAudio,
   DiagnosticSessionSummary,
   DiagnosticsDetailResponse,
+  DiagnosticsPeerSample,
   MeetingSessionsService,
 } from '../../services/meeting-sessions.service';
 
@@ -76,6 +78,36 @@ export class DiagnosticsPage {
     const label = track.label || 'Unlabeled';
     const deviceId = track.deviceId || 'no deviceId';
     return `${label} (${deviceId})`;
+  }
+
+  inboundAudioSummary(entry: DiagnosticEntry): string {
+    const peer = this.inboundAudioPeer(entry);
+    return this.peerInboundAudioSummary(peer);
+  }
+
+  peerInboundAudioSummary(peer: DiagnosticsPeerSample | undefined): string {
+    const inbound = peer?.inboundAudio;
+    if (!inbound) return '✗ not arriving · packets 0 · track unknown';
+    const arriving = inbound.packetsActivelyArriving === true && (inbound.packetsReceived ?? 0) > 0;
+    const status = arriving ? '✓ arriving' : '✗ not arriving';
+    const packets = inbound.packetsReceived ?? 0;
+    const delta = inbound.packetsReceivedDelta == null ? 'delta n/a' : `delta +${inbound.packetsReceivedDelta}`;
+    const level = inbound.audioLevel == null ? 'level n/a' : `level ${inbound.audioLevel.toFixed(3)}`;
+    const track = inbound.trackReadyState || 'track unknown';
+    const muted = inbound.trackMuted == null ? 'muted n/a' : `muted ${inbound.trackMuted ? 'yes' : 'no'}`;
+    return `${status} · packets ${packets} · ${delta} · ${level} · ${track} · ${muted}`;
+  }
+
+  audioRecvClass(inbound: DiagnosticsInboundAudio | undefined): 'audio-recv-ok' | 'audio-recv-bad' {
+    return inbound?.packetsActivelyArriving === true && (inbound.packetsReceived ?? 0) > 0 ? 'audio-recv-ok' : 'audio-recv-bad';
+  }
+
+  entryAudioRecvClass(entry: DiagnosticEntry): 'audio-recv-ok' | 'audio-recv-bad' {
+    return this.audioRecvClass(this.inboundAudioPeer(entry)?.inboundAudio);
+  }
+
+  private inboundAudioPeer(entry: DiagnosticEntry): DiagnosticsPeerSample | undefined {
+    return entry.payload.peers.find((candidate) => !candidate.isLocal && candidate.inboundAudio) ?? entry.payload.peers[0];
   }
 
   candidateLabel(entry: DiagnosticEntry): string {

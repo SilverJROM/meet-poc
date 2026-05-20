@@ -62,6 +62,16 @@ function samplePayload(overrides: Record<string, unknown> = {}): Record<string, 
           readyState: 'live',
           source: 'sender',
         },
+        inboundAudio: {
+          packetsReceived: 42,
+          packetsLost: 0,
+          bytesReceived: 12_345,
+          audioLevel: 0.08,
+          packetsReceivedDelta: 8,
+          packetsActivelyArriving: true,
+          trackReadyState: 'live',
+          trackMuted: false,
+        },
         outboundVideo: {
           id: 'video-track',
           kind: 'video',
@@ -128,6 +138,13 @@ describe('meeting session diagnostics API', () => {
       muted: false,
       readyState: 'live',
       source: 'sender',
+    });
+    expect(detail.body.entries[0].payload.peers[0].inboundAudio).toMatchObject({
+      packetsReceived: 42,
+      packetsReceivedDelta: 8,
+      packetsActivelyArriving: true,
+      trackReadyState: 'live',
+      trackMuted: false,
     });
     await request(app).get(`/api/meeting-sessions/${session.id}/diagnostics`).set('Cookie', otherCookie).expect(404);
     await request(app).get(`/api/meeting-sessions/${session.id}/diagnostics.json`).set('Cookie', ownerCookie).expect(200);

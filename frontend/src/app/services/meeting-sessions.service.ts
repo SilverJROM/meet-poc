@@ -38,6 +38,17 @@ export type DiagnosticsTrackInfo = {
   source: 'sender' | 'stream' | 'none';
 };
 
+export type DiagnosticsInboundAudio = {
+  packetsReceived: number | null;
+  packetsLost: number | null;
+  bytesReceived: number | null;
+  audioLevel: number | null;
+  packetsReceivedDelta: number | null;
+  packetsActivelyArriving: boolean | null;
+  trackReadyState: MediaStreamTrackState | null;
+  trackMuted: boolean | null;
+};
+
 export type DiagnosticsPeerSample = {
   id: string;
   participantId?: string;
@@ -60,6 +71,7 @@ export type DiagnosticsPeerSample = {
   camEnabled: boolean;
   screenOn: boolean;
   outboundAudio: DiagnosticsTrackInfo;
+  inboundAudio: DiagnosticsInboundAudio;
   outboundVideo: DiagnosticsTrackInfo;
   reconnecting?: boolean;
   updatedAt: number;

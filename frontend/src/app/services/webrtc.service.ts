@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { IceConfigService } from './ice-config.service';
-import type { DiagnosticsPeerSample, DiagnosticsTrackInfo } from './meeting-sessions.service';
+import type { DiagnosticsInboundAudio, DiagnosticsPeerSample, DiagnosticsTrackInfo } from './meeting-sessions.service';
 
 export type PeerState = {
   id: string;
@@ -64,6 +64,8 @@ type PreviousStats = {
   packetsReceived: number;
 };
 
+type InboundAudioStats = Omit<DiagnosticsInboundAudio, 'trackReadyState' | 'trackMuted'>;
+
 type QualityMetrics = {
   quality: ConnectionQuality;
   packetLossPct: number | null;
@@ -97,6 +99,8 @@ export class WebrtcService {
   private readonly peerMeta = new Map<string, PeerMeta>();
   private readonly qualityCounters = new Map<string, QualityCounters>();
   private readonly previousStats = new Map<string, PreviousStats>();
+  private readonly previousInboundAudioPackets = new Map<string, number>();
+  private readonly inboundAudioStats = new Map<string, InboundAudioStats>();
   private readonly autoPausedReceivers = new Set<string>();
   private readonly remotePauseRequests = new Set<string>();
   private readonly outboundVideoPaused = new Map<string, boolean>();
@@ -395,8 +399,10 @@ export class WebrtcService {
     return {
       peers: this.peerList().map((peer) => {
         const senders = peer.pc?.getSenders() ?? [];
+        const receivers = peer.pc?.getReceivers() ?? [];
         const audioSender = senders.find((sender) => sender.track?.kind === 'audio');
         const videoSender = senders.find((sender) => sender.track?.kind === 'video') ?? this.videoSenders.get(peer.id) ?? null;
+        const audioReceiver = receivers.find((receiver) => receiver.track?.kind === 'audio');
         const fallbackAudio = this.localStream?.getAudioTracks()[0] ?? peer.stream?.getAudioTracks()[0] ?? null;
         const fallbackVideo = this.localStream?.getVideoTracks()[0] ?? peer.stream?.getVideoTracks()[0] ?? null;
         return {
@@ -421,6 +427,7 @@ export class WebrtcService {
           camEnabled: peer.camEnabled,
           screenOn: peer.screenOn,
           outboundAudio: trackInfo(audioSender?.track ?? null, fallbackAudio, 'audio'),
+          inboundAudio: inboundAudioInfo(this.inboundAudioStats.get(peer.id), audioReceiver?.track ?? null),
           outboundVideo: trackInfo(videoSender?.track ?? null, fallbackVideo, 'video'),
           reconnecting: peer.reconnecting,
           updatedAt: peer.updatedAt,
@@ -537,6 +544,8 @@ export class WebrtcService {
     this.peerMeta.clear();
     this.qualityCounters.clear();
     this.previousStats.clear();
+    this.previousInboundAudioPackets.clear();
+    this.inboundAudioStats.clear();
     this.autoPausedReceivers.clear();
     this.remotePauseRequests.clear();
     this.outboundVideoPaused.clear();
@@ -595,6 +604,8 @@ export class WebrtcService {
     this.peerMeta.delete(clientId);
     this.qualityCounters.delete(clientId);
     this.previousStats.delete(clientId);
+    this.previousInboundAudioPackets.delete(clientId);
+    this.inboundAudioStats.delete(clientId);
     this.autoPausedReceivers.delete(clientId);
     this.remotePauseRequests.delete(clientId);
     this.outboundVideoPaused.delete(clientId);
@@ -779,6 +790,10 @@ export class WebrtcService {
     let availableOutgoingBitrateKbps: number | null = null;
     let hasInboundMedia = false;
     let inboundPacketsReceivedTotal = 0;
+    let inboundAudioPacketsReceived: number | null = null;
+    let inboundAudioPacketsLost: number | null = null;
+    let inboundAudioBytesReceived: number | null = null;
+    let inboundAudioLevel: number | null = null;
 
     for (const rawReport of stats.values()) {
       const report = rawReport as RTCStats & Record<string, unknown>;
@@ -788,6 +803,12 @@ export class WebrtcService {
         packetsReceived = (packetsReceived ?? 0) + numberOrZero(report['packetsReceived']);
         inboundPacketsReceivedTotal += numberOrZero(report['packetsReceived']);
         if (typeof report['jitter'] === 'number') jitterMs = Math.max(jitterMs ?? 0, report['jitter'] * 1000);
+        if (report['kind'] === 'audio') {
+          inboundAudioPacketsReceived = (inboundAudioPacketsReceived ?? 0) + numberOrZero(report['packetsReceived']);
+          inboundAudioPacketsLost = (inboundAudioPacketsLost ?? 0) + numberOrZero(report['packetsLost']);
+          inboundAudioBytesReceived = (inboundAudioBytesReceived ?? 0) + numberOrZero(report['bytesReceived']);
+          if (typeof report['audioLevel'] === 'number') inboundAudioLevel = Math.max(inboundAudioLevel ?? 0, report['audioLevel']);
+        }
       }
       if (report.type === 'remote-inbound-rtp' && typeof report['roundTripTime'] === 'number') {
         rttMs = Math.max(rttMs ?? 0, report['roundTripTime'] * 1000);
@@ -817,6 +838,8 @@ export class WebrtcService {
       this.previousStats.set(clientId, { packetsLost: currentLost, packetsReceived: currentReceived });
     }
 
+    this.inboundAudioStats.set(clientId, this.buildInboundAudioStats(clientId, inboundAudioPacketsReceived, inboundAudioPacketsLost, inboundAudioBytesReceived, inboundAudioLevel));
+
     const quality = classifyQuality({
       packetLossPct,
       jitterMs,
@@ -828,6 +851,38 @@ export class WebrtcService {
       iceConnectionState: pc.iceConnectionState,
     });
     return { quality, packetLossPct, jitterMs, rttMs, availableOutgoingBitrateKbps, hasInboundMedia };
+  }
+
+  private buildInboundAudioStats(
+    clientId: string,
+    packetsReceived: number | null,
+    packetsLost: number | null,
+    bytesReceived: number | null,
+    audioLevel: number | null,
+  ): InboundAudioStats {
+    if (packetsReceived == null) {
+      this.previousInboundAudioPackets.delete(clientId);
+      return {
+        packetsReceived: null,
+        packetsLost,
+        bytesReceived,
+        audioLevel,
+        packetsReceivedDelta: null,
+        packetsActivelyArriving: null,
+      };
+    }
+    const previousPackets = this.previousInboundAudioPackets.get(clientId);
+    const packetsReceivedDelta = previousPackets == null ? null : Math.max(0, packetsReceived - previousPackets);
+    const packetsActivelyArriving = previousPackets == null ? packetsReceived > 0 : (packetsReceivedDelta ?? 0) > 0;
+    this.previousInboundAudioPackets.set(clientId, packetsReceived);
+    return {
+      packetsReceived,
+      packetsLost,
+      bytesReceived,
+      audioLevel,
+      packetsReceivedDelta,
+      packetsActivelyArriving,
+    };
   }
 
   private sendReceiverVideoPolicy(clientId: string, videoPaused: boolean, reason: 'auto-poor' | 'manual-audio-only'): void {
@@ -980,6 +1035,19 @@ function classifyQuality(input: {
 
 function numberOrZero(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function inboundAudioInfo(stats: InboundAudioStats | undefined, receiverTrack: MediaStreamTrack | null): DiagnosticsInboundAudio {
+  return {
+    packetsReceived: stats?.packetsReceived ?? null,
+    packetsLost: stats?.packetsLost ?? null,
+    bytesReceived: stats?.bytesReceived ?? null,
+    audioLevel: stats?.audioLevel ?? null,
+    packetsReceivedDelta: stats?.packetsReceivedDelta ?? null,
+    packetsActivelyArriving: stats?.packetsActivelyArriving ?? null,
+    trackReadyState: receiverTrack?.readyState ?? null,
+    trackMuted: receiverTrack?.muted ?? null,
+  };
 }
 
 function trackInfo(senderTrack: MediaStreamTrack | null, fallbackTrack: MediaStreamTrack | null, kind: 'audio' | 'video'): DiagnosticsTrackInfo {

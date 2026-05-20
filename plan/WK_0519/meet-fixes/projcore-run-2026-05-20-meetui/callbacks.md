@@ -16,3 +16,6 @@ Codex appends one line per STATUS change: `[projcore callback] <batch-id> <STATE
 [projcore callback] tilefix DONE DR-30/DR-32 local-self-view-only mirror + stable tile order implemented; build PASS; tilefix e2e 2/2 PASS; targeted gate 12/12 PASS; pm2 clean env verified.
 [projcore callback] extdev PROPOSED DR-29 plan ready: fix selected external mic mismatch before publish/switch/reconnect, verify RTCRtpSender outbound audio deviceId via DR-28 diagnostics; waiting for APPROVED-PLAN.
 [projcore callback] extdev DONE DR-29 external mic reconciliation implemented; backend 121/121 PASS (1 skipped); build PASS; extdev e2e 1/1 PASS; DR25/DR28/DR31 targeted gate 6/6 PASS; pm2 clean env verified.
+[projcore callback] diaglog-recv PROPOSED DR-33 plan ready: add receive-side inboundAudio from audio inbound-rtp plus receiver track state, keep combined quality stats unchanged, display Audio recv, no migration expected; waiting for APPROVED-PLAN.
+[projcore callback] diaglog-recv APPROVED-PLAN DR-33 plan approved; implementing capture/display/test without changing media or quality behavior.
+[projcore callback] diaglog-recv DONE DR-33 inboundAudio diagnostics implemented; backend diagnostics test PASS; build PASS; isolated 48xx e2e PASS; pm2 restarted clean with no env leak.
