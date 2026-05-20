@@ -366,17 +366,21 @@ export class WebrtcService {
     for (const peer of this.peers().values()) {
       const pc = peer.pc;
       if (!pc) continue;
-      const sender = pc.getSenders().find((candidate) => candidate.track?.kind === kind);
+      const sender =
+        pc.getSenders().find((candidate) => candidate.track?.kind === kind) ??
+        (kind === 'video' ? this.videoSenders.get(peer.id) ?? null : null);
       if (sender) {
-        operations.push(sender.replaceTrack(track));
         if (kind === 'video') this.videoSenders.set(peer.id, sender);
+        operations.push(sender.replaceTrack(track).then(() => this.applySenderPreference(sender, kind)));
       } else if (track && this.localStream) {
         const added = pc.addTrack(track, this.localStream);
         if (kind === 'video') this.videoSenders.set(peer.id, added);
+        operations.push(this.applySenderPreference(added, kind));
       }
       operations.push(this.applySenderBandwidthPreferences(pc));
     }
     await Promise.all(operations);
+    await Promise.all(this.peerList().filter((peer) => !peer.isLocal && peer.pc).map((peer) => this.applySenderBandwidthPreferences(peer.pc!)));
     const localPeer = this.peerList().find((peer) => peer.isLocal);
     if (localPeer) this.touchPeer(localPeer.id, { stream: this.localStream });
   }
@@ -683,6 +687,7 @@ export class WebrtcService {
     } catch {
       await this.replaceVideoSenderFallback(clientId, sender, shouldPause);
     }
+    await this.applySenderBandwidthPreferences(pc);
     this.outboundVideoPaused.set(clientId, shouldPause);
   }
 
@@ -703,13 +708,17 @@ export class WebrtcService {
       pc.getSenders().map(async (sender) => {
         const kind = sender.track?.kind;
         if (kind !== 'audio' && kind !== 'video') return;
-        try {
-          await setSenderBandwidthPreference(sender, kind);
-        } catch (err) {
-          console.debug(`[webrtc] ${kind} sender bandwidth preference unavailable`, err);
-        }
+        await this.applySenderPreference(sender, kind);
       }),
     );
+  }
+
+  private async applySenderPreference(sender: RTCRtpSender, kind: 'audio' | 'video'): Promise<void> {
+    try {
+      await setSenderBandwidthPreference(sender, kind);
+    } catch (err) {
+      console.debug(`[webrtc] ${kind} sender bandwidth preference unavailable`, err);
+    }
   }
 
   private shouldPauseOutboundVideo(clientId: string): boolean {
@@ -738,7 +747,13 @@ export class WebrtcService {
 async function setVideoSenderActive(sender: RTCRtpSender, active: boolean): Promise<void> {
   const params = sender.getParameters();
   if (!params.encodings?.length) throw new Error('sender encodings unavailable');
-  params.encodings = params.encodings.map((encoding) => ({ ...encoding, active }));
+  params.encodings = params.encodings.map((encoding) => ({
+    ...encoding,
+    active,
+    priority: 'low',
+    networkPriority: 'low',
+    maxBitrate: Math.min(typeof encoding.maxBitrate === 'number' ? encoding.maxBitrate : VIDEO_MAX_BITRATE_BPS, VIDEO_MAX_BITRATE_BPS),
+  }));
   await sender.setParameters(params);
 }
 

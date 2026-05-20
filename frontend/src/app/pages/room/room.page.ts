@@ -1,4 +1,4 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, OnDestroy, Signal, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, HostListener, OnDestroy, Signal, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
@@ -96,6 +96,7 @@ export class RoomPage implements OnDestroy {
   readonly status = signal('');
   readonly deviceFailureNotice = signal<string | null>(null);
   readonly setupWarning = signal<string | null>(null);
+  readonly joinPrereqPopout = signal<string | null>(null);
   readonly myId = signal<string | null>(null);
   readonly hostClientId = signal<string | null>(null);
   readonly isOwner = signal(false);
@@ -289,12 +290,22 @@ export class RoomPage implements OnDestroy {
   async join(): Promise<void> {
     const name = this.displayName().trim();
     if (this.state() === 'connecting') return;
-    if (!name) {
-      this.nameError.set('Enter your name to join');
-      this.displayNameInput()?.nativeElement.focus();
+
+    const initialMissing = this.missingJoinPrereqs();
+    if (initialMissing.includes('name')) {
+      this.showJoinPrereqPopout(initialMissing);
       return;
     }
+
+    if (!this.hasMicAccess()) await this.startLobbyPreflight();
+    const missing = this.missingJoinPrereqs();
+    if (missing.length > 0) {
+      this.showJoinPrereqPopout(missing);
+      return;
+    }
+
     this.activeSpeaker.unlock();
+    this.joinPrereqPopout.set(null);
     this.nameError.set(null);
     this.error.set(null);
     this.status.set('Connecting...');
@@ -325,7 +336,15 @@ export class RoomPage implements OnDestroy {
 
   updateDisplayName(value: string): void {
     this.displayName.set(value);
-    if (value.trim()) this.nameError.set(null);
+    if (value.trim()) {
+      this.nameError.set(null);
+      if (this.joinPrereqPopout()?.includes('name')) this.joinPrereqPopout.set(null);
+    }
+  }
+
+  @HostListener('document:keydown.escape')
+  dismissJoinPrereqPopout(): void {
+    this.joinPrereqPopout.set(null);
   }
 
   cancelKnock(): void {
@@ -857,6 +876,34 @@ export class RoomPage implements OnDestroy {
     }
     track.enabled = this.microphoneRequested();
     this.media.micOn.set(track.enabled);
+  }
+
+  private missingJoinPrereqs(): ('name' | 'mic')[] {
+    const missing: ('name' | 'mic')[] = [];
+    if (!this.displayName().trim()) missing.push('name');
+    if (!this.hasMicAccess()) missing.push('mic');
+    return missing;
+  }
+
+  private hasMicAccess(): boolean {
+    const audioTrack = this.media.localStream()?.getAudioTracks()[0];
+    return !!audioTrack && audioTrack.readyState === 'live';
+  }
+
+  private showJoinPrereqPopout(missing: ('name' | 'mic')[]): void {
+    if (missing.includes('name')) {
+      this.nameError.set('Enter your name to join');
+      this.displayNameInput()?.nativeElement.focus();
+    } else {
+      this.nameError.set(null);
+    }
+    if (missing.includes('name') && missing.includes('mic')) {
+      this.joinPrereqPopout.set('Please add your name and enable your microphone');
+    } else if (missing.includes('name')) {
+      this.joinPrereqPopout.set('Please add your name');
+    } else {
+      this.joinPrereqPopout.set('Please enable your microphone');
+    }
   }
 
   private async checkIceConfigForJoin(): Promise<void> {

@@ -243,6 +243,35 @@ h1 {
   font-weight: 700;
 }
 
+.join-prereq-popout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid rgba(220, 38, 38, 0.42);
+  border-radius: 8px;
+  background: #fff1f2;
+  color: #7f1d1d;
+  padding: 10px 12px;
+  box-shadow: 0 12px 28px rgba(127, 29, 29, 0.14);
+}
+
+.join-prereq-popout p {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.join-prereq-popout button {
+  border: 0;
+  background: transparent;
+  color: #991b1b;
+  cursor: pointer;
+  font-weight: 800;
+  padding: 0;
+}
+
 .screen-share-help,
 .weak-connection-banner,
 .diagnostics-panel {

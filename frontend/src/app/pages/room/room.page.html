@@ -256,26 +256,25 @@
           </div>
         }
       }
-      @if (!hasBlockingLobbyError()) {
-        <div class="quick-join">
-          <app-lobby-preview
-            [stream]="localStream()"
-            [audioInputs]="audioInputs()"
-            [videoInputs]="videoInputs()"
-            [selectedAudioId]="selectedAudioId()"
-            [selectedVideoId]="selectedVideoId()"
-            [videoEnabled]="cameraRequested()"
-            [compact]="true"
-            [level]="micLevel()"
-            [audioContextActivated]="media.audioContextActivated()"
-            [facingMode]="currentFacingMode()"
-            (audioDeviceChange)="changeAudioDevice($event)"
-            (videoDeviceChange)="changeVideoDevice($event)"
-            (enableMicPreview)="enableMicPreview()"
-            (flipCamera)="flipLobbyCamera()"
-          />
-        </div>
-        <form class="join-form" novalidate (ngSubmit)="join()">
+      <div class="quick-join">
+        <app-lobby-preview
+          [stream]="localStream()"
+          [audioInputs]="audioInputs()"
+          [videoInputs]="videoInputs()"
+          [selectedAudioId]="selectedAudioId()"
+          [selectedVideoId]="selectedVideoId()"
+          [videoEnabled]="cameraRequested()"
+          [compact]="true"
+          [level]="micLevel()"
+          [audioContextActivated]="media.audioContextActivated()"
+          [facingMode]="currentFacingMode()"
+          (audioDeviceChange)="changeAudioDevice($event)"
+          (videoDeviceChange)="changeVideoDevice($event)"
+          (enableMicPreview)="enableMicPreview()"
+          (flipCamera)="flipLobbyCamera()"
+        />
+      </div>
+      <form class="join-form" novalidate (ngSubmit)="join()">
           <div class="field">
             <label for="display-name">Name</label>
             <input
@@ -328,53 +327,49 @@
               <p>{{ setupWarning() }}</p>
             </div>
           }
+          @if (joinPrereqPopout(); as prereqMessage) {
+            <div class="join-prereq-popout" role="alertdialog" aria-live="assertive" aria-label="Join requirements">
+              <p>{{ prereqMessage }}</p>
+              <button type="button" (click)="dismissJoinPrereqPopout()" aria-label="Dismiss join requirements">Dismiss</button>
+            </div>
+          }
           <button
             type="submit"
             class="primary-btn"
-            [class.disabled-look]="!displayName().trim()"
-            [disabled]="state() === 'connecting' || hasBlockingLobbyError()"
+            [disabled]="state() === 'connecting'"
           >
             {{ auth.user() ? 'Join' : 'Ask to join' }}
           </button>
-        </form>
-        <button type="button" class="configure-toggle" [attr.aria-expanded]="lobbyDeviceDialogOpen()" (click)="toggleLobbyDeviceDialog()">
-          {{ lobbyDeviceDialogOpen() ? 'Hide device test' : 'Test / configure devices' }}
-        </button>
-        @if (lobbyDeviceDialogOpen()) {
-          <app-device-dialog
-            [open]="true"
-            mode="lobby"
-            presentation="inline"
-            [permissionIntro]="devicePermissionIntro()"
-            [stream]="localStream()"
-            [audioInputs]="audioInputs()"
-            [videoInputs]="videoInputs()"
-            [audioOutputs]="audioOutputs()"
-            [selectedAudioId]="selectedAudioId()"
-            [selectedVideoId]="selectedVideoId()"
-            [selectedAudioOutputId]="selectedAudioOutputId()"
-            [level]="micLevel()"
-            [canSelectAudioOutput]="canSelectAudioOutput()"
-            [busy]="deviceDialogBusy()"
-            [error]="deviceDialogError()"
-            (continuePermission)="continueDeviceSetup()"
-            (audioDeviceChange)="changeAudioDevice($event)"
-            (videoDeviceChange)="changeVideoDevice($event)"
-            (audioOutputChange)="changeAudioOutputDevice($event)"
-            (testSpeaker)="testSpeaker()"
-            (close)="lobbyDeviceDialogOpen.set(false)"
-          />
-        }
-        <p class="error-text">{{ error() || '' }}</p>
-      } @else {
-        <div class="join-form disabled-lobby">
-          <div class="field">
-            <label for="display-name-disabled">Name</label>
-            <input id="display-name-disabled" type="text" [value]="displayName()" disabled>
-          </div>
-          <button type="button" class="primary-btn" disabled>{{ auth.user() ? 'Join' : 'Ask to join' }}</button>
-        </div>
+      </form>
+      <button type="button" class="configure-toggle" [attr.aria-expanded]="lobbyDeviceDialogOpen()" (click)="toggleLobbyDeviceDialog()">
+        {{ lobbyDeviceDialogOpen() ? 'Hide device test' : 'Test / configure devices' }}
+      </button>
+      @if (lobbyDeviceDialogOpen()) {
+        <app-device-dialog
+          [open]="true"
+          mode="lobby"
+          presentation="inline"
+          [permissionIntro]="devicePermissionIntro()"
+          [stream]="localStream()"
+          [audioInputs]="audioInputs()"
+          [videoInputs]="videoInputs()"
+          [audioOutputs]="audioOutputs()"
+          [selectedAudioId]="selectedAudioId()"
+          [selectedVideoId]="selectedVideoId()"
+          [selectedAudioOutputId]="selectedAudioOutputId()"
+          [level]="micLevel()"
+          [canSelectAudioOutput]="canSelectAudioOutput()"
+          [busy]="deviceDialogBusy()"
+          [error]="deviceDialogError()"
+          (continuePermission)="continueDeviceSetup()"
+          (audioDeviceChange)="changeAudioDevice($event)"
+          (videoDeviceChange)="changeVideoDevice($event)"
+          (audioOutputChange)="changeAudioOutputDevice($event)"
+          (testSpeaker)="testSpeaker()"
+          (close)="lobbyDeviceDialogOpen.set(false)"
+        />
       }
+      <p class="error-text">{{ error() || '' }}</p>
     </section>
   }
 </main>
