@@ -51,12 +51,15 @@
         [waitingCount]="knockers().length"
         [sidebarOpen]="sidebarOpen()"
         [diagnosticsOpen]="diagnosticsOpen()"
+        [chatOpen]="chatOpen()"
+        [chatUnreadCount]="chatUnreadCount()"
         [audioOnly]="webrtc.manualAudioOnly()"
         (mute)="toggleMic()"
         (camera)="toggleCamera()"
         (screen)="toggleScreen()"
         (record)="toggleRecording()"
         (sidebar)="toggleSidebar()"
+        (chat)="toggleChat()"
         (diagnostics)="toggleDiagnostics()"
         (audioOnlyToggle)="toggleAudioOnly()"
         (devices)="openInCallDeviceDialog()"
@@ -189,7 +192,12 @@
       }
       <app-recording-banner [recording]="hostRecording()" [startedAt]="recordingStartedAt()" />
       <p class="call-status" role="status">{{ status() }}</p>
-      <div class="call-content" [class.sidebar-open]="sidebarOpen()" [class.share-content]="shareLayoutActive()" [class.strip-collapsed]="shareStripCollapsed()">
+      <div
+        class="call-content"
+        [class.sidebar-open]="sidebarOpen() || chatOpen()"
+        [class.share-content]="shareLayoutActive()"
+        [class.strip-collapsed]="shareStripCollapsed()"
+      >
         @if (shareLayoutActive() && sharingPeer(); as presenter) {
           <div class="share-stage" aria-label="Shared screen">
             <app-tile [peer]="presenter" [displayStream]="shareStream()" [forceVideo]="true" variant="share-main" [speaking]="activeSpeaker.activePeerId() === presenter.id" />
@@ -218,18 +226,54 @@
             }
           </div>
         }
-        <app-participant-sidebar
-          [open]="sidebarOpen()"
-          [peers]="peers()"
-          [knockers]="knockers()"
-          [isHost]="isHost()"
-          [myClientId]="myId()"
-          (mute)="muteParticipant($event)"
-          (remove)="removeParticipant($event)"
-          (admit)="admit($event)"
-          (reject)="reject($event)"
-          (close)="sidebarOpen.set(false)"
-        />
+        @if (chatOpen()) {
+          <aside class="chat-panel" aria-label="Meeting chat">
+            <header class="chat-header">
+              <h2>In-call chat</h2>
+              <button type="button" aria-label="Close chat" title="Close chat" (click)="chatOpen.set(false)">x</button>
+            </header>
+            <div #chatMessageList class="chat-message-list" role="log" aria-live="polite" aria-label="Chat messages">
+              @for (message of chatMessages(); track message.id) {
+                <article class="chat-message" [class.mine]="message.mine">
+                  <div class="chat-message-meta">
+                    <strong>{{ message.sender }}</strong>
+                    <time [attr.datetime]="chatDateTime(message.sentAt)">{{ chatTime(message.sentAt) }}</time>
+                  </div>
+                  <p>{{ message.text }}</p>
+                </article>
+              } @empty {
+                <p class="chat-empty">No messages yet.</p>
+              }
+            </div>
+            <form class="chat-composer" (submit)="sendChat($event)">
+              <label class="sr-only" for="chat-message">Message</label>
+              <textarea
+                id="chat-message"
+                maxlength="2000"
+                rows="2"
+                placeholder="Send a message"
+                [value]="chatDraft()"
+                (input)="chatDraft.set($any($event.target).value)"
+                (keydown.enter)="sendChat($event)"
+              ></textarea>
+              <button type="submit" [disabled]="!chatDraft().trim()">Send</button>
+            </form>
+          </aside>
+        }
+        @if (sidebarOpen()) {
+          <app-participant-sidebar
+            [open]="true"
+            [peers]="peers()"
+            [knockers]="knockers()"
+            [isHost]="isHost()"
+            [myClientId]="myId()"
+            (mute)="muteParticipant($event)"
+            (remove)="removeParticipant($event)"
+            (admit)="admit($event)"
+            (reject)="reject($event)"
+            (close)="sidebarOpen.set(false)"
+          />
+        }
       </div>
       @if (leaveDialogOpen()) {
         <app-leave-dialog (endForAll)="endForAll()" (justLeave)="justLeave()" (cancel)="leaveDialogOpen.set(false)" />

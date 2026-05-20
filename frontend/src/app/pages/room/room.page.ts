@@ -27,6 +27,7 @@ const SPEAKER_ORDER_SETTLE_MS = 5_000;
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
 type BufferedSignal = { from: string; data: unknown };
+type ChatMessage = { id: string; clientId: string; sender: string; text: string; sentAt: number; mine: boolean };
 type LobbyError =
   | { kind: 'denied' }
   | { kind: 'no-devices' }
@@ -112,6 +113,10 @@ export class RoomPage implements OnDestroy {
   readonly isOwner = signal(false);
   readonly isHost = computed(() => this.isOwner() || (!!this.myId() && this.hostClientId() === this.myId()));
   readonly sidebarOpen = signal(false);
+  readonly chatOpen = signal(false);
+  readonly chatMessages = signal<ChatMessage[]>([]);
+  readonly chatDraft = signal('');
+  readonly chatUnreadCount = signal(0);
   readonly leaveDialogOpen = signal(false);
   readonly meetingEndedToastOpen = signal(false);
   readonly diagnosticsOpen = signal(false);
@@ -157,6 +162,7 @@ export class RoomPage implements OnDestroy {
   private pendingListInitialized = false;
   private lastDoorbellAt = 0;
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
+  private readonly chatMessageList = viewChild<ElementRef<HTMLElement>>('chatMessageList');
   readonly formattedElapsed = computed(() => {
     this.clockTick();
     const start = this.callStartMs();
@@ -562,11 +568,46 @@ export class RoomPage implements OnDestroy {
   }
 
   toggleSidebar(): void {
-    this.sidebarOpen.update((open) => !open);
+    const nextOpen = !this.sidebarOpen();
+    this.sidebarOpen.set(nextOpen);
+    if (nextOpen) this.chatOpen.set(false);
+  }
+
+  toggleChat(): void {
+    const nextOpen = !this.chatOpen();
+    this.chatOpen.set(nextOpen);
+    if (nextOpen) {
+      this.sidebarOpen.set(false);
+      this.chatUnreadCount.set(0);
+      this.scrollChatToBottom();
+    }
   }
 
   toggleDiagnostics(): void {
     this.diagnosticsOpen.update((open) => !open);
+  }
+
+  sendChat(event?: Event): void {
+    event?.preventDefault();
+    const text = this.chatDraft().trim().slice(0, 2000);
+    if (!text) {
+      this.chatDraft.set('');
+      return;
+    }
+    const id = localMessageId();
+    const clientId = this.myId() || 'local';
+    const sender = this.displayName().trim() || 'Anon';
+    this.appendChatMessage({ id, clientId, sender, text, sentAt: Date.now(), mine: true });
+    this.chatDraft.set('');
+    this.ws.send({ type: 'chat', text, clientMessageId: id });
+  }
+
+  chatTime(sentAt: number): string {
+    return new Intl.DateTimeFormat([], { hour: 'numeric', minute: '2-digit' }).format(new Date(sentAt));
+  }
+
+  chatDateTime(sentAt: number): string {
+    return new Date(sentAt).toISOString();
   }
 
   async setForceRelay(enabled: boolean): Promise<void> {
@@ -759,6 +800,12 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'media-state') {
       this.webrtc.updatePeer(msg.clientId, { micEnabled: msg.mic, camEnabled: msg.cam, screenOn: !!msg.screenOn });
+      return;
+    }
+    if (msg.type === 'chat') {
+      if (msg.clientId === this.myId()) return;
+      this.appendChatMessage({ ...msg, mine: false });
+      if (!this.chatOpen()) this.chatUnreadCount.update((count) => Math.min(99, count + 1));
       return;
     }
     if (msg.type === 'mute-request') {
@@ -1091,6 +1138,10 @@ export class RoomPage implements OnDestroy {
     this.hostClientId.set(null);
     this.currentSessionId.set(null);
     this.sidebarOpen.set(false);
+    this.chatOpen.set(false);
+    this.chatMessages.set([]);
+    this.chatDraft.set('');
+    this.chatUnreadCount.set(0);
     this.shareStripCollapsed.set(false);
     this.leaveDialogOpen.set(false);
     this.meetingEndedToastOpen.set(false);
@@ -1188,6 +1239,18 @@ export class RoomPage implements OnDestroy {
 
   private broadcastMediaState(mic: boolean, cam: boolean, screenOn = this.media.screenOn()): void {
     this.ws.send({ type: 'media-state', mic, cam, screenOn });
+  }
+
+  private appendChatMessage(message: ChatMessage): void {
+    this.chatMessages.update((messages) => [...messages, message]);
+    this.scrollChatToBottom();
+  }
+
+  private scrollChatToBottom(): void {
+    window.setTimeout(() => {
+      const list = this.chatMessageList()?.nativeElement;
+      if (list) list.scrollTop = list.scrollHeight;
+    });
   }
 
   private installMobileVisibilityPause(): void {
@@ -1297,6 +1360,10 @@ export class RoomPage implements OnDestroy {
 
 function pad(value: number): string {
   return String(value).padStart(2, '0');
+}
+
+function localMessageId(): string {
+  return typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `local-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
 function toLobbyError(error: MediaError): LobbyError {

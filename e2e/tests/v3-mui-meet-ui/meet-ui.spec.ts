@@ -26,7 +26,9 @@ test('DR-26 Meet-like control bar keeps every existing control wired', async ({ 
   await expect(bar).toBeVisible();
   await expect(page.locator('.meeting-corner-left')).toContainText(room.title);
   await expect(page.locator('.meeting-clock')).toContainText(/^\d+:\d{2}$/);
-  await expect(page.getByRole('button', { name: 'Chat unavailable until chat is enabled' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Show chat' }).click();
+  await expect(page.getByLabel('Meeting chat')).toBeVisible();
+  await page.getByRole('button', { name: 'Hide chat' }).click();
 
   const mic = page.getByRole('button', { name: 'Mute microphone' });
   await expect(mic).toHaveAttribute('aria-pressed', 'true');

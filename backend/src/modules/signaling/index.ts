@@ -65,6 +65,8 @@ type IncomingMessage = {
   mic?: unknown;
   cam?: unknown;
   screenOn?: unknown;
+  text?: unknown;
+  clientMessageId?: unknown;
   to?: string;
   data?: unknown;
   clientId?: unknown;
@@ -76,6 +78,7 @@ type IncomingMessage = {
 
 const MAX_ADMITTED = 8;
 const MAX_MOBILE_ADMITTED = 4;
+const MAX_CHAT_MESSAGE_CHARS = 2000;
 const RECONNECT_TOKEN_TTL_MS = 2 * 60 * 1000;
 const DISCONNECT_GRACE_MS = RECONNECT_TOKEN_TTL_MS;
 
@@ -540,6 +543,26 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const screenOn = Boolean(msg.screenOn);
         for (const [id, peer] of live.admitted) {
           if (id !== clientId) send(peer.ws, { type: 'media-state', clientId, mic, cam, screenOn });
+        }
+        return;
+      }
+
+      if (msg.type === 'chat') {
+        if (state !== 'admitted') return;
+        const live = currentRoom ? liveRooms.get(currentRoom) : null;
+        if (!live) return;
+        const text = (typeof msg.text === 'string' ? msg.text : '').trim().slice(0, MAX_CHAT_MESSAGE_CHARS);
+        if (!text) return;
+        const chat = {
+          type: 'chat',
+          id: crypto.randomBytes(12).toString('hex'),
+          clientId,
+          sender: myName,
+          text,
+          sentAt: Date.now(),
+        };
+        for (const [id, peer] of live.admitted) {
+          if (id !== clientId) send(peer.ws, chat);
         }
         return;
       }

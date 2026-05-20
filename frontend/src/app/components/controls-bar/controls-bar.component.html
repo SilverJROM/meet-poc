@@ -131,13 +131,18 @@
     </button>
     <button
       type="button"
-      class="corner-btn chat-placeholder"
-      disabled
-      aria-disabled="true"
-      aria-label="Chat unavailable until chat is enabled"
-      title="Chat will be enabled in the next batch"
+      class="corner-btn chat-toggle"
+      [class.active]="chatOpen()"
+      [class.has-unread]="chatUnreadCount() > 0"
+      [attr.aria-pressed]="chatOpen()"
+      [attr.aria-label]="chatOpen() ? 'Hide chat' : 'Show chat'"
+      (click)="chat.emit()"
+      [title]="chatOpen() ? 'Hide chat' : 'Show chat'"
     >
       <ion-icon name="chatbox-outline"></ion-icon>
+      @if (chatUnreadCount() > 0) {
+        <span class="chat-badge">{{ chatUnreadCount() }}</span>
+      }
     </button>
     <button
       type="button"

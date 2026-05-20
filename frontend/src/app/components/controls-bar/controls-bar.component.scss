@@ -214,24 +214,14 @@
   background: rgba(248, 250, 252, 0.14);
 }
 
-.chat-placeholder {
-  cursor: not-allowed;
-  color: rgba(248, 250, 252, 0.42);
-  background: transparent;
-  box-shadow: inset 0 0 0 1px rgba(248, 250, 252, 0.18);
-}
-
-.chat-placeholder:hover {
-  background: transparent;
-  transform: none;
-}
-
+.chat-toggle,
 .participant-toggle {
   position: relative;
 }
 
 .count-badge,
-.waiting-badge {
+.waiting-badge,
+.chat-badge {
   position: absolute;
   display: inline-flex;
   align-items: center;
@@ -260,7 +250,16 @@
   background: #dc2626;
 }
 
-.participant-toggle.has-waiting .waiting-badge {
+.chat-badge {
+  right: -3px;
+  top: -3px;
+  min-width: 18px;
+  height: 18px;
+  background: #dc2626;
+}
+
+.participant-toggle.has-waiting .waiting-badge,
+.chat-toggle.has-unread .chat-badge {
   animation: participant-waiting-pulse 1.4s infinite;
 }
 

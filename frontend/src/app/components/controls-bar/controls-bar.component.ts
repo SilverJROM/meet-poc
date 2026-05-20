@@ -38,12 +38,15 @@ export class ControlsBarComponent {
   readonly waitingCount = input(0);
   readonly sidebarOpen = input(false);
   readonly diagnosticsOpen = input(false);
+  readonly chatOpen = input(false);
+  readonly chatUnreadCount = input(0);
   readonly audioOnly = input(false);
   readonly mute = output<void>();
   readonly camera = output<void>();
   readonly screen = output<void>();
   readonly record = output<void>();
   readonly sidebar = output<void>();
+  readonly chat = output<void>();
   readonly diagnostics = output<void>();
   readonly audioOnlyToggle = output<void>();
   readonly devices = output<void>();
