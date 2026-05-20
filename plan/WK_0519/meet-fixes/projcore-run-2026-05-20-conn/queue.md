@@ -14,7 +14,7 @@ Branch: `fix/meet-conn-diag` off `fix/meet-fixc8-transcriber-config` tip
 | D | diagd — join-popout + audio-invariant | DR-12 (always-clickable Join + popout), DR-13 (audio-bandwidth non-overridable invariant) | **PASS** | 59be4c0. codex 83/83 clean-DB; projcore 55/55 non-seed-flaky + diagd 5/5 + DR-13 invariant test. 4 live-DB FK/WAL seed-flakes (test-infra, not DR-12/13). |
 
 | E1 | diage1 — room access + URLs | DR-14 (clickable rooms), DR-15 (name-slug + custom owner slug URLs) | **PASS** | f63b158. backend 106/1-skip, e2e 4/4, clean-DB 87/87, fresh-room slug+id resolution both work, targeted gate 17/17. Minor: TEST_ROOM01 migration-backfill slug file/runtime cosmetic mismatch (resolves via id; flagged). |
-| E2 | diage2 — waiting room | DR-16 (host open/close toggle + wait-timeout param; closed=timed-wait+kick+reconnect, open=unlimited+host-available) | PENDING | Dispatch after E1. Host-opened = explicit toggle; wait default 15min host-set. |
+| E2 | diage2 — waiting room | DR-16 | **PASS** | f0f7416. backend 113/1-skip, e2e 2/2 (incl host-open-mid-wait promotion), gate 91/91, pm2 env clean (no leak), screenshot good. |
 | F | diagf — connection resilience (PRIORITY) | DR-18/19/21/22 | **PASS** | 973dbce. diagf 2/2 isolation, backend 108/1-skip, signaling regression clean, security tests pass, 88/89 gate. UNCOVERED + FIXED critical leaked-/tmp-env on live backend (was corrupting the whole session's validation). |
 | G | diagg — display polish | DR-17 (remove all mirroring), DR-20 (stable speaker order + ~5s settle) | PENDING | Added 2026-05-20. Small in-call display tweaks. |
 | H | diagh — rooms-list search | DR-23 (room-name search/filter on list) | PENDING | Added 2026-05-20. Small rooms-list UI. |

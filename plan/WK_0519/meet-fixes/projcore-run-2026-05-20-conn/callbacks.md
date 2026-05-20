@@ -21,3 +21,4 @@ Codex appends one line per STATUS change as the final action of each reply:
 [projcore callback] diagf PROPOSED plan ready; root cause identified as server peer-left/delete on transient WS close plus resume-by-new-clientId causing duplicate identity/tiles, with sticky canonical identity and disconnect grace scoped
 [projcore callback] diagf DONE committed 973dbce; DR-18/19/21/22 implemented, backend 108/1-skip, DIAGF 2/2, clean Run-1+diag gate 89/89
 [projcore callback] diage2 PROPOSED plan ready; DR-16 room open-state schema, owner-gated controls, closed-room timed wait, open-room admit flow, and clean-env validation scoped
+[projcore callback] diage2 DONE committed f0f7416; DR-16 implemented, backend 113/1-skip, DIAGE2 2/2, clean Run-1+diag gate 91/91, pm2 clean env verified
