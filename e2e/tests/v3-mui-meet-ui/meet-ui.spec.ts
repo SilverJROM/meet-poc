@@ -34,12 +34,12 @@ test('DR-26 Meet-like control bar keeps every existing control wired', async ({ 
   await expect(page.getByRole('button', { name: 'Unmute microphone' })).toHaveClass(/is-off/);
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getAudioTracks()[0]?.enabled)).toBe(false);
 
-  const camera = page.getByRole('button', { name: 'Turn camera off' });
-  await camera.click();
+  await turnCameraOn(page);
+  await page.getByRole('button', { name: 'Turn camera off' }).click();
   await expect(page.getByRole('button', { name: 'Turn camera on' })).toHaveClass(/is-off/);
   await expect(page.locator('app-tile').filter({ hasText: 'host' }).locator('.camera-off-avatar')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Device settings' }).click();
+  await page.getByRole('button', { name: 'Device settings', exact: true }).click();
   await expect(page.getByRole('dialog', { name: 'Check your camera and audio' })).toBeVisible();
   await page.getByRole('button', { name: 'Close device settings' }).click();
 
@@ -64,7 +64,9 @@ test('DR-26 Meet-like control bar keeps every existing control wired', async ({ 
   await page.screenshot({ path: `${SCREENSHOT_DIR}/call-controls.png`, fullPage: true });
 
   await page.getByRole('button', { name: 'Leave call' }).click();
-  await expect(page.locator('app-leave-dialog')).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Leave meeting' })).toBeVisible();
+  await page.getByRole('button', { name: 'Leave but keep meeting going' }).click();
+  await expect(page).toHaveURL(/\/app\/rooms$/);
 });
 
 test('DR-26 tile states show mute, camera-off avatar, and active-speaker outline', async ({ browser, page }) => {
@@ -73,6 +75,7 @@ test('DR-26 tile states show mute, camera-off avatar, and active-speaker outline
   await closeParticipants(page);
 
   await page.getByRole('button', { name: 'Mute microphone' }).click();
+  await turnCameraOn(page);
   await page.getByRole('button', { name: 'Turn camera off' }).click();
   const hostTile = page.locator('app-tile').filter({ hasText: 'host' });
   await expect(hostTile.locator('.mute-icon')).toBeVisible();
@@ -110,13 +113,13 @@ test('DR-26 narrow mobile bar keeps primary controls reachable by horizontal scr
   await expect.poll(() => controls.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
 
   for (const name of [
-    'Mute microphone',
-    'Turn camera off',
-    'Share screen',
-    'Device settings',
-    'Enable audio-only mode',
-    'Show connection diagnostics',
-    'Leave call',
+    /^Mute microphone$/,
+    /^Turn camera (on|off)$/,
+    /^Share screen$/,
+    /^Device settings$/,
+    /^Enable audio-only mode$/,
+    /^Show connection diagnostics$/,
+    /^Leave call$/,
   ]) {
     const button = page.getByRole('button', { name });
     await button.scrollIntoViewIfNeeded();
@@ -164,6 +167,13 @@ async function activateActiveSpeaker(page: Page, peerName: string): Promise<void
     if (!peer || !window.__meetDebug?.forceActiveSpeakerForTest) throw new Error('active speaker debug hook missing');
     window.__meetDebug.forceActiveSpeakerForTest(peer.id);
   }, peerName);
+}
+
+async function turnCameraOn(page: Page): Promise<void> {
+  const turnOn = page.getByRole('button', { name: 'Turn camera on' });
+  if ((await turnOn.count()) > 0) await turnOn.click();
+  await expect(page.getByRole('button', { name: 'Turn camera off' })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getVideoTracks()[0]?.enabled)).toBe(true);
 }
 
 async function installFakeDisplayMedia(page: Page): Promise<void> {

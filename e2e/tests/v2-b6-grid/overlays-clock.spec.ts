@@ -19,7 +19,7 @@ test('S6.3 relays mute state to other admitted peers', async ({ browser, page })
   const room = await createAndJoinOwner(page, 'mute-state');
   const guest = await admitBrowserGuest(browser, page, room, 'guest-muted');
 
-  await guest.getByRole('button', { name: 'Mute' }).click();
+  await guest.getByRole('button', { name: 'Mute microphone' }).click();
   await expect(page.locator('app-tile').filter({ hasText: 'guest-muted' }).locator('.mute-icon')).toBeVisible();
   await page.screenshot({ path: `${B6_SCREENSHOT_DIR}/mute-icon-visible.png`, fullPage: true });
   await guest.context().close();

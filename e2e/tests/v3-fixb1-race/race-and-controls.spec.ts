@@ -59,7 +59,7 @@ test('FIX-B1.2 recording after peer connection includes remote audio signal', as
   await page.waitForTimeout(5200);
   const [uploadResponse] = await Promise.all([
     page.waitForResponse((res) => res.url().endsWith('/upload') && res.request().method() === 'POST'),
-    page.getByRole('button', { name: /Stop recording|Stop/ }).click(),
+    page.getByRole('button', { name: 'Stop recording' }).click(),
   ]);
   const uploadJson = await uploadResponse.json();
   const recordingPath = path.resolve('..', 'recordings', uploadJson.file);

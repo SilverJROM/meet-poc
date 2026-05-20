@@ -48,7 +48,7 @@ test('DR-25 in-call picker hot-swaps camera/mic tracks and keeps audio sender pr
   await assertConnected(page);
   await assertConnected(guest);
 
-  await page.getByRole('button', { name: 'Device settings' }).click();
+  await page.getByRole('button', { name: 'Device settings', exact: true }).click();
   await expect(page.locator('.modal-presentation .device-dialog')).toBeVisible();
 
   const beforeAudio = await localTrackId(page, 'audio');

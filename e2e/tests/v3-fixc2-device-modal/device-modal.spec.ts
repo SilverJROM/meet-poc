@@ -52,7 +52,7 @@ test('FIXC2.3 in-call gear opens the reused device dialog', async ({ page, reque
   await loginAsJrom(page);
   await joinOwnerWithCamera(page, room, 'host');
 
-  await page.getByRole('button', { name: 'Device settings' }).click();
+  await page.getByRole('button', { name: 'Device settings', exact: true }).click();
   await expect(page.locator('.modal-presentation .device-dialog').filter({ hasText: 'In-call devices' })).toBeVisible();
   await expect(page.locator('.modal-presentation .speaker-select')).toBeVisible();
   await page.screenshot({ path: `${SCREENSHOT_DIR}/in-call-dialog.png`, fullPage: true });
@@ -69,7 +69,7 @@ test('FIXC2.4 mic swap preserves peer connection and replaces the sender track',
   await assertConnected(page);
   await assertConnected(guest);
 
-  await page.getByRole('button', { name: 'Device settings' }).click();
+  await page.getByRole('button', { name: 'Device settings', exact: true }).click();
   const beforeTrackId = await page.evaluate(() => window.__meetDebug?.localAudioTrackId || '');
   const currentMic = await page.locator('app-device-dialog .mic-select').inputValue();
   await page.locator('app-device-dialog .mic-select').selectOption(currentMic);

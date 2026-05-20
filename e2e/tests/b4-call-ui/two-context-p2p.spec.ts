@@ -8,8 +8,10 @@ test('S4.3 two contexts complete P2P signaling', async ({ browser, page }) => {
   const guestContext = await browser.newContext();
   const guest = await guestContext.newPage();
   await joinGuestAndWait(guest, room, 'guest');
-  await expect(page.getByLabel('Waiting room').getByText('guest')).toBeVisible();
-  await page.getByRole('button', { name: 'Admit' }).click();
+  await page.getByRole('button', { name: 'Show participants' }).click();
+  const row = page.getByLabel('Waiting to join').locator('li').filter({ hasText: 'guest' });
+  await expect(row).toBeVisible();
+  await row.getByRole('button', { name: 'Admit' }).click();
 
   await expect(page.locator('app-tile')).toHaveCount(2);
   await expect(guest.locator('app-tile')).toHaveCount(2);

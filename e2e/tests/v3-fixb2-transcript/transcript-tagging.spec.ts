@@ -165,7 +165,7 @@ async function stopAndReadMeta(page: Page, durationMs: number): Promise<{ file: 
   const [uploadResponse, metadataResponse] = await Promise.all([
     page.waitForResponse((res) => res.url().endsWith('/upload') && res.request().method() === 'POST'),
     page.waitForResponse((res) => res.url().endsWith('/api/recordings/upload-metadata') && res.request().method() === 'POST'),
-    page.getByRole('button', { name: /Stop recording|Stop/ }).click(),
+    page.getByRole('button', { name: 'Stop recording' }).click(),
   ]);
   expect(metadataResponse.ok()).toBe(true);
   const uploadJson = await uploadResponse.json();

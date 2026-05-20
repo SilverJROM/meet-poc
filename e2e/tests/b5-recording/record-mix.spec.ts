@@ -17,17 +17,18 @@ test('S5.3 recording with a peer produces a webm with an audio stream', async ({
   await expect(page.locator('app-tile').filter({ hasText: 'guest' }).locator('.state')).toHaveText('connected', { timeout: 10000 });
 
   await page.getByRole('button', { name: 'Record' }).click();
-  await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop recording' })).toBeVisible();
   await page.waitForTimeout(2400);
   const [uploadResponse] = await Promise.all([
     page.waitForResponse((res) => res.url().endsWith('/upload') && res.request().method() === 'POST'),
-    page.getByRole('button', { name: 'Stop' }).click(),
+    page.getByRole('button', { name: 'Stop recording' }).click(),
   ]);
   const uploadJson = await uploadResponse.json();
   const recordingPath = path.resolve('..', 'recordings', uploadJson.file);
   expect(fs.statSync(recordingPath).size).toBeGreaterThan(1000);
 
-  await page.getByRole('button', { name: 'Leave' }).click();
+  await page.getByRole('button', { name: 'Leave call' }).click();
+  await page.getByRole('button', { name: 'Leave but keep meeting going' }).click();
   await expect(page).toHaveURL(/\/app\/rooms$/);
   const href = await page.locator('.recording-row').filter({ hasText: room.title }).getByRole('link', { name: 'Download' }).first().getAttribute('href');
   if (!href) throw new Error('download href missing');
