@@ -7,6 +7,7 @@ import express from 'express';
 import { getDb, getRepoRoot } from '../../db.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
 import { runAutoAnalysesForRecording } from '../questions/index.js';
+import { DEFAULT_TRANSCRIBER_MODEL, getTranscriberModel } from '../questions/store.js';
 import { getRoom, isOwnerOf } from '../rooms/store.js';
 import { getOpenSessionFor } from '../sessions/store.js';
 
@@ -363,11 +364,12 @@ function spawnTranscription(filename: string, options: { force: boolean }, datab
   }
   const python = process.env.MEET_TRANSCRIBE_PYTHON || path.join(getRepoRoot(), 'backend', '.venv-transcribe', 'bin', 'python');
   const script = process.env.MEET_TRANSCRIBE_SCRIPT || path.join(getRepoRoot(), 'backend', 'scripts', 'transcribe.py');
+  const transcriberModel = transcriberModelForRecording(filename, database);
   const args = [script, filepath, ...(options.force ? ['--force'] : [])];
   console.log(`[transcribe] start ${filename}`);
   const child = spawn(python, args, {
     cwd: getRepoRoot(),
-    env: process.env,
+    env: { ...process.env, WHISPER_MODEL: transcriberModel },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   child.stdout.on('data', (chunk) => console.log(`[transcribe] ${String(chunk).trim()}`));
@@ -389,7 +391,16 @@ function spawnTranscription(filename: string, options: { force: boolean }, datab
   });
 }
 
+function transcriberModelForRecording(filename: string, database: Database.Database): string {
+  const parsed = parseRecordingFilename(filename);
+  if (!parsed) return DEFAULT_TRANSCRIBER_MODEL;
+  const room = getRoom(parsed.roomId, database);
+  if (!room) return DEFAULT_TRANSCRIBER_MODEL;
+  return getTranscriberModel(room.ownerEmail, database);
+}
+
 function scheduleTranscription(filename: string, database: Database.Database): void {
+  if (process.env.MEET_TRANSCRIBE_DISABLED === '1') return;
   const delayMs = Number(process.env.MEET_TRANSCRIBE_UPLOAD_DELAY_MS || 1500);
   windowlessSetTimeout(() => spawnTranscription(filename, { force: false }, database), Number.isFinite(delayMs) ? Math.max(0, delayMs) : 1500);
 }

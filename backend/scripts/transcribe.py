@@ -118,7 +118,18 @@ def build_lines(words: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return lines
 
 
-def transcribe(audio_path: Path, force: bool) -> int:
+VALID_MODELS = {"small", "medium", "large-v3"}
+
+
+def selected_model(cli_model: str | None) -> str:
+    candidate = (cli_model or os.environ.get("WHISPER_MODEL") or "medium").strip()
+    if candidate not in VALID_MODELS:
+        print(f"invalid whisper model '{candidate}', falling back to medium", file=sys.stderr)
+        return "medium"
+    return candidate
+
+
+def transcribe(audio_path: Path, force: bool, model_name: str) -> int:
     transcript_path = Path(f"{audio_path}.transcript.json")
     if transcript_path.exists() and not force:
         print(f"already transcribed: {transcript_path.name}")
@@ -136,7 +147,7 @@ def transcribe(audio_path: Path, force: bool) -> int:
 
     metadata = read_metadata(audio_path)
     names = participant_names(metadata)
-    model = WhisperModel("medium", device="cpu", compute_type="int8")
+    model = WhisperModel(model_name, device="cpu", compute_type="int8")
     segments, info = model.transcribe(
         str(audio_path),
         language=None,
@@ -173,7 +184,7 @@ def transcribe(audio_path: Path, force: bool) -> int:
         "audioFile": audio_path.name,
         "language": getattr(info, "language", None),
         "languageProbability": round(float(getattr(info, "language_probability", 0.0)), 4),
-        "model": "medium",
+        "model": model_name,
         "lines": build_lines(words),
         "words": words,
     }
@@ -190,8 +201,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Transcribe a meeting recording with faster-whisper.")
     parser.add_argument("audio_file_path")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--model", choices=sorted(VALID_MODELS), default=None)
     args = parser.parse_args()
-    return transcribe(Path(args.audio_file_path).expanduser().resolve(), args.force)
+    return transcribe(Path(args.audio_file_path).expanduser().resolve(), args.force, selected_model(args.model))
 
 
 if __name__ == "__main__":

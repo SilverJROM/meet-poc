@@ -3,6 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 
 export type LlmProviderId = 'claude' | 'codex' | 'ollama';
+export type TranscriberModel = 'small' | 'medium' | 'large-v3';
 
 export type Question = {
   id: string;
@@ -19,6 +20,7 @@ export type Question = {
 export type LlmSettings = {
   defaultProvider: LlmProviderId;
   defaultOllamaModel: string;
+  transcriberModel: TranscriberModel;
 };
 
 export type Analysis = {
@@ -73,8 +75,8 @@ export class QuestionsService {
     return firstValueFrom(this.http.get<LlmSettings>('/api/llm/settings'));
   }
 
-  async updateSettings(defaultProvider: LlmProviderId): Promise<LlmSettings> {
-    return firstValueFrom(this.http.put<LlmSettings>('/api/llm/settings', { defaultProvider }));
+  async updateSettings(payload: Partial<Pick<LlmSettings, 'defaultProvider' | 'transcriberModel'>>): Promise<LlmSettings> {
+    return firstValueFrom(this.http.put<LlmSettings>('/api/llm/settings', payload));
   }
 
   async analyze(filename: string, questionId: string, providerOverride?: LlmProviderId | null): Promise<Analysis> {

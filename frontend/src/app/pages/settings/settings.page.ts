@@ -2,7 +2,7 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, computed, inject, signal } from '@an
 import { FormsModule } from '@angular/forms';
 import { addIcons } from 'ionicons';
 import { closeOutline, createOutline, saveOutline, star, starOutline, trashOutline } from 'ionicons/icons';
-import { LlmProviderId, Question, QuestionPayload, QuestionsService } from '../../services/questions.service';
+import { LlmProviderId, Question, QuestionPayload, QuestionsService, TranscriberModel } from '../../services/questions.service';
 
 type QuestionForm = QuestionPayload & { id: string | null };
 
@@ -30,9 +30,15 @@ export class SettingsPage {
     { id: 'codex', label: 'Codex gpt-5.3-codex-spark', detail: 'CLI provider' },
     { id: 'ollama', label: 'Ollama mistral-nemo:12b', detail: 'Local HTTP provider' },
   ];
+  readonly transcriberModels: { id: TranscriberModel; label: string; detail: string }[] = [
+    { id: 'small', label: 'small', detail: 'Faster first pass; lower accuracy' },
+    { id: 'medium', label: 'medium', detail: 'Current default balance' },
+    { id: 'large-v3', label: 'large-v3', detail: 'Highest accuracy; downloads on first use' },
+  ];
   readonly questions = signal<Question[]>([]);
   readonly defaultProvider = signal<LlmProviderId>('ollama');
   readonly defaultOllamaModel = signal('mistral-nemo:12b');
+  readonly transcriberModel = signal<TranscriberModel>('medium');
   readonly loading = signal(true);
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);
@@ -52,6 +58,7 @@ export class SettingsPage {
       const [settings, questions] = await Promise.all([this.questionsService.settings(), this.questionsService.list()]);
       this.defaultProvider.set(settings.defaultProvider);
       this.defaultOllamaModel.set(settings.defaultOllamaModel);
+      this.transcriberModel.set(settings.transcriberModel);
       this.questions.set(questions);
     } catch {
       this.error.set('Settings could not be loaded');
@@ -65,12 +72,30 @@ export class SettingsPage {
     this.error.set(null);
     this.status.set(null);
     try {
-      const settings = await this.questionsService.updateSettings(provider);
+      const settings = await this.questionsService.updateSettings({ defaultProvider: provider });
       this.defaultProvider.set(settings.defaultProvider);
       this.defaultOllamaModel.set(settings.defaultOllamaModel);
+      this.transcriberModel.set(settings.transcriberModel);
       this.status.set('Default provider saved');
     } catch {
       this.error.set('Default provider could not be saved');
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  async setTranscriberModel(model: TranscriberModel): Promise<void> {
+    this.saving.set(true);
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      const settings = await this.questionsService.updateSettings({ transcriberModel: model });
+      this.defaultProvider.set(settings.defaultProvider);
+      this.defaultOllamaModel.set(settings.defaultOllamaModel);
+      this.transcriberModel.set(settings.transcriberModel);
+      this.status.set('Transcriber model saved');
+    } catch {
+      this.error.set('Transcriber model could not be saved');
     } finally {
       this.saving.set(false);
     }

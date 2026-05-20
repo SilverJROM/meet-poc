@@ -90,3 +90,18 @@ R-C-1, R-C-2, R-C-3, R-C-4, R-C-5, R-C-6, R-C-7 all VERIFIED. Remaining: R-C-8 (
 - Minor: seed questions both is_default=0 (brief wanted Summarize pre-starred); star mechanism works, non-blocking
 - **Watcher miss:** pane-sentinel scrolled out of window during 23m run; switching to v2.0 callback-first watcher for FIXC8
 - See `validation/batch-fixc7.md`
+
+fixc8 dispatched_at: 2026-05-20T03:43:50Z estimate_min: 60 bucket: MEDIUM
+
+### FIXC8 — Transcriber model dropdown — **IMPLEMENTED / AWAITING PROJCORE VALIDATION** (2026-05-20)
+
+- Branch: `fix/meet-fixc8-transcriber-config`
+- Reused `llm_settings` for `transcriber_model` with default `medium`
+- Settings page now exposes a real `small` / `medium` / `large-v3` dropdown and persists selection
+- Backend transcription spawn passes persisted value as `WHISPER_MODEL`; orphan/missing-room fallback is `medium`
+- `transcribe.py` accepts `--model` or `WHISPER_MODEL` and writes selected model into the transcript sidecar
+- Backend: **93 passed / 1 skipped**
+- FIXC8 e2e: **3/3**
+- Run 1 regression: **67/67** (R8.1 → 18 consecutive if accepted)
+- Screenshot: `batch-fixc8/screenshots/settings-transcriber-dropdown.png`
+- See `batch-fixc8/independent-validation.md`

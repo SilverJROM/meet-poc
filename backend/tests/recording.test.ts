@@ -36,6 +36,7 @@ afterEach(() => {
   delete process.env.MEET_TRANSCRIBE_DISABLED;
   delete process.env.MEET_TRANSCRIBE_PYTHON;
   delete process.env.MEET_TRANSCRIBE_SCRIPT;
+  delete process.env.WHISPER_MODEL;
   for (const dir of recordingDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -397,7 +398,7 @@ describe('recording API', () => {
       [
         "const fs = require('node:fs');",
         'const file = process.argv[2];',
-        "fs.writeFileSync(`${file}.transcript.json`, JSON.stringify({ schemaVersion: 1, audioFile: require('node:path').basename(file), lines: [], words: [] }));",
+        "fs.writeFileSync(`${file}.transcript.json`, JSON.stringify({ schemaVersion: 1, audioFile: require('node:path').basename(file), model: process.env.WHISPER_MODEL, lines: [], words: [] }));",
         'process.exit(0);',
       ].join('\n'),
     );
@@ -405,14 +406,18 @@ describe('recording API', () => {
     process.env.MEET_TRANSCRIBE_PYTHON = process.execPath;
     process.env.MEET_TRANSCRIBE_SCRIPT = fakeWorker;
     const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
 
-    await request(createApp(db))
+    await request(app).put('/api/llm/settings').set('Cookie', cookie).send({ transcriberModel: 'small' }).expect(200);
+
+    await request(app)
       .post(`/api/recordings/${filename}/transcribe`)
       .set('Cookie', cookie)
       .send({ force: true })
       .expect(200, { ok: true, status: 'started' });
 
     await waitForFile(path.join(dir, `${filename}.transcript.json`));
+    expect(JSON.parse(fs.readFileSync(path.join(dir, `${filename}.transcript.json`), 'utf8')).model).toBe('small');
     expect(fs.existsSync(path.join(dir, `${filename}.transcribe.lock`))).toBe(false);
   });
 

@@ -108,7 +108,25 @@
       <div class="section-head compact">
         <div>
           <h3>Transcriber Model</h3>
-          <p>Local Whisper transcription is managed by the backend runtime.</p>
+          <p>Whisper downloads a selected model on first use.</p>
+        </div>
+      </div>
+      <div class="transcriber-control">
+        <div class="field">
+          <label for="transcriber-model">Whisper model</label>
+          <select id="transcriber-model" name="transcriberModel" [ngModel]="transcriberModel()" (ngModelChange)="setTranscriberModel($event)" [disabled]="saving()">
+            @for (model of transcriberModels; track model.id) {
+              <option [value]="model.id">{{ model.label }}</option>
+            }
+          </select>
+        </div>
+        <div class="model-details">
+          @for (model of transcriberModels; track model.id) {
+            <span [class.active]="transcriberModel() === model.id">
+              <strong>{{ model.label }}</strong>
+              {{ model.detail }}
+            </span>
+          }
         </div>
       </div>
     </section>

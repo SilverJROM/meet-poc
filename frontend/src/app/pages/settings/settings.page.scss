@@ -170,6 +170,38 @@ h3 {
   justify-content: flex-end;
 }
 
+.transcriber-control {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.model-details {
+  display: grid;
+  gap: 8px;
+}
+
+.model-details span {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--page-bg);
+  color: var(--muted);
+  padding: 9px 10px;
+  font-size: 12px;
+}
+
+.model-details span.active {
+  border-color: var(--blue);
+  background: var(--selected-tint);
+  color: var(--text);
+}
+
+.model-details strong {
+  margin-right: 6px;
+  color: var(--text);
+}
+
 .icon-btn.danger {
   color: var(--red);
 }
@@ -182,7 +214,8 @@ h3 {
 
 @include bp.max(900px) {
   .question-form,
-  .question-row {
+  .question-row,
+  .transcriber-control {
     grid-template-columns: minmax(0, 1fr);
   }
 

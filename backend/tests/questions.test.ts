@@ -100,7 +100,7 @@ describe('FIXC7 question library and analysis API', () => {
     expect(questions.body.questions).toHaveLength(2);
     expect(questions.body.questions[0]).toMatchObject({ name: 'Summarize meeting', autoRun: true, isDefault: true });
     expect(questions.body.questions[1]).toMatchObject({ name: 'Extract action items', autoRun: false });
-    expect(settings.body).toEqual({ defaultProvider: 'ollama', defaultOllamaModel: 'mistral-nemo:12b' });
+    expect(settings.body).toEqual({ defaultProvider: 'ollama', defaultOllamaModel: 'mistral-nemo:12b', transcriberModel: 'medium' });
   });
 
   it('creates, updates, stars, and deletes a question', async () => {
@@ -139,6 +139,7 @@ describe('FIXC7 question library and analysis API', () => {
     await request(app).post('/api/questions').set('Cookie', cookie).send({ name: '', prompt: 'x' }).expect(400);
     await request(app).post('/api/questions').set('Cookie', cookie).send({ name: 'x', prompt: 'x', providerOverride: 'bad' }).expect(400);
     await request(app).put('/api/llm/settings').set('Cookie', cookie).send({ defaultProvider: 'bad' }).expect(400);
+    await request(app).put('/api/llm/settings').set('Cookie', cookie).send({ transcriberModel: 'tiny' }).expect(400);
   });
 
   it('keeps question libraries isolated by owner', async () => {
@@ -167,6 +168,31 @@ describe('FIXC7 question library and analysis API', () => {
     const settings = await request(app).get('/api/llm/settings').set('Cookie', cookie).expect(200);
 
     expect(settings.body.defaultProvider).toBe('codex');
+  });
+
+  it('persists transcriber model settings without resubmitting provider settings', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const app = createApp(db, { llmService: fakeLlmService });
+    const cookie = authCookie(db);
+
+    const updated = await request(app).put('/api/llm/settings').set('Cookie', cookie).send({ transcriberModel: 'large-v3' }).expect(200);
+    const settings = await request(app).get('/api/llm/settings').set('Cookie', cookie).expect(200);
+
+    expect(updated.body).toMatchObject({ defaultProvider: 'ollama', transcriberModel: 'large-v3' });
+    expect(settings.body).toMatchObject({ defaultProvider: 'ollama', transcriberModel: 'large-v3' });
+  });
+
+  it('partial provider updates preserve the selected transcriber model', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const app = createApp(db, { llmService: fakeLlmService });
+    const cookie = authCookie(db);
+
+    await request(app).put('/api/llm/settings').set('Cookie', cookie).send({ transcriberModel: 'small' }).expect(200);
+    const updated = await request(app).put('/api/llm/settings').set('Cookie', cookie).send({ defaultProvider: 'claude' }).expect(200);
+
+    expect(updated.body).toMatchObject({ defaultProvider: 'claude', transcriberModel: 'small' });
   });
 
   it('runs manual analysis and writes a sidecar result', async () => {

@@ -13,9 +13,11 @@ import {
   deleteQuestion,
   getDefaultProvider,
   getQuestion,
+  getTranscriberModel,
   listAutoRunQuestions,
   listQuestions,
   setDefaultProvider,
+  setTranscriberModel,
   slugQuestionName,
   starQuestion,
   updateQuestion,
@@ -89,15 +91,25 @@ export function questionsRouter(
     return res.json({
       defaultProvider: getDefaultProvider(authReq.user.email, database),
       defaultOllamaModel: DEFAULT_OLLAMA_MODEL,
+      transcriberModel: getTranscriberModel(authReq.user.email, database),
     });
   });
 
   router.put('/llm/settings', auth, (req, res) => {
     const authReq = req as AuthenticatedRequest;
     try {
+      const defaultProvider =
+        req.body && Object.prototype.hasOwnProperty.call(req.body, 'defaultProvider')
+          ? setDefaultProvider(authReq.user.email, req.body.defaultProvider, database)
+          : getDefaultProvider(authReq.user.email, database);
+      const transcriberModel =
+        req.body && Object.prototype.hasOwnProperty.call(req.body, 'transcriberModel')
+          ? setTranscriberModel(authReq.user.email, req.body.transcriberModel, database)
+          : getTranscriberModel(authReq.user.email, database);
       return res.json({
-        defaultProvider: setDefaultProvider(authReq.user.email, req.body?.defaultProvider, database),
+        defaultProvider,
         defaultOllamaModel: DEFAULT_OLLAMA_MODEL,
+        transcriberModel,
       });
     } catch (err) {
       return res.status(400).json({ error: (err as Error).message });
