@@ -104,6 +104,23 @@ const MAX_MOBILE_ADMITTED = 4;
 const MAX_CHAT_MESSAGE_CHARS = 2000;
 const RECONNECT_TOKEN_TTL_MS = 2 * 60 * 1000;
 const DISCONNECT_GRACE_MS = RECONNECT_TOKEN_TTL_MS;
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 20_000;
+const DEFAULT_HEARTBEAT_MISSES_BEFORE_TERMINATE = 2;
+
+type HeartbeatOptions = {
+  intervalMs?: number;
+  missesBeforeTerminate?: number;
+};
+
+type SignalingOptions = {
+  heartbeat?: HeartbeatOptions | false;
+};
+
+type HeartbeatState = {
+  isAlive: boolean;
+  missedPongs: number;
+  lastPongAt: number;
+};
 
 const liveRooms = new Map<string, LiveRoom>();
 
@@ -545,10 +562,58 @@ function rejectPeer(roomId: string, clientId: string, database: Database.Databas
   console.log(`[room ${roomId}] REJECTED ${pending.name} (${clientId})`);
 }
 
-export function attachSignaling(server: http.Server, database: Database.Database = getDb()): void {
+export function attachSignaling(server: http.Server, database: Database.Database = getDb(), options: SignalingOptions = {}): void {
   const wss = new WebSocketServer({ noServer: true });
+  const heartbeatStates = new WeakMap<WebSocket, HeartbeatState>();
+  const heartbeatConfig = options.heartbeat === false ? null : options.heartbeat || {};
+  const heartbeatIntervalMs = Math.max(10, heartbeatConfig?.intervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS);
+  const heartbeatMissesBeforeTerminate = Math.max(2, heartbeatConfig?.missesBeforeTerminate ?? DEFAULT_HEARTBEAT_MISSES_BEFORE_TERMINATE);
+  const heartbeatTimer =
+    heartbeatConfig === null
+      ? null
+      : setInterval(() => {
+          const sentAt = Date.now();
+          for (const ws of wss.clients) {
+            if (ws.readyState !== WebSocket.OPEN) continue;
+            const state = heartbeatStates.get(ws);
+            if (!state) continue;
+            if (!state.isAlive) {
+              state.missedPongs += 1;
+              if (state.missedPongs >= heartbeatMissesBeforeTerminate) {
+                console.warn(`[signaling-heartbeat] terminating stale websocket missed=${state.missedPongs} lastPongAgoMs=${sentAt - state.lastPongAt}`);
+                ws.terminate();
+                continue;
+              }
+            } else {
+              state.missedPongs = 0;
+            }
+            state.isAlive = false;
+            send(ws, { type: 'heartbeat', sentAt });
+            try {
+              ws.ping();
+            } catch {
+              ws.terminate();
+            }
+          }
+        }, heartbeatIntervalMs);
+  heartbeatTimer?.unref?.();
+
+  const clearHeartbeatTimer = (): void => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+  };
+  wss.on('close', clearHeartbeatTimer);
+  server.on('close', clearHeartbeatTimer);
 
   wss.on('connection', (ws, req) => {
+    heartbeatStates.set(ws, { isAlive: true, missedPongs: 0, lastPongAt: Date.now() });
+    ws.on('pong', () => {
+      const state = heartbeatStates.get(ws);
+      if (!state) return;
+      state.isAlive = true;
+      state.missedPongs = 0;
+      state.lastPongAt = Date.now();
+    });
+
     const cookies = parseCookies(req.headers.cookie);
     const sessionUser = getSessionUser(cookies.session, database);
     const userEmail = sessionUser?.email || null;

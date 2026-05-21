@@ -90,7 +90,8 @@ export class DiagnosticsPage {
     if (!ws) return `${entry.payload.wsStatus || 'unknown'} · reconnects ${entry.payload.wsReconnectAttempts ?? 0}`;
     const lastCycle = ws.cycles?.[ws.cycles.length - 1];
     const stuck = lastCycle?.timeStuckMs == null ? 'stuck n/a' : `stuck ${Math.round(lastCycle.timeStuckMs / 1000)}s`;
-    return `${ws.status} · disconnects ${ws.disconnectCount} · reconnect attempts ${ws.reconnectAttempts} · ${stuck}`;
+    const lastPong = ws.lastPongAgoMs == null ? 'pong n/a' : `pong ${Math.round(ws.lastPongAgoMs / 1000)}s ago`;
+    return `${ws.status} · disconnects ${ws.disconnectCount} · reconnect attempts ${ws.reconnectAttempts} · heartbeat misses ${ws.heartbeatMissCount ?? 0} · ${lastPong} · ${stuck}`;
   }
 
   peerForensicsSummary(peer: DiagnosticsPeerSample): string {

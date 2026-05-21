@@ -1,15 +1,16 @@
 import http from 'node:http';
 import { AddressInfo } from 'node:net';
 import { WebSocket } from 'ws';
+import type { ClientOptions } from 'ws';
 import type Database from 'better-sqlite3';
 import { createApp } from '../src/server.js';
 import { attachSignaling } from '../src/modules/signaling/index.js';
 
 export type WsMessage = Record<string, unknown>;
 
-export async function startWsServer(database: Database.Database): Promise<{ server: http.Server; url: string }> {
+export async function startWsServer(database: Database.Database, options?: Parameters<typeof attachSignaling>[2]): Promise<{ server: http.Server; url: string }> {
   const server = http.createServer(createApp(database));
-  attachSignaling(server, database);
+  attachSignaling(server, database, options);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address() as AddressInfo;
   return { server, url: `ws://127.0.0.1:${address.port}/ws` };
@@ -22,9 +23,9 @@ export async function closeServer(server: http.Server): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 25));
 }
 
-export async function connectWs(url: string, cookie?: string, headers: Record<string, string> = {}): Promise<WebSocket> {
+export async function connectWs(url: string, cookie?: string, headers: Record<string, string> = {}, options: ClientOptions = {}): Promise<WebSocket> {
   const finalHeaders = { ...headers, ...(cookie ? { Cookie: cookie } : {}) };
-  const ws = new WebSocket(url, Object.keys(finalHeaders).length > 0 ? { headers: finalHeaders } : undefined);
+  const ws = new WebSocket(url, { ...options, ...(Object.keys(finalHeaders).length > 0 ? { headers: finalHeaders } : {}) });
   await new Promise<void>((resolve, reject) => {
     ws.once('open', resolve);
     ws.once('error', reject);

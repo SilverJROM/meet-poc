@@ -155,6 +155,12 @@ export type DiagnosticsWsHealth = {
   reconnectAttempts: number;
   lastDisconnectAt: number | null;
   lastReconnectAt: number | null;
+  lastSeenAt?: number | null;
+  lastSeenAgoMs?: number | null;
+  lastHeartbeatAt?: number | null;
+  lastHeartbeatRttMs?: number | null;
+  lastPongAgoMs?: number | null;
+  heartbeatMissCount?: number;
   cycles: DiagnosticsWsCycle[];
 };
 

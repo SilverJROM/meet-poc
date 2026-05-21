@@ -284,6 +284,52 @@ describe('signaling reconnect', () => {
     await closeServer(server);
   });
 
+  it('terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Heartbeat stale resume', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db, { heartbeat: { intervalMs: 20, missesBeforeTerminate: 2 } });
+    const owner = await connectWs(url, ownerCookie);
+    const ownerTokenPromise = nextMessage(owner, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    await ownerTokenPromise;
+
+    const guest = await connectWs(url, undefined, {}, { autoPong: false });
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'heartbeat-drop-key' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === knocking.clientId);
+    const guestAdmittedPromise = nextMessage(guest, (msg) => msg.type === 'admitted');
+    const guestTokenPromise = nextMessage(guest, (msg) => msg.type === 'reconnect-token');
+    const guestJoinedPromise = nextMessage(owner, (msg) => msg.type === 'peer-joined');
+    owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
+    const guestAdmitted = await guestAdmittedPromise;
+    await guestTokenPromise;
+    await guestJoinedPromise;
+
+    const peerReconnectingPromise = nextMessage(owner, (msg) => msg.type === 'peer-reconnecting' && msg.clientId === guestAdmitted.clientId);
+    await peerReconnectingPromise;
+
+    const resumed = await connectWs(url);
+    resumed.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'heartbeat-drop-key' }));
+    const resumedAdmitted = await nextMessage(resumed, (msg) => msg.type === 'admitted');
+    await nextMessage(owner, (msg) => msg.type === 'peer-resumed');
+
+    expect(resumedAdmitted).toMatchObject({
+      type: 'admitted',
+      isOwner: false,
+      participantId: guestAdmitted.participantId,
+      hostClientId: ownerAdmitted.clientId,
+    });
+
+    guest.terminate();
+    closeWs(resumed);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
   it('creates a new participantId for an unknown persistent clientKey', async () => {
     const db = createTestDb();
     seedUser(db);

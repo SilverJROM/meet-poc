@@ -12,6 +12,7 @@ export type SignalingMessage =
       hostClientId?: string;
       sessionId?: string | null;
     }
+  | { type: 'heartbeat'; sentAt: number }
   | { type: 'reconnect-token'; token: string; expiresAt: number }
   | { type: 'waiting-room'; clientId: string; roomTitle?: string; isOpen: boolean; waitTimeoutMs: number | null; expiresAt: number | null }
   | { type: 'waiting-timeout'; message: string }
@@ -49,6 +50,9 @@ export type OutgoingSignalingMessage =
 
 @Injectable({ providedIn: 'root' })
 export class WsService {
+  private readonly heartbeatCheckIntervalMs = 5_000;
+  private readonly heartbeatStaleMs = 45_000;
+  private readonly heartbeatStaleCloseCode = 4000;
   private socket: WebSocket | null = null;
   private roomId = '';
   private onMessage: ((msg: SignalingMessage) => void) | null = null;
@@ -60,6 +64,11 @@ export class WsService {
   private disconnectCount = 0;
   private lastDisconnectAt: number | null = null;
   private lastReconnectAt: number | null = null;
+  private lastSeenAt: number | null = null;
+  private lastHeartbeatAt: number | null = null;
+  private lastHeartbeatRttMs: number | null = null;
+  private heartbeatMissCount = 0;
+  private heartbeatCheckTimer: ReturnType<typeof setInterval> | null = null;
   private readonly cycles: DiagnosticsWsCycle[] = [];
 
   readonly connected = signal(false);
@@ -79,6 +88,10 @@ export class WsService {
     this.disconnectCount = 0;
     this.lastDisconnectAt = null;
     this.lastReconnectAt = null;
+    this.lastSeenAt = null;
+    this.lastHeartbeatAt = null;
+    this.lastHeartbeatRttMs = null;
+    this.heartbeatMissCount = 0;
     this.cycles.length = 0;
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     this.openSocket(`${proto}://${window.location.host}/ws`, false);
@@ -93,6 +106,7 @@ export class WsService {
   close(): void {
     this.intentionallyClosed = true;
     this.clearReconnectTimer();
+    this.clearHeartbeatCheckTimer();
     this.closeCurrentSocket();
     this.roomId = '';
     this.onMessage = null;
@@ -110,6 +124,12 @@ export class WsService {
       reconnectAttempts: this.reconnectAttempts(),
       lastDisconnectAt: this.lastDisconnectAt,
       lastReconnectAt: this.lastReconnectAt,
+      lastSeenAt: this.lastSeenAt,
+      lastSeenAgoMs: this.lastSeenAt == null ? null : Math.max(0, Date.now() - this.lastSeenAt),
+      lastHeartbeatAt: this.lastHeartbeatAt,
+      lastHeartbeatRttMs: this.lastHeartbeatRttMs,
+      lastPongAgoMs: this.lastHeartbeatAt == null ? null : Math.max(0, Date.now() - this.lastHeartbeatAt),
+      heartbeatMissCount: this.heartbeatMissCount,
       cycles: this.cycles.slice(),
     };
   }
@@ -132,6 +152,8 @@ export class WsService {
 
     ws.onopen = () => {
       if (this.socket !== ws) return;
+      this.lastSeenAt = Date.now();
+      this.startHeartbeatCheckTimer(ws);
       const wasReconnect = this.reconnectAttempt > 0 || reconnecting;
       this.connected.set(true);
       this.disconnected.set(false);
@@ -151,8 +173,15 @@ export class WsService {
     };
     ws.onmessage = (evt) => {
       if (this.socket !== ws) return;
+      this.lastSeenAt = Date.now();
       try {
-        this.onMessage?.(JSON.parse(evt.data) as SignalingMessage);
+        const msg = JSON.parse(evt.data) as SignalingMessage;
+        if (msg.type === 'heartbeat') {
+          this.lastHeartbeatAt = this.lastSeenAt;
+          this.lastHeartbeatRttMs = typeof msg.sentAt === 'number' ? Math.max(0, this.lastHeartbeatAt - msg.sentAt) : null;
+          return;
+        }
+        this.onMessage?.(msg);
       } catch {
         this.onError?.();
       }
@@ -163,10 +192,11 @@ export class WsService {
     ws.onclose = (event) => {
       if (this.socket !== ws) return;
       this.socket = null;
+      this.clearHeartbeatCheckTimer();
       this.connected.set(false);
       this.disconnected.set(true);
       this.status.set('disconnected');
-      if (!this.intentionallyClosed) this.recordDisconnect(event);
+      if (!this.intentionallyClosed) this.recordDisconnect(event.code || null, event.reason || null);
       console.warn(`[signaling] disconnected room=${this.roomId}`);
       if (!this.intentionallyClosed) this.scheduleReconnect();
     };
@@ -175,6 +205,7 @@ export class WsService {
   private closeCurrentSocket(): void {
     const ws = this.socket;
     this.socket = null;
+    this.clearHeartbeatCheckTimer();
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       ws.close();
     }
@@ -203,7 +234,37 @@ export class WsService {
     this.reconnectTimer = null;
   }
 
-  private recordDisconnect(event: CloseEvent): void {
+  private startHeartbeatCheckTimer(ws: WebSocket): void {
+    this.clearHeartbeatCheckTimer();
+    this.heartbeatCheckTimer = setInterval(() => this.checkHeartbeatLiveness(ws), this.heartbeatCheckIntervalMs);
+  }
+
+  private clearHeartbeatCheckTimer(): void {
+    if (this.heartbeatCheckTimer) clearInterval(this.heartbeatCheckTimer);
+    this.heartbeatCheckTimer = null;
+  }
+
+  private checkHeartbeatLiveness(ws: WebSocket): void {
+    if (this.socket !== ws || this.intentionallyClosed || ws.readyState !== WebSocket.OPEN) return;
+    const lastSeenAt = this.lastSeenAt;
+    if (lastSeenAt == null || Date.now() - lastSeenAt <= this.heartbeatStaleMs) return;
+    this.heartbeatMissCount += 1;
+    this.socket = null;
+    this.clearHeartbeatCheckTimer();
+    this.connected.set(false);
+    this.disconnected.set(true);
+    this.status.set('disconnected');
+    this.recordDisconnect(this.heartbeatStaleCloseCode, 'heartbeat stale', 'heartbeat-stale-close');
+    console.warn(`[signaling] heartbeat stale room=${this.roomId}; reconnecting`);
+    try {
+      ws.close(this.heartbeatStaleCloseCode, 'heartbeat stale');
+    } catch {
+      // Best effort close; reconnect is scheduled below even if the browser cannot close cleanly.
+    }
+    this.scheduleReconnect();
+  }
+
+  private recordDisconnect(code: number | null, reason: string | null, recoveryMethod = 'pending-reconnect'): void {
     const now = Date.now();
     this.disconnectCount += 1;
     this.lastDisconnectAt = now;
@@ -212,9 +273,9 @@ export class WsService {
       disconnectedAtIso: new Date(now).toISOString(),
       reconnectedAt: null,
       reconnectedAtIso: null,
-      code: event.code || null,
-      reason: event.reason || null,
-      recoveryMethod: 'pending-reconnect',
+      code,
+      reason,
+      recoveryMethod,
       timeStuckMs: null,
     });
     trimToLast(this.cycles, 12);
