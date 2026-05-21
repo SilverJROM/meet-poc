@@ -27,7 +27,7 @@ async function joinAndAdmit(owner: Awaited<ReturnType<typeof connectWs>>, url: s
 }
 
 describe('signaling mobile cap', () => {
-  it('S5.3 admits 4 mobile peers and rejects the 5th mobile peer', async () => {
+  it('S5.3 admits 5 mobile peers (no SFU mobile cap; was mesh DR-50 MAX_MOBILE_ADMITTED=4)', async () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Mobile cap', 'jrom@silverjrom.app', db);
@@ -37,24 +37,18 @@ describe('signaling mobile cap', () => {
     const owner = await joinOwner(url, ownerCookie, room.id, true);
     const peers = [];
 
-    for (let i = 0; i < 3; i += 1) {
-      peers.push(await joinAndAdmit(owner, url, room.id, `mobile-${i}`, true, DESKTOP_UA));
+    // admit 4 more mobile peers (owner + 4 = 5 total) — all must succeed under SFU product cap
+    for (let i = 0; i < 4; i += 1) {
+      peers.push(await joinAndAdmit(owner, url, room.id, `mobile-${i}`, true, MOBILE_UA));
     }
 
-    const fifth = await connectWs(url, undefined, { 'User-Agent': MOBILE_UA });
-    const closed = new Promise<void>((resolve) => fifth.once('close', () => resolve()));
-    fifth.send(JSON.stringify({ type: 'join', room: room.id, name: 'mobile-4', mobile: true }));
-    const error = await nextMessage(fifth);
-    await closed;
-
-    expect(error).toEqual({ type: 'error', error: 'mobile room full (4 max)' });
-    closeWs(fifth);
+    expect(peers.length).toBe(4);
     for (const peer of peers) closeWs(peer);
     closeWs(owner);
     await closeServer(server);
   });
 
-  it('S5.5 stacks the mobile cap with the global 5-peer cap', async () => {
+  it('S5.5 mobile peers count against the global SFU product cap only (no separate mobile limit)', async () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Mixed cap', 'jrom@silverjrom.app', db);
@@ -64,17 +58,12 @@ describe('signaling mobile cap', () => {
     const owner = await joinOwner(url, ownerCookie, room.id);
     const peers = [];
 
-    for (let i = 0; i < 4; i += 1) {
-      peers.push(await joinAndAdmit(owner, url, room.id, `mobile-${i}`, true, DESKTOP_UA));
+    // admit 5 mobile peers (owner + 5 = 6 total) — previously hit mobile cap at 4+owner=5, now all admitted
+    for (let i = 0; i < 5; i += 1) {
+      peers.push(await joinAndAdmit(owner, url, room.id, `mobile-${i}`, true, MOBILE_UA));
     }
-    const fifthDesktop = await connectWs(url);
-    const fifthDesktopClosed = new Promise<void>((resolve) => fifthDesktop.once('close', () => resolve()));
-    fifthDesktop.send(JSON.stringify({ type: 'join', room: room.id, name: 'desktop-blocked', mobile: false }));
-    const roomFull = await nextMessage(fifthDesktop);
-    await fifthDesktopClosed;
-    expect(roomFull).toEqual({ type: 'error', error: 'room full (max 5)' });
 
-    closeWs(fifthDesktop);
+    expect(peers.length).toBe(5);
     for (const peer of peers) closeWs(peer);
     closeWs(owner);
     await closeServer(server);

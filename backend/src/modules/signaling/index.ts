@@ -99,8 +99,7 @@ type IncomingMessage = {
   clientKey?: unknown;
 };
 
-const MAX_ADMITTED = 5;
-const MAX_MOBILE_ADMITTED = 4;
+const MAX_ADMITTED = 30; // SFU-era product cap; was mesh DR-50 = 5
 const MAX_CHAT_MESSAGE_CHARS = 2000;
 const RECONNECT_TOKEN_TTL_MS = 2 * 60 * 1000;
 const DISCONNECT_GRACE_MS = RECONNECT_TOKEN_TTL_MS;
@@ -287,10 +286,6 @@ function revokeClientIdentity(live: LiveRoom, entry: PeerEntry): void {
     wasAdmitted: false,
     revoked: true,
   });
-}
-
-function mobileAdmittedCount(live: LiveRoom): number {
-  return [...live.admitted.values()].filter((peer) => peer.isMobile).length + [...live.reconnecting.values()].filter((peer) => peer.isMobile).length;
 }
 
 function findAdmittedClientByParticipant(live: LiveRoom, participantId: string): [string, PeerEntry] | null {
@@ -738,12 +733,6 @@ export function attachSignaling(server: http.Server, database: Database.Database
           ws.close();
           return;
         }
-        if (!ownerResume && !canResume && declaredMobile && mobileAdmittedCount(live) >= MAX_MOBILE_ADMITTED) {
-          send(ws, { type: 'error', error: `mobile room full (${MAX_MOBILE_ADMITTED} max)` });
-          ws.close();
-          return;
-        }
-
         if (owner || canResume) {
           if (resumeOldClientId) {
             cleanupReconnectState(live, resumeOldClientId);

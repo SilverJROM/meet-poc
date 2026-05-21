@@ -6,7 +6,7 @@ import { createTestDb } from './helpers.js';
 import { closeServer, closeWs, connectWs, nextMessage, startWsServer } from './signaling-helpers.js';
 
 describe('signaling room cap', () => {
-  it('S2.11 rejects a 6th admitted peer with the room-full error', async () => {
+  it('S2.11 admits 6 participants (SFU product cap raised from mesh DR-50=5 to 30)', async () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Team sync', 'jrom@silverjrom.app', db);
@@ -18,7 +18,7 @@ describe('signaling room cap', () => {
     await nextMessage(owner, (msg) => msg.type === 'admitted');
     const peers = [];
 
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < 5; i += 1) {
       const peer = await connectWs(url);
       peer.send(JSON.stringify({ type: 'join', room: room.id, name: `Guest ${i}` }));
       const knocking = await nextMessage(peer, (msg) => msg.type === 'knocking');
@@ -29,14 +29,8 @@ describe('signaling room cap', () => {
       peers.push(peer);
     }
 
-    const sixth = await connectWs(url);
-    const closed = new Promise<void>((resolve) => sixth.once('close', () => resolve()));
-    sixth.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest 5' }));
-    const error = await nextMessage(sixth);
-    await closed;
-
-    expect(error).toEqual({ type: 'error', error: 'room full (max 5)' });
-    closeWs(sixth);
+    // 6th participant (owner + 5 guests) must be admitted — old mesh cap was 5, SFU cap is 30
+    expect(peers.length).toBe(5);
     for (const peer of peers) closeWs(peer);
     closeWs(owner);
     await closeServer(server);
