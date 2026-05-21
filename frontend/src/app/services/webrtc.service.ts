@@ -51,6 +51,7 @@ type SignalPayload = {
 type VideoControlPayload = {
   type?: string;
   videoPaused?: boolean;
+  videoDegraded?: boolean;
   reason?: 'auto-poor' | 'manual-audio-only';
 };
 
@@ -88,6 +89,7 @@ type QualityMetrics = {
   rttMs: number | null;
   availableOutgoingBitrateKbps: number | null;
   hasInboundMedia: boolean;
+  audioOnlyFloor: boolean;
 };
 
 type SenderEncoding = RTCRtpEncodingParameters & {
@@ -118,6 +120,15 @@ const QUALITY_POLL_MS = 2500;
 const AUTO_DEGRADE_POOR_SAMPLES = 3;
 const AUTO_RESTORE_GOOD_SAMPLES = 5;
 const VIDEO_MAX_BITRATE_BPS = 700_000;
+const VIDEO_DEGRADED_MAX_BITRATE_BPS = 120_000;
+const VIDEO_DEGRADED_SCALE = 4;
+const VIDEO_DEGRADED_MAX_FRAMERATE = 8;
+const VIDEO_NORMAL_SCALE = 1;
+const VIDEO_NORMAL_MAX_FRAMERATE = 30;
+const AUDIO_ONLY_FLOOR_LOSS_PCT = 35;
+const AUDIO_ONLY_FLOOR_RTT_MS = 1500;
+const AUDIO_ONLY_FLOOR_JITTER_MS = 250;
+const AUDIO_ONLY_FLOOR_BITRATE_KBPS = 90;
 const MIC_SILENT_AUDIO_LEVEL_THRESHOLD = 0.005;
 const MIC_SILENT_REQUIRED_SAMPLES = 3;
 const MIC_SILENT_ENERGY_EPSILON = 0.000001;
@@ -138,8 +149,11 @@ export class WebrtcService {
   private readonly peerForensics = new Map<string, PeerForensics>();
   private outboundAudioLiveness: OutboundAudioLiveness = emptyOutboundAudioLiveness();
   private readonly autoPausedReceivers = new Set<string>();
+  private readonly autoDegradedReceivers = new Set<string>();
   private readonly remotePauseRequests = new Set<string>();
+  private readonly remoteDegradeRequests = new Set<string>();
   private readonly outboundVideoPaused = new Map<string, boolean>();
+  private readonly outboundVideoDegraded = new Map<string, boolean>();
   private readonly videoSenders = new Map<string, RTCRtpSender>();
   private readonly fallbackVideoTracks = new Map<string, MediaStreamTrack | null>();
   private qualityTimer: ReturnType<typeof setInterval> | null = null;
@@ -264,7 +278,7 @@ export class WebrtcService {
       const sender = pc.addTrack(track, this.localStream);
       if (track.kind === 'video') this.videoSenders.set(clientId, sender);
     }
-    await this.applySenderBandwidthPreferences(pc);
+    await this.applySenderBandwidthPreferences(pc, clientId);
 
     pc.onicecandidate = (event) => {
       if (event.candidate) {
@@ -392,26 +406,30 @@ export class WebrtcService {
     for (const peer of this.peerList()) {
       if (peer.isLocal) continue;
       const stillPaused = enabled || this.autoPausedReceivers.has(peer.id);
-      this.sendReceiverVideoPolicy(peer.id, stillPaused, enabled ? 'manual-audio-only' : 'auto-poor');
+      const stillDegraded = !stillPaused && this.autoDegradedReceivers.has(peer.id);
+      this.sendReceiverVideoPolicy(peer.id, stillPaused, enabled ? 'manual-audio-only' : 'auto-poor', stillDegraded);
     }
   }
 
-  async sampleQualityNowForTest(quality?: ConnectionQuality): Promise<void> {
+  async sampleQualityNowForTest(quality?: ConnectionQuality | 'critical'): Promise<void> {
     if (!quality) {
       await this.sampleAllPeerQuality();
       return;
     }
+    const audioOnlyFloor = quality === 'critical';
+    const normalizedQuality: ConnectionQuality = audioOnlyFloor ? 'poor' : quality;
     await Promise.all(
       this.peerList()
         .filter((peer) => !peer.isLocal && peer.pc)
         .map((peer) =>
           this.handlePeerQualityMetrics(peer.id, {
-            quality,
-            packetLossPct: quality === 'poor' ? 20 : 0,
-            jitterMs: quality === 'poor' ? 120 : 5,
-            rttMs: quality === 'poor' ? 800 : 50,
-            availableOutgoingBitrateKbps: quality === 'poor' ? 140 : 1600,
+            quality: normalizedQuality,
+            packetLossPct: audioOnlyFloor ? 40 : normalizedQuality === 'poor' ? 20 : normalizedQuality === 'weak' ? 8 : 0,
+            jitterMs: audioOnlyFloor ? 260 : normalizedQuality === 'poor' ? 120 : normalizedQuality === 'weak' ? 50 : 5,
+            rttMs: audioOnlyFloor ? 1600 : normalizedQuality === 'poor' ? 800 : normalizedQuality === 'weak' ? 400 : 50,
+            availableOutgoingBitrateKbps: audioOnlyFloor ? 80 : normalizedQuality === 'poor' ? 140 : normalizedQuality === 'weak' ? 500 : 1600,
             hasInboundMedia: true,
+            audioOnlyFloor,
           }),
         ),
     );
@@ -427,6 +445,9 @@ export class WebrtcService {
     videoPriority: unknown;
     videoNetworkPriority: unknown;
     videoMaxBitrate: number | null;
+    videoScaleResolutionDownBy: number | null;
+    videoMaxFramerate: number | null;
+    videoDegraded: boolean;
   }[] {
     return this.peerList()
       .filter((peer) => !peer.isLocal && peer.pc)
@@ -446,6 +467,9 @@ export class WebrtcService {
           videoPriority: videoEncoding?.priority ?? null,
           videoNetworkPriority: videoEncoding?.networkPriority ?? null,
           videoMaxBitrate: typeof videoEncoding?.maxBitrate === 'number' ? videoEncoding.maxBitrate : null,
+          videoScaleResolutionDownBy: typeof videoEncoding?.scaleResolutionDownBy === 'number' ? videoEncoding.scaleResolutionDownBy : null,
+          videoMaxFramerate: typeof videoEncoding?.maxFramerate === 'number' ? videoEncoding.maxFramerate : null,
+          videoDegraded: this.shouldDegradeOutboundVideo(peer.id),
         };
       });
   }
@@ -559,16 +583,16 @@ export class WebrtcService {
         (kind === 'video' ? this.videoSenders.get(peer.id) ?? null : null);
       if (sender) {
         if (kind === 'video') this.videoSenders.set(peer.id, sender);
-        operations.push(sender.replaceTrack(track).then(() => this.applySenderPreference(sender, kind)));
+        operations.push(sender.replaceTrack(track).then(() => this.applySenderPreference(sender, kind, this.shouldDegradeOutboundVideo(peer.id))));
       } else if (track && this.localStream) {
         const added = pc.addTrack(track, this.localStream);
         if (kind === 'video') this.videoSenders.set(peer.id, added);
-        operations.push(this.applySenderPreference(added, kind));
+        operations.push(this.applySenderPreference(added, kind, this.shouldDegradeOutboundVideo(peer.id)));
       }
-      operations.push(this.applySenderBandwidthPreferences(pc));
+      operations.push(this.applySenderBandwidthPreferences(pc, peer.id));
     }
     await Promise.all(operations);
-    await Promise.all(this.peerList().filter((peer) => !peer.isLocal && peer.pc).map((peer) => this.applySenderBandwidthPreferences(peer.pc!)));
+    await Promise.all(this.peerList().filter((peer) => !peer.isLocal && peer.pc).map((peer) => this.applySenderBandwidthPreferences(peer.pc!, peer.id)));
     const localPeer = this.peerList().find((peer) => peer.isLocal);
     if (localPeer) this.touchPeer(localPeer.id, { stream: this.localStream });
   }
@@ -627,8 +651,11 @@ export class WebrtcService {
     this.peerForensics.clear();
     this.outboundAudioLiveness = emptyOutboundAudioLiveness();
     this.autoPausedReceivers.clear();
+    this.autoDegradedReceivers.clear();
     this.remotePauseRequests.clear();
+    this.remoteDegradeRequests.clear();
     this.outboundVideoPaused.clear();
+    this.outboundVideoDegraded.clear();
     this.videoSenders.clear();
     this.fallbackVideoTracks.clear();
     this.manualAudioOnly.set(false);
@@ -688,8 +715,11 @@ export class WebrtcService {
     this.inboundAudioStats.delete(clientId);
     this.peerForensics.delete(clientId);
     this.autoPausedReceivers.delete(clientId);
+    this.autoDegradedReceivers.delete(clientId);
     this.remotePauseRequests.delete(clientId);
+    this.remoteDegradeRequests.delete(clientId);
     this.outboundVideoPaused.delete(clientId);
+    this.outboundVideoDegraded.delete(clientId);
     this.videoSenders.delete(clientId);
     this.fallbackVideoTracks.delete(clientId);
     peer?.pc?.close();
@@ -925,8 +955,14 @@ export class WebrtcService {
 
   private async handleControlSignal(from: string, control: VideoControlPayload): Promise<void> {
     if (control.type !== 'receiver-video-policy') return;
-    if (control.videoPaused) this.remotePauseRequests.add(from);
-    else this.remotePauseRequests.delete(from);
+    if (control.videoPaused) {
+      this.remotePauseRequests.add(from);
+      this.remoteDegradeRequests.delete(from);
+    } else {
+      this.remotePauseRequests.delete(from);
+      if (control.videoDegraded) this.remoteDegradeRequests.add(from);
+      else this.remoteDegradeRequests.delete(from);
+    }
     await this.applyVideoPolicy(from);
     this.updateAudioOnlyReason(from);
   }
@@ -960,7 +996,7 @@ export class WebrtcService {
 
   private async handlePeerQualityMetrics(clientId: string, metrics: QualityMetrics): Promise<void> {
     const counters = this.qualityCounters.get(clientId) ?? { poor: 0, good: 0 };
-    if (metrics.quality === 'poor') {
+    if (metrics.quality === 'weak' || metrics.quality === 'poor') {
       counters.poor += 1;
       counters.good = 0;
     } else if (metrics.quality === 'good') {
@@ -978,16 +1014,25 @@ export class WebrtcService {
       rttMs: metrics.rttMs,
       availableOutgoingBitrateKbps: metrics.availableOutgoingBitrateKbps,
     });
-    if (metrics.quality === 'poor' && counters.poor >= AUTO_DEGRADE_POOR_SAMPLES && !this.autoPausedReceivers.has(clientId)) {
+    if (counters.poor >= AUTO_DEGRADE_POOR_SAMPLES && metrics.audioOnlyFloor) {
+      const changed = !this.autoPausedReceivers.has(clientId) || this.autoDegradedReceivers.has(clientId);
       this.autoPausedReceivers.add(clientId);
-      await this.applyVideoPolicy(clientId);
-      this.sendReceiverVideoPolicy(clientId, true, 'auto-poor');
+      this.autoDegradedReceivers.delete(clientId);
+      if (changed && !this.manualAudioOnly()) this.sendReceiverVideoPolicy(clientId, true, 'auto-poor');
+      this.updateAudioOnlyReason(clientId);
+      return;
+    }
+    if (counters.poor >= AUTO_DEGRADE_POOR_SAMPLES) {
+      const changed = !this.autoDegradedReceivers.has(clientId) || this.autoPausedReceivers.has(clientId);
+      this.autoPausedReceivers.delete(clientId);
+      this.autoDegradedReceivers.add(clientId);
+      if (changed && !this.manualAudioOnly()) this.sendReceiverVideoPolicy(clientId, false, 'auto-poor', true);
       this.updateAudioOnlyReason(clientId);
     }
-    if (metrics.quality === 'good' && counters.good >= AUTO_RESTORE_GOOD_SAMPLES && this.autoPausedReceivers.has(clientId)) {
+    if (metrics.quality === 'good' && counters.good >= AUTO_RESTORE_GOOD_SAMPLES && (this.autoPausedReceivers.has(clientId) || this.autoDegradedReceivers.has(clientId))) {
       this.autoPausedReceivers.delete(clientId);
-      await this.applyVideoPolicy(clientId);
-      if (!this.manualAudioOnly()) this.sendReceiverVideoPolicy(clientId, false, 'auto-poor');
+      this.autoDegradedReceivers.delete(clientId);
+      if (!this.manualAudioOnly()) this.sendReceiverVideoPolicy(clientId, false, 'auto-poor', false);
       this.updateAudioOnlyReason(clientId);
     }
   }
@@ -1070,7 +1115,17 @@ export class WebrtcService {
       connectionState: pc.connectionState,
       iceConnectionState: pc.iceConnectionState,
     });
-    return { quality, packetLossPct, jitterMs, rttMs, availableOutgoingBitrateKbps, hasInboundMedia };
+    const audioOnlyFloor = isAudioOnlyFloor({
+      packetLossPct,
+      jitterMs,
+      rttMs,
+      availableOutgoingBitrateKbps,
+      hasInboundMedia,
+      inboundPacketsReceivedTotal,
+      connectionState: pc.connectionState,
+      iceConnectionState: pc.iceConnectionState,
+    });
+    return { quality, packetLossPct, jitterMs, rttMs, availableOutgoingBitrateKbps, hasInboundMedia, audioOnlyFloor };
   }
 
   private updateOutboundAudioLiveness(outboundAudioLevel: number | null, outboundAudioEnergy: number | null): void {
@@ -1150,8 +1205,8 @@ export class WebrtcService {
     };
   }
 
-  private sendReceiverVideoPolicy(clientId: string, videoPaused: boolean, reason: 'auto-poor' | 'manual-audio-only'): void {
-    this.sendSignal?.(clientId, { control: { type: 'receiver-video-policy', videoPaused, reason } });
+  private sendReceiverVideoPolicy(clientId: string, videoPaused: boolean, reason: 'auto-poor' | 'manual-audio-only', videoDegraded = false): void {
+    this.sendSignal?.(clientId, { control: { type: 'receiver-video-policy', videoPaused, videoDegraded: !videoPaused && videoDegraded, reason } });
   }
 
   private async applyAllVideoPolicies(): Promise<void> {
@@ -1167,18 +1222,23 @@ export class WebrtcService {
     const peer = this.peers().get(clientId);
     const pc = peer?.pc;
     if (!pc) return;
-    await this.applySenderBandwidthPreferences(pc);
+    await this.applySenderBandwidthPreferences(pc, clientId);
     const shouldPause = this.shouldPauseOutboundVideo(clientId);
-    if (this.outboundVideoPaused.get(clientId) === shouldPause) return;
+    const shouldDegrade = this.shouldDegradeOutboundVideo(clientId);
+    const pauseUnchanged = this.outboundVideoPaused.get(clientId) === shouldPause;
+    const degradeUnchanged = this.outboundVideoDegraded.get(clientId) === shouldDegrade;
+    if (pauseUnchanged && degradeUnchanged) return;
     const sender = pc.getSenders().find((candidate) => candidate.track?.kind === 'video') ?? this.videoSenders.get(clientId);
-    if (!sender) return;
-    try {
-      await setVideoSenderActive(sender, !shouldPause);
-    } catch {
-      await this.replaceVideoSenderFallback(clientId, sender, shouldPause);
+    if (sender && !pauseUnchanged) {
+      try {
+        await setVideoSenderActive(sender, !shouldPause, shouldDegrade);
+      } catch {
+        await this.replaceVideoSenderFallback(clientId, sender, shouldPause);
+      }
     }
-    await this.applySenderBandwidthPreferences(pc);
+    await this.applySenderBandwidthPreferences(pc, clientId);
     this.outboundVideoPaused.set(clientId, shouldPause);
+    this.outboundVideoDegraded.set(clientId, shouldDegrade);
   }
 
   private async replaceVideoSenderFallback(clientId: string, sender: RTCRtpSender, shouldPause: boolean): Promise<void> {
@@ -1193,19 +1253,20 @@ export class WebrtcService {
     this.fallbackVideoTracks.delete(clientId);
   }
 
-  private async applySenderBandwidthPreferences(pc: RTCPeerConnection): Promise<void> {
+  private async applySenderBandwidthPreferences(pc: RTCPeerConnection, clientId?: string): Promise<void> {
+    const degradeVideo = clientId ? this.shouldDegradeOutboundVideo(clientId) : false;
     await Promise.all(
       pc.getSenders().map(async (sender) => {
         const kind = sender.track?.kind;
         if (kind !== 'audio' && kind !== 'video') return;
-        await this.applySenderPreference(sender, kind);
+        await this.applySenderPreference(sender, kind, degradeVideo);
       }),
     );
   }
 
-  private async applySenderPreference(sender: RTCRtpSender, kind: 'audio' | 'video'): Promise<void> {
+  private async applySenderPreference(sender: RTCRtpSender, kind: 'audio' | 'video', degradeVideo = false): Promise<void> {
     try {
-      await setSenderBandwidthPreference(sender, kind);
+      await setSenderBandwidthPreference(sender, kind, degradeVideo);
     } catch (err) {
       console.debug(`[webrtc] ${kind} sender bandwidth preference unavailable`, err);
     }
@@ -1213,6 +1274,10 @@ export class WebrtcService {
 
   private shouldPauseOutboundVideo(clientId: string): boolean {
     return this.manualAudioOnly() || this.remotePauseRequests.has(clientId);
+  }
+
+  private shouldDegradeOutboundVideo(clientId: string): boolean {
+    return !this.shouldPauseOutboundVideo(clientId) && this.remoteDegradeRequests.has(clientId);
   }
 
   private updateAudioOnlyReason(clientId: string): void {
@@ -1234,7 +1299,7 @@ export class WebrtcService {
   }
 }
 
-async function setVideoSenderActive(sender: RTCRtpSender, active: boolean): Promise<void> {
+async function setVideoSenderActive(sender: RTCRtpSender, active: boolean, degraded: boolean): Promise<void> {
   const params = sender.getParameters();
   if (!params.encodings?.length) throw new Error('sender encodings unavailable');
   params.encodings = params.encodings.map((encoding) => ({
@@ -1242,12 +1307,12 @@ async function setVideoSenderActive(sender: RTCRtpSender, active: boolean): Prom
     active,
     priority: 'low',
     networkPriority: 'low',
-    maxBitrate: Math.min(typeof encoding.maxBitrate === 'number' ? encoding.maxBitrate : VIDEO_MAX_BITRATE_BPS, VIDEO_MAX_BITRATE_BPS),
+    ...videoEncodingLimits(degraded),
   }));
   await sender.setParameters(params);
 }
 
-async function setSenderBandwidthPreference(sender: RTCRtpSender, kind: 'audio' | 'video'): Promise<void> {
+async function setSenderBandwidthPreference(sender: RTCRtpSender, kind: 'audio' | 'video', degradeVideo = false): Promise<void> {
   const params = sender.getParameters();
   const encodings = params.encodings?.length ? params.encodings : [{} as RTCRtpEncodingParameters];
   params.encodings = encodings.map((encoding) => {
@@ -1259,10 +1324,24 @@ async function setSenderBandwidthPreference(sender: RTCRtpSender, kind: 'audio' 
     }
     next.priority = 'low';
     next.networkPriority = 'low';
-    next.maxBitrate = Math.min(typeof next.maxBitrate === 'number' ? next.maxBitrate : VIDEO_MAX_BITRATE_BPS, VIDEO_MAX_BITRATE_BPS);
+    Object.assign(next, videoEncodingLimits(degradeVideo));
     return next;
   });
   await sender.setParameters(params);
+}
+
+function videoEncodingLimits(degraded: boolean): Pick<RTCRtpEncodingParameters, 'maxBitrate' | 'scaleResolutionDownBy' | 'maxFramerate'> {
+  return degraded
+    ? {
+        maxBitrate: VIDEO_DEGRADED_MAX_BITRATE_BPS,
+        scaleResolutionDownBy: VIDEO_DEGRADED_SCALE,
+        maxFramerate: VIDEO_DEGRADED_MAX_FRAMERATE,
+      }
+    : {
+        maxBitrate: VIDEO_MAX_BITRATE_BPS,
+        scaleResolutionDownBy: VIDEO_NORMAL_SCALE,
+        maxFramerate: VIDEO_NORMAL_MAX_FRAMERATE,
+      };
 }
 
 function classifyQuality(input: {
@@ -1296,6 +1375,29 @@ function classifyQuality(input: {
     return 'weak';
   }
   return 'good';
+}
+
+function isAudioOnlyFloor(input: {
+  packetLossPct: number | null;
+  jitterMs: number | null;
+  rttMs: number | null;
+  availableOutgoingBitrateKbps: number | null;
+  hasInboundMedia: boolean;
+  inboundPacketsReceivedTotal: number;
+  connectionState: RTCPeerConnectionState;
+  iceConnectionState: RTCIceConnectionState;
+}): boolean {
+  return (
+    input.connectionState === 'failed' ||
+    input.connectionState === 'disconnected' ||
+    input.iceConnectionState === 'failed' ||
+    input.iceConnectionState === 'disconnected' ||
+    (input.hasInboundMedia && input.inboundPacketsReceivedTotal === 0) ||
+    (input.packetLossPct != null && input.packetLossPct >= AUDIO_ONLY_FLOOR_LOSS_PCT) ||
+    (input.rttMs != null && input.rttMs >= AUDIO_ONLY_FLOOR_RTT_MS) ||
+    (input.jitterMs != null && input.jitterMs >= AUDIO_ONLY_FLOOR_JITTER_MS) ||
+    (input.availableOutgoingBitrateKbps != null && input.availableOutgoingBitrateKbps < AUDIO_ONLY_FLOOR_BITRATE_KBPS)
+  );
 }
 
 function numberOrZero(value: unknown): number {

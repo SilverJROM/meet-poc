@@ -4,13 +4,13 @@ import { expect, type BrowserContext, type Page, test } from '@playwright/test';
 import { createRoomFromDashboard, type TestRoom } from '../../fixtures/rooms';
 
 const DIAGC_PREFIX = 'DIAGC';
-const SCREENSHOT_DIR = '../plan/WK_0519/meet-fixes/projcore-run-2026-05-20-conn/batch-diagc/screenshots';
+const SCREENSHOT_DIR = '../plan/WK_0519/meet-fixes/projcore-run-2026-05-20-meetui/batch-video-weak/screenshots';
 
 test.beforeAll(() => {
   fs.mkdirSync(path.resolve(process.cwd(), SCREENSHOT_DIR), { recursive: true });
 });
 
-test('DR-11 protects audio first, auto-pauses receiver video, recovers, and respects manual audio-only', async ({ browser, page }) => {
+test('DR-42 degrades weak video before audio-only floor, recovers, and respects manual audio-only', async ({ browser, page }) => {
   await installWeakConnectionProbe(page.context());
   const room = await createRoomFromDashboard(page, `${DIAGC_PREFIX} weak link ${Date.now()}`);
   await joinOwnerWithCamera(page, room, 'host');
@@ -30,18 +30,38 @@ test('DR-11 protects audio first, auto-pauses receiver video, recovers, and resp
   await sampleQuality(page, 'poor', 3);
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.diagnostics?.[0]?.quality || 'missing'), { timeout: 5000 }).toBe('poor');
 
-  await expect(page.getByText('Weak connection - audio only')).toBeVisible();
+  await expect(page.getByText('Weak connection - audio only')).toHaveCount(0);
   const qualityPill = page.locator('app-tile').filter({ hasText: 'guest' }).locator('.quality-pill');
-  await expect(qualityPill).toHaveText('audio only');
+  await expect(qualityPill).toHaveText('poor');
   await qualityPill.screenshot({ path: `${SCREENSHOT_DIR}/quality-pill.png` });
+  await expect.poll(() => senderPaused(guest), { timeout: 5000 }).toBe(false);
+  await expect.poll(() => senderDegraded(guest), { timeout: 5000 }).toBe(true);
+  await expect.poll(() => degradedEncoding(guest), { timeout: 5000 }).toEqual({
+    videoMaxBitrate: 120000,
+    videoScaleResolutionDownBy: 4,
+    videoMaxFramerate: 8,
+  });
+  await expect.poll(() => audioStillActive(guest), { timeout: 5000 }).toBe(true);
+  await expect(page.locator('app-tile').filter({ hasText: 'guest' }).locator('video')).toBeVisible();
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/degraded-video-still-rendered.png`, fullPage: true });
+
+  await sampleQuality(page, 'critical', 3);
+  await expect(page.getByText('Weak connection - audio only')).toBeVisible();
+  await expect(qualityPill).toHaveText('audio only');
   await expect.poll(() => senderPaused(guest), { timeout: 5000 }).toBe(true);
   await expect.poll(() => audioStillActive(guest), { timeout: 5000 }).toBe(true);
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/weak-connection-banner.png`, fullPage: true });
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/audio-only-floor-banner.png`, fullPage: true });
 
   await sampleQuality(page, 'good', 5);
 
   await expect(page.getByText('Weak connection - audio only')).toHaveCount(0);
   await expect.poll(() => senderPaused(guest), { timeout: 5000 }).toBe(false);
+  await expect.poll(() => senderDegraded(guest), { timeout: 5000 }).toBe(false);
+  await expect.poll(() => restoredEncoding(guest), { timeout: 5000 }).toEqual({
+    videoMaxBitrate: 700000,
+    videoScaleResolutionDownBy: 1,
+    videoMaxFramerate: 30,
+  });
   await page.getByRole('button', { name: 'Enable audio-only mode' }).click();
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.manualAudioOnly)).toBe(true);
   await expect(page.getByText('Audio-only mode is on')).toBeVisible();
@@ -77,7 +97,7 @@ async function joinGuestWithCamera(page: Page, room: TestRoom, name: string): Pr
   await expect(page.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();
 }
 
-async function sampleQuality(page: Page, quality: 'good' | 'weak' | 'poor', count: number): Promise<void> {
+async function sampleQuality(page: Page, quality: 'good' | 'weak' | 'poor' | 'critical', count: number): Promise<void> {
   for (let index = 0; index < count; index += 1) {
     await page.evaluate((nextQuality) => window.__meetDebug?.sampleConnectionQualityForTest?.(nextQuality), quality);
   }
@@ -114,6 +134,25 @@ async function senderPaused(page: Page): Promise<boolean> {
 
 async function audioStillActive(page: Page): Promise<boolean> {
   return page.evaluate(() => window.__meetDebug?.senderSnapshot?.()[0]?.audioActive || false);
+}
+
+async function senderDegraded(page: Page): Promise<boolean> {
+  return page.evaluate(() => window.__meetDebug?.senderSnapshot?.()[0]?.videoDegraded || false);
+}
+
+async function degradedEncoding(page: Page): Promise<{ videoMaxBitrate: number | null; videoScaleResolutionDownBy: number | null; videoMaxFramerate: number | null }> {
+  return page.evaluate(() => {
+    const snapshot = window.__meetDebug?.senderSnapshot?.()[0];
+    return {
+      videoMaxBitrate: snapshot?.videoMaxBitrate ?? null,
+      videoScaleResolutionDownBy: snapshot?.videoScaleResolutionDownBy ?? null,
+      videoMaxFramerate: snapshot?.videoMaxFramerate ?? null,
+    };
+  });
+}
+
+async function restoredEncoding(page: Page): Promise<{ videoMaxBitrate: number | null; videoScaleResolutionDownBy: number | null; videoMaxFramerate: number | null }> {
+  return degradedEncoding(page);
 }
 
 async function installWeakConnectionProbe(context: BrowserContext): Promise<void> {

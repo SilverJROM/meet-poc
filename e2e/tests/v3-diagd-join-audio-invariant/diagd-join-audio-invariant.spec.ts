@@ -97,12 +97,18 @@ test('DR-13 audio reservation survives degrade, restore, and video active toggle
   await expectSenderInvariant(guest);
 
   await sampleQuality(page, 'poor', 3);
-  await expect.poll(() => senderPaused(guest), { timeout: 5000 }).toBe(true);
+  await expect.poll(() => senderPaused(guest), { timeout: 5000 }).toBe(false);
+  await expect.poll(() => senderDegraded(guest), { timeout: 5000 }).toBe(true);
   await expectSenderInvariant(page);
-  await expectSenderInvariant(guest);
+  await expectSenderInvariant(guest, {
+    videoMaxBitrate: 120000,
+    videoScaleResolutionDownBy: 4,
+    videoMaxFramerate: 8,
+  });
 
   await sampleQuality(page, 'good', 5);
   await expect.poll(() => senderPaused(guest), { timeout: 5000 }).toBe(false);
+  await expect.poll(() => senderDegraded(guest), { timeout: 5000 }).toBe(false);
   await expectSenderInvariant(page);
   await expectSenderInvariant(guest);
 
@@ -165,7 +171,18 @@ async function senderPaused(page: Page): Promise<boolean> {
   return page.evaluate(() => window.__meetDebug?.senderSnapshot?.()[0]?.videoPaused || false);
 }
 
-async function expectSenderInvariant(page: Page): Promise<void> {
+async function senderDegraded(page: Page): Promise<boolean> {
+  return page.evaluate(() => window.__meetDebug?.senderSnapshot?.()[0]?.videoDegraded || false);
+}
+
+async function expectSenderInvariant(
+  page: Page,
+  expectedVideo: { videoMaxBitrate: number; videoScaleResolutionDownBy: number; videoMaxFramerate: number } = {
+    videoMaxBitrate: 700000,
+    videoScaleResolutionDownBy: 1,
+    videoMaxFramerate: 30,
+  },
+): Promise<void> {
   await expect
     .poll(
       () =>
@@ -178,6 +195,8 @@ async function expectSenderInvariant(page: Page): Promise<void> {
             videoPriority: snapshot?.videoPriority,
             videoNetworkPriority: snapshot?.videoNetworkPriority,
             videoMaxBitrate: snapshot?.videoMaxBitrate,
+            videoScaleResolutionDownBy: snapshot?.videoScaleResolutionDownBy,
+            videoMaxFramerate: snapshot?.videoMaxFramerate,
           };
         }),
       { timeout: 8000 },
@@ -188,7 +207,7 @@ async function expectSenderInvariant(page: Page): Promise<void> {
       audioNetworkPriority: 'high',
       videoPriority: 'low',
       videoNetworkPriority: 'low',
-      videoMaxBitrate: 700000,
+      ...expectedVideo,
     });
 }
 

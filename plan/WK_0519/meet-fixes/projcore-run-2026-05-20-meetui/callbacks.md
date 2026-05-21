@@ -35,3 +35,5 @@ Codex appends one line per STATUS change: `[projcore callback] <batch-id> <STATE
 [projcore callback] admit APPROVED-PLAN DR-39/DR-38 approved; implementing message-only leave revocation, close-as-drop, re-admit clears revoke, and targeted tests.
 [projcore callback] admit DONE DR-39/DR-38 committed 22e6689; backend/build/e2e PASS; explicit leave message only revokes; bare close/reload are drops; pm2 env clean.
 [projcore callback] diag-deep PROPOSED DR-41/DR-43 plan ready: split into auth/toggle/all-participant posting plus deep WebRTC/WS forensics capture/display; waiting for APPROVED-PLAN.
+[projcore callback] video-weak PROPOSED DR-42 plan ready: sustained poor degrades video sender to low bitrate/scale/fps first; only critical audio-protective floor or manual audio-only fully pauses; recovery restores; waiting for APPROVED-PLAN.
+[projcore callback] video-weak APPROVED-PLAN DR-42 approved: implement good -> degraded active video -> conservative audio-only floor; preserve DR-13 audio high priority and manual audio-only.

@@ -266,7 +266,7 @@ export class RoomPage implements OnDestroy {
         isIOS: () => this.platform.isIOS(),
         isAndroid: () => this.platform.isAndroid(),
         closeSignalingForTest: () => this.ws.debugDropForReconnect(),
-        sampleConnectionQualityForTest: (quality?: 'good' | 'weak' | 'poor') => this.webrtc.sampleQualityNowForTest(quality),
+        sampleConnectionQualityForTest: (quality?: 'good' | 'weak' | 'poor' | 'critical') => this.webrtc.sampleQualityNowForTest(quality),
         senderSnapshot: () => this.webrtc.debugSenderSnapshot(),
       };
       if (window.location.hostname === 'localhost') {
@@ -1832,7 +1832,7 @@ declare global {
       isIOS?: () => boolean;
       isAndroid?: () => boolean;
       closeSignalingForTest?: () => void;
-      sampleConnectionQualityForTest?: (quality?: 'good' | 'weak' | 'poor') => Promise<void>;
+      sampleConnectionQualityForTest?: (quality?: 'good' | 'weak' | 'poor' | 'critical') => Promise<void>;
       senderSnapshot?: () => {
         id: string;
         videoPaused: boolean;
@@ -1843,6 +1843,9 @@ declare global {
         videoPriority: unknown;
         videoNetworkPriority: unknown;
         videoMaxBitrate: number | null;
+        videoScaleResolutionDownBy: number | null;
+        videoMaxFramerate: number | null;
+        videoDegraded: boolean;
       }[];
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
       forceActiveSpeakerForTest?: (id: string | null) => void;
