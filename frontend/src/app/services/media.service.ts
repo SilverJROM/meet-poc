@@ -24,6 +24,12 @@ type PreflightOptions = {
   facingMode?: 'user' | 'environment';
 };
 
+const AUDIO_PROCESSING_CONSTRAINTS: MediaTrackConstraints = {
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+};
+
 @Injectable({ providedIn: 'root' })
 export class MediaService {
   private readonly viewport = inject(ViewportService);
@@ -339,7 +345,10 @@ export class MediaService {
 
   private audioConstraints(audio: boolean, deviceId?: string): boolean | MediaTrackConstraints {
     if (!audio) return false;
-    return deviceId ? { deviceId: { exact: deviceId } } : true;
+    return {
+      ...AUDIO_PROCESSING_CONSTRAINTS,
+      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
+    };
   }
 
   private videoConstraints(

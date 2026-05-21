@@ -61,6 +61,10 @@
                 <strong>{{ trackSummary(latest, 'audio') }}</strong>
               </div>
               <div>
+                <span class="label">Mic settings</span>
+                <strong>{{ entryOutboundAudioSettings(latest) }}</strong>
+              </div>
+              <div>
                 <span class="label">Audio recv</span>
                 <strong [class]="entryAudioRecvClass(latest)">{{ inboundAudioSummary(latest) }}</strong>
               </div>
@@ -104,6 +108,7 @@
                       <span>labels {{ peerLabelsSummary(peer) }}</span>
                       <span>quality {{ peer.quality }}</span>
                       <span>audio {{ peer.outboundAudio.label || 'none' }} · {{ peer.outboundAudio.deviceId || 'no deviceId' }}</span>
+                      <span>mic settings {{ audioSettingsSummary(peer.outboundAudio) }}</span>
                       <span [class]="audioRecvClass(peer.inboundAudio)">Audio recv {{ peerInboundAudioSummary(peer) }}</span>
                       <span>video {{ peer.outboundVideo.label || 'none' }} · {{ peer.outboundVideo.deviceId || 'no deviceId' }}</span>
                       <span [class]="videoRecvClass(peer.inboundVideo)">Video recv {{ peerInboundVideoSummary(peer) }}</span>

@@ -31,6 +31,7 @@ test('DR-29 publishes the selected external mic sender through join, switch, fal
   await expect(page.locator('app-device-dialog .mic-select')).toHaveValue('extdev-external', { timeout: 10_000 });
   await expect.poll(() => localAudioDevice(page), { timeout: 10_000 }).toBe('extdev-external');
   await expect.poll(() => exactAudioCallCount(page, 'extdev-external'), { timeout: 10_000 }).toBe(1);
+  await expect.poll(() => audioCallsRequestProcessing(page), { timeout: 10_000 }).toBe(true);
 
   await page.locator('#display-name').fill('host');
   await page.getByRole('button', { name: 'Join' }).click();
@@ -46,6 +47,7 @@ test('DR-29 publishes the selected external mic sender through join, switch, fal
   await expect(page.locator('.modal-presentation .device-dialog')).toBeVisible();
   await page.locator('.modal-presentation .mic-select').selectOption('extdev-spare');
   await expect.poll(() => localAudioDevice(page), { timeout: 10_000 }).toBe('extdev-spare');
+  await expect.poll(() => audioCallsRequestProcessing(page), { timeout: 10_000 }).toBe(true);
   await expectSenderAudio(page, 'extdev-spare', 'Spare USB Microphone');
   await expectAudioPriority(page);
 
@@ -55,6 +57,7 @@ test('DR-29 publishes the selected external mic sender through join, switch, fal
   await page.locator('.modal-presentation .mic-select').selectOption('extdev-external');
   await expect.poll(() => localAudioDevice(page), { timeout: 10_000 }).toBe('extdev-built-in');
   await expect(page.locator('.modal-presentation .mic-select')).toHaveValue('extdev-built-in', { timeout: 10_000 });
+  await expect.poll(() => audioCallsRequestProcessing(page), { timeout: 10_000 }).toBe(true);
   await expectSenderAudio(page, 'extdev-built-in', 'Built-in Microphone');
   await expectAudioPriority(page);
 
@@ -124,6 +127,7 @@ async function captureDiagnosticsScreenshot(page: Page, roomTitle: string): Prom
   await sessionButton.click();
   await expect(diagnostics.getByText('External USB Microphone').first()).toBeVisible({ timeout: 10_000 });
   await expect(diagnostics.getByText('extdev-external').first()).toBeVisible();
+  await expect(diagnostics.getByText(/EC on.*NS on.*AGC on/).first()).toBeVisible();
   await diagnostics.screenshot({ path: `${SCREENSHOT_DIR}/external-mic-diagnostics.png`, fullPage: true });
   await diagnostics.close();
 }
@@ -148,9 +152,35 @@ async function exactAudioCallCount(page: Page, deviceId: string): Promise<number
   return page.evaluate((target) => (window.__extdevMediaCalls ?? []).filter((call) => call.audioDeviceId === target).length, deviceId);
 }
 
+async function audioCallsRequestProcessing(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const calls = window.__extdevMediaCalls ?? [];
+    return (
+      calls.length > 0 &&
+      calls.every((call) => {
+        const audio = call.constraints.audio;
+        return (
+          !!audio &&
+          audio !== true &&
+          audio.echoCancellation === true &&
+          audio.noiseSuppression === true &&
+          audio.autoGainControl === true
+        );
+      })
+    );
+  });
+}
+
 async function installExternalMicMedia(page: Page, role: 'host' | 'guest'): Promise<void> {
   await page.addInitScript(({ role }) => {
     type ExtdevTrack = MediaStreamTrack & { __diagDeviceId?: string; __diagLabel?: string };
+    type ExtdevAudioSettings = {
+      echoCancellation?: boolean;
+      noiseSuppression?: boolean;
+      autoGainControl?: boolean;
+      sampleRate: number;
+      channelCount: number;
+    };
     type ExtdevCall = { audioDeviceId: string | null; constraints: MediaStreamConstraints };
     const originalMediaDevices = navigator.mediaDevices;
     const originalGetUserMedia = originalMediaDevices.getUserMedia.bind(originalMediaDevices);
@@ -179,6 +209,7 @@ async function installExternalMicMedia(page: Page, role: 'host' | 'guest'): Prom
         getUserMedia: async (constraints: MediaStreamConstraints) => {
           const requestedAudio = requestedDeviceId(constraints.audio);
           const audioDeviceId = requestedAudio ?? (constraints.audio ? defaultAudioId : null);
+          const audioSettings = processingSettings(constraints.audio);
           calls.push({
             audioDeviceId,
             constraints: JSON.parse(JSON.stringify(constraints)) as MediaStreamConstraints,
@@ -188,7 +219,7 @@ async function installExternalMicMedia(page: Page, role: 'host' | 'guest'): Prom
           }
 
           const tracks: MediaStreamTrack[] = [];
-          if (constraints.audio && audioDeviceId) tracks.push(await audioTrack(audioDeviceId, labelFor(audioDeviceId)));
+          if (constraints.audio && audioDeviceId) tracks.push(await audioTrack(audioDeviceId, labelFor(audioDeviceId), audioSettings));
           if (constraints.video) tracks.push(videoTrack(`${role}-camera`, `${role} Camera`));
           return new MediaStream(tracks);
         },
@@ -212,11 +243,22 @@ async function installExternalMicMedia(page: Page, role: 'host' | 'guest'): Prom
       return null;
     }
 
-    async function audioTrack(deviceId: string, label: string): Promise<MediaStreamTrack> {
+    function processingSettings(value: boolean | MediaTrackConstraints | undefined): ExtdevAudioSettings {
+      const constraints = value && value !== true ? value : {};
+      return {
+        echoCancellation: constraints.echoCancellation === true,
+        noiseSuppression: constraints.noiseSuppression === true,
+        autoGainControl: constraints.autoGainControl === true,
+        sampleRate: 48000,
+        channelCount: 1,
+      };
+    }
+
+    async function audioTrack(deviceId: string, label: string, settings: ExtdevAudioSettings): Promise<MediaStreamTrack> {
       const stream = await originalGetUserMedia({ audio: true, video: false });
       const track = stream.getAudioTracks()[0] as ExtdevTrack;
       const originalSettings = track.getSettings.bind(track);
-      track.getSettings = () => ({ ...originalSettings(), deviceId });
+      track.getSettings = () => ({ ...originalSettings(), ...settings, deviceId });
       track.__diagDeviceId = deviceId;
       track.__diagLabel = label;
       return track;

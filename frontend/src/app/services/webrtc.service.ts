@@ -2114,7 +2114,7 @@ function trackInfo(senderTrack: MediaStreamTrack | null, fallbackTrack: MediaStr
   }
   const settings = typeof track.getSettings === 'function' ? track.getSettings() : {};
   const debugTrack = track as MediaStreamTrack & { __diagDeviceId?: string; __diagiDeviceId?: string; __diagLabel?: string };
-  return {
+  const info: DiagnosticsTrackInfo = {
     id: track.id || null,
     kind,
     deviceId: debugTrack.__diagDeviceId || debugTrack.__diagiDeviceId || settings.deviceId || null,
@@ -2124,6 +2124,14 @@ function trackInfo(senderTrack: MediaStreamTrack | null, fallbackTrack: MediaStr
     readyState: track.readyState,
     source: senderTrack ? 'sender' : 'stream',
   };
+  if (kind === 'audio') {
+    info.echoCancellation = typeof settings.echoCancellation === 'boolean' ? settings.echoCancellation : null;
+    info.noiseSuppression = typeof settings.noiseSuppression === 'boolean' ? settings.noiseSuppression : null;
+    info.autoGainControl = typeof settings.autoGainControl === 'boolean' ? settings.autoGainControl : null;
+    info.sampleRate = typeof settings.sampleRate === 'number' ? settings.sampleRate : null;
+    info.channelCount = typeof settings.channelCount === 'number' ? settings.channelCount : null;
+  }
+  return info;
 }
 
 function createPeerForensics(pc: RTCPeerConnection): PeerForensics {

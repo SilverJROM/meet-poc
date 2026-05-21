@@ -7,6 +7,7 @@ import {
   DiagnosticSessionSummary,
   DiagnosticsDetailResponse,
   DiagnosticsPeerSample,
+  DiagnosticsTrackInfo,
   MeetingSessionsService,
 } from '../../services/meeting-sessions.service';
 
@@ -79,6 +80,21 @@ export class DiagnosticsPage {
     const label = track.label || 'Unlabeled';
     const deviceId = track.deviceId || 'no deviceId';
     return `${label} (${deviceId})`;
+  }
+
+  audioSettingsSummary(track: DiagnosticsTrackInfo | undefined): string {
+    if (!track) return 'audio settings n/a';
+    const ec = this.booleanSetting(track.echoCancellation);
+    const ns = this.booleanSetting(track.noiseSuppression);
+    const agc = this.booleanSetting(track.autoGainControl);
+    const sampleRate = typeof track.sampleRate === 'number' ? `${track.sampleRate} Hz` : 'sample n/a';
+    const channelCount = typeof track.channelCount === 'number' ? `${track.channelCount} ch` : 'channels n/a';
+    return `EC ${ec} · NS ${ns} · AGC ${agc} · ${sampleRate} · ${channelCount}`;
+  }
+
+  entryOutboundAudioSettings(entry: DiagnosticEntry): string {
+    const peer = entry.payload.peers.find((candidate) => candidate.outboundAudio.source === 'sender') ?? entry.payload.peers[0];
+    return this.audioSettingsSummary(peer?.outboundAudio);
   }
 
   inboundAudioSummary(entry: DiagnosticEntry): string {
@@ -210,5 +226,11 @@ export class DiagnosticsPage {
 
   relayLabel(session: DiagnosticSessionSummary | DiagnosticEntry): string {
     return session.relayUsed ? 'relay used' : 'no relay seen';
+  }
+
+  private booleanSetting(value: boolean | null | undefined): string {
+    if (value === true) return 'on';
+    if (value === false) return 'off';
+    return 'n/a';
   }
 }

@@ -32,6 +32,11 @@ export type DiagnosticsTrackInfo = {
   kind: 'audio' | 'video';
   deviceId: string | null;
   label: string | null;
+  echoCancellation?: boolean | null;
+  noiseSuppression?: boolean | null;
+  autoGainControl?: boolean | null;
+  sampleRate?: number | null;
+  channelCount?: number | null;
   enabled: boolean | null;
   muted: boolean | null;
   readyState: MediaStreamTrackState | null;
