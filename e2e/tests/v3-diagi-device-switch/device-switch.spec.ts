@@ -69,6 +69,77 @@ test('DR-25 in-call picker hot-swaps camera/mic tracks and keeps audio sender pr
   await guest.context().close();
 });
 
+test('DR-46 in-call device track failure recovers with fallback and settles cleanly when absent', async ({ browser, page, request }) => {
+  await installFakeDeviceMedia(page);
+  const room = await createRoomViaApi(request, `DIAGI recovery ${Date.now()}`);
+  await loginAsJrom(page);
+  await joinOwnerWithCamera(page, room, 'host-recovery');
+
+  const guest = await createGuest(browser, room, 'guest-recovery');
+  await admitGuest(page, 'guest-recovery');
+  await assertConnected(page);
+  await assertConnected(guest);
+
+  const initialAudioId = await localTrackId(page, 'audio');
+  await page.evaluate(() => {
+    const win = window as unknown as { __diagiSetAvailableDevices?: (devices: DiagiFakeDevice[]) => void };
+    win.__diagiSetAvailableDevices?.([
+      { kind: 'audioinput', deviceId: 'diagi-mic-2', label: 'DIAGI Microphone 2' },
+      { kind: 'videoinput', deviceId: 'diagi-cam-1', label: 'DIAGI Camera 1' },
+      { kind: 'videoinput', deviceId: 'diagi-cam-2', label: 'DIAGI Camera 2' },
+      { kind: 'audiooutput', deviceId: 'diagi-speaker-1', label: 'DIAGI Speaker' },
+    ]);
+    const track = window.__meetDebug?.localStream?.getAudioTracks()[0];
+    track?.dispatchEvent(new Event('ended'));
+  });
+  await expect.poll(() => localTrackId(page, 'audio'), { timeout: 8000 }).not.toBe(initialAudioId);
+  await expect.poll(() => localTrackDevice(page, 'audio'), { timeout: 8000 }).toBe('diagi-mic-2');
+  await expect.poll(() => firstSenderAudioPriority(page), { timeout: 8000 }).toEqual({ priority: 'high', networkPriority: 'high' });
+  await expect(page.getByText(/Using fallback microphone|Switched to/i)).toBeVisible();
+  await expect(page.getByText(/refresh to rejoin/i)).toHaveCount(0);
+
+  const audioAfterRecovery = await localTrackId(page, 'audio');
+  await page.evaluate(() => {
+    const track = window.__meetDebug?.localStream?.getAudioTracks()[0];
+    track?.dispatchEvent(new Event('mute'));
+    track?.dispatchEvent(new Event('unmute'));
+  });
+  await page.waitForTimeout(LOCAL_TRACK_MUTE_DEBOUNCE_MS_FOR_TEST + 250);
+  expect(await localTrackId(page, 'audio')).toBe(audioAfterRecovery);
+
+  await page.evaluate(() => {
+    const win = window as unknown as { __diagiSetAvailableDevices?: (devices: DiagiFakeDevice[]) => void };
+    win.__diagiSetAvailableDevices?.([
+      { kind: 'audioinput', deviceId: 'diagi-mic-2', label: 'DIAGI Microphone 2' },
+      { kind: 'videoinput', deviceId: 'diagi-cam-2', label: 'DIAGI Camera 2' },
+      { kind: 'audiooutput', deviceId: 'diagi-speaker-1', label: 'DIAGI Speaker' },
+    ]);
+    const track = window.__meetDebug?.localStream?.getVideoTracks()[0];
+    track?.dispatchEvent(new Event('ended'));
+  });
+  await expect.poll(() => localTrackDevice(page, 'video'), { timeout: 8000 }).toBe('diagi-cam-2');
+  await expect(page.getByText(/Using fallback camera|Switched to/i)).toBeVisible();
+
+  await page.evaluate(() => {
+    const win = window as unknown as { __diagiSetAvailableDevices?: (devices: DiagiFakeDevice[]) => void };
+    win.__diagiSetAvailableDevices?.([
+      { kind: 'audioinput', deviceId: 'diagi-mic-2', label: 'DIAGI Microphone 2' },
+      { kind: 'audiooutput', deviceId: 'diagi-speaker-1', label: 'DIAGI Speaker' },
+    ]);
+    const track = window.__meetDebug?.localStream?.getVideoTracks()[0];
+    track?.dispatchEvent(new Event('ended'));
+  });
+  await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getVideoTracks().length || 0), { timeout: 8000 }).toBe(0);
+  await expect.poll(() => page.evaluate(() => window.__meetDebug?.effectiveCameraOn || false), { timeout: 8000 }).toBe(false);
+  await expect(page.getByText('No camera available. Camera is off.')).toBeVisible();
+
+  await guest.context().close();
+});
+
+const LOCAL_TRACK_MUTE_DEBOUNCE_MS_FOR_TEST = 1200;
+
+type DiagiFakeDevice = { kind: MediaDeviceKind; deviceId: string; label: string };
+
 async function installFakeDeviceMedia(page: Page): Promise<void> {
   await page.addInitScript(() => {
     type DiagiTrack = MediaStreamTrack & { __diagiDeviceId?: string };
@@ -76,30 +147,40 @@ async function installFakeDeviceMedia(page: Page): Promise<void> {
     const originalMediaDevices = navigator.mediaDevices;
     const originalGetUserMedia = originalMediaDevices.getUserMedia.bind(originalMediaDevices);
     const calls: DiagiCall[] = [];
+    type DiagiFakeDevice = { kind: MediaDeviceKind; deviceId: string; label: string };
+    let availableDevices: DiagiFakeDevice[] = [
+      { kind: 'audioinput', deviceId: 'diagi-mic-1', label: 'DIAGI Microphone 1' },
+      { kind: 'audioinput', deviceId: 'diagi-mic-2', label: 'DIAGI Microphone 2' },
+      { kind: 'videoinput', deviceId: 'diagi-cam-1', label: 'DIAGI Camera 1' },
+      { kind: 'videoinput', deviceId: 'diagi-cam-2', label: 'DIAGI Camera 2' },
+      { kind: 'audiooutput', deviceId: 'diagi-speaker-1', label: 'DIAGI Speaker' },
+    ];
 
     Object.defineProperty(window, '__diagiMediaCalls', {
       configurable: true,
       value: calls,
+    });
+    Object.defineProperty(window, '__diagiSetAvailableDevices', {
+      configurable: true,
+      value: (devices: DiagiFakeDevice[]) => {
+        availableDevices = devices;
+      },
     });
 
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: {
         ...originalMediaDevices,
-        enumerateDevices: async () => [
-          fakeDevice('audioinput', 'diagi-mic-1', 'DIAGI Microphone 1'),
-          fakeDevice('audioinput', 'diagi-mic-2', 'DIAGI Microphone 2'),
-          fakeDevice('videoinput', 'diagi-cam-1', 'DIAGI Camera 1'),
-          fakeDevice('videoinput', 'diagi-cam-2', 'DIAGI Camera 2'),
-          fakeDevice('audiooutput', 'diagi-speaker-1', 'DIAGI Speaker'),
-        ],
+        enumerateDevices: async () => availableDevices.map((device) => fakeDevice(device.kind, device.deviceId, device.label)),
         getUserMedia: async (constraints: MediaStreamConstraints) => {
-          const audioDeviceId = requestedDeviceId(constraints.audio) ?? (constraints.audio ? 'diagi-mic-1' : null);
-          const videoDeviceId = requestedDeviceId(constraints.video);
+          const requestedAudioDeviceId = requestedDeviceId(constraints.audio);
+          const requestedVideoDeviceId = requestedDeviceId(constraints.video);
+          const audioDeviceId = chooseDeviceId('audioinput', constraints.audio);
+          const videoDeviceId = chooseDeviceId('videoinput', constraints.video);
           const facingMode = requestedFacingMode(constraints.video);
           calls.push({
-            audioDeviceId,
-            videoDeviceId,
+            audioDeviceId: requestedAudioDeviceId,
+            videoDeviceId: requestedVideoDeviceId,
             facingMode,
             constraints: JSON.parse(JSON.stringify(constraints)) as MediaStreamConstraints,
           });
@@ -127,6 +208,19 @@ async function installFakeDeviceMedia(page: Page): Promise<void> {
         if (typeof ideal === 'string') return ideal;
       }
       return null;
+    }
+
+    function chooseDeviceId(kind: MediaDeviceKind, value: boolean | MediaTrackConstraints | undefined): string | null {
+      if (!value) return null;
+      const requested = requestedDeviceId(value);
+      const available = availableDevices.filter((device) => device.kind === kind);
+      if (requested) {
+        if (available.some((device) => device.deviceId === requested)) return requested;
+        throw new DOMException(`${kind} ${requested} not found`, 'NotFoundError');
+      }
+      const fallback = available[0]?.deviceId ?? null;
+      if (!fallback) throw new DOMException(`${kind} not found`, 'NotFoundError');
+      return fallback;
     }
 
     function requestedFacingMode(value: boolean | MediaTrackConstraints | undefined): string | null {

@@ -126,6 +126,23 @@ export class MediaService {
     return nextTrack;
   }
 
+  removeAudioTrack(): void {
+    const stream = this.localStream();
+    const track = stream?.getAudioTracks()[0] ?? null;
+    if (stream && track) stream.removeTrack(track);
+    if (track && track.readyState !== 'ended') track.stop();
+    this.micOn.set(false);
+    this.stopMicLevel();
+  }
+
+  removeVideoTrack(): void {
+    const stream = this.localStream();
+    const track = stream?.getVideoTracks()[0] ?? null;
+    if (stream && track) stream.removeTrack(track);
+    if (track && track.readyState !== 'ended') track.stop();
+    this.cameraOn.set(false);
+  }
+
   getMicLevel(stream: MediaStream): Signal<number> {
     this.stopMicLevel();
     const track = stream.getAudioTracks()[0];

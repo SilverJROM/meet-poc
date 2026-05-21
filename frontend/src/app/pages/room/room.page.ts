@@ -28,6 +28,9 @@ import { WebrtcService } from '../../services/webrtc.service';
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
 const DIAGNOSTICS_LOGGING_STORAGE_KEY = 'meet-poc.diagnosticsLogging';
+const LOCAL_TRACK_MUTE_DEBOUNCE_MS = 1_200;
+const DEVICE_RECOVERY_MAX_ATTEMPTS = 3;
+const DEVICE_RECOVERY_BACKOFF_MS = 650;
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
 type BufferedSignal = { from: string; data: unknown };
@@ -169,6 +172,10 @@ export class RoomPage implements OnDestroy {
   private pendingListInitialized = false;
   private lastDoorbellAt = 0;
   private deviceChangeListenerInstalled = false;
+  private audioRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private videoRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private audioRecoveryInFlight = false;
+  private videoRecoveryInFlight = false;
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
   private readonly chatMessageList = viewChild<ElementRef<HTMLElement>>('chatMessageList');
   readonly formattedElapsed = computed(() => {
@@ -1317,6 +1324,7 @@ export class RoomPage implements OnDestroy {
   private cleanupCall(sendLeaveMessage = false): void {
     if (this.state() === 'in-call') this.flushDiagnosticsLog('call-end', { useBeacon: true });
     this.stopDiagnosticsLogger();
+    this.clearLocalTrackRecoveryTimers();
     this.clearPreflightTimer();
     this.stopWaitingRoomCountdown();
     if (sendLeaveMessage && (this.state() === 'in-call' || this.state() === 'knocking' || this.state() === 'waiting-room')) this.ws.send({ type: 'leave' });
@@ -1402,6 +1410,13 @@ export class RoomPage implements OnDestroy {
     storeDevice(DEVICE_STORAGE.audioInput, actualDeviceId);
   }
 
+  private syncSelectedVideoIdToTrack(track: MediaStreamTrack | null | undefined): void {
+    const actualDeviceId = mediaTrackDeviceId(track);
+    this.selectedVideoId.set(actualDeviceId);
+    this.videoDevicePinned.set(!!actualDeviceId);
+    storeDevice(DEVICE_STORAGE.videoInput, actualDeviceId);
+  }
+
   private installDeviceChangeHandler(): void {
     if (this.deviceChangeListenerInstalled || !navigator.mediaDevices?.addEventListener) return;
     navigator.mediaDevices.addEventListener('devicechange', this.handleDeviceChange);
@@ -1474,19 +1489,163 @@ export class RoomPage implements OnDestroy {
 
   private attachLocalTrackFailureHandlers(stream: MediaStream): void {
     const audioTrack = stream.getAudioTracks()[0];
-    if (!audioTrack) return;
-    const onFailure = () => this.handleLocalAudioFailure();
-    audioTrack.onended = onFailure;
-    audioTrack.onmute = onFailure;
+    if (audioTrack) {
+      audioTrack.onended = () => this.handleLocalTrackFailure('audio', audioTrack, 'ended');
+      audioTrack.onmute = () => this.handleLocalTrackFailure('audio', audioTrack, 'mute');
+      audioTrack.onunmute = () => this.clearLocalTrackRecoveryTimer('audio', audioTrack);
+    }
+    const videoTrack = stream.getVideoTracks()[0];
+    if (videoTrack) {
+      videoTrack.onended = () => this.handleLocalTrackFailure('video', videoTrack, 'ended');
+      videoTrack.onmute = () => this.handleLocalTrackFailure('video', videoTrack, 'mute');
+      videoTrack.onunmute = () => this.clearLocalTrackRecoveryTimer('video', videoTrack);
+    }
   }
 
-  private handleLocalAudioFailure(): void {
-    if (this.state() !== 'in-call') return;
-    this.media.micOn.set(false);
+  private handleLocalTrackFailure(kind: 'audio' | 'video', track: MediaStreamTrack, event: 'ended' | 'mute'): void {
+    if (this.state() !== 'in-call' || !this.isCurrentLocalTrack(kind, track)) return;
+    this.clearLocalTrackRecoveryTimer(kind);
+    if (event === 'mute' && track.readyState === 'live') {
+      const timer = window.setTimeout(() => {
+        if (!this.isCurrentLocalTrack(kind, track)) return;
+        if (track.muted || track.readyState === 'ended') void this.recoverLocalTrack(kind, 'persistent-mute');
+      }, LOCAL_TRACK_MUTE_DEBOUNCE_MS);
+      if (kind === 'audio') this.audioRecoveryTimer = timer;
+      else this.videoRecoveryTimer = timer;
+      return;
+    }
+    void this.recoverLocalTrack(kind, 'ended');
+  }
+
+  private clearLocalTrackRecoveryTimer(kind: 'audio' | 'video', track?: MediaStreamTrack): void {
+    if (track && !this.isCurrentLocalTrack(kind, track)) return;
+    const timer = kind === 'audio' ? this.audioRecoveryTimer : this.videoRecoveryTimer;
+    if (timer) window.clearTimeout(timer);
+    if (kind === 'audio') this.audioRecoveryTimer = null;
+    else this.videoRecoveryTimer = null;
+  }
+
+  private clearLocalTrackRecoveryTimers(): void {
+    this.clearLocalTrackRecoveryTimer('audio');
+    this.clearLocalTrackRecoveryTimer('video');
+    this.audioRecoveryInFlight = false;
+    this.videoRecoveryInFlight = false;
+  }
+
+  private isCurrentLocalTrack(kind: 'audio' | 'video', track: MediaStreamTrack): boolean {
+    const current = kind === 'audio' ? this.media.localStream()?.getAudioTracks()[0] : this.media.localStream()?.getVideoTracks()[0];
+    return current === track;
+  }
+
+  private async recoverLocalTrack(kind: 'audio' | 'video', trigger: 'ended' | 'persistent-mute'): Promise<void> {
+    if (kind === 'audio') {
+      if (this.audioRecoveryInFlight) return;
+      this.audioRecoveryInFlight = true;
+    } else {
+      if (this.videoRecoveryInFlight) return;
+      this.videoRecoveryInFlight = true;
+    }
+    this.deviceFailureNotice.set(null);
+    this.actionNotice.set(kind === 'audio' ? 'Microphone disconnected. Reconnecting...' : 'Camera disconnected. Reconnecting...');
+    this.queueDiagnosticsLog('error', `local ${kind} track ${trigger}; attempting device recovery`);
+    try {
+      if (kind === 'audio') await this.recoverLocalAudioTrack();
+      else await this.recoverLocalVideoTrack();
+    } finally {
+      if (kind === 'audio') this.audioRecoveryInFlight = false;
+      else this.videoRecoveryInFlight = false;
+    }
+  }
+
+  private async recoverLocalAudioTrack(): Promise<void> {
+    for (let attempt = 0; attempt < DEVICE_RECOVERY_MAX_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) await delay(DEVICE_RECOVERY_BACKOFF_MS * attempt);
+      const devices = await this.media.enumerateDevices();
+      this.audioInputs.set(devices.audioInputs);
+      this.audioOutputs.set(devices.audioOutputs);
+      this.videoInputs.set(devices.videoInputs);
+      if (!devices.audioInputs.length) break;
+      const candidates = this.deviceCandidates(this.selectedAudioId(), devices.audioInputs);
+      for (const candidate of candidates) {
+        try {
+          const track = await this.media.replaceAudioTrack(candidate.deviceId, (nextTrack) => this.webrtc.replaceLocalSenderTrack('audio', nextTrack));
+          if (!track) continue;
+          this.syncSelectedAudioIdToTrack(track);
+          this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
+          this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([track])));
+          this.updateLocalMediaState();
+          this.broadcastMediaState(track.enabled, this.media.cameraOn());
+          this.actionNotice.set(this.recoveryNotice('microphone', candidate, track));
+          this.queueDiagnosticsLog('state-change', 'local audio track recovered via replaceTrack');
+          return;
+        } catch (err) {
+          console.debug('[devices] microphone recovery candidate failed', candidate.deviceId || 'default', err);
+        }
+      }
+    }
+    await this.webrtc.replaceLocalSenderTrack('audio', null);
+    this.media.removeAudioTrack();
     this.updateLocalMediaState();
     this.broadcastMediaState(false, this.media.cameraOn());
-    this.deviceFailureNotice.set('Microphone disconnected. Please refresh to rejoin.');
-    this.queueDiagnosticsLog('error', 'local audio track failed');
+    this.actionNotice.set(null);
+    this.deviceFailureNotice.set('No microphone available. Connect a microphone, then choose it from devices.');
+    this.queueDiagnosticsLog('error', 'local audio recovery failed; no microphone available');
+  }
+
+  private async recoverLocalVideoTrack(): Promise<void> {
+    for (let attempt = 0; attempt < DEVICE_RECOVERY_MAX_ATTEMPTS; attempt += 1) {
+      if (attempt > 0) await delay(DEVICE_RECOVERY_BACKOFF_MS * attempt);
+      const devices = await this.media.enumerateDevices();
+      this.audioInputs.set(devices.audioInputs);
+      this.audioOutputs.set(devices.audioOutputs);
+      this.videoInputs.set(devices.videoInputs);
+      if (!devices.videoInputs.length) break;
+      const candidates = this.deviceCandidates(this.selectedVideoId(), devices.videoInputs);
+      for (const candidate of candidates) {
+        try {
+          const track = await this.media.replaceVideoTrack(candidate.deviceId, (nextTrack) => this.webrtc.replaceLocalSenderTrack('video', nextTrack));
+          if (!track) continue;
+          this.syncSelectedVideoIdToTrack(track);
+          this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
+          this.updateLocalMediaState();
+          this.broadcastMediaState(this.media.micOn(), true);
+          this.actionNotice.set(this.recoveryNotice('camera', candidate, track));
+          this.queueDiagnosticsLog('state-change', 'local video track recovered via replaceTrack');
+          return;
+        } catch (err) {
+          console.debug('[devices] camera recovery candidate failed', candidate.deviceId || 'default', err);
+        }
+      }
+    }
+    await this.webrtc.replaceVideoTrack(null);
+    this.media.removeVideoTrack();
+    this.updateLocalMediaState();
+    this.broadcastMediaState(this.media.micOn(), false);
+    this.actionNotice.set(null);
+    this.deviceFailureNotice.set('No camera available. Camera is off.');
+    this.queueDiagnosticsLog('error', 'local video recovery failed; camera switched off');
+  }
+
+  private deviceCandidates(
+    selectedDeviceId: string,
+    devices: MediaDeviceInfo[],
+  ): { deviceId: string | undefined; label: string; fallback: boolean }[] {
+    const availableIds = new Set(devices.map((device) => device.deviceId).filter(Boolean));
+    const selected = selectedDeviceId && availableIds.has(selectedDeviceId) ? devices.find((device) => device.deviceId === selectedDeviceId) : null;
+    const candidates: { deviceId: string | undefined; label: string; fallback: boolean }[] = [];
+    if (selected) candidates.push({ deviceId: selected.deviceId, label: selected.label, fallback: false });
+    candidates.push({ deviceId: undefined, label: devices[0]?.label || '', fallback: !selected });
+    for (const device of devices) {
+      if (device.deviceId === selected?.deviceId) continue;
+      candidates.push({ deviceId: device.deviceId, label: device.label, fallback: true });
+    }
+    return candidates.filter((candidate, index, all) => all.findIndex((entry) => entry.deviceId === candidate.deviceId) === index);
+  }
+
+  private recoveryNotice(kind: 'microphone' | 'camera', candidate: { label: string; fallback: boolean }, track: MediaStreamTrack): string {
+    const label = candidate.label || track.label || '';
+    if (candidate.fallback) return label ? `Using fallback ${kind}: ${label}.` : `Using fallback ${kind}.`;
+    return label ? `Switched to ${label}.` : `${kind[0].toUpperCase()}${kind.slice(1)} reconnected.`;
   }
 
   private async syncShareCameraCut(shareActive: boolean, localScreenShareActive: boolean, manualOverride: boolean): Promise<void> {
@@ -1857,6 +2016,10 @@ function preferredDeviceId(key: string, devices: MediaDeviceInfo[], current: str
 }
 
 function audioTrackDeviceId(track: MediaStreamTrack | null | undefined): string {
+  return mediaTrackDeviceId(track);
+}
+
+function mediaTrackDeviceId(track: MediaStreamTrack | null | undefined): string {
   if (!track || typeof track.getSettings !== 'function') return '';
   const deviceId = track.getSettings().deviceId;
   return typeof deviceId === 'string' ? deviceId : '';
