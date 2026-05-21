@@ -342,12 +342,13 @@ function isHostCommandAllowed(command: string, roomId: string | null, userEmail:
   return allowed;
 }
 
-function peerSummaries(live: LiveRoom, roomId: string, database: Database.Database): { id: string; participantId: string; name: string; host: boolean }[] {
+function peerSummaries(live: LiveRoom, roomId: string, database: Database.Database): { id: string; participantId: string; name: string; host: boolean; isMobile: boolean }[] {
   return [...live.admitted.entries()].map(([id, p]) => ({
     id,
     participantId: p.participantId,
     name: p.name,
     host: isOwnerOf(roomId, p.userEmail, database),
+    isMobile: p.isMobile,
   }));
 }
 
@@ -535,7 +536,7 @@ function admitPeer(roomId: string, clientId: string, database: Database.Database
   });
   issueReconnectToken(live, clientId, pending, pending.supportsReconnect);
   for (const [, peer] of live.admitted) {
-    send(peer.ws, { type: 'peer-joined', clientId, participantId: pending.participantId, name: pending.name });
+    send(peer.ws, { type: 'peer-joined', clientId, participantId: pending.participantId, name: pending.name, isMobile: pending.isMobile });
   }
   live.admitted.set(clientId, pending);
   bumpAdmittedPeak(live, database);
@@ -761,10 +762,10 @@ export function attachSignaling(server: http.Server, database: Database.Database
               send(
                 peer.ws,
                 resumeOldClientId
-                  ? { type: 'peer-resumed', oldClientId: resumeOldClientId, clientId, participantId, name: myName, host: owner }
+                  ? { type: 'peer-resumed', oldClientId: resumeOldClientId, clientId, participantId, name: myName, host: owner, isMobile: entry.isMobile }
                   : owner && supportsReconnect
-                    ? { type: 'peer-joined', clientId, participantId, name: myName, host: true }
-                    : { type: 'peer-joined', clientId, participantId, name: myName },
+                    ? { type: 'peer-joined', clientId, participantId, name: myName, host: true, isMobile: entry.isMobile }
+                    : { type: 'peer-joined', clientId, participantId, name: myName, isMobile: entry.isMobile },
               );
             }
           }
@@ -800,8 +801,9 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const mic = Boolean(msg.mic);
         const cam = Boolean(msg.cam);
         const screenOn = Boolean(msg.screenOn);
+        const sender = live.admitted.get(clientId);
         for (const [id, peer] of live.admitted) {
-          if (id !== clientId) send(peer.ws, { type: 'media-state', clientId, mic, cam, screenOn });
+          if (id !== clientId) send(peer.ws, { type: 'media-state', clientId, mic, cam, screenOn, isMobile: sender?.isMobile ?? false });
         }
         return;
       }

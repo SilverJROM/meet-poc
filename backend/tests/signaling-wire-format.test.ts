@@ -36,14 +36,14 @@ describe('signaling wire format', () => {
     expect(Object.keys(knocking)).toEqual(['type', 'clientId', 'roomTitle']);
     expect(Object.keys(knock)).toEqual(['type', 'clientId', 'name']);
     expect(Object.keys(guestAdmitted)).toEqual(['type', 'clientId', 'participantId', 'peers', 'roomTitle', 'isOwner', 'hostClientId', 'sessionId']);
-    expect(Object.keys(peerJoined)).toEqual(['type', 'clientId', 'participantId', 'name']);
+    expect(Object.keys(peerJoined)).toEqual(['type', 'clientId', 'participantId', 'name', 'isMobile']);
     expect(Object.keys(knockCancelled)).toEqual(['type', 'clientId']);
     expect(Object.keys(signal)).toEqual(['type', 'from', 'data']);
     expect(Object.keys(peerLeft)).toEqual(['type', 'clientId', 'participantId']);
     expect(ownerAdmitted).toMatchObject({ type: 'admitted', peers: [], roomTitle: 'Team sync', isOwner: true, sessionId: expect.any(String) });
     expect(guestAdmitted).toMatchObject({
       type: 'admitted',
-      peers: [{ id: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId, name: 'Owner', host: true }],
+      peers: [{ id: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId, name: 'Owner', host: true, isMobile: false }],
       roomTitle: 'Team sync',
       isOwner: false,
       hostClientId: ownerAdmitted.clientId,

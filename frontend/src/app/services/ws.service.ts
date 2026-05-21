@@ -6,7 +6,7 @@ export type SignalingMessage =
       type: 'admitted';
       clientId: string;
       participantId?: string;
-      peers: { id: string; participantId?: string; name: string; host?: boolean }[];
+      peers: { id: string; participantId?: string; name: string; host?: boolean; isMobile?: boolean }[];
       roomTitle?: string;
       isOwner: boolean;
       hostClientId?: string;
@@ -19,11 +19,11 @@ export type SignalingMessage =
   | { type: 'knocking'; clientId: string; roomTitle?: string }
   | { type: 'knock'; clientId: string; name: string }
   | { type: 'pending-list'; knockers: { id: string; name: string }[] }
-  | { type: 'peer-joined'; clientId: string; participantId?: string; name: string; host?: boolean }
+  | { type: 'peer-joined'; clientId: string; participantId?: string; name: string; host?: boolean; isMobile?: boolean }
   | { type: 'peer-reconnecting'; clientId: string; participantId?: string; name: string; host?: boolean }
-  | { type: 'peer-resumed'; oldClientId: string; clientId: string; participantId?: string; name: string; host?: boolean }
+  | { type: 'peer-resumed'; oldClientId: string; clientId: string; participantId?: string; name: string; host?: boolean; isMobile?: boolean }
   | { type: 'peer-left'; clientId: string; participantId?: string }
-  | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean; screenOn?: boolean }
+  | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean; screenOn?: boolean; isMobile?: boolean }
   | { type: 'chat'; id: string; clientId: string; sender: string; text: string; sentAt: number }
   | { type: 'recording-started'; clientId: string; sessionId: string }
   | { type: 'recording-stopped'; clientId: string; sessionId: string }

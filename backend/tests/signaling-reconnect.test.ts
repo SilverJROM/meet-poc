@@ -58,7 +58,7 @@ describe('signaling reconnect', () => {
       isOwner: false,
       hostClientId: ownerAdmitted.clientId,
       participantId: guestAdmitted.participantId,
-      peers: [{ id: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId, name: 'Owner', host: true }],
+      peers: [{ id: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId, name: 'Owner', host: true, isMobile: false }],
     });
     expect(resumedAdmitted.clientId).not.toBe(knocking.clientId);
     expect(rejoin).toEqual({
@@ -68,6 +68,7 @@ describe('signaling reconnect', () => {
       participantId: guestAdmitted.participantId,
       name: 'Guest',
       host: false,
+      isMobile: false,
     });
 
     closeWs(resumed);
@@ -121,6 +122,7 @@ describe('signaling reconnect', () => {
       participantId: guestAdmitted.participantId,
       name: 'Guest',
       host: false,
+      isMobile: false,
     });
 
     closeWs(resumed);
@@ -444,6 +446,7 @@ describe('signaling reconnect', () => {
       participantId: guestAdmitted.participantId,
       name: 'Guest',
       host: false,
+      isMobile: false,
     });
 
     closeWs(resumed);
@@ -522,6 +525,7 @@ describe('signaling reconnect', () => {
       participantId: firstAdmitted.participantId,
       name: 'Owner',
       host: true,
+      isMobile: false,
     });
 
     closeWs(guest);

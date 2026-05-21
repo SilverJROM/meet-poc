@@ -37,6 +37,7 @@ export type PeerState = {
   screenOn: boolean;
   reconnecting: boolean;
   reconnectingSince: number | null;
+  isMobile: boolean;
 };
 
 export type ConnectionQuality = 'good' | 'weak' | 'poor';
@@ -164,13 +165,16 @@ export class WebrtcService {
   private outboundAudioLiveness: OutboundAudioLiveness = emptyOutboundAudioLiveness();
   private readonly autoPausedReceivers = new Set<string>();
   private readonly autoDegradedReceivers = new Set<string>();
+  private readonly mobileAutoPausedReceivers = new Set<string>();
   private readonly remotePauseRequests = new Set<string>();
   private readonly remoteDegradeRequests = new Set<string>();
+  private readonly lastActiveSpeakerAt = new Map<string, number>();
   private readonly outboundVideoPaused = new Map<string, boolean>();
   private readonly outboundVideoDegraded = new Map<string, boolean>();
   private readonly videoSenders = new Map<string, RTCRtpSender>();
   private readonly fallbackVideoTracks = new Map<string, MediaStreamTrack | null>();
   private qualityTimer: ReturnType<typeof setInterval> | null = null;
+  private activeSpeakerId: string | null = null;
   readonly forceRelay = signal(readForceRelay());
   readonly lastPeerConnectionPolicy = signal<RTCIceTransportPolicy | 'all'>('all');
   readonly lastPeerConnectionConfig = signal<RTCConfiguration | null>(null);
@@ -241,6 +245,7 @@ export class WebrtcService {
         screenOn: options.screenOn,
         reconnecting: false,
         reconnectingSince: null,
+        isMobile: this.localMobile,
       });
       for (const [id, peer] of peers) {
         if (peer.isLocal && id !== clientId) peers.delete(id);
@@ -248,11 +253,11 @@ export class WebrtcService {
     });
   }
 
-  async addPeer(clientId: string, name: string, isInitiator: boolean, options: { participantId?: string; isHost?: boolean; stream?: MediaStream } = {}): Promise<void> {
+  async addPeer(clientId: string, name: string, isInitiator: boolean, options: { participantId?: string; isHost?: boolean; isMobile?: boolean; stream?: MediaStream } = {}): Promise<void> {
     const participantId = options.participantId || clientId;
     if (!this.localStream || !this.sendSignal) return;
     if (this.peers().has(clientId)) {
-      this.updatePeer(clientId, { name, participantId, isHost: !!options.isHost, reconnecting: false, reconnectingSince: null });
+      this.updatePeer(clientId, { name, participantId, isHost: !!options.isHost, isMobile: !!options.isMobile, reconnecting: false, reconnectingSince: null });
       return;
     }
     const blockedByLivePeer = this.removeStalePeersForParticipant(participantId, clientId);
@@ -284,6 +289,7 @@ export class WebrtcService {
       screenOn: false,
       reconnecting: false,
       reconnectingSince: null,
+      isMobile: !!options.isMobile,
     };
     this.mutatePeers((peers) => peers.set(clientId, peer));
 
@@ -291,11 +297,11 @@ export class WebrtcService {
     await this.applyAllVideoPolicies();
   }
 
-  async resumePeer(oldClientId: string, clientId: string, name: string, isInitiator: boolean, options: { participantId?: string; isHost?: boolean } = {}): Promise<void> {
+  async resumePeer(oldClientId: string, clientId: string, name: string, isInitiator: boolean, options: { participantId?: string; isHost?: boolean; isMobile?: boolean } = {}): Promise<void> {
     const participantId = options.participantId || this.peers().get(oldClientId)?.participantId || clientId;
     if (oldClientId === clientId) {
       this.cancelPeerConnectionRecreate(clientId);
-      this.updatePeer(clientId, { name, participantId, isHost: !!options.isHost, reconnecting: false, reconnectingSince: null });
+      this.updatePeer(clientId, { name, participantId, isHost: !!options.isHost, isMobile: !!options.isMobile, reconnecting: false, reconnectingSince: null });
       return;
     }
     const oldPeer = this.peers().get(oldClientId);
@@ -353,10 +359,11 @@ export class WebrtcService {
         micEnabled: peer.micEnabled,
         camEnabled: peer.camEnabled,
         screenOn: peer.screenOn,
+        isMobile: peer.isMobile,
       }));
     for (const peer of remotes) this.removePeer(peer.id);
     for (const peer of remotes) {
-      await this.addPeer(peer.id, peer.name, true, { participantId: peer.participantId, isHost: peer.isHost });
+      await this.addPeer(peer.id, peer.name, true, { participantId: peer.participantId, isHost: peer.isHost, isMobile: peer.isMobile });
       this.updatePeer(peer.id, { micEnabled: peer.micEnabled, camEnabled: peer.camEnabled, screenOn: peer.screenOn });
     }
   }
@@ -410,6 +417,7 @@ export class WebrtcService {
     videoScaleResolutionDownBy: number | null;
     videoMaxFramerate: number | null;
     videoDegraded: boolean;
+    remoteIsMobile: boolean;
   }[] {
     return this.peerList()
       .filter((peer) => !peer.isLocal && peer.pc)
@@ -432,6 +440,7 @@ export class WebrtcService {
           videoScaleResolutionDownBy: typeof videoEncoding?.scaleResolutionDownBy === 'number' ? videoEncoding.scaleResolutionDownBy : null,
           videoMaxFramerate: typeof videoEncoding?.maxFramerate === 'number' ? videoEncoding.maxFramerate : null,
           videoDegraded: this.shouldDegradeOutboundVideo(peer.id),
+          remoteIsMobile: peer.isMobile,
         };
     });
   }
@@ -616,6 +625,18 @@ export class WebrtcService {
     this.touchPeer(clientId, patch);
   }
 
+  setActiveSpeakerPeer(clientId: string | null): void {
+    this.activeSpeakerId = clientId;
+    if (!clientId) return;
+    this.lastActiveSpeakerAt.set(clientId, Date.now());
+    if (this.mobileAutoPausedReceivers.has(clientId)) {
+      this.mobileAutoPausedReceivers.delete(clientId);
+      this.autoPausedReceivers.delete(clientId);
+      if (!this.manualAudioOnly()) this.sendReceiverVideoPolicy(clientId, false, 'auto-poor', true);
+      this.updateAudioOnlyReason(clientId);
+    }
+  }
+
   removePeer(clientId: string): void {
     this.removePeerResources(clientId, true);
     this.mutatePeers((peers) => peers.delete(clientId));
@@ -671,8 +692,11 @@ export class WebrtcService {
     this.outboundAudioLiveness = emptyOutboundAudioLiveness();
     this.autoPausedReceivers.clear();
     this.autoDegradedReceivers.clear();
+    this.mobileAutoPausedReceivers.clear();
     this.remotePauseRequests.clear();
     this.remoteDegradeRequests.clear();
+    this.lastActiveSpeakerAt.clear();
+    this.activeSpeakerId = null;
     this.outboundVideoPaused.clear();
     this.outboundVideoDegraded.clear();
     this.videoSenders.clear();
@@ -834,8 +858,10 @@ export class WebrtcService {
     this.peerForensics.delete(clientId);
     this.autoPausedReceivers.delete(clientId);
     this.autoDegradedReceivers.delete(clientId);
+    this.mobileAutoPausedReceivers.delete(clientId);
     this.remotePauseRequests.delete(clientId);
     this.remoteDegradeRequests.delete(clientId);
+    this.lastActiveSpeakerAt.delete(clientId);
     this.outboundVideoPaused.delete(clientId);
     this.outboundVideoDegraded.delete(clientId);
     this.videoSenders.delete(clientId);
@@ -1306,6 +1332,13 @@ export class WebrtcService {
       rttMs: metrics.rttMs,
       availableOutgoingBitrateKbps: metrics.availableOutgoingBitrateKbps,
     });
+    if (this.localMobile && counters.poor >= AUTO_DEGRADE_POOR_SAMPLES && metrics.quality !== 'good') {
+      this.pauseNextMobileNonSpeakerReceiver();
+      return;
+    }
+    if (this.localMobile && metrics.quality === 'good' && counters.good >= AUTO_RESTORE_GOOD_SAMPLES && this.restoreOneMobileReceiverVideo()) {
+      return;
+    }
     if (counters.poor >= AUTO_DEGRADE_POOR_SAMPLES && metrics.audioOnlyFloor) {
       const changed = !this.autoPausedReceivers.has(clientId) || this.autoDegradedReceivers.has(clientId);
       this.autoPausedReceivers.add(clientId);
@@ -1327,6 +1360,30 @@ export class WebrtcService {
       if (!this.manualAudioOnly()) this.sendReceiverVideoPolicy(clientId, false, 'auto-poor', false);
       this.updateAudioOnlyReason(clientId);
     }
+  }
+
+  private pauseNextMobileNonSpeakerReceiver(): void {
+    if (!this.localMobile || this.manualAudioOnly()) return;
+    const candidate = this.peerList()
+      .filter((peer) => !peer.isLocal && peer.pc && peer.id !== this.activeSpeakerId && !this.autoPausedReceivers.has(peer.id))
+      .sort((a, b) => (this.lastActiveSpeakerAt.get(a.id) ?? 0) - (this.lastActiveSpeakerAt.get(b.id) ?? 0))[0];
+    if (!candidate) return;
+    this.mobileAutoPausedReceivers.add(candidate.id);
+    this.autoPausedReceivers.add(candidate.id);
+    this.autoDegradedReceivers.delete(candidate.id);
+    this.sendReceiverVideoPolicy(candidate.id, true, 'auto-poor');
+    this.updateAudioOnlyReason(candidate.id);
+  }
+
+  private restoreOneMobileReceiverVideo(): boolean {
+    if (!this.localMobile || this.manualAudioOnly()) return false;
+    const clientId = this.mobileAutoPausedReceivers.values().next().value as string | undefined;
+    if (!clientId) return false;
+    this.mobileAutoPausedReceivers.delete(clientId);
+    this.autoPausedReceivers.delete(clientId);
+    this.sendReceiverVideoPolicy(clientId, false, 'auto-poor', true);
+    this.updateAudioOnlyReason(clientId);
+    return true;
   }
 
   private updateSustainedHealthyRecoveryWindow(clientId: string, metrics: QualityMetrics): void {
@@ -1592,7 +1649,12 @@ export class WebrtcService {
   }
 
   private shouldDegradeOutboundVideo(clientId: string): boolean {
-    return !this.shouldPauseOutboundVideo(clientId) && (this.remoteDegradeRequests.has(clientId) || this.shouldProtectMobileOutboundVideo());
+    return !this.shouldPauseOutboundVideo(clientId) && (this.remoteDegradeRequests.has(clientId) || this.isRemoteMobile(clientId) || this.shouldProtectMobileOutboundVideo());
+  }
+
+  private isRemoteMobile(clientId: string): boolean {
+    const peer = this.peers().get(clientId);
+    return !!peer && !peer.isLocal && peer.isMobile;
   }
 
   private shouldProtectMobileOutboundVideo(): boolean {

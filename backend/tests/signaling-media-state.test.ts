@@ -37,12 +37,13 @@ describe('signaling media-state', () => {
     await nextMessage(owner, (msg) => msg.type === 'admitted');
 
     const guest1 = await connectWs(url);
-    guest1.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest One' }));
+    guest1.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest One', mobile: true }));
     const knocking1 = await nextMessage(guest1, (msg) => msg.type === 'knocking');
     await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === knocking1.clientId);
     owner.send(JSON.stringify({ type: 'admit', clientId: knocking1.clientId }));
     const guest1Admitted = await nextMessage(guest1, (msg) => msg.type === 'admitted');
-    await nextMessage(owner, (msg) => msg.type === 'peer-joined' && msg.clientId === guest1Admitted.clientId);
+    const guest1Joined = await nextMessage(owner, (msg) => msg.type === 'peer-joined' && msg.clientId === guest1Admitted.clientId);
+    expect(guest1Joined).toMatchObject({ isMobile: true });
 
     const guest2 = await connectWs(url);
     guest2.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest Two' }));
@@ -57,7 +58,7 @@ describe('signaling media-state', () => {
     const ownerState = await nextMessage(owner, (msg) => msg.type === 'media-state');
     const guest2State = await nextMessage(guest2, (msg) => msg.type === 'media-state');
 
-    expect(ownerState).toEqual({ type: 'media-state', clientId: guest1Admitted.clientId, mic: false, cam: true, screenOn: true });
+    expect(ownerState).toEqual({ type: 'media-state', clientId: guest1Admitted.clientId, mic: false, cam: true, screenOn: true, isMobile: true });
     expect(guest2State).toEqual(ownerState);
     await expectNoMessage(guest1);
 
@@ -89,7 +90,7 @@ describe('signaling media-state', () => {
     guest.send(JSON.stringify({ type: 'media-state', mic: true, cam: false }));
     const ownerState = await nextMessage(owner, (msg) => msg.type === 'media-state');
 
-    expect(ownerState).toEqual({ type: 'media-state', clientId: guestAdmitted.clientId, mic: true, cam: false, screenOn: false });
+    expect(ownerState).toEqual({ type: 'media-state', clientId: guestAdmitted.clientId, mic: true, cam: false, screenOn: false, isMobile: false });
 
     closeWs(guest);
     closeWs(owner);

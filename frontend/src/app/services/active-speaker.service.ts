@@ -101,6 +101,7 @@ export class ActiveSpeakerService {
       screenOn: false,
       reconnecting: false,
       reconnectingSince: null,
+      isMobile: false,
     });
     this.start();
   }

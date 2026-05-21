@@ -200,6 +200,7 @@ export class RoomPage implements OnDestroy {
             screenOn: peer.screenOn,
             quality: peer.quality,
             audioOnlyReason: peer.audioOnlyReason,
+            isMobile: peer.isMobile,
           };
         }),
         shareLayoutActive: this.shareLayoutActive(),
@@ -257,6 +258,7 @@ export class RoomPage implements OnDestroy {
             .filter((peer) => !peer.isLocal)
             .map((peer) => ({
               id: peer.id,
+              isMobile: peer.isMobile,
               audioTracks: peer.stream?.getAudioTracks().length ?? 0,
               videoTracks: peer.stream?.getVideoTracks().length ?? 0,
               hasVideoSrcObject: !!peer.stream?.getVideoTracks().length,
@@ -285,6 +287,9 @@ export class RoomPage implements OnDestroy {
     });
     effect(() => {
       this.activeSpeaker.observe(this.peers());
+    });
+    effect(() => {
+      this.webrtc.setActiveSpeakerPeer(this.activeSpeaker.activeFrame().id);
     });
     effect(() => {
       const deviceId = this.selectedAudioOutputId();
@@ -816,7 +821,11 @@ export class RoomPage implements OnDestroy {
       if (!this.callStartMs()) this.startClock();
       this.status.set(wasInCall ? 'Reconnected to signaling. Syncing peers...' : `You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
       for (const peer of msg.peers) {
-        await this.webrtc.addPeer(peer.id, peer.name, true, { participantId: peer.participantId, isHost: !!peer.host || peer.id === this.hostClientId() });
+        await this.webrtc.addPeer(peer.id, peer.name, true, {
+          participantId: peer.participantId,
+          isHost: !!peer.host || peer.id === this.hostClientId(),
+          isMobile: !!peer.isMobile,
+        });
         await this.drainPendingSignals(peer.id);
       }
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
@@ -842,7 +851,11 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-joined') {
       this.status.set(`${msg.name} joined.`);
-      await this.webrtc.addPeer(msg.clientId, msg.name, false, { participantId: msg.participantId, isHost: !!msg.host || msg.clientId === this.hostClientId() });
+      await this.webrtc.addPeer(msg.clientId, msg.name, false, {
+        participantId: msg.participantId,
+        isHost: !!msg.host || msg.clientId === this.hostClientId(),
+        isMobile: !!msg.isMobile,
+      });
       this.recorder.notifyParticipantJoined({
         clientId: msg.clientId,
         displayName: msg.name,
@@ -860,7 +873,11 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-resumed') {
       this.status.set(`${msg.name} reconnected.`);
-      await this.webrtc.resumePeer(msg.oldClientId, msg.clientId, msg.name, false, { participantId: msg.participantId, isHost: !!msg.host || msg.clientId === this.hostClientId() });
+      await this.webrtc.resumePeer(msg.oldClientId, msg.clientId, msg.name, false, {
+        participantId: msg.participantId,
+        isHost: !!msg.host || msg.clientId === this.hostClientId(),
+        isMobile: !!msg.isMobile,
+      });
       const queued = this.pendingSignals.get(msg.oldClientId);
       if (queued?.length) {
         this.pendingSignals.delete(msg.oldClientId);
@@ -876,7 +893,8 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'media-state') {
-      this.webrtc.updatePeer(msg.clientId, { micEnabled: msg.mic, camEnabled: msg.cam, screenOn: !!msg.screenOn });
+      const patch = { micEnabled: msg.mic, camEnabled: msg.cam, screenOn: !!msg.screenOn, ...(msg.isMobile === undefined ? {} : { isMobile: !!msg.isMobile }) };
+      this.webrtc.updatePeer(msg.clientId, patch);
       this.queueDiagnosticsLog('state-change');
       return;
     }
@@ -1771,6 +1789,7 @@ declare global {
         screenOn?: boolean;
         quality?: 'good' | 'weak' | 'poor';
         audioOnlyReason?: 'auto-poor' | 'manual-audio-only' | 'remote-request' | null;
+        isMobile?: boolean;
       }[];
       shareLayoutActive?: boolean;
       shareStripCollapsed?: boolean;
@@ -1837,6 +1856,7 @@ declare global {
       }[];
       remoteMedia?: () => {
         id: string;
+        isMobile: boolean;
         audioTracks: number;
         videoTracks: number;
         hasVideoSrcObject: boolean;
@@ -1861,6 +1881,7 @@ declare global {
         videoScaleResolutionDownBy: number | null;
         videoMaxFramerate: number | null;
         videoDegraded: boolean;
+        remoteIsMobile: boolean;
       }[];
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
       forceActiveSpeakerForTest?: (id: string | null) => void;
