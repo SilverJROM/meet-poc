@@ -28,3 +28,5 @@ Codex appends one line per STATUS change: `[projcore callback] <batch-id> <STATE
 [projcore callback] turn-tls443 PROPOSED CF /credentials/generate returns no TLS 443, but CF docs/live generate-ice-servers confirm turns:turn.cloudflare.com:443?transport=tcp is supported; plan is guarded derived 443 from CF TLS host plus static-env preservation; waiting for APPROVED-PLAN.
 [projcore callback] turn-tls443 APPROVED-PLAN DR-36 approved; implementing guarded same-entry TLS-443 derivation from existing CF turns host with dedupe and tests.
 [projcore callback] turn-tls443 DONE DR-36 Cloudflare TURN TLS-443 fallback committed; targeted/full backend tests PASS; build PASS; pm2 restart clean with no env leak.
+[projcore callback] identity PROPOSED DR-37 plan ready: persistent localStorage clientKey sent on WS join; server indexes active/reconnecting peers by (roomId, clientKey) and reuses DR-31 peer-resumed path; no cookie planned; waiting for APPROVED-PLAN.
+[projcore callback] identity APPROVED-PLAN DR-37 approved with meeting-lifetime clientKey identity map required; implementing durable participantId reuse without DR-39 auto-admit policy.

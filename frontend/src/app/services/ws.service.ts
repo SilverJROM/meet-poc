@@ -34,7 +34,7 @@ export type SignalingMessage =
   | { type: 'error'; error: string };
 
 export type OutgoingSignalingMessage =
-  | { type: 'join'; room: string; name: string; mobile?: boolean; supportsReconnect?: boolean; reconnectToken?: string }
+  | { type: 'join'; room: string; name: string; mobile?: boolean; supportsReconnect?: boolean; reconnectToken?: string; clientKey?: string }
   | { type: 'signal'; to: string; data: unknown }
   | { type: 'admit'; clientId: string }
   | { type: 'reject'; clientId: string; reason?: string }

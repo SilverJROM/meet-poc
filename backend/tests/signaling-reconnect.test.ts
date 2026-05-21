@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
 import { createRoom, setRoomAccess } from '../src/modules/rooms/store.js';
@@ -6,6 +6,10 @@ import { createTestDb } from './helpers.js';
 import { closeServer, closeWs, connectWs, dropWs, nextMessage, startWsServer } from './signaling-helpers.js';
 
 describe('signaling reconnect', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('resumes a previously admitted guest with an opt-in reconnect token', async () => {
     const db = createTestDb();
     seedUser(db);
@@ -67,6 +71,149 @@ describe('signaling reconnect', () => {
     });
 
     closeWs(resumed);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('resumes a reconnecting guest by persistent clientKey without a reconnect token', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Client key reconnect', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    const ownerTokenPromise = nextMessage(owner, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    await ownerTokenPromise;
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'guest-client-key' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock');
+    const guestAdmittedPromise = nextMessage(guest, (msg) => msg.type === 'admitted');
+    const guestTokenPromise = nextMessage(guest, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
+    const guestAdmitted = await guestAdmittedPromise;
+    await guestTokenPromise;
+    await nextMessage(owner, (msg) => msg.type === 'peer-joined');
+
+    const peerReconnectingPromise = nextMessage(owner, (msg) => msg.type === 'peer-reconnecting' && msg.clientId === knocking.clientId);
+    dropWs(guest);
+    await peerReconnectingPromise;
+
+    const resumed = await connectWs(url);
+    resumed.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'guest-client-key' }));
+    const resumedAdmitted = await nextMessage(resumed, (msg) => msg.type === 'admitted');
+    const resumedNotice = await nextMessage(owner, (msg) => msg.type === 'peer-resumed');
+
+    expect(resumedAdmitted).toMatchObject({
+      type: 'admitted',
+      isOwner: false,
+      participantId: guestAdmitted.participantId,
+      hostClientId: ownerAdmitted.clientId,
+    });
+    expect(resumedNotice).toEqual({
+      type: 'peer-resumed',
+      oldClientId: knocking.clientId,
+      clientId: resumedAdmitted.clientId,
+      participantId: guestAdmitted.participantId,
+      name: 'Guest',
+      host: false,
+    });
+
+    closeWs(resumed);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('reuses a durable clientKey participantId after reconnect grace removes the old peer', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Durable client key', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    const ownerTokenPromise = nextMessage(owner, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    await ownerTokenPromise;
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'durable-client-key' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock');
+    const guestAdmittedPromise = nextMessage(guest, (msg) => msg.type === 'admitted');
+    const guestTokenPromise = nextMessage(guest, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
+    const guestAdmitted = await guestAdmittedPromise;
+    await guestTokenPromise;
+    await nextMessage(owner, (msg) => msg.type === 'peer-joined');
+
+    vi.useFakeTimers();
+    const peerReconnectingPromise = nextMessage(owner, (msg) => msg.type === 'peer-reconnecting' && msg.clientId === knocking.clientId);
+    guest.terminate();
+    await peerReconnectingPromise;
+    await vi.advanceTimersByTimeAsync(120_001);
+    vi.useRealTimers();
+
+    const returned = await connectWs(url);
+    returned.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'durable-client-key' }));
+    const returnedKnocking = await nextMessage(returned, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === returnedKnocking.clientId);
+    const returnedAdmittedPromise = nextMessage(returned, (msg) => msg.type === 'admitted');
+    owner.send(JSON.stringify({ type: 'admit', clientId: returnedKnocking.clientId }));
+    const returnedAdmitted = await returnedAdmittedPromise;
+    await nextMessage(owner, (msg) => msg.type === 'peer-joined' && msg.clientId === returnedAdmitted.clientId);
+
+    expect(returnedAdmitted).toMatchObject({
+      type: 'admitted',
+      isOwner: false,
+      participantId: guestAdmitted.participantId,
+      hostClientId: ownerAdmitted.clientId,
+    });
+    expect(returnedAdmitted.clientId).not.toBe(knocking.clientId);
+
+    closeWs(returned);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('creates a new participantId for an unknown persistent clientKey', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Unknown client key', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner' }));
+    await nextMessage(owner, (msg) => msg.type === 'admitted');
+
+    const first = await connectWs(url);
+    first.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest One', clientKey: 'first-client-key' }));
+    const firstKnock = await nextMessage(first, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock');
+    const firstAdmittedPromise = nextMessage(first, (msg) => msg.type === 'admitted');
+    owner.send(JSON.stringify({ type: 'admit', clientId: firstKnock.clientId }));
+    const firstAdmitted = await firstAdmittedPromise;
+    await nextMessage(owner, (msg) => msg.type === 'peer-joined' && msg.clientId === firstAdmitted.clientId);
+
+    const second = await connectWs(url);
+    second.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest Two', clientKey: 'second-client-key' }));
+    const secondKnock = await nextMessage(second, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === secondKnock.clientId);
+    const secondAdmittedPromise = nextMessage(second, (msg) => msg.type === 'admitted');
+    owner.send(JSON.stringify({ type: 'admit', clientId: secondKnock.clientId }));
+    const secondAdmitted = await secondAdmittedPromise;
+
+    expect(secondAdmitted.participantId).toEqual(expect.any(String));
+    expect(secondAdmitted.participantId).not.toBe(firstAdmitted.participantId);
+
+    closeWs(second);
+    closeWs(first);
     closeWs(owner);
     await closeServer(server);
   });

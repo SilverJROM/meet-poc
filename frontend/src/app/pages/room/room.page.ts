@@ -1559,6 +1559,7 @@ export class RoomPage implements OnDestroy {
       mobile: this.viewport.isMobile(),
       supportsReconnect: true,
       reconnectToken: this.reconnectToken() || undefined,
+      clientKey: readClientKey(),
     });
   }
 
@@ -1622,6 +1623,22 @@ const DEVICE_STORAGE = {
 
 function reconnectTokenKey(roomKey: string): string {
   return `meet-poc.reconnect.${roomKey}`;
+}
+
+function readClientKey(): string {
+  const storageKey = 'meet-poc.clientKey';
+  try {
+    const existing = window.localStorage.getItem(storageKey);
+    if (existing) return existing;
+    const generated =
+      typeof window.crypto?.randomUUID === 'function'
+        ? window.crypto.randomUUID()
+        : `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+    window.localStorage.setItem(storageKey, generated);
+    return generated;
+  } catch {
+    return `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
 }
 
 function readReconnectToken(roomKey: string): string | null {
