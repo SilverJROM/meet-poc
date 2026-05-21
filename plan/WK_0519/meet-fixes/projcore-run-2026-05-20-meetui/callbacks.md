@@ -25,3 +25,6 @@ Codex appends one line per STATUS change: `[projcore callback] <batch-id> <STATE
 [projcore callback] mic-liveness PROPOSED DR-35 plan ready: read local mic liveness from getStats media-source audioLevel/totalAudioEnergy, persist top-level outboundAudioLevel/outboundAudioEnergy/micSilent, red-flag diagnostics display; waiting for APPROVED-PLAN.
 [projcore callback] mic-liveness APPROVED-PLAN DR-35 approved; implementing getStats media-source capture/display/test with no auto-recover or quality changes.
 [projcore callback] mic-liveness DONE DR-35 outbound mic liveness committed; build PASS; isolated 48xx e2e PASS; pm2 restarted clean with no env leak.
+[projcore callback] turn-tls443 PROPOSED CF /credentials/generate returns no TLS 443, but CF docs/live generate-ice-servers confirm turns:turn.cloudflare.com:443?transport=tcp is supported; plan is guarded derived 443 from CF TLS host plus static-env preservation; waiting for APPROVED-PLAN.
+[projcore callback] turn-tls443 APPROVED-PLAN DR-36 approved; implementing guarded same-entry TLS-443 derivation from existing CF turns host with dedupe and tests.
+[projcore callback] turn-tls443 DONE DR-36 Cloudflare TURN TLS-443 fallback committed; targeted/full backend tests PASS; build PASS; pm2 restart clean with no env leak.

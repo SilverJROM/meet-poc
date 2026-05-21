@@ -106,7 +106,7 @@ function normalizeCloudflareIceServer(raw: unknown): IceServerConfig | null {
   const username = typeof value?.username === 'string' ? value.username : '';
   const credential = typeof value?.credential === 'string' ? value.credential : '';
   if (urls.length === 0 || !username || !credential) return null;
-  return { urls, username, credential };
+  return { urls: withTurnTls443Fallback(urls), username, credential };
 }
 
 function parseUrlList(raw: string | undefined): string[] {
@@ -118,4 +118,49 @@ function parseUrlList(raw: string | undefined): string[] {
 
 function firstPresent(...values: Array<string | undefined>): string | undefined {
   return values.find((value) => value && value.trim())?.trim();
+}
+
+function withTurnTls443Fallback(urls: string[]): string[] {
+  if (urls.some(isTurnTls443Url)) return urls;
+
+  const tlsTurnUrl = urls.find((url) => {
+    const parsed = parseTurnUrl(url);
+    return parsed?.protocol === 'turns:' && !!parsed.hostname;
+  });
+  const parsed = tlsTurnUrl ? parseTurnUrl(tlsTurnUrl) : null;
+  if (!parsed) return urls;
+
+  return [...urls, `turns:${parsed.hostname}:443?transport=tcp`];
+}
+
+function isTurnTls443Url(url: string): boolean {
+  const parsed = parseTurnUrl(url);
+  return parsed?.protocol === 'turns:' && parsed.port === '443';
+}
+
+type ParsedTurnUrl = {
+  protocol: 'turn:' | 'turns:';
+  hostname: string;
+  port: string;
+};
+
+function parseTurnUrl(url: string): ParsedTurnUrl | null {
+  if (!/^turns?:/i.test(url)) return null;
+
+  try {
+    const [, rawProtocol = '', rawAddress = ''] = /^(turns?):([^?]+)/i.exec(url) || [];
+    const parsed = new URL(`https://${rawAddress}`);
+    if (!parsed.hostname) return null;
+    return {
+      protocol: `${rawProtocol.toLowerCase()}:` as ParsedTurnUrl['protocol'],
+      hostname: parsed.hostname,
+      port: parsed.port || readExplicitPort(rawAddress),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readExplicitPort(address: string): string {
+  return address.match(/:(\d+)$/)?.[1] || '';
 }

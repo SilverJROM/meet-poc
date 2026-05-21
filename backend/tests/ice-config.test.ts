@@ -37,14 +37,14 @@ describe('ice config API', () => {
   });
 
   it('DR-5 includes static long-term TURN credentials from env', async () => {
-    process.env.MEET_TURN_URLS = 'turn:relay.example.com:3478,turns:relay.example.com:5349';
+    process.env.MEET_TURN_URLS = 'turn:relay.example.com:3478,turns:relay.example.com:443?transport=tcp';
     process.env.MEET_TURN_USERNAME = 'metered-user';
     process.env.MEET_TURN_CREDENTIAL = 'metered-secret';
 
     const res = await request(createApp(createTestDb())).get('/api/ice-config').expect(200);
 
     expect(res.body.iceServers).toContainEqual({
-      urls: ['turn:relay.example.com:3478', 'turns:relay.example.com:5349'],
+      urls: ['turn:relay.example.com:3478', 'turns:relay.example.com:443?transport=tcp'],
       username: 'metered-user',
       credential: 'metered-secret',
     });
@@ -61,7 +61,7 @@ describe('ice config API', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('ignoring incomplete static TURN env'));
   });
 
-  it('DR-5 mints Cloudflare TURN credentials from JROM env names and merges them with STUN', async () => {
+  it('DR-36 mints Cloudflare TURN credentials and adds a same-entry TLS 443 fallback', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -101,11 +101,70 @@ describe('ice config API', () => {
           'turn:turn.cloudflare.com:3478?transport=udp',
           'turn:turn.cloudflare.com:3478?transport=tcp',
           'turns:turn.cloudflare.com:5349?transport=tcp',
+          'turns:turn.cloudflare.com:443?transport=tcp',
         ],
         username: 'minted-user',
         credential: 'minted-secret',
       },
     ]);
+  });
+
+  it('DR-36 does not duplicate Cloudflare TLS 443 and ignores malformed TURN urls safely', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        iceServers: {
+          urls: [
+            'turn:turn.cloudflare.com:3478?transport=tcp',
+            'turns:turn.cloudflare.com:443?transport=tcp',
+            'turns:%',
+          ],
+          username: 'minted-user',
+          credential: 'minted-secret',
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.TURN_ID = 'cloudflare-key-id';
+    process.env.TURN_API_Key = 'cloudflare-token';
+
+    const servers = await getIceServersFromEnv();
+    const cloudflareServer = servers.at(-1);
+
+    expect(cloudflareServer).toEqual({
+      urls: ['turn:turn.cloudflare.com:3478?transport=tcp', 'turns:turn.cloudflare.com:443?transport=tcp', 'turns:%'],
+      username: 'minted-user',
+      credential: 'minted-secret',
+    });
+    expect((cloudflareServer?.urls as string[]).filter((url) => url === 'turns:turn.cloudflare.com:443?transport=tcp')).toHaveLength(1);
+  });
+
+  it('DR-36 does not derive TLS 443 from non-TLS TURN urls', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          iceServers: {
+            urls: ['turn:turn.cloudflare.com:3478?transport=udp', 'turn:turn.cloudflare.com:3478?transport=tcp', 'turns:%'],
+            username: 'minted-user',
+            credential: 'minted-secret',
+          },
+        }),
+      })),
+    );
+    process.env.TURN_ID = 'cloudflare-key-id';
+    process.env.TURN_API_Key = 'cloudflare-token';
+
+    const servers = await getIceServersFromEnv();
+
+    expect(servers.at(-1)).toEqual({
+      urls: ['turn:turn.cloudflare.com:3478?transport=udp', 'turn:turn.cloudflare.com:3478?transport=tcp', 'turns:%'],
+      username: 'minted-user',
+      credential: 'minted-secret',
+    });
   });
 
   it('DR-5 caches Cloudflare minted credentials between requests', async () => {
