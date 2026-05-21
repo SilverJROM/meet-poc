@@ -88,6 +88,9 @@ export type DiagnosticsPayload = {
   wsReconnectAttempts: number;
   forceRelay: boolean;
   manualAudioOnly: boolean;
+  outboundAudioLevel: number | null;
+  outboundAudioEnergy: number | null;
+  micSilent: boolean | null;
   peers: DiagnosticsPeerSample[];
   error?: string;
 };

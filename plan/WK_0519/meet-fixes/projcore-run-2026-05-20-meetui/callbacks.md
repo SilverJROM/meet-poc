@@ -22,3 +22,6 @@ Codex appends one line per STATUS change: `[projcore callback] <batch-id> <STATE
 [projcore callback] audiofix PROPOSED dedicated remote audio sink in tile; room-level autoplay unblock prompt; preserve sink routing
 [projcore callback] audiofix APPROVED-PLAN live peer stream binding; all video muted; implement DR-34 now
 [projcore callback] audiofix DONE DR-34 remote audio decoupled from camera-gated video; live stream audio sink; autoplay prompt; setSinkId preserved; build/e2e/pm2 PASS
+[projcore callback] mic-liveness PROPOSED DR-35 plan ready: read local mic liveness from getStats media-source audioLevel/totalAudioEnergy, persist top-level outboundAudioLevel/outboundAudioEnergy/micSilent, red-flag diagnostics display; waiting for APPROVED-PLAN.
+[projcore callback] mic-liveness APPROVED-PLAN DR-35 approved; implementing getStats media-source capture/display/test with no auto-recover or quality changes.
+[projcore callback] mic-liveness DONE DR-35 outbound mic liveness committed; build PASS; isolated 48xx e2e PASS; pm2 restarted clean with no env leak.

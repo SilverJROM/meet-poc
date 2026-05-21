@@ -1449,6 +1449,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string): DiagnosticsPayload {
+    const diagnostics = this.webrtc.diagnosticSnapshot();
     const payload: DiagnosticsPayload = {
       kind,
       roomId: this.roomId,
@@ -1460,7 +1461,10 @@ export class RoomPage implements OnDestroy {
       wsReconnectAttempts: this.ws.reconnectAttempts(),
       forceRelay: this.webrtc.forceRelay(),
       manualAudioOnly: this.webrtc.manualAudioOnly(),
-      peers: this.webrtc.diagnosticSnapshot().peers,
+      outboundAudioLevel: diagnostics.outboundAudioLevel,
+      outboundAudioEnergy: diagnostics.outboundAudioEnergy,
+      micSilent: diagnostics.micSilent,
+      peers: diagnostics.peers,
     };
     if (error) payload.error = error;
     return payload;
@@ -1721,7 +1725,7 @@ declare global {
         audioOnlyReason: 'auto-poor' | 'manual-audio-only' | 'remote-request' | null;
         updatedAt: number;
       }[];
-      diagnosticSnapshot?: () => { peers: DiagnosticsPeerSample[] };
+      diagnosticSnapshot?: () => Pick<DiagnosticsPayload, 'outboundAudioLevel' | 'outboundAudioEnergy' | 'micSilent' | 'peers'>;
       forceRelay?: boolean;
       manualAudioOnly?: boolean;
       lastPeerConnectionPolicy?: RTCIceTransportPolicy | 'all';

@@ -65,6 +65,10 @@
                 <strong [class]="entryAudioRecvClass(latest)">{{ inboundAudioSummary(latest) }}</strong>
               </div>
               <div>
+                <span class="label">Mic live</span>
+                <strong [class]="micLivenessClass(latest)">{{ micLivenessSummary(latest) }}</strong>
+              </div>
+              <div>
                 <span class="label">Video sender</span>
                 <strong>{{ trackSummary(latest, 'video') }}</strong>
               </div>
@@ -78,6 +82,7 @@
                   <strong>{{ entry.kind }}</strong>
                   <span>{{ entry.createdAtIso | date: 'medium' }}</span>
                   <span>{{ candidateLabel(entry) }} · {{ relayLabel(entry) }}</span>
+                  <span [class]="micLivenessClass(entry)">{{ micLivenessSummary(entry) }}</span>
                 </div>
                 <div class="peer-list">
                   @for (peer of entry.payload.peers; track peer.id) {

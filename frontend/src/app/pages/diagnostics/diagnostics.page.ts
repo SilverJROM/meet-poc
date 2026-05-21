@@ -85,6 +85,20 @@ export class DiagnosticsPage {
     return this.peerInboundAudioSummary(peer);
   }
 
+  micLivenessSummary(entry: DiagnosticEntry): string {
+    const level = entry.payload.outboundAudioLevel == null ? 'level n/a' : `level ${entry.payload.outboundAudioLevel.toFixed(3)}`;
+    const energy = entry.payload.outboundAudioEnergy == null ? 'energy n/a' : `energy ${entry.payload.outboundAudioEnergy.toFixed(6)}`;
+    if (entry.payload.micSilent === true) return `MIC SILENT · ${level} · ${energy}`;
+    if (entry.payload.micSilent === false) return `mic live · ${level} · ${energy}`;
+    return `mic liveness n/a · ${level} · ${energy}`;
+  }
+
+  micLivenessClass(entry: DiagnosticEntry): 'mic-live-ok' | 'mic-live-bad' | 'mic-live-neutral' {
+    if (entry.payload.micSilent === true) return 'mic-live-bad';
+    if (entry.payload.micSilent === false) return 'mic-live-ok';
+    return 'mic-live-neutral';
+  }
+
   peerInboundAudioSummary(peer: DiagnosticsPeerSample | undefined): string {
     const inbound = peer?.inboundAudio;
     if (!inbound) return '✗ not arriving · packets 0 · track unknown';

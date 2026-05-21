@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { IceConfigService } from './ice-config.service';
-import type { DiagnosticsInboundAudio, DiagnosticsPeerSample, DiagnosticsTrackInfo } from './meeting-sessions.service';
+import type { DiagnosticsInboundAudio, DiagnosticsPayload, DiagnosticsPeerSample, DiagnosticsTrackInfo } from './meeting-sessions.service';
 
 export type PeerState = {
   id: string;
@@ -66,6 +66,10 @@ type PreviousStats = {
 
 type InboundAudioStats = Omit<DiagnosticsInboundAudio, 'trackReadyState' | 'trackMuted'>;
 
+type OutboundAudioLiveness = Pick<DiagnosticsPayload, 'outboundAudioLevel' | 'outboundAudioEnergy' | 'micSilent'> & {
+  silentSamples: number;
+};
+
 type QualityMetrics = {
   quality: ConnectionQuality;
   packetLossPct: number | null;
@@ -88,6 +92,9 @@ const QUALITY_POLL_MS = 2500;
 const AUTO_DEGRADE_POOR_SAMPLES = 3;
 const AUTO_RESTORE_GOOD_SAMPLES = 5;
 const VIDEO_MAX_BITRATE_BPS = 700_000;
+const MIC_SILENT_AUDIO_LEVEL_THRESHOLD = 0.005;
+const MIC_SILENT_REQUIRED_SAMPLES = 3;
+const MIC_SILENT_ENERGY_EPSILON = 0.000001;
 
 @Injectable({ providedIn: 'root' })
 export class WebrtcService {
@@ -101,6 +108,7 @@ export class WebrtcService {
   private readonly previousStats = new Map<string, PreviousStats>();
   private readonly previousInboundAudioPackets = new Map<string, number>();
   private readonly inboundAudioStats = new Map<string, InboundAudioStats>();
+  private outboundAudioLiveness: OutboundAudioLiveness = emptyOutboundAudioLiveness();
   private readonly autoPausedReceivers = new Set<string>();
   private readonly remotePauseRequests = new Set<string>();
   private readonly outboundVideoPaused = new Map<string, boolean>();
@@ -395,8 +403,12 @@ export class WebrtcService {
       });
   }
 
-  diagnosticSnapshot(): { peers: DiagnosticsPeerSample[] } {
+  diagnosticSnapshot(): Pick<DiagnosticsPayload, 'outboundAudioLevel' | 'outboundAudioEnergy' | 'micSilent' | 'peers'> {
+    const outboundAudio = this.currentOutboundAudioLiveness();
     return {
+      outboundAudioLevel: outboundAudio.outboundAudioLevel,
+      outboundAudioEnergy: outboundAudio.outboundAudioEnergy,
+      micSilent: outboundAudio.micSilent,
       peers: this.peerList().map((peer) => {
         const senders = peer.pc?.getSenders() ?? [];
         const receivers = peer.pc?.getReceivers() ?? [];
@@ -546,6 +558,7 @@ export class WebrtcService {
     this.previousStats.clear();
     this.previousInboundAudioPackets.clear();
     this.inboundAudioStats.clear();
+    this.outboundAudioLiveness = emptyOutboundAudioLiveness();
     this.autoPausedReceivers.clear();
     this.remotePauseRequests.clear();
     this.outboundVideoPaused.clear();
@@ -734,13 +747,13 @@ export class WebrtcService {
 
   private async sampleAllPeerQuality(): Promise<void> {
     const peers = this.peerList().filter((peer) => !peer.isLocal && peer.pc);
-    await Promise.all(peers.map((peer) => this.samplePeerQuality(peer.id, peer.pc!)));
+    await Promise.all(peers.map((peer, index) => this.samplePeerQuality(peer.id, peer.pc!, index === 0)));
   }
 
-  private async samplePeerQuality(clientId: string, pc: RTCPeerConnection): Promise<void> {
+  private async samplePeerQuality(clientId: string, pc: RTCPeerConnection, sampleOutboundAudio = false): Promise<void> {
     if (pc.signalingState === 'closed') return;
     try {
-      const metrics = await this.readQualityMetrics(clientId, pc);
+      const metrics = await this.readQualityMetrics(clientId, pc, sampleOutboundAudio);
       await this.handlePeerQualityMetrics(clientId, metrics);
     } catch (err) {
       console.debug(`[webrtc] quality sample failed for ${clientId}`, err);
@@ -781,7 +794,7 @@ export class WebrtcService {
     }
   }
 
-  private async readQualityMetrics(clientId: string, pc: RTCPeerConnection): Promise<QualityMetrics> {
+  private async readQualityMetrics(clientId: string, pc: RTCPeerConnection, sampleOutboundAudio = false): Promise<QualityMetrics> {
     const stats = await pc.getStats();
     let packetsLost: number | null = null;
     let packetsReceived: number | null = null;
@@ -794,6 +807,8 @@ export class WebrtcService {
     let inboundAudioPacketsLost: number | null = null;
     let inboundAudioBytesReceived: number | null = null;
     let inboundAudioLevel: number | null = null;
+    let outboundAudioLevel: number | null = null;
+    let outboundAudioEnergy: number | null = null;
 
     for (const rawReport of stats.values()) {
       const report = rawReport as RTCStats & Record<string, unknown>;
@@ -824,7 +839,13 @@ export class WebrtcService {
         if (typeof pair?.['currentRoundTripTime'] === 'number') rttMs = Math.max(rttMs ?? 0, pair['currentRoundTripTime'] * 1000);
         if (typeof pair?.['availableOutgoingBitrate'] === 'number') availableOutgoingBitrateKbps = Math.round(pair['availableOutgoingBitrate'] / 1000);
       }
+      if (sampleOutboundAudio && report.type === 'media-source' && report['kind'] === 'audio') {
+        if (typeof report['audioLevel'] === 'number') outboundAudioLevel = Math.max(outboundAudioLevel ?? 0, report['audioLevel']);
+        if (typeof report['totalAudioEnergy'] === 'number') outboundAudioEnergy = Math.max(outboundAudioEnergy ?? 0, report['totalAudioEnergy']);
+      }
     }
+
+    if (sampleOutboundAudio) this.updateOutboundAudioLiveness(outboundAudioLevel, outboundAudioEnergy);
 
     const previous = this.previousStats.get(clientId);
     const currentLost = packetsLost ?? 0;
@@ -851,6 +872,51 @@ export class WebrtcService {
       iceConnectionState: pc.iceConnectionState,
     });
     return { quality, packetLossPct, jitterMs, rttMs, availableOutgoingBitrateKbps, hasInboundMedia };
+  }
+
+  private updateOutboundAudioLiveness(outboundAudioLevel: number | null, outboundAudioEnergy: number | null): void {
+    const audioTrack = this.localStream?.getAudioTracks()[0] ?? null;
+    if (!audioTrack || !audioTrack.enabled || audioTrack.readyState !== 'live') {
+      this.outboundAudioLiveness = emptyOutboundAudioLiveness();
+      return;
+    }
+
+    if (outboundAudioLevel == null || outboundAudioEnergy == null) {
+      this.outboundAudioLiveness = {
+        outboundAudioLevel,
+        outboundAudioEnergy,
+        micSilent: null,
+        silentSamples: 0,
+      };
+      return;
+    }
+
+    const previousEnergy = this.outboundAudioLiveness.outboundAudioEnergy;
+    const energyFlat = previousEnergy == null || outboundAudioEnergy <= previousEnergy + MIC_SILENT_ENERGY_EPSILON;
+    const silentThisSample = outboundAudioLevel <= MIC_SILENT_AUDIO_LEVEL_THRESHOLD && energyFlat;
+    const silentSamples = silentThisSample ? this.outboundAudioLiveness.silentSamples + 1 : 0;
+    this.outboundAudioLiveness = {
+      outboundAudioLevel,
+      outboundAudioEnergy,
+      micSilent: silentSamples >= MIC_SILENT_REQUIRED_SAMPLES,
+      silentSamples,
+    };
+  }
+
+  private currentOutboundAudioLiveness(): Pick<DiagnosticsPayload, 'outboundAudioLevel' | 'outboundAudioEnergy' | 'micSilent'> {
+    const audioTrack = this.localStream?.getAudioTracks()[0] ?? null;
+    if (!audioTrack || !audioTrack.enabled || audioTrack.readyState !== 'live') {
+      return {
+        outboundAudioLevel: null,
+        outboundAudioEnergy: null,
+        micSilent: null,
+      };
+    }
+    return {
+      outboundAudioLevel: this.outboundAudioLiveness.outboundAudioLevel,
+      outboundAudioEnergy: this.outboundAudioLiveness.outboundAudioEnergy,
+      micSilent: this.outboundAudioLiveness.micSilent,
+    };
   }
 
   private buildInboundAudioStats(
@@ -1035,6 +1101,15 @@ function classifyQuality(input: {
 
 function numberOrZero(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
+}
+
+function emptyOutboundAudioLiveness(): OutboundAudioLiveness {
+  return {
+    outboundAudioLevel: null,
+    outboundAudioEnergy: null,
+    micSilent: null,
+    silentSamples: 0,
+  };
 }
 
 function inboundAudioInfo(stats: InboundAudioStats | undefined, receiverTrack: MediaStreamTrack | null): DiagnosticsInboundAudio {
