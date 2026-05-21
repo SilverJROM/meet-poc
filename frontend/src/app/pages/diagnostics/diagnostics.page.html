@@ -120,6 +120,7 @@
                       <span>mic settings {{ audioSettingsSummary(peer.outboundAudio) }}</span>
                       <span [class]="audioRecvClass(peer.inboundAudio)">Audio recv {{ peerInboundAudioSummary(peer) }}</span>
                       <span>video {{ peer.outboundVideo.label || 'none' }} · {{ peer.outboundVideo.deviceId || 'no deviceId' }}</span>
+                      <span>Video send {{ peerOutboundVideoStatsSummary(peer) }}</span>
                       <span [class]="videoRecvClass(peer.inboundVideo)">Video recv {{ peerInboundVideoSummary(peer) }}</span>
                     </div>
                   }

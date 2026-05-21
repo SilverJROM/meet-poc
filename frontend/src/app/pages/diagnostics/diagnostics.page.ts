@@ -168,7 +168,8 @@ export class DiagnosticsPage {
   negotiationSummary(peer: DiagnosticsPeerSample): string {
     const negotiation = peer.negotiation;
     if (!negotiation) return 'negotiation n/a';
-    return `needed ${negotiation.negotiationNeededCount} · offers ${negotiation.offerSentCount}/${negotiation.offerReceivedCount} · answers ${negotiation.answerSentCount}/${negotiation.answerReceivedCount} · glare ${negotiation.glareIgnoredCount}`;
+    const neededOffer = negotiation.lastNegotiationNeededOfferSent == null ? 'offerSent n/a' : `offerSent ${negotiation.lastNegotiationNeededOfferSent ? 'yes' : 'no'}`;
+    return `needed ${negotiation.negotiationNeededCount} · ${neededOffer} · offers ${negotiation.offerSentCount}/${negotiation.offerReceivedCount} · answers ${negotiation.answerSentCount}/${negotiation.answerReceivedCount} · glare ${negotiation.glareIgnoredCount}`;
   }
 
   transitionSummary(peer: DiagnosticsPeerSample): string {
@@ -199,9 +200,10 @@ export class DiagnosticsPage {
     const packets = inbound.packetsReceived ?? 0;
     const delta = inbound.packetsReceivedDelta == null ? 'delta n/a' : `delta +${inbound.packetsReceivedDelta}`;
     const level = inbound.audioLevel == null ? 'level n/a' : `level ${inbound.audioLevel.toFixed(3)}`;
+    const jitterBuffer = inbound.jitterBufferDelay == null ? 'jb n/a' : `jb ${inbound.jitterBufferDelay.toFixed(3)}s`;
     const track = inbound.trackReadyState || 'track unknown';
     const muted = inbound.trackMuted == null ? 'muted n/a' : `muted ${inbound.trackMuted ? 'yes' : 'no'}`;
-    return `${status} · packets ${packets} · ${delta} · ${level} · ${track} · ${muted}`;
+    return `${status} · packets ${packets} · ${delta} · ${level} · ${jitterBuffer} · ${track} · ${muted}`;
   }
 
   peerInboundVideoSummary(peer: DiagnosticsPeerSample | undefined): string {
@@ -212,9 +214,22 @@ export class DiagnosticsPage {
     const delta = inbound.framesDecodedDelta == null ? 'delta n/a' : `delta +${inbound.framesDecodedDelta}`;
     const received = inbound.framesReceived == null ? 'received n/a' : `received ${inbound.framesReceived}`;
     const freezes = inbound.freezeCount == null ? 'freeze n/a' : `freeze ${inbound.freezeCount}`;
+    const receivedBytes = inbound.bytesReceived == null ? 'bytes n/a' : `bytes ${inbound.bytesReceived}`;
     const samples = `samples vf=${inbound.videoFrozenSamples ?? 0}/nm=${inbound.noInboundMediaSamples ?? 0}`;
     const expected = inbound.videoExpected ? 'expected' : 'not expected';
-    return `${status} · frames ${frames} · ${delta} · ${received} · ${freezes} · ${samples} · ${expected}`;
+    return `${status} · frames ${frames} · ${delta} · ${received} · ${receivedBytes} · ${freezes} · ${samples} · ${expected}`;
+  }
+
+  peerOutboundVideoStatsSummary(peer: DiagnosticsPeerSample | undefined): string {
+    const outbound = peer?.outboundVideoStats;
+    if (!outbound) return 'send stats n/a';
+    const sending = outbound.activelySending == null ? 'sending n/a' : outbound.activelySending ? 'sending' : 'not sending';
+    const framesEncoded = outbound.framesEncoded == null ? 'encoded n/a' : `encoded ${outbound.framesEncoded}`;
+    const framesDelta = outbound.framesSentDelta == null ? 'sent delta n/a' : `sent delta +${outbound.framesSentDelta}`;
+    const quality = outbound.qualityLimitationReason || 'quality n/a';
+    const encoding = outbound.senderEncoding;
+    const maxBitrate = encoding.maxBitrate == null ? 'max bitrate n/a' : `max bitrate ${encoding.maxBitrate}`;
+    return `${sending} · ${framesEncoded} · ${framesDelta} · ${quality} · ${maxBitrate}`;
   }
 
   peerLabelsSummary(peer: DiagnosticsPeerSample | undefined): string {

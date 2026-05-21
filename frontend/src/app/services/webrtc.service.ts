@@ -6,12 +6,16 @@ import type {
   DiagnosticsInboundVideo,
   DiagnosticsIceRestartAudit,
   DiagnosticsNegotiationAudit,
+  DiagnosticsOutboundVideo,
   DiagnosticsPayload,
   DiagnosticsPeerSample,
   DiagnosticsRelayGathered,
+  DiagnosticsSenderEncoding,
   DiagnosticsTrackInfo,
+  DiagnosticsTransceiverState,
   DiagnosticsTransition,
 } from './meeting-sessions.service';
+import { isInboundVideoExpectedForPeer } from './webrtc-diagnostics';
 
 export type PeerState = {
   id: string;
@@ -97,6 +101,15 @@ type PreviousInboundVideoStats = {
   totalFreezesDuration: number;
 };
 
+type PreviousOutboundVideoStats = {
+  framesSent: number;
+};
+
+type OutboundVideoRawStats = Omit<
+  DiagnosticsOutboundVideo,
+  'framesSentDelta' | 'activelySending' | 'senderEncoding' | 'senderTrackId' | 'senderTrackLabel' | 'senderTrackKind' | 'senderTrackSource'
+>;
+
 type MediaHealthState = {
   videoFrozenSamples: number;
   noInboundMediaSamples: number;
@@ -181,8 +194,10 @@ export class WebrtcService {
   private readonly previousStats = new Map<string, PreviousStats>();
   private readonly previousInboundAudioPackets = new Map<string, number>();
   private readonly previousInboundVideoStats = new Map<string, PreviousInboundVideoStats>();
+  private readonly previousOutboundVideoStats = new Map<string, PreviousOutboundVideoStats>();
   private readonly inboundAudioStats = new Map<string, InboundAudioStats>();
   private readonly inboundVideoStats = new Map<string, InboundVideoStats>();
+  private readonly outboundVideoStats = new Map<string, DiagnosticsOutboundVideo>();
   private readonly mediaHealthState = new Map<string, MediaHealthState>();
   private readonly peerForensics = new Map<string, PeerForensics>();
   private outboundAudioLiveness: OutboundAudioLiveness = emptyOutboundAudioLiveness();
@@ -549,6 +564,7 @@ export class WebrtcService {
         const outboundAudio = trackInfo(audioSender?.track ?? null, fallbackAudio, 'audio');
         const inboundAudio = inboundAudioInfo(this.inboundAudioStats.get(peer.id), audioReceiver?.track ?? null);
         const outboundVideo = trackInfo(videoSender?.track ?? null, fallbackVideo, 'video');
+        const outboundVideoStats = this.outboundVideoStats.get(peer.id) ?? emptyOutboundVideoInfo(videoSender);
         const inboundVideo = inboundVideoInfo(this.inboundVideoStats.get(peer.id), videoReceiver?.track ?? null);
         return {
           id: peer.id,
@@ -567,6 +583,7 @@ export class WebrtcService {
           iceRelayGathered: { ...forensics.iceRelayGathered },
           iceRestart: { ...forensics.iceRestart },
           negotiation: { ...forensics.negotiation },
+          transceivers: transceiverStates(peer.pc),
           transitionTimeline: forensics.transitionTimeline.slice(),
           relayUsed: peer.selectedCandidateType === 'relay' || forensics.iceRelayGathered.local || forensics.iceRelayGathered.remote || this.forceRelay(),
           quality: peer.quality,
@@ -582,6 +599,7 @@ export class WebrtcService {
           outboundAudio,
           inboundAudio,
           outboundVideo,
+          outboundVideoStats,
           inboundVideo,
           reconnecting: peer.reconnecting,
           updatedAt: peer.updatedAt,
@@ -729,8 +747,10 @@ export class WebrtcService {
     this.previousStats.clear();
     this.previousInboundAudioPackets.clear();
     this.previousInboundVideoStats.clear();
+    this.previousOutboundVideoStats.clear();
     this.inboundAudioStats.clear();
     this.inboundVideoStats.clear();
+    this.outboundVideoStats.clear();
     this.mediaHealthState.clear();
     this.peerForensics.clear();
     this.outboundAudioLiveness = emptyOutboundAudioLiveness();
@@ -815,8 +835,10 @@ export class WebrtcService {
     this.previousStats.delete(clientId);
     this.previousInboundAudioPackets.delete(clientId);
     this.previousInboundVideoStats.delete(clientId);
+    this.previousOutboundVideoStats.delete(clientId);
     this.inboundAudioStats.delete(clientId);
     this.inboundVideoStats.delete(clientId);
+    this.outboundVideoStats.delete(clientId);
     this.mediaHealthState.delete(clientId);
     this.videoSenders.delete(clientId);
     this.fallbackVideoTracks.delete(clientId);
@@ -884,10 +906,11 @@ export class WebrtcService {
     pc.onnegotiationneeded = () => {
       const forensics = this.ensureForensics(clientId, pc);
       forensics.negotiation.negotiationNeededCount += 1;
+      forensics.negotiation.lastNegotiationNeededOfferSent = false;
       this.pushTransition(clientId, {
         scope: 'negotiation',
         event: 'negotiationneeded',
-        detail: `makingOffer=${meta.makingOffer} signaling=${pc.signalingState}`,
+        detail: `makingOffer=${meta.makingOffer} signaling=${pc.signalingState} offerSent=false`,
       });
     };
 
@@ -908,8 +931,10 @@ export class WebrtcService {
     this.previousStats.delete(clientId);
     this.previousInboundAudioPackets.delete(clientId);
     this.previousInboundVideoStats.delete(clientId);
+    this.previousOutboundVideoStats.delete(clientId);
     this.inboundAudioStats.delete(clientId);
     this.inboundVideoStats.delete(clientId);
+    this.outboundVideoStats.delete(clientId);
     this.mediaHealthState.delete(clientId);
     this.peerForensics.delete(clientId);
     this.autoPausedReceivers.delete(clientId);
@@ -1296,7 +1321,10 @@ export class WebrtcService {
 
   private recordNegotiationEvent(clientId: string, event: string, pc: RTCPeerConnection): void {
     const forensics = this.ensureForensics(clientId, pc);
-    if (event.endsWith('offer-sent') || event === 'offer-sent') forensics.negotiation.offerSentCount += 1;
+    if (event.endsWith('offer-sent') || event === 'offer-sent') {
+      forensics.negotiation.offerSentCount += 1;
+      forensics.negotiation.lastNegotiationNeededOfferSent = true;
+    }
     if (event === 'answer-sent') forensics.negotiation.answerSentCount += 1;
     if (event === 'offer-received') forensics.negotiation.offerReceivedCount += 1;
     if (event === 'answer-received') forensics.negotiation.answerReceivedCount += 1;
@@ -1532,36 +1560,77 @@ export class WebrtcService {
     let inboundAudioPacketsLost: number | null = null;
     let inboundAudioBytesReceived: number | null = null;
     let inboundAudioLevel: number | null = null;
+    let inboundAudioJitterBufferDelay: number | null = null;
+    let inboundAudioJitterBufferTargetDelay: number | null = null;
+    let inboundAudioJitterBufferEmittedCount: number | null = null;
+    let inboundAudioConcealedSamples: number | null = null;
+    let inboundAudioConcealmentEvents: number | null = null;
+    let inboundAudioRemoteRoundTripTime: number | null = null;
+    let inboundAudioRemoteFractionLost: number | null = null;
+    let inboundVideoBytesReceived: number | null = null;
+    let inboundVideoPacketsReceived: number | null = null;
+    let inboundVideoPacketsLost: number | null = null;
     let inboundVideoFramesDecoded: number | null = null;
     let inboundVideoFramesReceived: number | null = null;
+    let inboundVideoFramesDropped: number | null = null;
+    let inboundVideoNackCount: number | null = null;
+    let inboundVideoPliCount: number | null = null;
+    let inboundVideoFirCount: number | null = null;
+    let inboundVideoKeyFramesDecoded: number | null = null;
+    let inboundVideoJitterBufferDelay: number | null = null;
+    let inboundVideoJitterBufferEmittedCount: number | null = null;
     let inboundVideoFreezeCount: number | null = null;
     let inboundVideoTotalFreezesDuration: number | null = null;
+    let outboundVideoRaw = emptyOutboundVideoRawStats();
     let outboundAudioLevel: number | null = null;
     let outboundAudioEnergy: number | null = null;
 
     for (const rawReport of stats.values()) {
       const report = rawReport as RTCStats & Record<string, unknown>;
+      const kind = report['kind'] ?? report['mediaType'];
       if (report.type === 'inbound-rtp' && !report['isRemote']) {
         hasInboundMedia = true;
         packetsLost = (packetsLost ?? 0) + numberOrZero(report['packetsLost']);
         packetsReceived = (packetsReceived ?? 0) + numberOrZero(report['packetsReceived']);
         inboundPacketsReceivedTotal += numberOrZero(report['packetsReceived']);
         if (typeof report['jitter'] === 'number') jitterMs = Math.max(jitterMs ?? 0, report['jitter'] * 1000);
-        if (report['kind'] === 'audio') {
+        if (kind === 'audio') {
           inboundAudioPacketsReceived = (inboundAudioPacketsReceived ?? 0) + numberOrZero(report['packetsReceived']);
           inboundAudioPacketsLost = (inboundAudioPacketsLost ?? 0) + numberOrZero(report['packetsLost']);
           inboundAudioBytesReceived = (inboundAudioBytesReceived ?? 0) + numberOrZero(report['bytesReceived']);
+          inboundAudioJitterBufferDelay = addNullable(inboundAudioJitterBufferDelay, report['jitterBufferDelay']);
+          inboundAudioJitterBufferTargetDelay = addNullable(inboundAudioJitterBufferTargetDelay, report['jitterBufferTargetDelay']);
+          inboundAudioJitterBufferEmittedCount = addNullable(inboundAudioJitterBufferEmittedCount, report['jitterBufferEmittedCount']);
+          inboundAudioConcealedSamples = addNullable(inboundAudioConcealedSamples, report['concealedSamples']);
+          inboundAudioConcealmentEvents = addNullable(inboundAudioConcealmentEvents, report['concealmentEvents']);
           if (typeof report['audioLevel'] === 'number') inboundAudioLevel = Math.max(inboundAudioLevel ?? 0, report['audioLevel']);
         }
-        if (report['kind'] === 'video') {
+        if (kind === 'video') {
+          inboundVideoBytesReceived = addNullable(inboundVideoBytesReceived, report['bytesReceived']);
+          inboundVideoPacketsReceived = addNullable(inboundVideoPacketsReceived, report['packetsReceived']);
+          inboundVideoPacketsLost = addNullable(inboundVideoPacketsLost, report['packetsLost']);
           inboundVideoFramesDecoded = (inboundVideoFramesDecoded ?? 0) + numberOrZero(report['framesDecoded']);
           inboundVideoFramesReceived = (inboundVideoFramesReceived ?? 0) + numberOrZero(report['framesReceived']);
+          inboundVideoFramesDropped = addNullable(inboundVideoFramesDropped, report['framesDropped']);
+          inboundVideoNackCount = addNullable(inboundVideoNackCount, report['nackCount']);
+          inboundVideoPliCount = addNullable(inboundVideoPliCount, report['pliCount']);
+          inboundVideoFirCount = addNullable(inboundVideoFirCount, report['firCount']);
+          inboundVideoKeyFramesDecoded = addNullable(inboundVideoKeyFramesDecoded, report['keyFramesDecoded']);
+          inboundVideoJitterBufferDelay = addNullable(inboundVideoJitterBufferDelay, report['jitterBufferDelay']);
+          inboundVideoJitterBufferEmittedCount = addNullable(inboundVideoJitterBufferEmittedCount, report['jitterBufferEmittedCount']);
           inboundVideoFreezeCount = (inboundVideoFreezeCount ?? 0) + numberOrZero(report['freezeCount']);
           inboundVideoTotalFreezesDuration = (inboundVideoTotalFreezesDuration ?? 0) + numberOrZero(report['totalFreezesDuration']);
         }
       }
       if (report.type === 'remote-inbound-rtp' && typeof report['roundTripTime'] === 'number') {
         rttMs = Math.max(rttMs ?? 0, report['roundTripTime'] * 1000);
+        if (kind === 'audio') {
+          inboundAudioRemoteRoundTripTime = Math.max(inboundAudioRemoteRoundTripTime ?? 0, report['roundTripTime']);
+          if (typeof report['fractionLost'] === 'number') inboundAudioRemoteFractionLost = Math.max(inboundAudioRemoteFractionLost ?? 0, report['fractionLost']);
+        }
+      }
+      if (report.type === 'outbound-rtp' && kind === 'video') {
+        outboundVideoRaw = mergeOutboundVideoRawStats(outboundVideoRaw, report);
       }
       if (report.type === 'candidate-pair' && (report['selected'] || report['state'] === 'succeeded')) {
         if (typeof report['currentRoundTripTime'] === 'number') rttMs = Math.max(rttMs ?? 0, report['currentRoundTripTime'] * 1000);
@@ -1594,14 +1663,38 @@ export class WebrtcService {
       this.previousStats.set(clientId, { packetsLost: currentLost, packetsReceived: currentReceived });
     }
 
-    const inboundAudio = this.buildInboundAudioStats(clientId, inboundAudioPacketsReceived, inboundAudioPacketsLost, inboundAudioBytesReceived, inboundAudioLevel);
+    const inboundAudio = this.buildInboundAudioStats(clientId, {
+      packetsReceived: inboundAudioPacketsReceived,
+      packetsLost: inboundAudioPacketsLost,
+      bytesReceived: inboundAudioBytesReceived,
+      audioLevel: inboundAudioLevel,
+      jitterBufferDelay: inboundAudioJitterBufferDelay,
+      jitterBufferTargetDelay: inboundAudioJitterBufferTargetDelay,
+      jitterBufferEmittedCount: inboundAudioJitterBufferEmittedCount,
+      concealedSamples: inboundAudioConcealedSamples,
+      concealmentEvents: inboundAudioConcealmentEvents,
+      remoteRoundTripTime: inboundAudioRemoteRoundTripTime,
+      remoteFractionLost: inboundAudioRemoteFractionLost,
+    });
     this.inboundAudioStats.set(clientId, inboundAudio);
+    const videoSender = pc.getSenders().find((sender) => sender.track?.kind === 'video') ?? this.videoSenders.get(clientId) ?? null;
+    this.outboundVideoStats.set(clientId, this.buildOutboundVideoStats(clientId, outboundVideoRaw, videoSender));
     const connected = isPeerConnectionConnected(pc);
     const inboundVideo = this.buildInboundVideoStats(
       clientId,
       {
+        bytesReceived: inboundVideoBytesReceived,
+        packetsReceived: inboundVideoPacketsReceived,
+        packetsLost: inboundVideoPacketsLost,
         framesDecoded: inboundVideoFramesDecoded,
         framesReceived: inboundVideoFramesReceived,
+        framesDropped: inboundVideoFramesDropped,
+        nackCount: inboundVideoNackCount,
+        pliCount: inboundVideoPliCount,
+        firCount: inboundVideoFirCount,
+        keyFramesDecoded: inboundVideoKeyFramesDecoded,
+        jitterBufferDelay: inboundVideoJitterBufferDelay,
+        jitterBufferEmittedCount: inboundVideoJitterBufferEmittedCount,
         freezeCount: inboundVideoFreezeCount,
         totalFreezesDuration: inboundVideoTotalFreezesDuration,
       },
@@ -1691,18 +1784,35 @@ export class WebrtcService {
 
   private buildInboundAudioStats(
     clientId: string,
-    packetsReceived: number | null,
-    packetsLost: number | null,
-    bytesReceived: number | null,
-    audioLevel: number | null,
+    stats: {
+      packetsReceived: number | null;
+      packetsLost: number | null;
+      bytesReceived: number | null;
+      audioLevel: number | null;
+      jitterBufferDelay: number | null;
+      jitterBufferTargetDelay: number | null;
+      jitterBufferEmittedCount: number | null;
+      concealedSamples: number | null;
+      concealmentEvents: number | null;
+      remoteRoundTripTime: number | null;
+      remoteFractionLost: number | null;
+    },
   ): InboundAudioStats {
+    const { packetsReceived } = stats;
     if (packetsReceived == null) {
       this.previousInboundAudioPackets.delete(clientId);
       return {
         packetsReceived: null,
-        packetsLost,
-        bytesReceived,
-        audioLevel,
+        packetsLost: stats.packetsLost,
+        bytesReceived: stats.bytesReceived,
+        audioLevel: stats.audioLevel,
+        jitterBufferDelay: stats.jitterBufferDelay,
+        jitterBufferTargetDelay: stats.jitterBufferTargetDelay,
+        jitterBufferEmittedCount: stats.jitterBufferEmittedCount,
+        concealedSamples: stats.concealedSamples,
+        concealmentEvents: stats.concealmentEvents,
+        remoteRoundTripTime: stats.remoteRoundTripTime,
+        remoteFractionLost: stats.remoteFractionLost,
         packetsReceivedDelta: null,
         packetsActivelyArriving: null,
       };
@@ -1713,19 +1823,57 @@ export class WebrtcService {
     this.previousInboundAudioPackets.set(clientId, packetsReceived);
     return {
       packetsReceived,
-      packetsLost,
-      bytesReceived,
-      audioLevel,
+      packetsLost: stats.packetsLost,
+      bytesReceived: stats.bytesReceived,
+      audioLevel: stats.audioLevel,
+      jitterBufferDelay: stats.jitterBufferDelay,
+      jitterBufferTargetDelay: stats.jitterBufferTargetDelay,
+      jitterBufferEmittedCount: stats.jitterBufferEmittedCount,
+      concealedSamples: stats.concealedSamples,
+      concealmentEvents: stats.concealmentEvents,
+      remoteRoundTripTime: stats.remoteRoundTripTime,
+      remoteFractionLost: stats.remoteFractionLost,
       packetsReceivedDelta,
       packetsActivelyArriving,
+    };
+  }
+
+  private buildOutboundVideoStats(clientId: string, stats: OutboundVideoRawStats, sender: RTCRtpSender | null): DiagnosticsOutboundVideo {
+    const framesSent = stats.framesSent ?? null;
+    if (framesSent == null) {
+      this.previousOutboundVideoStats.delete(clientId);
+    }
+    const previous = this.previousOutboundVideoStats.get(clientId);
+    const framesSentDelta = framesSent == null ? null : previous ? Math.max(0, framesSent - previous.framesSent) : framesSent;
+    if (framesSent != null) this.previousOutboundVideoStats.set(clientId, { framesSent });
+    const track = sender?.track ?? null;
+    return {
+      ...stats,
+      framesSentDelta,
+      activelySending: framesSentDelta == null ? null : framesSentDelta > 0,
+      senderEncoding: senderEncodingInfo(sender),
+      senderTrackId: track?.id ?? null,
+      senderTrackLabel: track?.label || null,
+      senderTrackKind: track?.kind ?? null,
+      senderTrackSource: track ? 'sender' : 'none',
     };
   }
 
   private buildInboundVideoStats(
     clientId: string,
     stats: {
+      bytesReceived: number | null;
+      packetsReceived: number | null;
+      packetsLost: number | null;
       framesDecoded: number | null;
       framesReceived: number | null;
+      framesDropped: number | null;
+      nackCount: number | null;
+      pliCount: number | null;
+      firCount: number | null;
+      keyFramesDecoded: number | null;
+      jitterBufferDelay: number | null;
+      jitterBufferEmittedCount: number | null;
       freezeCount: number | null;
       totalFreezesDuration: number | null;
     },
@@ -1783,10 +1931,20 @@ export class WebrtcService {
     }
     this.mediaHealthState.set(clientId, state);
     return {
+      bytesReceived: stats.bytesReceived,
+      packetsReceived: stats.packetsReceived,
+      packetsLost: stats.packetsLost,
       framesDecoded,
       framesDecodedDelta,
       framesReceived,
       framesReceivedDelta,
+      framesDropped: stats.framesDropped,
+      nackCount: stats.nackCount,
+      pliCount: stats.pliCount,
+      firCount: stats.firCount,
+      keyFramesDecoded: stats.keyFramesDecoded,
+      jitterBufferDelay: stats.jitterBufferDelay,
+      jitterBufferEmittedCount: stats.jitterBufferEmittedCount,
       freezeCount,
       freezeCountDelta,
       totalFreezesDuration,
@@ -1802,12 +1960,14 @@ export class WebrtcService {
 
   private isInboundVideoExpected(clientId: string): boolean {
     const peer = this.peers().get(clientId);
-    if (!peer || peer.isLocal || !peer.camEnabled || peer.screenOn) return false;
     const meta = this.peerMeta.get(clientId);
     if (meta?.mediaDeadReason) return true;
-    if (this.manualAudioOnly()) return false;
-    if (this.autoPausedReceivers.has(clientId) || this.mobileAutoPausedReceivers.has(clientId) || this.remotePauseRequests.has(clientId)) return false;
-    return true;
+    return isInboundVideoExpectedForPeer(peer, {
+      manualAudioOnly: this.manualAudioOnly(),
+      autoPaused: this.autoPausedReceivers.has(clientId),
+      mobileAutoPaused: this.mobileAutoPausedReceivers.has(clientId),
+      remotePaused: this.remotePauseRequests.has(clientId),
+    });
   }
 
   private sendReceiverVideoPolicy(clientId: string, videoPaused: boolean, reason: 'auto-poor' | 'manual-audio-only', videoDegraded = false): void {
@@ -2023,6 +2183,30 @@ function numberOrZero(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
 
+function nullableNumber(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function nullableString(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function addNullable(current: number | null, value: unknown): number | null {
+  const next = nullableNumber(value);
+  return next == null ? current : (current ?? 0) + next;
+}
+
+function maxNullable(current: number | null, value: unknown): number | null {
+  const next = nullableNumber(value);
+  return next == null ? current : Math.max(current ?? next, next);
+}
+
+function durationRecord(value: unknown): Record<string, number> | null {
+  if (!value || typeof value !== 'object') return null;
+  const entries = Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]));
+  return entries.length > 0 ? Object.fromEntries(entries) : null;
+}
+
 function emptyOutboundAudioLiveness(): OutboundAudioLiveness {
   return {
     outboundAudioLevel: null,
@@ -2032,12 +2216,83 @@ function emptyOutboundAudioLiveness(): OutboundAudioLiveness {
   };
 }
 
+function emptyOutboundVideoRawStats(): OutboundVideoRawStats {
+  return {
+    bytesSent: null,
+    packetsSent: null,
+    framesEncoded: null,
+    framesSent: null,
+    keyFramesEncoded: null,
+    frameWidth: null,
+    frameHeight: null,
+    framesPerSecond: null,
+    targetBitrate: null,
+    qualityLimitationReason: null,
+    qualityLimitationDurations: null,
+    nackCount: null,
+    pliCount: null,
+    firCount: null,
+  };
+}
+
+function mergeOutboundVideoRawStats(current: OutboundVideoRawStats, report: Record<string, unknown>): OutboundVideoRawStats {
+  return {
+    bytesSent: addNullable(current.bytesSent, report['bytesSent']),
+    packetsSent: addNullable(current.packetsSent, report['packetsSent']),
+    framesEncoded: addNullable(current.framesEncoded, report['framesEncoded']),
+    framesSent: addNullable(current.framesSent, report['framesSent']),
+    keyFramesEncoded: addNullable(current.keyFramesEncoded, report['keyFramesEncoded']),
+    frameWidth: maxNullable(current.frameWidth, report['frameWidth']),
+    frameHeight: maxNullable(current.frameHeight, report['frameHeight']),
+    framesPerSecond: maxNullable(current.framesPerSecond, report['framesPerSecond']),
+    targetBitrate: addNullable(current.targetBitrate, report['targetBitrate']),
+    qualityLimitationReason: nullableString(report['qualityLimitationReason']) ?? current.qualityLimitationReason,
+    qualityLimitationDurations: durationRecord(report['qualityLimitationDurations']) ?? current.qualityLimitationDurations,
+    nackCount: addNullable(current.nackCount, report['nackCount']),
+    pliCount: addNullable(current.pliCount, report['pliCount']),
+    firCount: addNullable(current.firCount, report['firCount']),
+  };
+}
+
+function senderEncodingInfo(sender: RTCRtpSender | null): DiagnosticsSenderEncoding {
+  const encoding = sender?.getParameters().encodings?.[0] as SenderEncoding | undefined;
+  return {
+    active: typeof encoding?.active === 'boolean' ? encoding.active : null,
+    maxBitrate: typeof encoding?.maxBitrate === 'number' ? encoding.maxBitrate : null,
+    scaleResolutionDownBy: typeof encoding?.scaleResolutionDownBy === 'number' ? encoding.scaleResolutionDownBy : null,
+    maxFramerate: typeof encoding?.maxFramerate === 'number' ? encoding.maxFramerate : null,
+    priority: typeof encoding?.priority === 'string' ? encoding.priority : null,
+    networkPriority: typeof encoding?.networkPriority === 'string' ? encoding.networkPriority : null,
+  };
+}
+
+function emptyOutboundVideoInfo(sender: RTCRtpSender | null): DiagnosticsOutboundVideo {
+  const track = sender?.track ?? null;
+  return {
+    ...emptyOutboundVideoRawStats(),
+    framesSentDelta: null,
+    activelySending: null,
+    senderEncoding: senderEncodingInfo(sender),
+    senderTrackId: track?.id ?? null,
+    senderTrackLabel: track?.label || null,
+    senderTrackKind: track?.kind ?? null,
+    senderTrackSource: track ? 'sender' : 'none',
+  };
+}
+
 function inboundAudioInfo(stats: InboundAudioStats | undefined, receiverTrack: MediaStreamTrack | null): DiagnosticsInboundAudio {
   return {
     packetsReceived: stats?.packetsReceived ?? null,
     packetsLost: stats?.packetsLost ?? null,
     bytesReceived: stats?.bytesReceived ?? null,
     audioLevel: stats?.audioLevel ?? null,
+    jitterBufferDelay: stats?.jitterBufferDelay ?? null,
+    jitterBufferTargetDelay: stats?.jitterBufferTargetDelay ?? null,
+    jitterBufferEmittedCount: stats?.jitterBufferEmittedCount ?? null,
+    concealedSamples: stats?.concealedSamples ?? null,
+    concealmentEvents: stats?.concealmentEvents ?? null,
+    remoteRoundTripTime: stats?.remoteRoundTripTime ?? null,
+    remoteFractionLost: stats?.remoteFractionLost ?? null,
     packetsReceivedDelta: stats?.packetsReceivedDelta ?? null,
     packetsActivelyArriving: stats?.packetsActivelyArriving ?? null,
     trackReadyState: receiverTrack?.readyState ?? null,
@@ -2047,10 +2302,20 @@ function inboundAudioInfo(stats: InboundAudioStats | undefined, receiverTrack: M
 
 function inboundVideoInfo(stats: InboundVideoStats | undefined, receiverTrack: MediaStreamTrack | null): DiagnosticsInboundVideo {
   return {
+    bytesReceived: stats?.bytesReceived ?? null,
+    packetsReceived: stats?.packetsReceived ?? null,
+    packetsLost: stats?.packetsLost ?? null,
     framesDecoded: stats?.framesDecoded ?? null,
     framesDecodedDelta: stats?.framesDecodedDelta ?? null,
     framesReceived: stats?.framesReceived ?? null,
     framesReceivedDelta: stats?.framesReceivedDelta ?? null,
+    framesDropped: stats?.framesDropped ?? null,
+    nackCount: stats?.nackCount ?? null,
+    pliCount: stats?.pliCount ?? null,
+    firCount: stats?.firCount ?? null,
+    keyFramesDecoded: stats?.keyFramesDecoded ?? null,
+    jitterBufferDelay: stats?.jitterBufferDelay ?? null,
+    jitterBufferEmittedCount: stats?.jitterBufferEmittedCount ?? null,
     freezeCount: stats?.freezeCount ?? null,
     freezeCountDelta: stats?.freezeCountDelta ?? null,
     totalFreezesDuration: stats?.totalFreezesDuration ?? null,
@@ -2068,10 +2333,20 @@ function inboundVideoInfo(stats: InboundVideoStats | undefined, receiverTrack: M
 
 function emptyInboundVideoStats(videoExpected: boolean): InboundVideoStats {
   return {
+    bytesReceived: null,
+    packetsReceived: null,
+    packetsLost: null,
     framesDecoded: null,
     framesDecodedDelta: null,
     framesReceived: null,
     framesReceivedDelta: null,
+    framesDropped: null,
+    nackCount: null,
+    pliCount: null,
+    firCount: null,
+    keyFramesDecoded: null,
+    jitterBufferDelay: null,
+    jitterBufferEmittedCount: null,
     freezeCount: null,
     freezeCountDelta: null,
     totalFreezesDuration: null,
@@ -2083,6 +2358,18 @@ function emptyInboundVideoStats(videoExpected: boolean): InboundVideoStats {
     videoFrozen: false,
     noInboundMedia: false,
   };
+}
+
+function transceiverStates(pc: RTCPeerConnection | null): DiagnosticsTransceiverState[] {
+  return (pc?.getTransceivers() ?? []).map((transceiver) => ({
+    mid: transceiver.mid,
+    direction: transceiver.direction,
+    currentDirection: transceiver.currentDirection,
+    senderTrackKind: transceiver.sender.track?.kind ?? null,
+    receiverTrackKind: transceiver.receiver.track?.kind ?? null,
+    receiverTrackReadyState: transceiver.receiver.track?.readyState ?? null,
+    receiverTrackMuted: transceiver.receiver.track?.muted ?? null,
+  }));
 }
 
 function diagnosticLabelsForPeer(
@@ -2170,6 +2457,7 @@ function createEmptyForensics(): PeerForensics {
       answerSentCount: 0,
       offerReceivedCount: 0,
       answerReceivedCount: 0,
+      lastNegotiationNeededOfferSent: null,
       makingOffer: false,
       ignoreOffer: false,
       glareIgnoredCount: 0,

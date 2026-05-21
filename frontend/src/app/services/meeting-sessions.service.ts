@@ -48,6 +48,13 @@ export type DiagnosticsInboundAudio = {
   packetsLost: number | null;
   bytesReceived: number | null;
   audioLevel: number | null;
+  jitterBufferDelay: number | null;
+  jitterBufferTargetDelay: number | null;
+  jitterBufferEmittedCount: number | null;
+  concealedSamples: number | null;
+  concealmentEvents: number | null;
+  remoteRoundTripTime: number | null;
+  remoteFractionLost: number | null;
   packetsReceivedDelta: number | null;
   packetsActivelyArriving: boolean | null;
   trackReadyState: MediaStreamTrackState | null;
@@ -55,10 +62,20 @@ export type DiagnosticsInboundAudio = {
 };
 
 export type DiagnosticsInboundVideo = {
+  bytesReceived: number | null;
+  packetsReceived: number | null;
+  packetsLost: number | null;
   framesDecoded: number | null;
   framesDecodedDelta: number | null;
   framesReceived: number | null;
   framesReceivedDelta: number | null;
+  framesDropped: number | null;
+  nackCount: number | null;
+  pliCount: number | null;
+  firCount: number | null;
+  keyFramesDecoded: number | null;
+  jitterBufferDelay: number | null;
+  jitterBufferEmittedCount: number | null;
   freezeCount: number | null;
   freezeCountDelta: number | null;
   totalFreezesDuration: number | null;
@@ -71,6 +88,39 @@ export type DiagnosticsInboundVideo = {
   noInboundMedia: boolean;
   trackReadyState: MediaStreamTrackState | null;
   trackMuted: boolean | null;
+};
+
+export type DiagnosticsSenderEncoding = {
+  active: boolean | null;
+  maxBitrate: number | null;
+  scaleResolutionDownBy: number | null;
+  maxFramerate: number | null;
+  priority: string | null;
+  networkPriority: string | null;
+};
+
+export type DiagnosticsOutboundVideo = {
+  bytesSent: number | null;
+  packetsSent: number | null;
+  framesEncoded: number | null;
+  framesSent: number | null;
+  framesSentDelta: number | null;
+  keyFramesEncoded: number | null;
+  frameWidth: number | null;
+  frameHeight: number | null;
+  framesPerSecond: number | null;
+  targetBitrate: number | null;
+  qualityLimitationReason: string | null;
+  qualityLimitationDurations: Record<string, number> | null;
+  nackCount: number | null;
+  pliCount: number | null;
+  firCount: number | null;
+  activelySending: boolean | null;
+  senderEncoding: DiagnosticsSenderEncoding;
+  senderTrackId: string | null;
+  senderTrackLabel: string | null;
+  senderTrackKind: string | null;
+  senderTrackSource: 'sender' | 'none';
 };
 
 export type DiagnosticsCandidateInfo = {
@@ -116,10 +166,21 @@ export type DiagnosticsNegotiationAudit = {
   answerSentCount: number;
   offerReceivedCount: number;
   answerReceivedCount: number;
+  lastNegotiationNeededOfferSent: boolean | null;
   makingOffer: boolean;
   ignoreOffer: boolean;
   glareIgnoredCount: number;
   rollbackCount: number;
+};
+
+export type DiagnosticsTransceiverState = {
+  mid: string | null;
+  direction: RTCRtpTransceiverDirection;
+  currentDirection: RTCRtpTransceiverDirection | null;
+  senderTrackKind: string | null;
+  receiverTrackKind: string | null;
+  receiverTrackReadyState: MediaStreamTrackState | null;
+  receiverTrackMuted: boolean | null;
 };
 
 export type DiagnosticsRelayGathered = {
@@ -144,6 +205,7 @@ export type DiagnosticsPeerSample = {
   iceRelayGathered: DiagnosticsRelayGathered;
   iceRestart: DiagnosticsIceRestartAudit;
   negotiation: DiagnosticsNegotiationAudit;
+  transceivers: DiagnosticsTransceiverState[];
   transitionTimeline: DiagnosticsTransition[];
   relayUsed: boolean;
   quality: string;
@@ -159,6 +221,7 @@ export type DiagnosticsPeerSample = {
   outboundAudio: DiagnosticsTrackInfo;
   inboundAudio: DiagnosticsInboundAudio;
   outboundVideo: DiagnosticsTrackInfo;
+  outboundVideoStats?: DiagnosticsOutboundVideo;
   inboundVideo?: DiagnosticsInboundVideo;
   reconnecting?: boolean;
   updatedAt: number;
