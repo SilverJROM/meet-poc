@@ -83,8 +83,48 @@ export class SfuClientService {
   }
 
   removePeer(clientId: string): void {
+    this.tearDownPeerSubscription(clientId);
     const next = removeFromRoster(this.remotePublishers(), clientId);
     if (next !== this.remotePublishers()) this.remotePublishers.set(next);
+  }
+
+  private tearDownPeerSubscription(clientId: string): void {
+    if (!this.subscribedClientIds.has(clientId)) return;
+
+    const mids: string[] = [];
+    const nextSubscribed = new Map(this.subscribedTracks());
+    for (const [mid, entry] of nextSubscribed) {
+      if (entry.publisherClientId === clientId) {
+        mids.push(mid);
+        nextSubscribed.delete(mid);
+        this.midToEntry.delete(mid);
+      }
+    }
+    this.subscribedTracks.set(nextSubscribed);
+
+    const nextStreams = new Map(this.remoteStreams());
+    nextStreams.delete(clientId);
+    this.remoteStreams.set(nextStreams);
+
+    this.subscribedClientIds.delete(clientId);
+
+    if (mids.length > 0) {
+      const creds = this.callerCreds;
+      const cfSessionId = this.localPublishState()?.cfSessionId ?? '';
+      if (creds && cfSessionId) {
+        void this.enqueue(() => this.doClose(mids, creds, cfSessionId));
+      }
+    }
+  }
+
+  private async doClose(mids: string[], creds: { clientKey: string; participantId: string; sessionId: string }, cfSessionId: string): Promise<void> {
+    await firstValueFrom(
+      this.http.put('/api/sfu/tracks/close', {
+        ...creds,
+        cfSessionId,
+        tracks: mids.map((mid) => ({ mid })),
+      }),
+    );
   }
 
   destroy(): void {
