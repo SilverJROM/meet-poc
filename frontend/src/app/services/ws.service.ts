@@ -33,7 +33,9 @@ export type SignalingMessage =
   | { type: 'knock-cancelled'; clientId: string }
   | { type: 'signal'; from: string; data: unknown }
   | { type: 'rejected'; reason?: string }
-  | { type: 'error'; error: string };
+  | { type: 'error'; error: string }
+  | { type: 'sfu-presence'; clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }
+  | { type: 'sfu-roster'; publishers: { clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }[] };
 
 export type OutgoingSignalingMessage =
   | { type: 'join'; room: string; name: string; mobile?: boolean; supportsReconnect?: boolean; reconnectToken?: string; clientKey?: string }
@@ -46,7 +48,8 @@ export type OutgoingSignalingMessage =
   | { type: 'meeting-ended-by-host' }
   | { type: 'mute-target'; clientId: string }
   | { type: 'remove-peer'; clientId: string }
-  | { type: 'leave' };
+  | { type: 'leave' }
+  | { type: 'sfu-publish'; cfSessionId: string; tracks: { trackName: string; kind: string }[] };
 
 @Injectable({ providedIn: 'root' })
 export class WsService {

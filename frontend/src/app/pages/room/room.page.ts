@@ -888,6 +888,16 @@ export class RoomPage implements OnDestroy {
       if (this.route.snapshot.queryParamMap.get('sfu') === '1' && msg.participantId && msg.sessionId) {
         void this.sfuClient
           .publish({ clientKey: readClientKey(), participantId: msg.participantId, sessionId: msg.sessionId, localStream: this.media.localStream() })
+          .then(() => {
+            const state = this.sfuClient.localPublishState();
+            if (state?.status === 'published') {
+              this.ws.send({
+                type: 'sfu-publish',
+                cfSessionId: state.cfSessionId,
+                tracks: state.tracks.filter((t) => t.status === 'live').map((t) => ({ trackName: t.trackName, kind: t.kind })),
+              });
+            }
+          })
           .catch((err: unknown) => console.error('[sfu-client] publish failed', err));
       }
       this.startDiagnosticsLogger();
@@ -1002,9 +1012,18 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'peer-left') {
       this.recorder.notifyParticipantLeft(msg.clientId);
       this.webrtc.removePeer(msg.clientId);
+      this.sfuClient.removePeer(msg.clientId);
       this.pendingSignals.delete(msg.clientId);
       this.removeKnocker(msg.clientId);
       this.queueDiagnosticsLog('state-change');
+      return;
+    }
+    if (msg.type === 'sfu-presence') {
+      this.sfuClient.handleSfuPresence(msg);
+      return;
+    }
+    if (msg.type === 'sfu-roster') {
+      this.sfuClient.handleSfuRoster(msg.publishers);
       return;
     }
     if (msg.type === 'signal') {

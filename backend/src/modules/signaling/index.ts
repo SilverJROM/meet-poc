@@ -28,6 +28,14 @@ type ClosedWaiterEntry = PeerEntry & {
   timer: ReturnType<typeof setTimeout>;
 };
 
+type SfuPresenceEntry = {
+  clientId: string;
+  participantId: string;
+  cfSessionId: string;
+  tracks: { trackName: string; kind: string }[];
+  revision: number;
+};
+
 type LiveRoom = {
   admitted: Map<string, PeerEntry>;
   pending: Map<string, PeerEntry>;
@@ -36,6 +44,8 @@ type LiveRoom = {
   reconnecting: Map<string, ReconnectingPeer>;
   clientIdentities: Map<string, ClientIdentity>;
   currentSessionId: string | null;
+  sfuPresence: Map<string, SfuPresenceEntry>;
+  sfuPresenceRevision: number;
 };
 
 type ClientIdentity = {
@@ -97,6 +107,8 @@ type IncomingMessage = {
   supportsReconnect?: unknown;
   reconnectToken?: unknown;
   clientKey?: unknown;
+  cfSessionId?: unknown;
+  tracks?: unknown;
 };
 
 const MAX_ADMITTED = 30; // SFU-era product cap; was mesh DR-50 = 5
@@ -134,6 +146,8 @@ function getOrCreateLiveRoom(roomId: string): LiveRoom {
       reconnecting: new Map(),
       clientIdentities: new Map(),
       currentSessionId: null,
+      sfuPresence: new Map(),
+      sfuPresenceRevision: 0,
     };
     liveRooms.set(roomId, live);
   }
@@ -426,6 +440,7 @@ function removeAdmittedPeer(roomId: string, clientId: string, live: LiveRoom, da
   if (!entry) return;
   const isHost = isOwnerOf(roomId, entry.userEmail, database);
   live.admitted.delete(clientId);
+  live.sfuPresence.delete(clientId);
   entry.setState('idle');
   for (const [, peer] of live.admitted) {
     send(peer.ws, { type: 'peer-left', clientId, participantId: entry.participantId });
@@ -503,6 +518,10 @@ function promoteClosedWaiters(roomId: string, waitTimeoutMinutes: number, databa
   console.log(`[room ${roomId}] OPENED promoted ${waiters.length} waiter(s) timeout=${waitTimeoutMinutes}`);
 }
 
+function sendSfuRosterToNewPeer(live: LiveRoom, ws: WebSocket): void {
+  send(ws, { type: 'sfu-roster', publishers: [...live.sfuPresence.values()] });
+}
+
 function admitPeer(roomId: string, clientId: string, database: Database.Database): void {
   const live = liveRooms.get(roomId);
   const room = getRoom(roomId, database);
@@ -529,6 +548,7 @@ function admitPeer(roomId: string, clientId: string, database: Database.Database
     hostClientId,
     sessionId: live.currentSessionId,
   });
+  sendSfuRosterToNewPeer(live, pending.ws);
   issueReconnectToken(live, clientId, pending, pending.supportsReconnect);
   for (const [, peer] of live.admitted) {
     send(peer.ws, { type: 'peer-joined', clientId, participantId: pending.participantId, name: pending.name, isMobile: pending.isMobile });
@@ -745,6 +765,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
           const peers = peerSummaries(live, roomId, database).filter((peer) => peer.id !== clientId);
           const hostClientId = getHostClientId(roomId, database) || (owner ? clientId : null);
           send(ws, { type: 'admitted', clientId, participantId, peers, roomTitle: room.title, isOwner: owner, hostClientId, sessionId: live.currentSessionId });
+          sendSfuRosterToNewPeer(live, ws);
           issueReconnectToken(live, clientId, entry, supportsReconnect);
           for (const [id, peer] of live.admitted) {
             if (id !== clientId) {
@@ -793,6 +814,43 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const sender = live.admitted.get(clientId);
         for (const [id, peer] of live.admitted) {
           if (id !== clientId) send(peer.ws, { type: 'media-state', clientId, mic, cam, screenOn, isMobile: sender?.isMobile ?? false });
+        }
+        return;
+      }
+
+      if (msg.type === 'sfu-publish') {
+        if (state !== 'admitted') return;
+        const live = currentRoom ? liveRooms.get(currentRoom) : null;
+        if (!live) return;
+        const peer = live.admitted.get(clientId);
+        if (!peer) return;
+        const cfSessionId =
+          typeof msg.cfSessionId === 'string' && msg.cfSessionId.trim().length > 0
+            ? msg.cfSessionId.slice(0, 256)
+            : null;
+        if (!cfSessionId) return;
+        const rawTracks = Array.isArray(msg.tracks) ? (msg.tracks as unknown[]).slice(0, 64) : null;
+        if (!rawTracks) return;
+        const tracks = rawTracks
+          .filter(
+            (t): t is { trackName: string; kind: string } =>
+              typeof t === 'object' &&
+              t !== null &&
+              typeof (t as Record<string, unknown>).trackName === 'string' &&
+              typeof (t as Record<string, unknown>).kind === 'string',
+          )
+          .map((t) => ({ trackName: t.trackName, kind: t.kind }));
+        live.sfuPresenceRevision += 1;
+        const sfuEntry: SfuPresenceEntry = {
+          clientId,
+          participantId: peer.participantId,
+          cfSessionId,
+          tracks,
+          revision: live.sfuPresenceRevision,
+        };
+        live.sfuPresence.set(clientId, sfuEntry);
+        for (const [id, p] of live.admitted) {
+          if (id !== clientId) send(p.ws, { type: 'sfu-presence', ...sfuEntry });
         }
         return;
       }
@@ -939,6 +997,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const closingEntry = live.admitted.get(clientId);
         if (closingEntry) startReconnectGrace(currentRoom, clientId, closingEntry, closingPeerWasHost, live, database);
         live.admitted.delete(clientId);
+        live.sfuPresence.delete(clientId);
         console.log(`[room ${currentRoom}] RECONNECTING ${myName} (${clientId})  admitted=${live.admitted.size}`);
       } else if (state === 'pending') {
         live.pending.delete(clientId);
