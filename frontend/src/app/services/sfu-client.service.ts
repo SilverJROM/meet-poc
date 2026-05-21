@@ -19,6 +19,13 @@ export interface LocalPublishState {
   error?: string;
 }
 
+export interface SubscribedTrackEntry {
+  publisherClientId: string;
+  trackName: string;
+  kind: string;
+  mid: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class SfuClientService {
   private readonly http = inject(HttpClient);
@@ -26,10 +33,16 @@ export class SfuClientService {
 
   readonly localPublishState = signal<LocalPublishState | null>(null);
   readonly remotePublishers = signal<Map<string, import('./sfu-roster-utils.js').RemotePublisher>>(new Map());
+  readonly remoteStreams = signal<Map<string, MediaStream>>(new Map());
+  readonly subscribedTracks = signal<Map<string, SubscribedTrackEntry>>(new Map());
 
   private pc: RTCPeerConnection | null = null;
-  // Single serialized queue — all PC-mutating ops run through enqueue() (subscribe/close/update in later batches)
+  // Single serialized queue — all PC-mutating ops run through enqueue() (publish/subscribe/close/renegotiate)
   private opQueue: Promise<void> = Promise.resolve();
+
+  private callerCreds: { clientKey: string; participantId: string; sessionId: string } | null = null;
+  private subscribedClientIds = new Set<string>();
+  private midToEntry = new Map<string, SubscribedTrackEntry>();
 
   enqueue<T>(op: () => Promise<T>): Promise<T> {
     const result = this.opQueue.then(() => op());
@@ -42,6 +55,18 @@ export class SfuClientService {
 
   publish(params: { clientKey: string; participantId: string; sessionId: string; localStream: MediaStream | null }): Promise<void> {
     return this.enqueue(() => this.doPublish(params));
+  }
+
+  subscribeIfNeeded(publisher: import('./sfu-roster-utils.js').RemotePublisher): void {
+    // Skip self
+    if (publisher.cfSessionId === this.localPublishState()?.cfSessionId) return;
+    // Skip already-subscribed
+    if (this.subscribedClientIds.has(publisher.clientId)) return;
+    // Skip if no tracks to subscribe to
+    if (!publisher.tracks.length) return;
+    // Mark before enqueue to prevent double-subscribe
+    this.subscribedClientIds.add(publisher.clientId);
+    void this.enqueue(() => this.doSubscribe(publisher));
   }
 
   getStats(): Promise<RTCStatsReport | null> {
@@ -67,14 +92,20 @@ export class SfuClientService {
       this.pc.close();
       this.pc = null;
     }
+    this.callerCreds = null;
+    this.subscribedClientIds.clear();
+    this.midToEntry.clear();
     this.localPublishState.set(null);
     this.remotePublishers.set(new Map());
+    this.remoteStreams.set(new Map());
+    this.subscribedTracks.set(new Map());
   }
 
   private async doPublish(params: { clientKey: string; participantId: string; sessionId: string; localStream: MediaStream | null }): Promise<void> {
     const { clientKey, participantId, sessionId, localStream } = params;
     const epoch = Date.now();
 
+    this.callerCreds = { clientKey, participantId, sessionId };
     this.localPublishState.set({ cfSessionId: '', status: 'publishing', tracks: [] });
 
     try {
@@ -82,6 +113,22 @@ export class SfuClientService {
       const turnServers = await this.iceConfigService.getIceServers();
       const iceServers: RTCIceServer[] = [{ urls: 'stun:stun.cloudflare.com:3478' }, ...turnServers];
       this.pc = new RTCPeerConnection({ iceServers });
+
+      // Set ontrack BEFORE any subscribe requests so no track event is missed
+      this.pc.ontrack = (event) => {
+        const mid = event.transceiver.mid;
+        if (!mid) return;
+        const entry = this.midToEntry.get(mid);
+        if (!entry) return;
+        const next = new Map(this.remoteStreams());
+        let stream = next.get(entry.publisherClientId);
+        if (!stream) {
+          stream = new MediaStream();
+          next.set(entry.publisherClientId, stream);
+        }
+        stream.addTrack(event.track);
+        this.remoteStreams.set(next);
+      };
 
       // Add local tracks with pre-negotiated video transceiver (DR-55/F2: always negotiate video up-front)
       const audioTrack = localStream?.getAudioTracks()[0];
@@ -144,6 +191,62 @@ export class SfuClientService {
     } catch (err) {
       this.localPublishState.set({ cfSessionId: '', status: 'error', tracks: [], error: String(err) });
       throw err;
+    }
+  }
+
+  private async doSubscribe(publisher: import('./sfu-roster-utils.js').RemotePublisher): Promise<void> {
+    const creds = this.callerCreds;
+    const publishState = this.localPublishState();
+    if (!creds || !publishState || publishState.status !== 'published' || !this.pc) return;
+
+    const cfSessionId = publishState.cfSessionId;
+
+    type CfTracksResponse = {
+      requiresImmediateRenegotiation?: boolean;
+      sessionDescription?: RTCSessionDescriptionInit;
+      tracks?: { trackName: string; mid: string }[];
+    };
+
+    const res = await firstValueFrom(
+      this.http.post<CfTracksResponse>('/api/sfu/tracks', {
+        ...creds,
+        cfSessionId,
+        tracks: publisher.tracks.map((t) => ({
+          location: 'remote',
+          sessionId: publisher.cfSessionId,
+          trackName: t.trackName,
+        })),
+      }),
+    );
+
+    // Map mid → entry using the CF response, update subscribedTracks signal
+    const responseTracks = res.tracks ?? [];
+    const nextSubscribed = new Map(this.subscribedTracks());
+    for (const rt of responseTracks) {
+      const kind = publisher.tracks.find((t) => t.trackName === rt.trackName)?.kind ?? 'unknown';
+      const entry: SubscribedTrackEntry = {
+        publisherClientId: publisher.clientId,
+        trackName: rt.trackName,
+        kind,
+        mid: rt.mid,
+      };
+      this.midToEntry.set(rt.mid, entry);
+      nextSubscribed.set(rt.mid, entry);
+    }
+    this.subscribedTracks.set(nextSubscribed);
+
+    // Full renegotiation inside this enqueue op — must not interleave with other ops
+    if (res.requiresImmediateRenegotiation && res.sessionDescription) {
+      await this.pc.setRemoteDescription(res.sessionDescription);
+      const answer = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(answer);
+      await firstValueFrom(
+        this.http.put('/api/sfu/renegotiate', {
+          ...creds,
+          cfSessionId,
+          sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+        }),
+      );
     }
   }
 }

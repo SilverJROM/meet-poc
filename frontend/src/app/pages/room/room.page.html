@@ -245,11 +245,19 @@
             }
           </aside>
         } @else {
-          <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
-            @for (peer of peers(); track peer.participantId) {
-              <app-tile [peer]="peer" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
-            }
-          </div>
+          @if (isSfuMode()) {
+            <div class="tiles-grid" aria-label="Participants" [attr.data-count]="sfuPeers().length">
+              @for (peer of sfuPeers(); track peer.participantId) {
+                <app-tile [peer]="peer" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+              }
+            </div>
+          } @else {
+            <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
+              @for (peer of peers(); track peer.participantId) {
+                <app-tile [peer]="peer" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+              }
+            </div>
+          }
         }
         @if (chatOpen()) {
           <aside class="chat-panel" aria-label="Meeting chat">

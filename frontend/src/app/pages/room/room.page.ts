@@ -24,7 +24,7 @@ import { RemoteAudioService } from '../../services/remote-audio.service';
 import { RoomsService } from '../../services/rooms.service';
 import { ViewportService } from '../../services/viewport.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
-import { WebrtcService } from '../../services/webrtc.service';
+import { WebrtcService, type PeerState } from '../../services/webrtc.service';
 import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
 
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
@@ -140,6 +140,44 @@ export class RoomPage implements OnDestroy {
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
   readonly peers = this.webrtc.peerList;
+  readonly isSfuMode = signal(this.route.snapshot.queryParamMap.get('sfu') === '1');
+  readonly sfuPeers = computed<PeerState[]>(() => {
+    const result: PeerState[] = [];
+    const localPeer = this.peers().find((p) => p.isLocal);
+    if (localPeer) result.push(localPeer);
+    const streams = this.sfuClient.remoteStreams();
+    for (const [clientId, publisher] of this.sfuClient.remotePublishers()) {
+      const stream = streams.get(clientId) ?? null;
+      result.push({
+        id: clientId,
+        participantId: publisher.participantId,
+        name: clientId,
+        pc: null,
+        stream,
+        connectionState: stream ? 'connected' : 'connecting',
+        iceConnectionState: 'connected',
+        iceGatheringState: 'complete',
+        signalingState: 'stable',
+        selectedCandidateType: null,
+        quality: 'good',
+        packetLossPct: null,
+        jitterMs: null,
+        rttMs: null,
+        availableOutgoingBitrateKbps: null,
+        audioOnlyReason: null,
+        updatedAt: Date.now(),
+        isLocal: false,
+        isHost: false,
+        micEnabled: true,
+        camEnabled: !!(stream?.getVideoTracks().length),
+        screenOn: false,
+        reconnecting: false,
+        reconnectingSince: null,
+        isMobile: false,
+      });
+    }
+    return result;
+  });
   readonly shareStripCollapsed = signal(false);
   readonly sharingPeer = computed(() => this.peers().find((peer) => peer.screenOn) ?? null);
   readonly shareLayoutActive = computed(() => !!this.sharingPeer());
@@ -297,6 +335,7 @@ export class RoomPage implements OnDestroy {
         sampleConnectionQualityForTest: (quality?: 'good' | 'weak' | 'poor' | 'critical') => this.webrtc.sampleQualityNowForTest(quality),
         senderSnapshot: () => this.webrtc.debugSenderSnapshot(),
         sfuPublishState: this.sfuClient.localPublishState(),
+        sfuRemoteStreams: this.sfuClient.remoteStreams(),
       };
       if (window.location.hostname === 'localhost') {
         debug.diagnosticSnapshot = () => this.webrtc.diagnosticSnapshot();
@@ -338,6 +377,19 @@ export class RoomPage implements OnDestroy {
       window.setTimeout(() => {
         void this.applySpeakerDevice(deviceId).catch((err) => console.debug('[devices] speaker routing refresh failed', err));
       }, 0);
+    });
+    // SFU subscribe: react to remotePublishers changes, but only after local publish is done.
+    // The sfu-roster can arrive mid-admitted handler (between awaits) before sfuClient.publish()
+    // is called, so we guard on 'published' status and let the effect re-fire when it transitions.
+    effect(() => {
+      if (!this.isSfuMode()) return;
+      if (this.sfuClient.localPublishState()?.status !== 'published') return;
+      const publishers = this.sfuClient.remotePublishers();
+      const myId = this.myId();
+      for (const [clientId, publisher] of publishers) {
+        if (clientId === myId) continue;
+        this.sfuClient.subscribeIfNeeded(publisher);
+      }
     });
     effect(() => {
       const activePeerIds = new Set<string>();
@@ -2238,6 +2290,7 @@ declare global {
         forceRelay: boolean;
       }[];
       sfuPublishState?: LocalPublishState | null;
+      sfuRemoteStreams?: Map<string, MediaStream>;
       sfuGetStats?: () => Promise<RTCStatsReport | null>;
     };
   }
