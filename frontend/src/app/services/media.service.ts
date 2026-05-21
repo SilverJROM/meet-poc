@@ -277,6 +277,7 @@ export class MediaService {
     this.screenShareAttempts.update((count) => count + 1);
     const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
     const track = screen.getVideoTracks()[0];
+    if (track) track.contentHint = 'detail';
     registerDebugTracks(screen);
     this.screenTrack = track;
     this.screenStream.set(screen);
