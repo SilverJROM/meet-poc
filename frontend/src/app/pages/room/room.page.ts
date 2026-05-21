@@ -797,7 +797,7 @@ export class RoomPage implements OnDestroy {
       if (msg.roomTitle) this.roomTitle.set(msg.roomTitle);
       const stream = this.media.localStream();
       if (stream) {
-        this.webrtc.configure(stream, (to, data) => this.ws.send({ type: 'signal', to, data }));
+        this.webrtc.configure(stream, (to, data) => this.ws.send({ type: 'signal', to, data }), { isMobile: this.viewport.isMobile() });
         this.hostClientId.set(msg.hostClientId || (msg.isOwner ? msg.clientId : null));
         if (wasInCall) {
           this.pendingSignals.clear();

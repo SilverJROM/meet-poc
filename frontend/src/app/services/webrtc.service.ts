@@ -131,6 +131,7 @@ const FORCE_RELAY_STORAGE_KEY = 'meet-poc.forceRelay';
 const QUALITY_POLL_MS = 2500;
 const AUTO_DEGRADE_POOR_SAMPLES = 3;
 const AUTO_RESTORE_GOOD_SAMPLES = 5;
+const MOBILE_PROTECTIVE_VIDEO_PARTICIPANTS = 4;
 const VIDEO_MAX_BITRATE_BPS = 700_000;
 const VIDEO_DEGRADED_MAX_BITRATE_BPS = 120_000;
 const VIDEO_DEGRADED_SCALE = 4;
@@ -153,6 +154,7 @@ export class WebrtcService {
   private localStream: MediaStream | null = null;
   private sendSignal: ((to: string, data: unknown) => void) | null = null;
   private localClientId: string | null = null;
+  private localMobile = false;
   private readonly peerMeta = new Map<string, PeerMeta>();
   private readonly qualityCounters = new Map<string, QualityCounters>();
   private readonly previousStats = new Map<string, PreviousStats>();
@@ -199,9 +201,11 @@ export class WebrtcService {
       })),
   );
 
-  configure(localStream: MediaStream, sendSignal: (to: string, data: unknown) => void): void {
+  configure(localStream: MediaStream, sendSignal: (to: string, data: unknown) => void, options: { isMobile?: boolean } = {}): void {
     this.localStream = localStream;
     this.sendSignal = sendSignal;
+    this.localMobile = !!options.isMobile;
+    void this.applyAllVideoPolicies();
   }
 
   setLocalPeer(
@@ -284,6 +288,7 @@ export class WebrtcService {
     this.mutatePeers((peers) => peers.set(clientId, peer));
 
     await this.createPeerConnectionForPeer(clientId, isInitiator, { resetForensics: true });
+    await this.applyAllVideoPolicies();
   }
 
   async resumePeer(oldClientId: string, clientId: string, name: string, isInitiator: boolean, options: { participantId?: string; isHost?: boolean } = {}): Promise<void> {
@@ -615,6 +620,7 @@ export class WebrtcService {
     this.removePeerResources(clientId, true);
     this.mutatePeers((peers) => peers.delete(clientId));
     if (!this.peerList().some((peerState) => !peerState.isLocal)) this.stopQualityPolling();
+    void this.applyAllVideoPolicies();
   }
 
   resetRemotePeers(): void {
@@ -649,6 +655,7 @@ export class WebrtcService {
     this.localStream = null;
     this.sendSignal = null;
     this.localClientId = null;
+    this.localMobile = false;
     for (const meta of this.peerMeta.values()) {
       if (meta.restartTimer) clearTimeout(meta.restartTimer);
       if (meta.recoveryTimer) clearTimeout(meta.recoveryTimer);
@@ -1585,7 +1592,11 @@ export class WebrtcService {
   }
 
   private shouldDegradeOutboundVideo(clientId: string): boolean {
-    return !this.shouldPauseOutboundVideo(clientId) && this.remoteDegradeRequests.has(clientId);
+    return !this.shouldPauseOutboundVideo(clientId) && (this.remoteDegradeRequests.has(clientId) || this.shouldProtectMobileOutboundVideo());
+  }
+
+  private shouldProtectMobileOutboundVideo(): boolean {
+    return this.localMobile && this.peerList().length >= MOBILE_PROTECTIVE_VIDEO_PARTICIPANTS;
   }
 
   private updateAudioOnlyReason(clientId: string): void {

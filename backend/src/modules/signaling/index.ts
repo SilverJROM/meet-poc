@@ -99,7 +99,7 @@ type IncomingMessage = {
   clientKey?: unknown;
 };
 
-const MAX_ADMITTED = 8;
+const MAX_ADMITTED = 5;
 const MAX_MOBILE_ADMITTED = 4;
 const MAX_CHAT_MESSAGE_CHARS = 2000;
 const RECONNECT_TOKEN_TTL_MS = 2 * 60 * 1000;
@@ -222,7 +222,7 @@ function closeSupersededAdmittedPeer(live: LiveRoom, clientId: string): void {
 function rejectForRoomFull(roomId: string, clientId: string, pending: PeerEntry, live: LiveRoom, database: Database.Database): void {
   live.pending.delete(clientId);
   pending.setState('idle');
-  send(pending.ws, { type: 'error', error: 'room full (max 8)' });
+  send(pending.ws, { type: 'error', error: `room full (max ${MAX_ADMITTED})` });
   try {
     pending.ws.close();
   } catch {
@@ -732,13 +732,13 @@ export function attachSignaling(server: http.Server, database: Database.Database
           console.log(`[room ${roomId}] WAIT ${myName} (${clientId}) timeout=${room.waitTimeoutMinutes}`);
           return;
         }
-        if (!ownerResume && !canResume && declaredMobile && mobileAdmittedCount(live) >= MAX_MOBILE_ADMITTED) {
-          send(ws, { type: 'error', error: 'mobile room full (4 max)' });
+        if (!ownerResume && !canResume && live.admitted.size + live.reconnecting.size >= MAX_ADMITTED) {
+          send(ws, { type: 'error', error: `room full (max ${MAX_ADMITTED})` });
           ws.close();
           return;
         }
-        if (!ownerResume && !canResume && live.admitted.size + live.reconnecting.size >= MAX_ADMITTED) {
-          send(ws, { type: 'error', error: 'room full (max 8)' });
+        if (!ownerResume && !canResume && declaredMobile && mobileAdmittedCount(live) >= MAX_MOBILE_ADMITTED) {
+          send(ws, { type: 'error', error: `mobile room full (${MAX_MOBILE_ADMITTED} max)` });
           ws.close();
           return;
         }
