@@ -4,7 +4,16 @@
       <h2>Call diagnostics</h2>
       <p>Per-call connection log with published sender tracks.</p>
     </div>
-    <button type="button" class="secondary" (click)="refresh()">Refresh</button>
+    <div class="header-actions">
+      <div class="turn-health" aria-live="polite">
+        <span class="label">TURN health</span>
+        <strong [class]="turnHealthClass(turnHealth())">{{ turnHealthChecking() ? 'Checking...' : turnHealthSummary(turnHealth()) }}</strong>
+      </div>
+      <button type="button" class="secondary" [disabled]="turnHealthChecking()" (click)="runTurnHealthCheck()">
+        {{ turnHealthChecking() ? 'Checking TURN' : 'Check TURN' }}
+      </button>
+      <button type="button" class="secondary" (click)="refresh()">Refresh</button>
+    </div>
   </div>
 
   @if (error()) {

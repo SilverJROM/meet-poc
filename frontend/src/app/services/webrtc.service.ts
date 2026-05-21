@@ -792,13 +792,17 @@ export class WebrtcService {
     );
   }
 
-  private async createPeerConnectionForPeer(clientId: string, isInitiator: boolean, options: { resetForensics: boolean }): Promise<RTCPeerConnection | null> {
+  private async createPeerConnectionForPeer(
+    clientId: string,
+    isInitiator: boolean,
+    options: { resetForensics: boolean; forceIceRefresh?: boolean },
+  ): Promise<RTCPeerConnection | null> {
     if (!this.localStream || !this.sendSignal) return null;
     const peer = this.peers().get(clientId);
     if (!peer || peer.isLocal) return null;
     const meta = this.peerMeta.get(clientId) ?? this.createPeerMeta(clientId);
     this.peerMeta.set(clientId, meta);
-    const iceServers = await this.iceConfig.getIceServers();
+    const iceServers = await this.iceConfig.getIceServers({ forceRefresh: !!options.forceIceRefresh });
     const pc = new RTCPeerConnection(this.peerConnectionConfig(iceServers));
     if (options.resetForensics || !this.peerForensics.has(clientId)) this.peerForensics.set(clientId, createPeerForensics(pc));
     else {
@@ -1136,7 +1140,7 @@ export class WebrtcService {
       const stream = peer.stream ?? new MediaStream();
       for (const track of stream.getTracks()) stream.removeTrack(track);
       this.touchPeer(clientId, { pc: null, stream, connectionState: 'new', iceConnectionState: 'new', iceGatheringState: 'new', signalingState: 'stable' });
-      await this.createPeerConnectionForPeer(clientId, true, { resetForensics: false });
+      await this.createPeerConnectionForPeer(clientId, true, { resetForensics: false, forceIceRefresh: true });
     } catch (err) {
       forensics.iceRestart.autoRecoveryOutcome = 'failed';
       forensics.iceRestart.lastOutcome = 'failed';

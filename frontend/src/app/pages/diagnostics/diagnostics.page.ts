@@ -10,6 +10,7 @@ import {
   DiagnosticsTrackInfo,
   MeetingSessionsService,
 } from '../../services/meeting-sessions.service';
+import { IceConfigService, TurnHealthResult } from '../../services/ice-config.service';
 
 @Component({
   selector: 'app-diagnostics-page',
@@ -20,6 +21,7 @@ import {
 })
 export class DiagnosticsPage {
   private readonly sessionsService = inject(MeetingSessionsService);
+  private readonly iceConfig = inject(IceConfigService);
 
   readonly sessions = signal<DiagnosticSessionSummary[]>([]);
   readonly selectedSessionId = signal<string | null>(null);
@@ -27,6 +29,8 @@ export class DiagnosticsPage {
   readonly loading = signal(true);
   readonly detailLoading = signal(false);
   readonly error = signal<string | null>(null);
+  readonly turnHealth = this.iceConfig.lastTurnHealth;
+  readonly turnHealthChecking = this.iceConfig.turnHealthInFlight;
 
   constructor() {
     void this.refresh();
@@ -66,6 +70,24 @@ export class DiagnosticsPage {
 
   downloadUrl(sessionId: string): string {
     return this.sessionsService.diagnosticsDownloadUrl(sessionId);
+  }
+
+  async runTurnHealthCheck(): Promise<void> {
+    await this.iceConfig.checkTurnHealth();
+  }
+
+  turnHealthSummary(result: TurnHealthResult | null): string {
+    if (!result) return 'Not checked';
+    const status = result.status === 'reachable' ? 'TURN reachable' : 'TURN unavailable';
+    const transport = result.transport ? ` · ${result.transport}` : '';
+    const elapsed = ` · ${result.elapsedMs}ms`;
+    const error = result.error ? ` · ${result.error}` : '';
+    return `${status}${transport}${elapsed}${error}`;
+  }
+
+  turnHealthClass(result: TurnHealthResult | null): 'turn-health-ok' | 'turn-health-bad' | 'turn-health-neutral' {
+    if (!result) return 'turn-health-neutral';
+    return result.status === 'reachable' ? 'turn-health-ok' : 'turn-health-bad';
   }
 
   latestEntry(): DiagnosticEntry | null {
