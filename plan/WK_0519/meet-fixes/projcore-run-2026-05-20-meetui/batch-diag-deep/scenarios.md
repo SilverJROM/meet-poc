@@ -1,16 +1,17 @@
-# DR-41 Scenarios
+# DR-43 Scenarios
 
-## Covered in this slice
+## Covered
 
-- DR-41.1: A two-peer call produces persisted diagnostics from the owner and from an admitted guest.
-- DR-41.2: Diagnostics POST rejects a client that was never admitted to the session.
-- DR-41.3: Owner-gated diagnostics viewing remains unchanged.
-- DR-41.4: Diagnostics logging defaults ON and can be disabled via a localStorage-backed UI toggle.
-- DR-41.5: When logging is OFF, interval, beacon, and queued/manual diagnostics posts stop.
+- DR-43.1: A diagnostics sample includes per-peer candidate-pair forensic fields: selected pair object, candidate-pair count, nominated-pair change count, local/remote candidate type and protocol when available.
+- DR-43.2: A diagnostics sample includes ICE gathering state and relay-gathered-per-side booleans.
+- DR-43.3: A diagnostics sample includes ICE restart audit fields: fired, attempts, outcome, time-to-recover, terminalFailed, and `autoRecoveryOutcome: null`.
+- DR-43.4: A diagnostics sample includes signaling/negotiation forensics: signaling transitions, negotiationneeded count, makingOffer, ignoreOffer/glare, and rollback counter.
+- DR-43.5: A diagnostics sample includes a bounded transition timeline for connection, ICE connection, signaling, gathering, candidate pair, negotiation, and restart events.
+- DR-43.6: A diagnostics sample includes WS signaling health and a bounded disconnect-to-reconnect cycle log.
+- DR-43.7: `/app/diagnostics` shows compact key forensics, and Download JSON preserves the full payload.
 
-## Out of scope
+## Out of Scope
 
-- DR-43 deep forensics.
-- DR-40 recovery behavior.
+- DR-40 auto-recovery behavior.
 - DR-42 video changes.
-- Call/admit/identity behavior changes beyond read-only membership validation for diagnostics POST.
+- Any call/admit/identity policy change.

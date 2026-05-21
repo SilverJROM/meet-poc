@@ -1481,6 +1481,7 @@ export class RoomPage implements OnDestroy {
       createdAt: Date.now(),
       wsStatus: this.ws.status(),
       wsReconnectAttempts: this.ws.reconnectAttempts(),
+      wsHealth: this.ws.diagnosticsSnapshot(),
       forceRelay: this.webrtc.forceRelay(),
       manualAudioOnly: this.webrtc.manualAudioOnly(),
       outboundAudioLevel: diagnostics.outboundAudioLevel,

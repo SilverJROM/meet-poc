@@ -85,6 +85,53 @@ export class DiagnosticsPage {
     return this.peerInboundAudioSummary(peer);
   }
 
+  wsHealthSummary(entry: DiagnosticEntry): string {
+    const ws = entry.payload.wsHealth;
+    if (!ws) return `${entry.payload.wsStatus || 'unknown'} · reconnects ${entry.payload.wsReconnectAttempts ?? 0}`;
+    const lastCycle = ws.cycles?.[ws.cycles.length - 1];
+    const stuck = lastCycle?.timeStuckMs == null ? 'stuck n/a' : `stuck ${Math.round(lastCycle.timeStuckMs / 1000)}s`;
+    return `${ws.status} · disconnects ${ws.disconnectCount} · reconnect attempts ${ws.reconnectAttempts} · ${stuck}`;
+  }
+
+  peerForensicsSummary(peer: DiagnosticsPeerSample): string {
+    return `${this.candidatePairSummary(peer)} · relay ${this.relayGatheredSummary(peer)} · pair count ${peer.candidatePairCount ?? 0}`;
+  }
+
+  candidatePairSummary(peer: DiagnosticsPeerSample): string {
+    const pair = peer.candidatePair;
+    if (!pair) return `pair unknown (${peer.selectedCandidateType || 'candidate unknown'})`;
+    const local = pair.local ? `${pair.local.candidateType || '?'}:${pair.local.protocol || '?'}` : 'local ?';
+    const remote = pair.remote ? `${pair.remote.candidateType || '?'}:${pair.remote.protocol || '?'}` : 'remote ?';
+    const nominated = pair.nominated ? 'nominated' : 'not nominated';
+    return `${local} -> ${remote} · ${pair.state || 'state ?'} · ${nominated}`;
+  }
+
+  relayGatheredSummary(peer: DiagnosticsPeerSample): string {
+    const relay = peer.iceRelayGathered;
+    if (!relay) return 'local n/a / remote n/a';
+    return `local ${relay.local ? 'yes' : 'no'} / remote ${relay.remote ? 'yes' : 'no'}`;
+  }
+
+  iceRestartSummary(peer: DiagnosticsPeerSample): string {
+    const restart = peer.iceRestart;
+    if (!restart) return 'restart audit n/a';
+    const outcome = restart.lastOutcome || 'none';
+    const recover = restart.lastTimeToRecoverMs == null ? 'recover n/a' : `recover ${Math.round(restart.lastTimeToRecoverMs / 1000)}s`;
+    return `fired ${restart.fired ? 'yes' : 'no'} · attempts ${restart.attempts} · ${outcome} · ${recover} · terminal failed ${restart.terminalFailed ? 'yes' : 'no'}`;
+  }
+
+  negotiationSummary(peer: DiagnosticsPeerSample): string {
+    const negotiation = peer.negotiation;
+    if (!negotiation) return 'negotiation n/a';
+    return `needed ${negotiation.negotiationNeededCount} · offers ${negotiation.offerSentCount}/${negotiation.offerReceivedCount} · answers ${negotiation.answerSentCount}/${negotiation.answerReceivedCount} · glare ${negotiation.glareIgnoredCount}`;
+  }
+
+  transitionSummary(peer: DiagnosticsPeerSample): string {
+    const latest = peer.transitionTimeline?.slice(-3) ?? [];
+    if (!latest.length) return 'timeline empty';
+    return latest.map((item) => `${item.scope}:${item.event || `${item.from || '?'}>${item.to || '?'}`}`).join(' · ');
+  }
+
   micLivenessSummary(entry: DiagnosticEntry): string {
     const level = entry.payload.outboundAudioLevel == null ? 'level n/a' : `level ${entry.payload.outboundAudioLevel.toFixed(3)}`;
     const energy = entry.payload.outboundAudioEnergy == null ? 'energy n/a' : `energy ${entry.payload.outboundAudioEnergy.toFixed(6)}`;

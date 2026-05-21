@@ -14,6 +14,21 @@ type DiagnosticDetail = {
       clientName: string;
       clientKey?: string;
       participantId?: string;
+      wsHealth?: {
+        status: string;
+        disconnectCount: number;
+        reconnectAttempts: number;
+        cycles: unknown[];
+      };
+      peers?: {
+        candidatePair?: unknown;
+        candidatePairCount?: number;
+        nominatedPairChanges?: number;
+        iceRelayGathered?: { local: boolean; remote: boolean };
+        iceRestart?: { fired: boolean; attempts: number; terminalFailed: boolean; autoRecoveryOutcome: null };
+        negotiation?: { negotiationNeededCount: number; glareIgnoredCount: number };
+        transitionTimeline?: unknown[];
+      }[];
     };
   }[];
 };
@@ -43,6 +58,8 @@ test('DR-41 admitted owner and guest both post diagnostics, and logging toggle s
   );
   const detail = await diagnosticDetail(request, room.title);
   expect(detail?.entries.some((entry) => entry.payload.clientName === 'dr41-guest' && !!entry.payload.clientKey && !!entry.payload.participantId)).toBe(true);
+  expect(detail?.entries.some((entry) => hasDr43Forensics(entry.payload))).toBe(true);
+  await captureDiagnosticsForensics(page, room.title);
 
   await disableDiagnosticsLogging(page);
   await disableDiagnosticsLogging(guest);
@@ -61,6 +78,16 @@ async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Join' }).click();
   await expect(page.locator('.call-panel')).toBeVisible();
+}
+
+async function captureDiagnosticsForensics(page: Page, roomTitle: string): Promise<void> {
+  const diagnostics = await page.context().newPage();
+  await diagnostics.goto('/app/diagnostics');
+  await diagnostics.getByRole('button', { name: new RegExp(roomTitle) }).click();
+  await expect(diagnostics.getByText('WS health')).toBeVisible();
+  await expect(diagnostics.getByText(/pair count|pair unknown/).first()).toBeVisible();
+  await diagnostics.screenshot({ path: `${SCREENSHOT_DIR}/diagnostics-forensics.png`, fullPage: true });
+  await diagnostics.close();
 }
 
 async function admitGuest(browser: Browser, owner: Page, room: TestRoom, name: string): Promise<Page> {
@@ -83,6 +110,24 @@ async function disableDiagnosticsLogging(page: Page): Promise<void> {
   await toggle.uncheck();
   await expect(toggle).not.toBeChecked();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem('meet-poc.diagnosticsLogging'))).toBe('0');
+}
+
+function hasDr43Forensics(payload: DiagnosticDetail['entries'][number]['payload']): boolean {
+  const peer = payload.peers?.find((candidate) => candidate.candidatePairCount != null);
+  return (
+    !!payload.wsHealth &&
+    typeof payload.wsHealth.disconnectCount === 'number' &&
+    Array.isArray(payload.wsHealth.cycles) &&
+    !!peer &&
+    typeof peer.candidatePairCount === 'number' &&
+    typeof peer.nominatedPairChanges === 'number' &&
+    typeof peer.iceRelayGathered?.local === 'boolean' &&
+    typeof peer.iceRelayGathered.remote === 'boolean' &&
+    peer.iceRestart?.autoRecoveryOutcome === null &&
+    typeof peer.iceRestart.terminalFailed === 'boolean' &&
+    typeof peer.negotiation?.negotiationNeededCount === 'number' &&
+    Array.isArray(peer.transitionTimeline)
+  );
 }
 
 async function diagnosticClientNames(request: APIRequestContext, roomTitle: string): Promise<string[]> {

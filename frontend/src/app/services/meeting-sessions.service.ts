@@ -49,6 +49,60 @@ export type DiagnosticsInboundAudio = {
   trackMuted: boolean | null;
 };
 
+export type DiagnosticsCandidateInfo = {
+  id: string | null;
+  candidateType: string | null;
+  protocol: string | null;
+  address: string | null;
+  port: number | null;
+};
+
+export type DiagnosticsCandidatePair = {
+  id: string | null;
+  state: string | null;
+  selected: boolean;
+  nominated: boolean;
+  local: DiagnosticsCandidateInfo | null;
+  remote: DiagnosticsCandidateInfo | null;
+};
+
+export type DiagnosticsTransition = {
+  at: number;
+  atIso: string;
+  scope: 'connection' | 'iceConnection' | 'signaling' | 'iceGathering' | 'candidatePair' | 'negotiation' | 'iceRestart';
+  from?: string | null;
+  to?: string | null;
+  event?: string;
+  detail?: string;
+};
+
+export type DiagnosticsIceRestartAudit = {
+  fired: boolean;
+  attempts: number;
+  lastAttemptAt: number | null;
+  lastOutcome: 'recovered' | 'failed' | 'pending' | null;
+  lastTimeToRecoverMs: number | null;
+  terminalFailed: boolean;
+  autoRecoveryOutcome: null;
+};
+
+export type DiagnosticsNegotiationAudit = {
+  negotiationNeededCount: number;
+  offerSentCount: number;
+  answerSentCount: number;
+  offerReceivedCount: number;
+  answerReceivedCount: number;
+  makingOffer: boolean;
+  ignoreOffer: boolean;
+  glareIgnoredCount: number;
+  rollbackCount: number;
+};
+
+export type DiagnosticsRelayGathered = {
+  local: boolean;
+  remote: boolean;
+};
+
 export type DiagnosticsPeerSample = {
   id: string;
   participantId?: string;
@@ -60,6 +114,13 @@ export type DiagnosticsPeerSample = {
   iceGatheringState: string;
   signalingState: string;
   selectedCandidateType: string | null;
+  candidatePair: DiagnosticsCandidatePair | null;
+  candidatePairCount: number;
+  nominatedPairChanges: number;
+  iceRelayGathered: DiagnosticsRelayGathered;
+  iceRestart: DiagnosticsIceRestartAudit;
+  negotiation: DiagnosticsNegotiationAudit;
+  transitionTimeline: DiagnosticsTransition[];
   relayUsed: boolean;
   quality: string;
   packetLossPct: number | null;
@@ -77,6 +138,26 @@ export type DiagnosticsPeerSample = {
   updatedAt: number;
 };
 
+export type DiagnosticsWsCycle = {
+  disconnectedAt: number;
+  disconnectedAtIso: string;
+  reconnectedAt: number | null;
+  reconnectedAtIso: string | null;
+  code: number | null;
+  reason: string | null;
+  recoveryMethod: string;
+  timeStuckMs: number | null;
+};
+
+export type DiagnosticsWsHealth = {
+  status: string;
+  disconnectCount: number;
+  reconnectAttempts: number;
+  lastDisconnectAt: number | null;
+  lastReconnectAt: number | null;
+  cycles: DiagnosticsWsCycle[];
+};
+
 export type DiagnosticsPayload = {
   kind: 'sample' | 'state-change' | 'reconnect' | 'error' | 'call-end';
   roomId: string;
@@ -88,6 +169,7 @@ export type DiagnosticsPayload = {
   createdAt: number;
   wsStatus: string;
   wsReconnectAttempts: number;
+  wsHealth: DiagnosticsWsHealth;
   forceRelay: boolean;
   manualAudioOnly: boolean;
   outboundAudioLevel: number | null;

@@ -1,6 +1,16 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { IceConfigService } from './ice-config.service';
-import type { DiagnosticsInboundAudio, DiagnosticsPayload, DiagnosticsPeerSample, DiagnosticsTrackInfo } from './meeting-sessions.service';
+import type {
+  DiagnosticsCandidatePair,
+  DiagnosticsInboundAudio,
+  DiagnosticsIceRestartAudit,
+  DiagnosticsNegotiationAudit,
+  DiagnosticsPayload,
+  DiagnosticsPeerSample,
+  DiagnosticsRelayGathered,
+  DiagnosticsTrackInfo,
+  DiagnosticsTransition,
+} from './meeting-sessions.service';
 
 export type PeerState = {
   id: string;
@@ -52,6 +62,7 @@ type PeerMeta = {
   restartTimer: ReturnType<typeof setTimeout> | null;
   recoveryTimer: ReturnType<typeof setTimeout> | null;
   lastRestartAt: number;
+  currentRestartStartedAt: number | null;
 };
 
 type QualityCounters = {
@@ -84,6 +95,21 @@ type SenderEncoding = RTCRtpEncodingParameters & {
   networkPriority?: 'very-low' | 'low' | 'medium' | 'high';
 };
 
+type PeerForensics = {
+  candidatePair: DiagnosticsCandidatePair | null;
+  candidatePairCount: number;
+  selectedPairId: string | null;
+  nominatedPairChanges: number;
+  iceRelayGathered: DiagnosticsRelayGathered;
+  iceRestart: DiagnosticsIceRestartAudit;
+  negotiation: DiagnosticsNegotiationAudit;
+  transitionTimeline: DiagnosticsTransition[];
+  lastConnectionState: string | null;
+  lastIceConnectionState: string | null;
+  lastIceGatheringState: string | null;
+  lastSignalingState: string | null;
+};
+
 const ICE_RESTART_DEBOUNCE_MS = 1200;
 const ICE_RESTART_COOLDOWN_MS = 3000;
 const MAX_ICE_RESTART_ATTEMPTS = 3;
@@ -95,6 +121,7 @@ const VIDEO_MAX_BITRATE_BPS = 700_000;
 const MIC_SILENT_AUDIO_LEVEL_THRESHOLD = 0.005;
 const MIC_SILENT_REQUIRED_SAMPLES = 3;
 const MIC_SILENT_ENERGY_EPSILON = 0.000001;
+const MAX_FORENSIC_TRANSITIONS = 40;
 
 @Injectable({ providedIn: 'root' })
 export class WebrtcService {
@@ -108,6 +135,7 @@ export class WebrtcService {
   private readonly previousStats = new Map<string, PreviousStats>();
   private readonly previousInboundAudioPackets = new Map<string, number>();
   private readonly inboundAudioStats = new Map<string, InboundAudioStats>();
+  private readonly peerForensics = new Map<string, PeerForensics>();
   private outboundAudioLiveness: OutboundAudioLiveness = emptyOutboundAudioLiveness();
   private readonly autoPausedReceivers = new Set<string>();
   private readonly remotePauseRequests = new Set<string>();
@@ -203,6 +231,7 @@ export class WebrtcService {
     const pc = new RTCPeerConnection(this.peerConnectionConfig(iceServers));
     const meta = this.createPeerMeta(clientId);
     this.peerMeta.set(clientId, meta);
+    this.peerForensics.set(clientId, createPeerForensics(pc));
     const peer: PeerState = {
       id: clientId,
       participantId,
@@ -238,7 +267,10 @@ export class WebrtcService {
     await this.applySenderBandwidthPreferences(pc);
 
     pc.onicecandidate = (event) => {
-      if (event.candidate) this.sendSignal?.(clientId, { ice: event.candidate.toJSON() });
+      if (event.candidate) {
+        this.recordGatheredCandidate(clientId, event.candidate.toJSON(), 'local');
+        this.sendSignal?.(clientId, { ice: event.candidate.toJSON() });
+      }
     };
     pc.ontrack = (event) => {
       const nextStream = peer.stream ?? new MediaStream();
@@ -247,6 +279,7 @@ export class WebrtcService {
       this.touchPeer(clientId, { stream: nextStream });
     };
     pc.onconnectionstatechange = () => {
+      this.recordStateTransition(clientId, 'connection', pc.connectionState);
       this.touchPeer(clientId, { connectionState: pc.connectionState, reconnecting: false, reconnectingSince: null });
       console.log(`[webrtc] peer ${clientId} connectionState=${pc.connectionState} at ${new Date().toISOString()}`);
       this.updateRecoveryState(clientId, pc);
@@ -254,6 +287,7 @@ export class WebrtcService {
       this.maybeScheduleIceRestart(clientId, pc);
     };
     pc.oniceconnectionstatechange = () => {
+      this.recordStateTransition(clientId, 'iceConnection', pc.iceConnectionState);
       this.touchPeer(clientId, { iceConnectionState: pc.iceConnectionState, reconnecting: false, reconnectingSince: null });
       console.log(`[webrtc] peer ${clientId} iceConnectionState=${pc.iceConnectionState} at ${new Date().toISOString()}`);
       this.updateRecoveryState(clientId, pc);
@@ -261,12 +295,25 @@ export class WebrtcService {
       this.maybeScheduleIceRestart(clientId, pc);
     };
     pc.onicegatheringstatechange = () => {
+      this.recordStateTransition(clientId, 'iceGathering', pc.iceGatheringState);
       this.touchPeer(clientId, { iceGatheringState: pc.iceGatheringState });
       console.log(`[webrtc] peer ${clientId} iceGatheringState=${pc.iceGatheringState} at ${new Date().toISOString()}`);
+      void this.logSelectedCandidateType(clientId, pc);
     };
     pc.onsignalingstatechange = () => {
+      this.recordStateTransition(clientId, 'signaling', pc.signalingState);
       this.touchPeer(clientId, { signalingState: pc.signalingState });
       console.log(`[webrtc] peer ${clientId} signalingState=${pc.signalingState} at ${new Date().toISOString()}`);
+      void this.logSelectedCandidateType(clientId, pc);
+    };
+    pc.onnegotiationneeded = () => {
+      const forensics = this.ensureForensics(clientId, pc);
+      forensics.negotiation.negotiationNeededCount += 1;
+      this.pushTransition(clientId, {
+        scope: 'negotiation',
+        event: 'negotiationneeded',
+        detail: `makingOffer=${meta.makingOffer} signaling=${pc.signalingState}`,
+      });
     };
 
     if (isInitiator) {
@@ -417,6 +464,7 @@ export class WebrtcService {
         const audioReceiver = receivers.find((receiver) => receiver.track?.kind === 'audio');
         const fallbackAudio = this.localStream?.getAudioTracks()[0] ?? peer.stream?.getAudioTracks()[0] ?? null;
         const fallbackVideo = this.localStream?.getVideoTracks()[0] ?? peer.stream?.getVideoTracks()[0] ?? null;
+        const forensics = this.peerForensics.get(peer.id) ?? createEmptyForensics();
         return {
           id: peer.id,
           participantId: peer.participantId,
@@ -428,7 +476,14 @@ export class WebrtcService {
           iceGatheringState: peer.iceGatheringState,
           signalingState: peer.signalingState,
           selectedCandidateType: peer.selectedCandidateType,
-          relayUsed: peer.selectedCandidateType === 'relay' || this.forceRelay(),
+          candidatePair: forensics.candidatePair,
+          candidatePairCount: forensics.candidatePairCount,
+          nominatedPairChanges: forensics.nominatedPairChanges,
+          iceRelayGathered: { ...forensics.iceRelayGathered },
+          iceRestart: { ...forensics.iceRestart },
+          negotiation: { ...forensics.negotiation },
+          transitionTimeline: forensics.transitionTimeline.slice(),
+          relayUsed: peer.selectedCandidateType === 'relay' || forensics.iceRelayGathered.local || forensics.iceRelayGathered.remote || this.forceRelay(),
           quality: peer.quality,
           packetLossPct: peer.packetLossPct,
           jitterMs: peer.jitterMs,
@@ -460,17 +515,28 @@ export class WebrtcService {
     const meta = this.peerMeta.get(from) ?? this.createPeerMeta(from);
     this.peerMeta.set(from, meta);
     if (payload.sdp) {
+      this.recordNegotiationEvent(from, payload.sdp.type === 'offer' ? 'offer-received' : 'answer-received', pc);
       const offerCollision = payload.sdp.type === 'offer' && (meta.makingOffer || pc.signalingState !== 'stable');
       meta.ignoreOffer = !meta.polite && offerCollision;
       if (meta.ignoreOffer) {
+        const forensics = this.ensureForensics(from, pc);
+        forensics.negotiation.glareIgnoredCount += 1;
+        forensics.negotiation.ignoreOffer = true;
+        this.pushTransition(from, {
+          scope: 'negotiation',
+          event: 'ignoreOffer',
+          detail: `polite=${meta.polite} makingOffer=${meta.makingOffer} signaling=${pc.signalingState}`,
+        });
         console.warn(`[webrtc] ignored colliding offer from ${from}`);
         return;
       }
       meta.ignoreOffer = false;
+      this.ensureForensics(from, pc).negotiation.ignoreOffer = false;
       await pc.setRemoteDescription(payload.sdp);
       if (payload.sdp.type === 'offer') await this.sendAnswer(from, pc);
     } else if (payload.ice) {
       try {
+        this.recordGatheredCandidate(from, payload.ice, 'remote');
         await pc.addIceCandidate(payload.ice);
       } catch (err) {
         if (meta.ignoreOffer) return;
@@ -558,6 +624,7 @@ export class WebrtcService {
     this.previousStats.clear();
     this.previousInboundAudioPackets.clear();
     this.inboundAudioStats.clear();
+    this.peerForensics.clear();
     this.outboundAudioLiveness = emptyOutboundAudioLiveness();
     this.autoPausedReceivers.clear();
     this.remotePauseRequests.clear();
@@ -619,6 +686,7 @@ export class WebrtcService {
     this.previousStats.delete(clientId);
     this.previousInboundAudioPackets.delete(clientId);
     this.inboundAudioStats.delete(clientId);
+    this.peerForensics.delete(clientId);
     this.autoPausedReceivers.delete(clientId);
     this.remotePauseRequests.delete(clientId);
     this.outboundVideoPaused.delete(clientId);
@@ -637,12 +705,18 @@ export class WebrtcService {
       restartTimer: null,
       recoveryTimer: null,
       lastRestartAt: 0,
+      currentRestartStartedAt: null,
     };
   }
 
   private updateRecoveryState(clientId: string, pc: RTCPeerConnection): void {
     const meta = this.peerMeta.get(clientId);
     if (!meta) return;
+    const forensics = this.ensureForensics(clientId, pc);
+    if (pc.connectionState === 'failed' || pc.iceConnectionState === 'failed') {
+      forensics.iceRestart.terminalFailed = true;
+      if (forensics.iceRestart.lastOutcome === 'pending') forensics.iceRestart.lastOutcome = 'failed';
+    }
     const disconnected =
       pc.connectionState === 'disconnected' ||
       pc.iceConnectionState === 'disconnected' ||
@@ -652,6 +726,16 @@ export class WebrtcService {
       if (meta.recoveryTimer) clearTimeout(meta.recoveryTimer);
       meta.recoveryTimer = null;
       if (pc.connectionState === 'connected' || pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        if (meta.currentRestartStartedAt != null) {
+          forensics.iceRestart.lastOutcome = 'recovered';
+          forensics.iceRestart.lastTimeToRecoverMs = Date.now() - meta.currentRestartStartedAt;
+          this.pushTransition(clientId, {
+            scope: 'iceRestart',
+            event: 'recovered',
+            detail: `attempt=${forensics.iceRestart.attempts} timeToRecoverMs=${forensics.iceRestart.lastTimeToRecoverMs}`,
+          });
+          meta.currentRestartStartedAt = null;
+        }
         meta.restartAttempts = 0;
       }
       return;
@@ -668,24 +752,32 @@ export class WebrtcService {
         current.iceConnectionState === 'disconnected' ||
         current.connectionState === 'failed' ||
         current.iceConnectionState === 'failed';
-      if (stillDisconnected) this.touchPeer(clientId, { quality: 'poor' });
+      if (stillDisconnected) {
+        const currentForensics = this.ensureForensics(clientId, current);
+        if (currentForensics.iceRestart.lastOutcome === 'pending') currentForensics.iceRestart.lastOutcome = 'failed';
+        this.touchPeer(clientId, { quality: 'poor' });
+      }
     }, 20_000);
   }
 
   private async sendOffer(clientId: string, pc: RTCPeerConnection, meta: PeerMeta, iceRestart: boolean): Promise<void> {
     try {
       meta.makingOffer = true;
+      this.recordMakingOffer(clientId, pc, true);
       const offer = await pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
       await pc.setLocalDescription(offer);
+      this.recordNegotiationEvent(clientId, iceRestart ? 'ice-restart-offer-sent' : 'offer-sent', pc);
       this.sendSignal?.(clientId, { sdp: pc.localDescription?.toJSON() });
     } finally {
       meta.makingOffer = false;
+      this.recordMakingOffer(clientId, pc, false);
     }
   }
 
   private async sendAnswer(clientId: string, pc: RTCPeerConnection): Promise<void> {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
+    this.recordNegotiationEvent(clientId, 'answer-sent', pc);
     this.sendSignal?.(clientId, { sdp: pc.localDescription?.toJSON() });
   }
 
@@ -708,6 +800,18 @@ export class WebrtcService {
     }
     meta.restartAttempts += 1;
     meta.lastRestartAt = now;
+    meta.currentRestartStartedAt = now;
+    const forensics = this.ensureForensics(clientId, pc);
+    forensics.iceRestart.fired = true;
+    forensics.iceRestart.attempts = meta.restartAttempts;
+    forensics.iceRestart.lastAttemptAt = now;
+    forensics.iceRestart.lastOutcome = 'pending';
+    forensics.iceRestart.lastTimeToRecoverMs = null;
+    this.pushTransition(clientId, {
+      scope: 'iceRestart',
+      event: 'fired',
+      detail: `attempt=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS}`,
+    });
     console.warn(`[webrtc] restarting ICE for peer ${clientId}; attempt=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS}`);
     pc.restartIce();
     await this.sendOffer(clientId, pc, meta, true);
@@ -715,7 +819,9 @@ export class WebrtcService {
 
   private async logSelectedCandidateType(clientId: string, pc: RTCPeerConnection): Promise<void> {
     try {
-      const candidateType = await selectedCandidateType(pc);
+      const stats = await pc.getStats();
+      this.updateForensicsFromStats(clientId, pc, stats);
+      const candidateType = selectedCandidateTypeFromStats(stats);
       if (candidateType) {
         this.touchPeer(clientId, { selectedCandidateType: candidateType });
         console.log(`[webrtc] peer ${clientId} selectedCandidateType=${candidateType}`);
@@ -723,6 +829,98 @@ export class WebrtcService {
     } catch (err) {
       console.debug(`[webrtc] selected candidate lookup failed for ${clientId}`, err);
     }
+  }
+
+  private ensureForensics(clientId: string, pc?: RTCPeerConnection): PeerForensics {
+    const existing = this.peerForensics.get(clientId);
+    if (existing) return existing;
+    const created = pc ? createPeerForensics(pc) : createEmptyForensics();
+    this.peerForensics.set(clientId, created);
+    return created;
+  }
+
+  private recordStateTransition(clientId: string, scope: DiagnosticsTransition['scope'], nextState: string): void {
+    const forensics = this.ensureForensics(clientId);
+    const key =
+      scope === 'connection'
+        ? 'lastConnectionState'
+        : scope === 'iceConnection'
+          ? 'lastIceConnectionState'
+          : scope === 'iceGathering'
+            ? 'lastIceGatheringState'
+            : scope === 'signaling'
+              ? 'lastSignalingState'
+              : null;
+    if (!key) return;
+    const previous = forensics[key];
+    forensics[key] = nextState;
+    if (previous === nextState) return;
+    this.pushTransition(clientId, { scope, from: previous, to: nextState });
+  }
+
+  private recordGatheredCandidate(clientId: string, candidate: RTCIceCandidateInit, side: 'local' | 'remote'): void {
+    const type = candidateTypeFromCandidateLine(candidate.candidate);
+    if (type !== 'relay') return;
+    const forensics = this.ensureForensics(clientId);
+    forensics.iceRelayGathered[side] = true;
+    this.pushTransition(clientId, { scope: 'iceGathering', event: `${side}-relay-gathered` });
+  }
+
+  private recordMakingOffer(clientId: string, pc: RTCPeerConnection, makingOffer: boolean): void {
+    const forensics = this.ensureForensics(clientId, pc);
+    forensics.negotiation.makingOffer = makingOffer;
+    this.pushTransition(clientId, {
+      scope: 'negotiation',
+      event: makingOffer ? 'makingOffer-start' : 'makingOffer-end',
+      detail: `signaling=${pc.signalingState}`,
+    });
+  }
+
+  private recordNegotiationEvent(clientId: string, event: string, pc: RTCPeerConnection): void {
+    const forensics = this.ensureForensics(clientId, pc);
+    if (event.endsWith('offer-sent') || event === 'offer-sent') forensics.negotiation.offerSentCount += 1;
+    if (event === 'answer-sent') forensics.negotiation.answerSentCount += 1;
+    if (event === 'offer-received') forensics.negotiation.offerReceivedCount += 1;
+    if (event === 'answer-received') forensics.negotiation.answerReceivedCount += 1;
+    forensics.negotiation.makingOffer = this.peerMeta.get(clientId)?.makingOffer ?? forensics.negotiation.makingOffer;
+    forensics.negotiation.ignoreOffer = this.peerMeta.get(clientId)?.ignoreOffer ?? forensics.negotiation.ignoreOffer;
+    this.pushTransition(clientId, { scope: 'negotiation', event, detail: `signaling=${pc.signalingState}` });
+  }
+
+  private updateForensicsFromStats(clientId: string, pc: RTCPeerConnection, stats: RTCStatsReport): void {
+    const forensics = this.ensureForensics(clientId, pc);
+    const next = readCandidatePairForensics(stats);
+    forensics.candidatePairCount = next.candidatePairCount;
+    if (next.localRelayGathered) forensics.iceRelayGathered.local = true;
+    if (next.remoteRelayGathered) forensics.iceRelayGathered.remote = true;
+    if (next.candidatePair) {
+      if (next.candidatePair.id !== forensics.selectedPairId) {
+        const previous = forensics.selectedPairId;
+        forensics.selectedPairId = next.candidatePair.id;
+        if (next.candidatePair.nominated) forensics.nominatedPairChanges += 1;
+        this.pushTransition(clientId, {
+          scope: 'candidatePair',
+          from: previous,
+          to: next.candidatePair.id,
+          detail: candidatePairSummary(next.candidatePair),
+        });
+      } else if (next.candidatePair.nominated && forensics.candidatePair && !forensics.candidatePair.nominated) {
+        forensics.nominatedPairChanges += 1;
+        this.pushTransition(clientId, {
+          scope: 'candidatePair',
+          event: 'nominated',
+          detail: candidatePairSummary(next.candidatePair),
+        });
+      }
+      forensics.candidatePair = next.candidatePair;
+    }
+  }
+
+  private pushTransition(clientId: string, transition: Omit<DiagnosticsTransition, 'at' | 'atIso'>): void {
+    const forensics = this.ensureForensics(clientId);
+    const at = Date.now();
+    forensics.transitionTimeline.push({ ...transition, at, atIso: new Date(at).toISOString() });
+    trimToLast(forensics.transitionTimeline, MAX_FORENSIC_TRANSITIONS);
   }
 
   private async handleControlSignal(from: string, control: VideoControlPayload): Promise<void> {
@@ -796,6 +994,7 @@ export class WebrtcService {
 
   private async readQualityMetrics(clientId: string, pc: RTCPeerConnection, sampleOutboundAudio = false): Promise<QualityMetrics> {
     const stats = await pc.getStats();
+    this.updateForensicsFromStats(clientId, pc, stats);
     let packetsLost: number | null = null;
     let packetsReceived: number | null = null;
     let jitterMs: number | null = null;
@@ -1153,8 +1352,105 @@ function trackInfo(senderTrack: MediaStreamTrack | null, fallbackTrack: MediaStr
   };
 }
 
-async function selectedCandidateType(pc: RTCPeerConnection): Promise<string | null> {
-  const stats = await pc.getStats();
+function createPeerForensics(pc: RTCPeerConnection): PeerForensics {
+  return {
+    ...createEmptyForensics(),
+    lastConnectionState: pc.connectionState,
+    lastIceConnectionState: pc.iceConnectionState,
+    lastIceGatheringState: pc.iceGatheringState,
+    lastSignalingState: pc.signalingState,
+  };
+}
+
+function createEmptyForensics(): PeerForensics {
+  return {
+    candidatePair: null,
+    candidatePairCount: 0,
+    selectedPairId: null,
+    nominatedPairChanges: 0,
+    iceRelayGathered: { local: false, remote: false },
+    iceRestart: {
+      fired: false,
+      attempts: 0,
+      lastAttemptAt: null,
+      lastOutcome: null,
+      lastTimeToRecoverMs: null,
+      terminalFailed: false,
+      autoRecoveryOutcome: null,
+    },
+    negotiation: {
+      negotiationNeededCount: 0,
+      offerSentCount: 0,
+      answerSentCount: 0,
+      offerReceivedCount: 0,
+      answerReceivedCount: 0,
+      makingOffer: false,
+      ignoreOffer: false,
+      glareIgnoredCount: 0,
+      rollbackCount: 0,
+    },
+    transitionTimeline: [],
+    lastConnectionState: null,
+    lastIceConnectionState: null,
+    lastIceGatheringState: null,
+    lastSignalingState: null,
+  };
+}
+
+function readCandidatePairForensics(stats: RTCStatsReport): {
+  candidatePair: DiagnosticsCandidatePair | null;
+  candidatePairCount: number;
+  localRelayGathered: boolean;
+  remoteRelayGathered: boolean;
+} {
+  let selectedPair: (RTCStats & Record<string, unknown>) | null = null;
+  let fallbackPair: (RTCStats & Record<string, unknown>) | null = null;
+  let candidatePairCount = 0;
+  let localRelayGathered = false;
+  let remoteRelayGathered = false;
+
+  for (const rawReport of stats.values()) {
+    const report = rawReport as RTCStats & Record<string, unknown>;
+    if (report.type === 'local-candidate' && report['candidateType'] === 'relay') localRelayGathered = true;
+    if (report.type === 'remote-candidate' && report['candidateType'] === 'relay') remoteRelayGathered = true;
+    if (report.type === 'transport' && report['selectedCandidatePairId']) {
+      const pair = stats.get(String(report['selectedCandidatePairId'])) as (RTCStats & Record<string, unknown>) | undefined;
+      if (pair) selectedPair = pair;
+    }
+    if (report.type === 'candidate-pair') {
+      candidatePairCount += 1;
+      if (report['selected']) selectedPair = report;
+      if (!fallbackPair && report['state'] === 'succeeded') fallbackPair = report;
+    }
+  }
+
+  const pair = selectedPair ?? fallbackPair;
+  if (!pair) return { candidatePair: null, candidatePairCount, localRelayGathered, remoteRelayGathered };
+  const local = pair['localCandidateId'] ? (stats.get(String(pair['localCandidateId'])) as (RTCStats & Record<string, unknown>) | undefined) : undefined;
+  const remote = pair['remoteCandidateId'] ? (stats.get(String(pair['remoteCandidateId'])) as (RTCStats & Record<string, unknown>) | undefined) : undefined;
+  const candidatePair: DiagnosticsCandidatePair = {
+    id: stringOrNull(pair.id),
+    state: stringOrNull(pair['state']),
+    selected: pair === selectedPair || pair['selected'] === true,
+    nominated: pair['nominated'] === true,
+    local: candidateInfo(local),
+    remote: candidateInfo(remote),
+  };
+  return { candidatePair, candidatePairCount, localRelayGathered, remoteRelayGathered };
+}
+
+function candidateInfo(report: (RTCStats & Record<string, unknown>) | undefined): DiagnosticsCandidatePair['local'] {
+  if (!report) return null;
+  return {
+    id: stringOrNull(report.id),
+    candidateType: stringOrNull(report['candidateType']),
+    protocol: stringOrNull(report['protocol'] ?? report['relayProtocol']),
+    address: stringOrNull(report['address'] ?? report['ip']),
+    port: typeof report['port'] === 'number' ? report['port'] : null,
+  };
+}
+
+function selectedCandidateTypeFromStats(stats: RTCStatsReport): string | null {
   for (const report of stats.values()) {
     if (report.type !== 'transport' || !report.selectedCandidatePairId) continue;
     const pair = stats.get(report.selectedCandidatePairId);
@@ -1169,6 +1465,26 @@ async function selectedCandidateType(pc: RTCPeerConnection): Promise<string | nu
     return candidate?.candidateType ?? null;
   }
   return null;
+}
+
+function candidateTypeFromCandidateLine(candidate: string | undefined): string | null {
+  if (!candidate) return null;
+  const match = / typ ([a-zA-Z0-9-]+)/.exec(candidate);
+  return match?.[1] ?? null;
+}
+
+function candidatePairSummary(pair: DiagnosticsCandidatePair): string {
+  const local = pair.local ? `${pair.local.candidateType || '?'}:${pair.local.protocol || '?'}` : 'local ?';
+  const remote = pair.remote ? `${pair.remote.candidateType || '?'}:${pair.remote.protocol || '?'}` : 'remote ?';
+  return `${local} -> ${remote}; state=${pair.state || '?'}; nominated=${pair.nominated ? 'yes' : 'no'}`;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null;
+}
+
+function trimToLast<T>(items: T[], max: number): void {
+  if (items.length > max) items.splice(0, items.length - max);
 }
 
 function readForceRelay(): boolean {

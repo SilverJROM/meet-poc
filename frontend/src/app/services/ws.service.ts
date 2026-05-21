@@ -1,4 +1,5 @@
 import { Injectable, signal } from '@angular/core';
+import type { DiagnosticsWsCycle, DiagnosticsWsHealth } from './meeting-sessions.service';
 
 export type SignalingMessage =
   | {
@@ -56,6 +57,10 @@ export class WsService {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private intentionallyClosed = true;
+  private disconnectCount = 0;
+  private lastDisconnectAt: number | null = null;
+  private lastReconnectAt: number | null = null;
+  private readonly cycles: DiagnosticsWsCycle[] = [];
 
   readonly connected = signal(false);
   readonly disconnected = signal(false);
@@ -71,6 +76,10 @@ export class WsService {
     this.onError = onError;
     this.reconnectAttempt = 0;
     this.intentionallyClosed = false;
+    this.disconnectCount = 0;
+    this.lastDisconnectAt = null;
+    this.lastReconnectAt = null;
+    this.cycles.length = 0;
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
     this.openSocket(`${proto}://${window.location.host}/ws`, false);
   }
@@ -92,6 +101,17 @@ export class WsService {
     this.reconnectAttempt = 0;
     this.connected.set(false);
     this.status.set('idle');
+  }
+
+  diagnosticsSnapshot(): DiagnosticsWsHealth {
+    return {
+      status: this.status(),
+      disconnectCount: this.disconnectCount,
+      reconnectAttempts: this.reconnectAttempts(),
+      lastDisconnectAt: this.lastDisconnectAt,
+      lastReconnectAt: this.lastReconnectAt,
+      cycles: this.cycles.slice(),
+    };
   }
 
   debugDropForReconnect(): void {
@@ -116,6 +136,15 @@ export class WsService {
       this.connected.set(true);
       this.disconnected.set(false);
       this.status.set('connected');
+      if (wasReconnect) {
+        this.lastReconnectAt = Date.now();
+        const latest = this.cycles[this.cycles.length - 1];
+        if (latest && latest.reconnectedAt == null) {
+          latest.reconnectedAt = this.lastReconnectAt;
+          latest.reconnectedAtIso = new Date(this.lastReconnectAt).toISOString();
+          latest.timeStuckMs = this.lastReconnectAt - latest.disconnectedAt;
+        }
+      }
       this.reconnectAttempt = 0;
       console.info(`[signaling] ${wasReconnect ? 'reconnected' : 'connected'} room=${this.roomId}`);
       this.onOpen?.();
@@ -131,12 +160,13 @@ export class WsService {
     ws.onerror = () => {
       if (this.socket === ws) this.onError?.();
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (this.socket !== ws) return;
       this.socket = null;
       this.connected.set(false);
       this.disconnected.set(true);
       this.status.set('disconnected');
+      if (!this.intentionallyClosed) this.recordDisconnect(event);
       console.warn(`[signaling] disconnected room=${this.roomId}`);
       if (!this.intentionallyClosed) this.scheduleReconnect();
     };
@@ -157,6 +187,8 @@ export class WsService {
     this.reconnectAttempt = attempt;
     this.reconnectAttempts.update((count) => count + 1);
     this.status.set('reconnecting');
+    const latest = this.cycles[this.cycles.length - 1];
+    if (latest && latest.reconnectedAt == null) latest.recoveryMethod = `websocket-reconnect-attempt-${attempt}`;
     console.info(`[signaling] reconnect scheduled room=${this.roomId} attempt=${attempt} delayMs=${delay}`);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
@@ -170,4 +202,25 @@ export class WsService {
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = null;
   }
+
+  private recordDisconnect(event: CloseEvent): void {
+    const now = Date.now();
+    this.disconnectCount += 1;
+    this.lastDisconnectAt = now;
+    this.cycles.push({
+      disconnectedAt: now,
+      disconnectedAtIso: new Date(now).toISOString(),
+      reconnectedAt: null,
+      reconnectedAtIso: null,
+      code: event.code || null,
+      reason: event.reason || null,
+      recoveryMethod: 'pending-reconnect',
+      timeStuckMs: null,
+    });
+    trimToLast(this.cycles, 12);
+  }
+}
+
+function trimToLast<T>(items: T[], max: number): void {
+  if (items.length > max) items.splice(0, items.length - max);
 }

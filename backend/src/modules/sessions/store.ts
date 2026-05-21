@@ -431,7 +431,14 @@ function summarizeDiagnosticsPayload(payload: DiagnosticsPayload): { kind: strin
     const record = peer as Record<string, unknown>;
     const candidateType = typeof record.selectedCandidateType === 'string' ? record.selectedCandidateType : '';
     if (candidateType) candidateTypes.add(candidateType);
-    if (candidateType === 'relay' || record.relayUsed === true) relayUsed = true;
+    const pair = record.candidatePair && typeof record.candidatePair === 'object' ? (record.candidatePair as Record<string, unknown>) : null;
+    const local = pair?.local && typeof pair.local === 'object' ? (pair.local as Record<string, unknown>) : null;
+    const remote = pair?.remote && typeof pair.remote === 'object' ? (pair.remote as Record<string, unknown>) : null;
+    const localType = typeof local?.candidateType === 'string' ? local.candidateType : '';
+    const remoteType = typeof remote?.candidateType === 'string' ? remote.candidateType : '';
+    if (localType) candidateTypes.add(localType);
+    if (remoteType) candidateTypes.add(remoteType);
+    if (candidateType === 'relay' || localType === 'relay' || remoteType === 'relay' || record.relayUsed === true) relayUsed = true;
   }
   return {
     kind: String(payload.kind || 'sample'),

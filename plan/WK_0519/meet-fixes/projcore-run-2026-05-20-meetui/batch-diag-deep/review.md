@@ -1,19 +1,21 @@
-# DR-41 Review
+# DR-43 Review
 
 ## Scope Check
 
-- DR-41 only: implemented all-participant diagnostics posting, admitted-member POST authorization, owner-only viewing preservation, and logging toggle.
-- DR-43 not implemented in this slice.
-- No DR-40 recovery, DR-42 video, or call/admit/identity policy changes.
+- DR-43 only: capture, persist, and display diagnostics for connection forensics.
+- DR-41 behavior remains in place and unchanged.
+- Existing ICE restart behavior was not expanded; this slice only records audit fields around the existing path.
+- No new high-frequency polling was added.
 
-## Security Review
+## Implementation Review
 
-- POST no longer depends on owner auth, because guests may be unauthenticated.
-- POST requires `sessionId`, `clientKey`, and `participantId` to match the signaling-recorded admitted/reconnecting peer for the live session.
-- Authenticated requests also require the auth user to match the signaling peer email when the peer had one.
-- A never-admitted client with a supplied session id is rejected with `403`.
-- Owner diagnostics list/detail/download routes still require owner auth and were not loosened.
+- Candidate-pair details are read from `RTCPeerConnection.getStats()` using `transport.selectedCandidatePairId` where available, with candidate-pair fallback.
+- Relay-gathered-per-side is recorded from local/remote ICE candidates and stats candidate reports.
+- Timelines and WS cycles are ring-buffer style bounded arrays, preventing long calls from growing memory or payloads unbounded.
+- Full forensic JSON stays inside the existing diagnostics payload persisted by `payload_json`; backend schema did not need a migration.
+- Compact display is intentionally summarized in `/app/diagnostics`; full detail is left in Download JSON.
 
 ## Residual Risk
 
-- Validation is intentionally tied to live signaling memory for the active session. Historical/offline uploads from a closed room remain rejected, which matches DR-41's requirement that only admitted session members may post.
+- Browser stats support differs by engine. If a field is unavailable, the payload keeps the forensic structure but individual candidate-pair values can be `null`.
+- Some short calls may capture timelines before a selected candidate pair is available; later interval/state-change samples fill it when stats expose the pair.

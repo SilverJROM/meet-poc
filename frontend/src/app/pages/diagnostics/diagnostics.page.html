@@ -69,6 +69,10 @@
                 <strong [class]="micLivenessClass(latest)">{{ micLivenessSummary(latest) }}</strong>
               </div>
               <div>
+                <span class="label">WS health</span>
+                <strong>{{ wsHealthSummary(latest) }}</strong>
+              </div>
+              <div>
                 <span class="label">Video sender</span>
                 <strong>{{ trackSummary(latest, 'video') }}</strong>
               </div>
@@ -89,6 +93,10 @@
                     <div class="peer-row">
                       <span class="peer-name">{{ peer.name }}</span>
                       <span>{{ peer.connectionState }}/{{ peer.iceConnectionState }}</span>
+                      <span>{{ peerForensicsSummary(peer) }}</span>
+                      <span>{{ iceRestartSummary(peer) }}</span>
+                      <span>{{ negotiationSummary(peer) }}</span>
+                      <span>Timeline {{ transitionSummary(peer) }}</span>
                       <span>quality {{ peer.quality }}</span>
                       <span>audio {{ peer.outboundAudio.label || 'none' }} · {{ peer.outboundAudio.deviceId || 'no deviceId' }}</span>
                       <span [class]="audioRecvClass(peer.inboundAudio)">Audio recv {{ peerInboundAudioSummary(peer) }}</span>
