@@ -673,12 +673,12 @@ export class RoomPage implements OnDestroy {
       this.leaveDialogOpen.set(true);
       return;
     }
-    await this.directLeave();
+    await this.directLeave(true);
   }
 
   async justLeave(): Promise<void> {
     this.leaveDialogOpen.set(false);
-    await this.directLeave();
+    await this.directLeave(true);
   }
 
   async endForAll(): Promise<void> {
@@ -696,17 +696,17 @@ export class RoomPage implements OnDestroy {
       await delay(1000);
     } finally {
       this.leaveDialogOpen.set(false);
-      await this.directLeave();
+      await this.directLeave(false);
     }
   }
 
   async dismissMeetingEnded(): Promise<void> {
     this.meetingEndedToastOpen.set(false);
-    await this.directLeave();
+    await this.directLeave(false);
   }
 
-  private async directLeave(): Promise<void> {
-    this.cleanupCall();
+  private async directLeave(sendLeaveMessage: boolean): Promise<void> {
+    this.cleanupCall(sendLeaveMessage);
     await this.router.navigate([this.auth.user() ? '/app/rooms' : '/']);
   }
 
@@ -872,7 +872,7 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'peer-removed') {
       this.actionNotice.set('You were removed by the host.');
       setTimeout(() => {
-        void this.directLeave();
+        void this.directLeave(false);
       }, 600);
       return;
     }
@@ -1226,12 +1226,12 @@ export class RoomPage implements OnDestroy {
     }
   }
 
-  private cleanupCall(): void {
+  private cleanupCall(sendLeaveMessage = false): void {
     if (this.state() === 'in-call') this.flushDiagnosticsLog('call-end', { useBeacon: true });
     this.stopDiagnosticsLogger();
     this.clearPreflightTimer();
     this.stopWaitingRoomCountdown();
-    if (this.state() === 'in-call' || this.state() === 'knocking' || this.state() === 'waiting-room') this.ws.send({ type: 'leave' });
+    if (sendLeaveMessage && (this.state() === 'in-call' || this.state() === 'knocking' || this.state() === 'waiting-room')) this.ws.send({ type: 'leave' });
     this.ws.close();
     this.recorder.discard();
     this.media.stopLocal();

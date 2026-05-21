@@ -42,6 +42,7 @@ type ClientIdentity = {
   participantId: string;
   name: string;
   wasAdmitted: boolean;
+  revoked: boolean;
 };
 
 type ReconnectTicket = {
@@ -248,7 +249,18 @@ function rememberClientIdentity(live: LiveRoom, clientKey: string | null, partic
   live.clientIdentities.set(clientKey, {
     participantId,
     name,
-    wasAdmitted: wasAdmitted || current?.wasAdmitted === true,
+    wasAdmitted: wasAdmitted || (current?.wasAdmitted === true && current.revoked !== true),
+    revoked: wasAdmitted ? false : current?.revoked === true,
+  });
+}
+
+function revokeClientIdentity(live: LiveRoom, entry: PeerEntry): void {
+  if (!entry.clientKey) return;
+  live.clientIdentities.set(entry.clientKey, {
+    participantId: entry.participantId,
+    name: entry.name,
+    wasAdmitted: false,
+    revoked: true,
   });
 }
 
@@ -559,11 +571,13 @@ export function attachSignaling(server: http.Server, database: Database.Database
           reconnectTicket.userEmail === userEmail &&
           tokenResumeSource.userEmail === userEmail;
         const durableIdentity = clientKey ? live.clientIdentities.get(clientKey) ?? null : null;
+        const durableAdmittedIdentity = durableIdentity?.wasAdmitted === true && durableIdentity.revoked !== true ? durableIdentity : null;
         const clientKeyAdmitted = clientKey ? findAdmittedClientByClientKey(live, clientKey) : null;
         const clientKeyGrace = clientKey ? findReconnectingClientByClientKey(live, clientKey) : null;
         const clientKeyResumeSource = clientKeyAdmitted?.[1] ?? clientKeyGrace?.[1] ?? null;
         const canResumeByClientKey = !!clientKeyResumeSource && clientKeyResumeSource.userEmail === userEmail;
-        const canResume = canResumeByToken || canResumeByClientKey;
+        const canAutoAdmitByIdentity = !!durableAdmittedIdentity && !canResumeByToken && !canResumeByClientKey;
+        const canResume = canResumeByToken || canResumeByClientKey || canAutoAdmitByIdentity;
         const ownerCandidate = owner ? findOwnerResumeCandidate(live, room.ownerEmail) : null;
         const ownerResume = !!ownerCandidate;
         const tokenOldClientId =
@@ -577,7 +591,8 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const clientKeyOldClientId = canResumeByClientKey ? clientKeyAdmitted?.[0] ?? clientKeyGrace?.[0] ?? null : null;
         const resumeOldClientId = ownerCandidate?.[0] ?? tokenOldClientId ?? clientKeyOldClientId;
         const resumeSource = ownerCandidate?.[1] ?? (canResumeByToken ? tokenResumeSource : null) ?? clientKeyResumeSource;
-        const participantId = ownerCandidate?.[1].participantId ?? durableIdentity?.participantId ?? resumeSource?.participantId ?? reconnectTicket?.participantId ?? crypto.randomUUID();
+        const participantId =
+          ownerCandidate?.[1].participantId ?? resumeSource?.participantId ?? durableAdmittedIdentity?.participantId ?? reconnectTicket?.participantId ?? crypto.randomUUID();
         if (canResumeByToken && reconnectTicket) {
           live.reconnectTickets.delete(reconnectToken);
           myName = reconnectTicket.name;
@@ -585,6 +600,8 @@ export function attachSignaling(server: http.Server, database: Database.Database
           myName = clientKeyResumeSource.name;
         } else if (owner && resumeSource) {
           myName = resumeSource.name;
+        } else if (canAutoAdmitByIdentity && durableAdmittedIdentity) {
+          myName = durableAdmittedIdentity.name;
         }
         rememberClientIdentity(live, clientKey, participantId, myName, false);
         const entry = {
@@ -792,8 +809,11 @@ export function attachSignaling(server: http.Server, database: Database.Database
         if (!currentRoom) return;
         const live = liveRooms.get(currentRoom);
         if (!live) return;
-        if (state === 'admitted') removeAdmittedPeer(currentRoom, clientId, live, database);
-        else if (state === 'pending') {
+        if (state === 'admitted') {
+          const leaving = live.admitted.get(clientId);
+          if (leaving) revokeClientIdentity(live, leaving);
+          removeAdmittedPeer(currentRoom, clientId, live, database);
+        } else if (state === 'pending') {
           live.pending.delete(clientId);
           state = 'idle';
           broadcastToOwners(live, currentRoom, { type: 'knock-cancelled', clientId }, database);
@@ -809,15 +829,10 @@ export function attachSignaling(server: http.Server, database: Database.Database
       }
     });
 
-    ws.on('close', (code, reasonBuffer) => {
+    ws.on('close', () => {
       if (!currentRoom) return;
       const live = liveRooms.get(currentRoom);
       if (!live) return;
-      const explicitLeave = code === 4001 || reasonBuffer.toString() === 'explicit leave';
-      if (explicitLeave && state === 'admitted') {
-        removeAdmittedPeer(currentRoom, clientId, live, database);
-        return;
-      }
       const admittedBeforeClose = live.admitted.size;
       const pendingBeforeClose = live.pending.size;
       const closingPeerWasHost = currentRoomOwner;

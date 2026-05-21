@@ -30,3 +30,6 @@ Codex appends one line per STATUS change: `[projcore callback] <batch-id> <STATE
 [projcore callback] turn-tls443 DONE DR-36 Cloudflare TURN TLS-443 fallback committed; targeted/full backend tests PASS; build PASS; pm2 restart clean with no env leak.
 [projcore callback] identity PROPOSED DR-37 plan ready: persistent localStorage clientKey sent on WS join; server indexes active/reconnecting peers by (roomId, clientKey) and reuses DR-31 peer-resumed path; no cookie planned; waiting for APPROVED-PLAN.
 [projcore callback] identity APPROVED-PLAN DR-37 approved with meeting-lifetime clientKey identity map required; implementing durable participantId reuse without DR-39 auto-admit policy.
+[projcore callback] identity DONE DR-37 persistent browser clientKey identity committed 5eb3592; backend 126/126 PASS (1 skipped); build PASS; isolated 48xx identity e2e PASS; pm2 clean restart verified no env leak.
+[projcore callback] admit PROPOSED DR-39/DR-38 plan ready: button-only leave message revokes membership/removes card; refresh/unload/ws close are drops with reconnecting card and known admitted clientKey auto-admit; waiting for APPROVED-PLAN.
+[projcore callback] admit APPROVED-PLAN DR-39/DR-38 approved; implementing message-only leave revocation, close-as-drop, re-admit clears revoke, and targeted tests.

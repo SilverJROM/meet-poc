@@ -63,7 +63,7 @@ export class WsService {
   readonly status = signal<'idle' | 'connecting' | 'connected' | 'reconnecting' | 'disconnected'>('idle');
 
   connect(roomId: string, onMessage: (msg: SignalingMessage) => void, onOpen: () => void, onError: () => void): void {
-    this.closeCurrentSocket(false);
+    this.closeCurrentSocket();
     this.clearReconnectTimer();
     this.roomId = roomId;
     this.onMessage = onMessage;
@@ -84,7 +84,7 @@ export class WsService {
   close(): void {
     this.intentionallyClosed = true;
     this.clearReconnectTimer();
-    this.closeCurrentSocket(true);
+    this.closeCurrentSocket();
     this.roomId = '';
     this.onMessage = null;
     this.onOpen = null;
@@ -142,11 +142,11 @@ export class WsService {
     };
   }
 
-  private closeCurrentSocket(explicitLeave: boolean): void {
+  private closeCurrentSocket(): void {
     const ws = this.socket;
     this.socket = null;
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
-      ws.close(explicitLeave ? 4001 : 1000, explicitLeave ? 'explicit leave' : undefined);
+      ws.close();
     }
   }
 

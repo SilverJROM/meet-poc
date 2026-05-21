@@ -128,7 +128,7 @@ describe('signaling reconnect', () => {
     await closeServer(server);
   });
 
-  it('reuses a durable clientKey participantId after reconnect grace removes the old peer', async () => {
+  it('auto-admits a durable admitted clientKey after reconnect grace removes the old peer', async () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Durable client key', 'jrom@silverjrom.app', db);
@@ -161,11 +161,7 @@ describe('signaling reconnect', () => {
 
     const returned = await connectWs(url);
     returned.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'durable-client-key' }));
-    const returnedKnocking = await nextMessage(returned, (msg) => msg.type === 'knocking');
-    await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === returnedKnocking.clientId);
-    const returnedAdmittedPromise = nextMessage(returned, (msg) => msg.type === 'admitted');
-    owner.send(JSON.stringify({ type: 'admit', clientId: returnedKnocking.clientId }));
-    const returnedAdmitted = await returnedAdmittedPromise;
+    const returnedAdmitted = await nextMessage(returned, (msg) => msg.type === 'admitted');
     await nextMessage(owner, (msg) => msg.type === 'peer-joined' && msg.clientId === returnedAdmitted.clientId);
 
     expect(returnedAdmitted).toMatchObject({
@@ -177,6 +173,113 @@ describe('signaling reconnect', () => {
     expect(returnedAdmitted.clientId).not.toBe(knocking.clientId);
 
     closeWs(returned);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('requires re-admit after an explicit leave message, then clears the revoke on owner admit', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Explicit leave revoke', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    const ownerTokenPromise = nextMessage(owner, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    await ownerTokenPromise;
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'leave-rejoin-key' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === knocking.clientId);
+    const guestAdmittedPromise = nextMessage(guest, (msg) => msg.type === 'admitted');
+    const guestTokenPromise = nextMessage(guest, (msg) => msg.type === 'reconnect-token');
+    const guestJoinedPromise = nextMessage(owner, (msg) => msg.type === 'peer-joined');
+    owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
+    const guestAdmitted = await guestAdmittedPromise;
+    await guestTokenPromise;
+    await guestJoinedPromise;
+
+    guest.send(JSON.stringify({ type: 'leave' }));
+    await nextMessage(owner, (msg) => msg.type === 'peer-left' && msg.clientId === guestAdmitted.clientId);
+
+    const returned = await connectWs(url);
+    returned.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'leave-rejoin-key' }));
+    const returnedKnocking = await nextMessage(returned, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === returnedKnocking.clientId);
+    const returnedAdmittedPromise = nextMessage(returned, (msg) => msg.type === 'admitted');
+    const returnedTokenPromise = nextMessage(returned, (msg) => msg.type === 'reconnect-token');
+    const returnedJoinedPromise = nextMessage(owner, (msg) => msg.type === 'peer-joined');
+    owner.send(JSON.stringify({ type: 'admit', clientId: returnedKnocking.clientId }));
+    const returnedAdmitted = await returnedAdmittedPromise;
+    await returnedTokenPromise;
+    await returnedJoinedPromise;
+
+    const peerReconnectingPromise = nextMessage(owner, (msg) => msg.type === 'peer-reconnecting' && msg.clientId === returnedAdmitted.clientId);
+    dropWs(returned);
+    await peerReconnectingPromise;
+
+    const resumed = await connectWs(url);
+    resumed.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'leave-rejoin-key' }));
+    const resumedAdmitted = await nextMessage(resumed, (msg) => msg.type === 'admitted');
+    await nextMessage(owner, (msg) => msg.type === 'peer-resumed');
+
+    expect(resumedAdmitted).toMatchObject({
+      type: 'admitted',
+      isOwner: false,
+      participantId: returnedAdmitted.participantId,
+      hostClientId: ownerAdmitted.clientId,
+    });
+
+    closeWs(resumed);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('treats any bare socket close code or reason as a drop, not an explicit leave', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Close code is drop', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    const ownerTokenPromise = nextMessage(owner, (msg) => msg.type === 'reconnect-token');
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    await ownerTokenPromise;
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'close-code-drop-key' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === knocking.clientId);
+    const guestAdmittedPromise = nextMessage(guest, (msg) => msg.type === 'admitted');
+    const guestTokenPromise = nextMessage(guest, (msg) => msg.type === 'reconnect-token');
+    const guestJoinedPromise = nextMessage(owner, (msg) => msg.type === 'peer-joined');
+    owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
+    const guestAdmitted = await guestAdmittedPromise;
+    await guestTokenPromise;
+    await guestJoinedPromise;
+
+    const peerReconnectingPromise = nextMessage(owner, (msg) => msg.type === 'peer-reconnecting' && msg.clientId === guestAdmitted.clientId);
+    guest.close(4001, 'explicit leave');
+    await peerReconnectingPromise;
+
+    const resumed = await connectWs(url);
+    resumed.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'close-code-drop-key' }));
+    const resumedAdmitted = await nextMessage(resumed, (msg) => msg.type === 'admitted');
+    await nextMessage(owner, (msg) => msg.type === 'peer-resumed');
+
+    expect(resumedAdmitted).toMatchObject({
+      type: 'admitted',
+      isOwner: false,
+      participantId: guestAdmitted.participantId,
+      hostClientId: ownerAdmitted.clientId,
+    });
+
+    closeWs(resumed);
     closeWs(owner);
     await closeServer(server);
   });
