@@ -49,6 +49,25 @@ export type DiagnosticsInboundAudio = {
   trackMuted: boolean | null;
 };
 
+export type DiagnosticsInboundVideo = {
+  framesDecoded: number | null;
+  framesDecodedDelta: number | null;
+  framesReceived: number | null;
+  framesReceivedDelta: number | null;
+  freezeCount: number | null;
+  freezeCountDelta: number | null;
+  totalFreezesDuration: number | null;
+  totalFreezesDurationDelta: number | null;
+  framesActivelyDecoding: boolean | null;
+  videoExpected: boolean;
+  videoFrozenSamples: number;
+  noInboundMediaSamples: number;
+  videoFrozen: boolean;
+  noInboundMedia: boolean;
+  trackReadyState: MediaStreamTrackState | null;
+  trackMuted: boolean | null;
+};
+
 export type DiagnosticsCandidateInfo = {
   id: string | null;
   candidateType: string | null;
@@ -131,9 +150,11 @@ export type DiagnosticsPeerSample = {
   micEnabled: boolean;
   camEnabled: boolean;
   screenOn: boolean;
+  diagnosticLabels?: string[];
   outboundAudio: DiagnosticsTrackInfo;
   inboundAudio: DiagnosticsInboundAudio;
   outboundVideo: DiagnosticsTrackInfo;
+  inboundVideo?: DiagnosticsInboundVideo;
   reconnecting?: boolean;
   updatedAt: number;
 };

@@ -1795,7 +1795,14 @@ export class RoomPage implements OnDestroy {
       outboundAudioLevel: diagnostics.outboundAudioLevel,
       outboundAudioEnergy: diagnostics.outboundAudioEnergy,
       micSilent: diagnostics.micSilent,
-      peers: diagnostics.peers,
+      peers: diagnostics.peers.map((peer) => ({
+        ...peer,
+        diagnosticLabels: [
+          ...(peer.diagnosticLabels ?? []),
+          ...(diagnostics.micSilent === true && peer.isLocal ? ['sender-silent'] : []),
+          ...(this.remoteAudioBlocked() && !peer.isLocal ? ['autoplay-blocked'] : []),
+        ],
+      })),
     };
     if (error) payload.error = error;
     return payload;

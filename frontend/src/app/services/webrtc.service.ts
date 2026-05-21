@@ -3,6 +3,7 @@ import { IceConfigService } from './ice-config.service';
 import type {
   DiagnosticsCandidatePair,
   DiagnosticsInboundAudio,
+  DiagnosticsInboundVideo,
   DiagnosticsIceRestartAudit,
   DiagnosticsNegotiationAudit,
   DiagnosticsPayload,
@@ -72,6 +73,7 @@ type PeerMeta = {
   negotiationRecoveryAttempts: number;
   lastRestartAt: number;
   currentRestartStartedAt: number | null;
+  mediaDeadReason: 'video-frozen' | 'no-inbound-media' | null;
 };
 
 type QualityCounters = {
@@ -86,6 +88,21 @@ type PreviousStats = {
 
 type InboundAudioStats = Omit<DiagnosticsInboundAudio, 'trackReadyState' | 'trackMuted'>;
 
+type InboundVideoStats = Omit<DiagnosticsInboundVideo, 'trackReadyState' | 'trackMuted'>;
+
+type PreviousInboundVideoStats = {
+  framesDecoded: number;
+  framesReceived: number;
+  freezeCount: number;
+  totalFreezesDuration: number;
+};
+
+type MediaHealthState = {
+  videoFrozenSamples: number;
+  noInboundMediaSamples: number;
+  activeLabel: 'video-frozen' | 'no-inbound-media' | null;
+};
+
 type OutboundAudioLiveness = Pick<DiagnosticsPayload, 'outboundAudioLevel' | 'outboundAudioEnergy' | 'micSilent'> & {
   silentSamples: number;
 };
@@ -98,6 +115,8 @@ type QualityMetrics = {
   availableOutgoingBitrateKbps: number | null;
   hasInboundMedia: boolean;
   audioOnlyFloor: boolean;
+  connected: boolean;
+  inboundVideo: InboundVideoStats;
 };
 
 type SenderEncoding = RTCRtpEncodingParameters & {
@@ -147,6 +166,7 @@ const MIC_SILENT_AUDIO_LEVEL_THRESHOLD = 0.005;
 const MIC_SILENT_REQUIRED_SAMPLES = 3;
 const MIC_SILENT_ENERGY_EPSILON = 0.000001;
 const MAX_FORENSIC_TRANSITIONS = 40;
+const MEDIA_DEAD_REQUIRED_SAMPLES = 3;
 
 @Injectable({ providedIn: 'root' })
 export class WebrtcService {
@@ -160,7 +180,10 @@ export class WebrtcService {
   private readonly qualityCounters = new Map<string, QualityCounters>();
   private readonly previousStats = new Map<string, PreviousStats>();
   private readonly previousInboundAudioPackets = new Map<string, number>();
+  private readonly previousInboundVideoStats = new Map<string, PreviousInboundVideoStats>();
   private readonly inboundAudioStats = new Map<string, InboundAudioStats>();
+  private readonly inboundVideoStats = new Map<string, InboundVideoStats>();
+  private readonly mediaHealthState = new Map<string, MediaHealthState>();
   private readonly peerForensics = new Map<string, PeerForensics>();
   private outboundAudioLiveness: OutboundAudioLiveness = emptyOutboundAudioLiveness();
   private readonly autoPausedReceivers = new Set<string>();
@@ -408,6 +431,8 @@ export class WebrtcService {
             availableOutgoingBitrateKbps: audioOnlyFloor ? 80 : normalizedQuality === 'poor' ? 140 : normalizedQuality === 'weak' ? 500 : 1600,
             hasInboundMedia: true,
             audioOnlyFloor,
+            connected: true,
+            inboundVideo: emptyInboundVideoStats(this.isInboundVideoExpected(peer.id)),
           }),
         ),
     );
@@ -517,9 +542,14 @@ export class WebrtcService {
         const audioSender = senders.find((sender) => sender.track?.kind === 'audio');
         const videoSender = senders.find((sender) => sender.track?.kind === 'video') ?? this.videoSenders.get(peer.id) ?? null;
         const audioReceiver = receivers.find((receiver) => receiver.track?.kind === 'audio');
+        const videoReceiver = receivers.find((receiver) => receiver.track?.kind === 'video');
         const fallbackAudio = this.localStream?.getAudioTracks()[0] ?? peer.stream?.getAudioTracks()[0] ?? null;
         const fallbackVideo = this.localStream?.getVideoTracks()[0] ?? peer.stream?.getVideoTracks()[0] ?? null;
         const forensics = this.peerForensics.get(peer.id) ?? createEmptyForensics();
+        const outboundAudio = trackInfo(audioSender?.track ?? null, fallbackAudio, 'audio');
+        const inboundAudio = inboundAudioInfo(this.inboundAudioStats.get(peer.id), audioReceiver?.track ?? null);
+        const outboundVideo = trackInfo(videoSender?.track ?? null, fallbackVideo, 'video');
+        const inboundVideo = inboundVideoInfo(this.inboundVideoStats.get(peer.id), videoReceiver?.track ?? null);
         return {
           id: peer.id,
           participantId: peer.participantId,
@@ -548,9 +578,11 @@ export class WebrtcService {
           micEnabled: peer.micEnabled,
           camEnabled: peer.camEnabled,
           screenOn: peer.screenOn,
-          outboundAudio: trackInfo(audioSender?.track ?? null, fallbackAudio, 'audio'),
-          inboundAudio: inboundAudioInfo(this.inboundAudioStats.get(peer.id), audioReceiver?.track ?? null),
-          outboundVideo: trackInfo(videoSender?.track ?? null, fallbackVideo, 'video'),
+          diagnosticLabels: diagnosticLabelsForPeer(peer, outboundAudio, inboundAudio, outboundVideo, inboundVideo),
+          outboundAudio,
+          inboundAudio,
+          outboundVideo,
+          inboundVideo,
           reconnecting: peer.reconnecting,
           updatedAt: peer.updatedAt,
         };
@@ -696,7 +728,10 @@ export class WebrtcService {
     this.qualityCounters.clear();
     this.previousStats.clear();
     this.previousInboundAudioPackets.clear();
+    this.previousInboundVideoStats.clear();
     this.inboundAudioStats.clear();
+    this.inboundVideoStats.clear();
+    this.mediaHealthState.clear();
     this.peerForensics.clear();
     this.outboundAudioLiveness = emptyOutboundAudioLiveness();
     this.autoPausedReceivers.clear();
@@ -775,7 +810,10 @@ export class WebrtcService {
     }
     this.previousStats.delete(clientId);
     this.previousInboundAudioPackets.delete(clientId);
+    this.previousInboundVideoStats.delete(clientId);
     this.inboundAudioStats.delete(clientId);
+    this.inboundVideoStats.delete(clientId);
+    this.mediaHealthState.delete(clientId);
     this.videoSenders.delete(clientId);
     this.fallbackVideoTracks.delete(clientId);
     this.touchPeer(clientId, {
@@ -865,7 +903,10 @@ export class WebrtcService {
     this.qualityCounters.delete(clientId);
     this.previousStats.delete(clientId);
     this.previousInboundAudioPackets.delete(clientId);
+    this.previousInboundVideoStats.delete(clientId);
     this.inboundAudioStats.delete(clientId);
+    this.inboundVideoStats.delete(clientId);
+    this.mediaHealthState.delete(clientId);
     this.peerForensics.delete(clientId);
     this.autoPausedReceivers.delete(clientId);
     this.autoDegradedReceivers.delete(clientId);
@@ -898,6 +939,7 @@ export class WebrtcService {
       negotiationRecoveryAttempts: 0,
       lastRestartAt: 0,
       currentRestartStartedAt: null,
+      mediaDeadReason: null,
     };
   }
 
@@ -929,7 +971,7 @@ export class WebrtcService {
           });
           meta.currentRestartStartedAt = null;
         }
-        meta.restartAttempts = 0;
+        if (!meta.mediaDeadReason) meta.restartAttempts = 0;
       }
       return;
     }
@@ -976,23 +1018,32 @@ export class WebrtcService {
     this.sendSignal?.(clientId, { sdp: pc.localDescription?.toJSON() });
   }
 
-  private maybeScheduleIceRestart(clientId: string, pc: RTCPeerConnection): void {
-    if (pc.connectionState !== 'failed' && pc.connectionState !== 'disconnected' && pc.iceConnectionState !== 'failed' && pc.iceConnectionState !== 'disconnected') return;
+  private maybeScheduleIceRestart(clientId: string, pc: RTCPeerConnection, trigger: 'connection' | 'media-dead' = 'connection'): void {
+    const connectionTrigger =
+      pc.connectionState === 'failed' ||
+      pc.connectionState === 'disconnected' ||
+      pc.iceConnectionState === 'failed' ||
+      pc.iceConnectionState === 'disconnected';
+    if (trigger === 'connection' && !connectionTrigger) return;
+    if (trigger === 'media-dead' && !isPeerConnectionConnected(pc)) return;
+    const peer = this.peers().get(clientId);
     const meta = this.peerMeta.get(clientId);
-    if (!meta || meta.restartTimer || meta.restartAttempts >= MAX_ICE_RESTART_ATTEMPTS || pc.signalingState === 'closed') return;
+    if (!peer || peer.reconnecting || !meta || meta.restartTimer || meta.restartAttempts >= MAX_ICE_RESTART_ATTEMPTS || pc.signalingState === 'closed') return;
 
     meta.restartTimer = setTimeout(() => {
       meta.restartTimer = null;
-      void this.restartIce(clientId, pc, meta);
+      void this.restartIce(clientId, pc, meta, trigger);
     }, ICE_RESTART_DEBOUNCE_MS);
   }
 
-  private async restartIce(clientId: string, pc: RTCPeerConnection, meta: PeerMeta): Promise<void> {
+  private async restartIce(clientId: string, pc: RTCPeerConnection, meta: PeerMeta, trigger: 'connection' | 'media-dead' = 'connection'): Promise<void> {
     const now = Date.now();
     if (now - meta.lastRestartAt < ICE_RESTART_COOLDOWN_MS || pc.signalingState !== 'stable') {
-      this.maybeScheduleIceRestart(clientId, pc);
+      this.maybeScheduleIceRestart(clientId, pc, trigger);
       return;
     }
+    const peer = this.peers().get(clientId);
+    if (!peer || peer.reconnecting || peer.pc !== pc) return;
     meta.restartAttempts += 1;
     meta.lastRestartAt = now;
     meta.currentRestartStartedAt = now;
@@ -1005,18 +1056,19 @@ export class WebrtcService {
     this.pushTransition(clientId, {
       scope: 'iceRestart',
       event: 'fired',
-      detail: `attempt=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS}`,
+      detail: `attempt=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS} trigger=${trigger}`,
     });
     console.warn(`[webrtc] restarting ICE for peer ${clientId}; attempt=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS}`);
     pc.restartIce();
     await this.sendOffer(clientId, pc, meta, true);
   }
 
-  private maybeSchedulePeerConnectionRecreate(clientId: string, pc: RTCPeerConnection): void {
+  private maybeSchedulePeerConnectionRecreate(clientId: string, pc: RTCPeerConnection, trigger: 'connection' | 'media-dead' = 'connection'): void {
     const terminalFailed = pc.connectionState === 'failed' || pc.iceConnectionState === 'failed';
-    if (!terminalFailed || pc.signalingState === 'closed') return;
     const peer = this.peers().get(clientId);
     const meta = this.peerMeta.get(clientId);
+    const terminalMediaDead = trigger === 'media-dead' && !!meta?.mediaDeadReason && isPeerConnectionConnected(pc);
+    if ((!terminalFailed && !terminalMediaDead) || pc.signalingState === 'closed') return;
     if (!peer || peer.reconnecting || !meta || meta.recreatingPc || meta.pcRecreateTimer || meta.restartAttempts < MAX_ICE_RESTART_ATTEMPTS) return;
     const forensics = this.ensureForensics(clientId, pc);
     forensics.iceRestart.terminalFailed = true;
@@ -1039,7 +1091,7 @@ export class WebrtcService {
     this.pushTransition(clientId, {
       scope: 'iceRestart',
       event: 'pc-recreate-scheduled',
-      detail: `delayMs=${delay} restartAttempts=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS}`,
+      detail: `delayMs=${delay} restartAttempts=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS} trigger=${trigger}`,
     });
   }
 
@@ -1048,7 +1100,8 @@ export class WebrtcService {
     const meta = this.peerMeta.get(clientId);
     if (!peer || !meta || peer.reconnecting || peer.pc !== failedPc || meta.recreatingPc) return;
     const terminalFailed = failedPc.connectionState === 'failed' || failedPc.iceConnectionState === 'failed';
-    if (!terminalFailed || meta.restartAttempts < MAX_ICE_RESTART_ATTEMPTS) return;
+    const terminalMediaDead = !!meta.mediaDeadReason && isPeerConnectionConnected(failedPc);
+    if ((!terminalFailed && !terminalMediaDead) || meta.restartAttempts < MAX_ICE_RESTART_ATTEMPTS) return;
     if (meta.pcRecreateAttempts >= MAX_CONSECUTIVE_PC_RECREATE_ATTEMPTS) {
       this.ensureForensics(clientId, failedPc).iceRestart.autoRecoveryOutcome = 'failed';
       return;
@@ -1069,7 +1122,7 @@ export class WebrtcService {
     this.pushTransition(clientId, {
       scope: 'iceRestart',
       event: 'pc-recreate-fired',
-      detail: `attempt=${meta.pcRecreateAttempts}/${MAX_CONSECUTIVE_PC_RECREATE_ATTEMPTS} participantId=${peer.participantId}`,
+      detail: `attempt=${meta.pcRecreateAttempts}/${MAX_CONSECUTIVE_PC_RECREATE_ATTEMPTS} participantId=${peer.participantId} trigger=${terminalMediaDead ? meta.mediaDeadReason : 'connection'}`,
     });
 
     if (!this.forceRelay() && meta.pcRecreateAttempts > 1) {
@@ -1103,7 +1156,10 @@ export class WebrtcService {
     meta.negotiationTimer = null;
     this.previousStats.delete(clientId);
     this.previousInboundAudioPackets.delete(clientId);
+    this.previousInboundVideoStats.delete(clientId);
     this.inboundAudioStats.delete(clientId);
+    this.inboundVideoStats.delete(clientId);
+    this.mediaHealthState.delete(clientId);
     this.videoSenders.delete(clientId);
     this.fallbackVideoTracks.delete(clientId);
     pc.close();
@@ -1343,6 +1399,7 @@ export class WebrtcService {
       rttMs: metrics.rttMs,
       availableOutgoingBitrateKbps: metrics.availableOutgoingBitrateKbps,
     });
+    this.handleInboundMediaHealth(clientId, metrics);
     if (this.localMobile && counters.poor >= AUTO_DEGRADE_POOR_SAMPLES && metrics.quality !== 'good') {
       this.pauseNextMobileNonSpeakerReceiver();
       return;
@@ -1371,6 +1428,43 @@ export class WebrtcService {
       if (!this.manualAudioOnly()) this.sendReceiverVideoPolicy(clientId, false, 'auto-poor', false);
       this.updateAudioOnlyReason(clientId);
     }
+  }
+
+  private handleInboundMediaHealth(clientId: string, metrics: QualityMetrics): void {
+    const label = metrics.inboundVideo.noInboundMedia ? 'no-inbound-media' : metrics.inboundVideo.videoFrozen ? 'video-frozen' : null;
+    const peer = this.peers().get(clientId);
+    const pc = peer?.pc;
+    const meta = this.peerMeta.get(clientId);
+    if (!peer || !pc || !meta) return;
+    if (!label) {
+      if (meta.mediaDeadReason && metrics.connected) {
+        const forensics = this.ensureForensics(clientId, pc);
+        if (forensics.iceRestart.lastOutcome === 'pending') {
+          forensics.iceRestart.lastOutcome = 'recovered';
+          forensics.iceRestart.lastTimeToRecoverMs = meta.currentRestartStartedAt == null ? null : Date.now() - meta.currentRestartStartedAt;
+          if (meta.pcRecreateAttempts > 0) forensics.iceRestart.autoRecoveryOutcome = 'recovered';
+        }
+        this.pushTransition(clientId, { scope: 'iceRestart', event: 'media-dead-recovered', detail: `reason=${meta.mediaDeadReason}` });
+        meta.mediaDeadReason = null;
+        meta.currentRestartStartedAt = null;
+        meta.restartAttempts = 0;
+      }
+      return;
+    }
+    if (meta.mediaDeadReason !== label) {
+      meta.mediaDeadReason = label;
+      this.pushTransition(clientId, {
+        scope: 'iceRestart',
+        event: 'media-dead-detected',
+        detail: `${label} samples=${label === 'no-inbound-media' ? metrics.inboundVideo.noInboundMediaSamples : metrics.inboundVideo.videoFrozenSamples}`,
+      });
+    }
+    this.touchPeer(clientId, { quality: 'poor' });
+    if (meta.restartAttempts >= MAX_ICE_RESTART_ATTEMPTS) {
+      this.maybeSchedulePeerConnectionRecreate(clientId, pc, 'media-dead');
+      return;
+    }
+    this.maybeScheduleIceRestart(clientId, pc, 'media-dead');
   }
 
   private pauseNextMobileNonSpeakerReceiver(): void {
@@ -1434,6 +1528,10 @@ export class WebrtcService {
     let inboundAudioPacketsLost: number | null = null;
     let inboundAudioBytesReceived: number | null = null;
     let inboundAudioLevel: number | null = null;
+    let inboundVideoFramesDecoded: number | null = null;
+    let inboundVideoFramesReceived: number | null = null;
+    let inboundVideoFreezeCount: number | null = null;
+    let inboundVideoTotalFreezesDuration: number | null = null;
     let outboundAudioLevel: number | null = null;
     let outboundAudioEnergy: number | null = null;
 
@@ -1450,6 +1548,12 @@ export class WebrtcService {
           inboundAudioPacketsLost = (inboundAudioPacketsLost ?? 0) + numberOrZero(report['packetsLost']);
           inboundAudioBytesReceived = (inboundAudioBytesReceived ?? 0) + numberOrZero(report['bytesReceived']);
           if (typeof report['audioLevel'] === 'number') inboundAudioLevel = Math.max(inboundAudioLevel ?? 0, report['audioLevel']);
+        }
+        if (report['kind'] === 'video') {
+          inboundVideoFramesDecoded = (inboundVideoFramesDecoded ?? 0) + numberOrZero(report['framesDecoded']);
+          inboundVideoFramesReceived = (inboundVideoFramesReceived ?? 0) + numberOrZero(report['framesReceived']);
+          inboundVideoFreezeCount = (inboundVideoFreezeCount ?? 0) + numberOrZero(report['freezeCount']);
+          inboundVideoTotalFreezesDuration = (inboundVideoTotalFreezesDuration ?? 0) + numberOrZero(report['totalFreezesDuration']);
         }
       }
       if (report.type === 'remote-inbound-rtp' && typeof report['roundTripTime'] === 'number') {
@@ -1486,7 +1590,22 @@ export class WebrtcService {
       this.previousStats.set(clientId, { packetsLost: currentLost, packetsReceived: currentReceived });
     }
 
-    this.inboundAudioStats.set(clientId, this.buildInboundAudioStats(clientId, inboundAudioPacketsReceived, inboundAudioPacketsLost, inboundAudioBytesReceived, inboundAudioLevel));
+    const inboundAudio = this.buildInboundAudioStats(clientId, inboundAudioPacketsReceived, inboundAudioPacketsLost, inboundAudioBytesReceived, inboundAudioLevel);
+    this.inboundAudioStats.set(clientId, inboundAudio);
+    const connected = isPeerConnectionConnected(pc);
+    const inboundVideo = this.buildInboundVideoStats(
+      clientId,
+      {
+        framesDecoded: inboundVideoFramesDecoded,
+        framesReceived: inboundVideoFramesReceived,
+        freezeCount: inboundVideoFreezeCount,
+        totalFreezesDuration: inboundVideoTotalFreezesDuration,
+      },
+      inboundAudio,
+      connected,
+      this.isInboundVideoExpected(clientId),
+    );
+    this.inboundVideoStats.set(clientId, inboundVideo);
 
     const quality = classifyQuality({
       packetLossPct,
@@ -1508,7 +1627,17 @@ export class WebrtcService {
       connectionState: pc.connectionState,
       iceConnectionState: pc.iceConnectionState,
     });
-    return { quality, packetLossPct, jitterMs, rttMs, availableOutgoingBitrateKbps, hasInboundMedia, audioOnlyFloor };
+    return {
+      quality,
+      packetLossPct,
+      jitterMs,
+      rttMs,
+      availableOutgoingBitrateKbps,
+      hasInboundMedia,
+      audioOnlyFloor,
+      connected,
+      inboundVideo,
+    };
   }
 
   private updateOutboundAudioLiveness(outboundAudioLevel: number | null, outboundAudioEnergy: number | null): void {
@@ -1586,6 +1715,95 @@ export class WebrtcService {
       packetsReceivedDelta,
       packetsActivelyArriving,
     };
+  }
+
+  private buildInboundVideoStats(
+    clientId: string,
+    stats: {
+      framesDecoded: number | null;
+      framesReceived: number | null;
+      freezeCount: number | null;
+      totalFreezesDuration: number | null;
+    },
+    inboundAudio: InboundAudioStats,
+    connected: boolean,
+    videoExpected: boolean,
+  ): InboundVideoStats {
+    const hasVideoStats =
+      stats.framesDecoded != null ||
+      stats.framesReceived != null ||
+      stats.freezeCount != null ||
+      stats.totalFreezesDuration != null;
+    const framesDecoded = stats.framesDecoded ?? null;
+    const framesReceived = stats.framesReceived ?? null;
+    const freezeCount = stats.freezeCount ?? null;
+    const totalFreezesDuration = stats.totalFreezesDuration ?? null;
+    const previous = this.previousInboundVideoStats.get(clientId);
+    const current = {
+      framesDecoded: framesDecoded ?? 0,
+      framesReceived: framesReceived ?? 0,
+      freezeCount: freezeCount ?? 0,
+      totalFreezesDuration: totalFreezesDuration ?? 0,
+    };
+    const framesDecodedDelta = previous ? Math.max(0, current.framesDecoded - previous.framesDecoded) : current.framesDecoded;
+    const framesReceivedDelta = previous ? Math.max(0, current.framesReceived - previous.framesReceived) : current.framesReceived;
+    const freezeCountDelta = previous ? Math.max(0, current.freezeCount - previous.freezeCount) : 0;
+    const totalFreezesDurationDelta = previous ? Math.max(0, current.totalFreezesDuration - previous.totalFreezesDuration) : 0;
+    if (hasVideoStats || videoExpected) this.previousInboundVideoStats.set(clientId, current);
+    else this.previousInboundVideoStats.delete(clientId);
+
+    const videoActivelyDecoding = framesDecodedDelta > 0 || framesReceivedDelta > 0;
+    const audioActivelyArriving =
+      inboundAudio.packetsActivelyArriving === true ||
+      (inboundAudio.packetsReceivedDelta == null && (inboundAudio.packetsReceived ?? 0) > 0) ||
+      (inboundAudio.packetsReceivedDelta ?? 0) > 0;
+    const freezeIncreasing = freezeCountDelta > 0 || totalFreezesDurationDelta > 0;
+    const frozenSample = connected && videoExpected && (!videoActivelyDecoding || freezeIncreasing);
+    const noInboundMediaSample = connected && videoExpected && !audioActivelyArriving && !videoActivelyDecoding;
+    const state = this.mediaHealthState.get(clientId) ?? { videoFrozenSamples: 0, noInboundMediaSamples: 0, activeLabel: null };
+    state.videoFrozenSamples = frozenSample ? state.videoFrozenSamples + 1 : 0;
+    state.noInboundMediaSamples = noInboundMediaSample ? state.noInboundMediaSamples + 1 : 0;
+    state.activeLabel =
+      state.noInboundMediaSamples >= MEDIA_DEAD_REQUIRED_SAMPLES
+        ? 'no-inbound-media'
+        : state.videoFrozenSamples >= MEDIA_DEAD_REQUIRED_SAMPLES
+          ? 'video-frozen'
+          : null;
+    if (!videoExpected) {
+      state.videoFrozenSamples = 0;
+      state.noInboundMediaSamples = 0;
+      state.activeLabel = null;
+    } else if (!connected && !state.activeLabel) {
+      state.videoFrozenSamples = 0;
+      state.noInboundMediaSamples = 0;
+    }
+    this.mediaHealthState.set(clientId, state);
+    return {
+      framesDecoded,
+      framesDecodedDelta,
+      framesReceived,
+      framesReceivedDelta,
+      freezeCount,
+      freezeCountDelta,
+      totalFreezesDuration,
+      totalFreezesDurationDelta,
+      framesActivelyDecoding: videoActivelyDecoding,
+      videoExpected,
+      videoFrozenSamples: state.videoFrozenSamples,
+      noInboundMediaSamples: state.noInboundMediaSamples,
+      videoFrozen: state.activeLabel === 'video-frozen',
+      noInboundMedia: state.activeLabel === 'no-inbound-media',
+    };
+  }
+
+  private isInboundVideoExpected(clientId: string): boolean {
+    const peer = this.peers().get(clientId);
+    if (!peer || peer.isLocal || !peer.camEnabled || peer.screenOn) return false;
+    const meta = this.peerMeta.get(clientId);
+    if (meta?.mediaDeadReason) return true;
+    if (this.manualAudioOnly()) return false;
+    if (this.autoPausedReceivers.has(clientId) || this.mobileAutoPausedReceivers.has(clientId) || this.remotePauseRequests.has(clientId)) return false;
+    return true;
   }
 
   private sendReceiverVideoPolicy(clientId: string, videoPaused: boolean, reason: 'auto-poor' | 'manual-audio-only', videoDegraded = false): void {
@@ -1793,6 +2011,10 @@ function isAudioOnlyFloor(input: {
   );
 }
 
+function isPeerConnectionConnected(pc: RTCPeerConnection): boolean {
+  return pc.connectionState === 'connected' || pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed';
+}
+
 function numberOrZero(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0;
 }
@@ -1817,6 +2039,63 @@ function inboundAudioInfo(stats: InboundAudioStats | undefined, receiverTrack: M
     trackReadyState: receiverTrack?.readyState ?? null,
     trackMuted: receiverTrack?.muted ?? null,
   };
+}
+
+function inboundVideoInfo(stats: InboundVideoStats | undefined, receiverTrack: MediaStreamTrack | null): DiagnosticsInboundVideo {
+  return {
+    framesDecoded: stats?.framesDecoded ?? null,
+    framesDecodedDelta: stats?.framesDecodedDelta ?? null,
+    framesReceived: stats?.framesReceived ?? null,
+    framesReceivedDelta: stats?.framesReceivedDelta ?? null,
+    freezeCount: stats?.freezeCount ?? null,
+    freezeCountDelta: stats?.freezeCountDelta ?? null,
+    totalFreezesDuration: stats?.totalFreezesDuration ?? null,
+    totalFreezesDurationDelta: stats?.totalFreezesDurationDelta ?? null,
+    framesActivelyDecoding: stats?.framesActivelyDecoding ?? null,
+    videoExpected: stats?.videoExpected ?? false,
+    videoFrozenSamples: stats?.videoFrozenSamples ?? 0,
+    noInboundMediaSamples: stats?.noInboundMediaSamples ?? 0,
+    videoFrozen: stats?.videoFrozen ?? false,
+    noInboundMedia: stats?.noInboundMedia ?? false,
+    trackReadyState: receiverTrack?.readyState ?? null,
+    trackMuted: receiverTrack?.muted ?? null,
+  };
+}
+
+function emptyInboundVideoStats(videoExpected: boolean): InboundVideoStats {
+  return {
+    framesDecoded: null,
+    framesDecodedDelta: null,
+    framesReceived: null,
+    framesReceivedDelta: null,
+    freezeCount: null,
+    freezeCountDelta: null,
+    totalFreezesDuration: null,
+    totalFreezesDurationDelta: null,
+    framesActivelyDecoding: null,
+    videoExpected,
+    videoFrozenSamples: 0,
+    noInboundMediaSamples: 0,
+    videoFrozen: false,
+    noInboundMedia: false,
+  };
+}
+
+function diagnosticLabelsForPeer(
+  peer: PeerState,
+  outboundAudio: DiagnosticsTrackInfo,
+  inboundAudio: DiagnosticsInboundAudio,
+  outboundVideo: DiagnosticsTrackInfo,
+  inboundVideo: DiagnosticsInboundVideo,
+): string[] {
+  const labels = new Set<string>();
+  if (inboundVideo.videoFrozen) labels.add('video-frozen');
+  if (inboundVideo.noInboundMedia) labels.add('no-inbound-media');
+  if (!peer.isLocal && inboundAudio.packetsActivelyArriving === false && (inboundAudio.packetsReceived ?? 0) === 0) labels.add('receiver-zero');
+  if (outboundAudio.readyState === 'ended' || outboundVideo.readyState === 'ended' || inboundAudio.trackReadyState === 'ended' || inboundVideo.trackReadyState === 'ended') {
+    labels.add('track-ended');
+  }
+  return [...labels];
 }
 
 function trackInfo(senderTrack: MediaStreamTrack | null, fallbackTrack: MediaStreamTrack | null, kind: 'audio' | 'video'): DiagnosticsTrackInfo {

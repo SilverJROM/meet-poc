@@ -65,6 +65,10 @@
                 <strong [class]="entryAudioRecvClass(latest)">{{ inboundAudioSummary(latest) }}</strong>
               </div>
               <div>
+                <span class="label">Video recv</span>
+                <strong [class]="entryVideoRecvClass(latest)">{{ inboundVideoSummary(latest) }}</strong>
+              </div>
+              <div>
                 <span class="label">Mic live</span>
                 <strong [class]="micLivenessClass(latest)">{{ micLivenessSummary(latest) }}</strong>
               </div>
@@ -97,10 +101,12 @@
                       <span>{{ iceRestartSummary(peer) }}</span>
                       <span>{{ negotiationSummary(peer) }}</span>
                       <span>Timeline {{ transitionSummary(peer) }}</span>
+                      <span>labels {{ peerLabelsSummary(peer) }}</span>
                       <span>quality {{ peer.quality }}</span>
                       <span>audio {{ peer.outboundAudio.label || 'none' }} · {{ peer.outboundAudio.deviceId || 'no deviceId' }}</span>
                       <span [class]="audioRecvClass(peer.inboundAudio)">Audio recv {{ peerInboundAudioSummary(peer) }}</span>
                       <span>video {{ peer.outboundVideo.label || 'none' }} · {{ peer.outboundVideo.deviceId || 'no deviceId' }}</span>
+                      <span [class]="videoRecvClass(peer.inboundVideo)">Video recv {{ peerInboundVideoSummary(peer) }}</span>
                     </div>
                   }
                 </div>

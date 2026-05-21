@@ -3,6 +3,7 @@ import { Component, inject, signal } from '@angular/core';
 import {
   DiagnosticEntry,
   DiagnosticsInboundAudio,
+  DiagnosticsInboundVideo,
   DiagnosticSessionSummary,
   DiagnosticsDetailResponse,
   DiagnosticsPeerSample,
@@ -85,6 +86,11 @@ export class DiagnosticsPage {
     return this.peerInboundAudioSummary(peer);
   }
 
+  inboundVideoSummary(entry: DiagnosticEntry): string {
+    const peer = this.inboundAudioPeer(entry);
+    return this.peerInboundVideoSummary(peer);
+  }
+
   wsHealthSummary(entry: DiagnosticEntry): string {
     const ws = entry.payload.wsHealth;
     if (!ws) return `${entry.payload.wsStatus || 'unknown'} · reconnects ${entry.payload.wsReconnectAttempts ?? 0}`;
@@ -160,12 +166,38 @@ export class DiagnosticsPage {
     return `${status} · packets ${packets} · ${delta} · ${level} · ${track} · ${muted}`;
   }
 
+  peerInboundVideoSummary(peer: DiagnosticsPeerSample | undefined): string {
+    const inbound = peer?.inboundVideo;
+    if (!inbound) return 'not sampled · frames n/a · freeze n/a';
+    const status = inbound.noInboundMedia ? 'NO MEDIA' : inbound.videoFrozen ? 'VIDEO FROZEN' : inbound.framesActivelyDecoding ? 'decoding' : 'not decoding';
+    const frames = inbound.framesDecoded ?? 0;
+    const delta = inbound.framesDecodedDelta == null ? 'delta n/a' : `delta +${inbound.framesDecodedDelta}`;
+    const received = inbound.framesReceived == null ? 'received n/a' : `received ${inbound.framesReceived}`;
+    const freezes = inbound.freezeCount == null ? 'freeze n/a' : `freeze ${inbound.freezeCount}`;
+    const samples = `samples vf=${inbound.videoFrozenSamples ?? 0}/nm=${inbound.noInboundMediaSamples ?? 0}`;
+    const expected = inbound.videoExpected ? 'expected' : 'not expected';
+    return `${status} · frames ${frames} · ${delta} · ${received} · ${freezes} · ${samples} · ${expected}`;
+  }
+
+  peerLabelsSummary(peer: DiagnosticsPeerSample | undefined): string {
+    const labels = peer?.diagnosticLabels ?? [];
+    return labels.length ? labels.join(', ') : 'none';
+  }
+
   audioRecvClass(inbound: DiagnosticsInboundAudio | undefined): 'audio-recv-ok' | 'audio-recv-bad' {
     return inbound?.packetsActivelyArriving === true && (inbound.packetsReceived ?? 0) > 0 ? 'audio-recv-ok' : 'audio-recv-bad';
   }
 
+  videoRecvClass(inbound: DiagnosticsInboundVideo | undefined): 'audio-recv-ok' | 'audio-recv-bad' {
+    return inbound?.videoFrozen || inbound?.noInboundMedia ? 'audio-recv-bad' : 'audio-recv-ok';
+  }
+
   entryAudioRecvClass(entry: DiagnosticEntry): 'audio-recv-ok' | 'audio-recv-bad' {
     return this.audioRecvClass(this.inboundAudioPeer(entry)?.inboundAudio);
+  }
+
+  entryVideoRecvClass(entry: DiagnosticEntry): 'audio-recv-ok' | 'audio-recv-bad' {
+    return this.videoRecvClass(this.inboundAudioPeer(entry)?.inboundVideo);
   }
 
   private inboundAudioPeer(entry: DiagnosticEntry): DiagnosticsPeerSample | undefined {
