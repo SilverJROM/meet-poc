@@ -33,3 +33,5 @@ Codex appends one line per STATUS change: `[projcore callback] <batch-id> <STATE
 [projcore callback] identity DONE DR-37 persistent browser clientKey identity committed 5eb3592; backend 126/126 PASS (1 skipped); build PASS; isolated 48xx identity e2e PASS; pm2 clean restart verified no env leak.
 [projcore callback] admit PROPOSED DR-39/DR-38 plan ready: button-only leave message revokes membership/removes card; refresh/unload/ws close are drops with reconnecting card and known admitted clientKey auto-admit; waiting for APPROVED-PLAN.
 [projcore callback] admit APPROVED-PLAN DR-39/DR-38 approved; implementing message-only leave revocation, close-as-drop, re-admit clears revoke, and targeted tests.
+[projcore callback] admit DONE DR-39/DR-38 committed 22e6689; backend/build/e2e PASS; explicit leave message only revokes; bare close/reload are drops; pm2 env clean.
+[projcore callback] diag-deep PROPOSED DR-41/DR-43 plan ready: split into auth/toggle/all-participant posting plus deep WebRTC/WS forensics capture/display; waiting for APPROVED-PLAN.

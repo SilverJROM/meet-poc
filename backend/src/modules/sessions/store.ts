@@ -30,6 +30,8 @@ type SessionRow = {
 export type DiagnosticsPayload = {
   kind?: string;
   createdAt?: number;
+  clientKey?: string;
+  participantId?: string;
   peers?: unknown[];
   forceRelay?: boolean;
   [key: string]: unknown;
@@ -233,31 +235,35 @@ export function listEndedForOwner(
 
 export function appendDiagnosticsEntry(
   sessionId: string,
-  ownerEmail: string,
+  ownerEmail: string | null | undefined,
   body: unknown,
   database: Database.Database = getDb(),
 ): DiagnosticEntry | null {
   const payload = normalizeDiagnosticsPayload(body);
   if (!payload) return null;
+  const params = ownerEmail ? [sessionId, ownerEmail] : [sessionId];
+  const ownerFilter = ownerEmail ? 'AND r.owner_email = ?' : '';
   const session = database
     .prepare(
       `
         SELECT s.id, s.room_id, r.title AS room_title, s.host_email, s.started_at, s.ended_at, s.ended_reason, s.admitted_peak
         FROM meeting_sessions s
         JOIN rooms r ON r.id = s.room_id
-        WHERE s.id = ? AND r.owner_email = ?
+        WHERE s.id = ?
+          ${ownerFilter}
         LIMIT 1
       `,
     )
-    .get(sessionId, ownerEmail) as SessionRow | undefined;
+    .get(...params) as SessionRow | undefined;
   if (!session) return null;
+  const diagnosticOwnerEmail = session.host_email;
 
   const summary = summarizeDiagnosticsPayload(payload);
   const entry = {
     id: crypto.randomUUID(),
     sessionId,
     roomId: session.room_id,
-    ownerEmail,
+    ownerEmail: diagnosticOwnerEmail,
     kind: summary.kind,
     createdAt: Date.now(),
     payloadJson: JSON.stringify(payload),
@@ -305,7 +311,7 @@ export function appendDiagnosticsEntry(
   });
   insert();
 
-  return getDiagnosticsEntry(ownerEmail, entry.id, database);
+  return getDiagnosticsEntry(diagnosticOwnerEmail, entry.id, database);
 }
 
 export function listDiagnosticsSessionsForOwner(

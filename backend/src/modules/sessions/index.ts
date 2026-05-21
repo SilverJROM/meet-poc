@@ -1,8 +1,11 @@
-import { Router } from 'express';
+import { Router, type Request } from 'express';
 import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
+import { parseCookies } from '../../lib/cookies.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
+import { getSessionUser } from '../auth/sessions.js';
 import { countRecordingsBySessionForUser } from '../recording/index.js';
+import { isAdmittedDiagnosticPoster } from '../signaling/index.js';
 import {
   appendDiagnosticsEntry,
   getDiagnosticsForSession,
@@ -61,6 +64,15 @@ function mapDiagnosticEntry(entry: DiagnosticEntry): Record<string, unknown> {
     peerCount: entry.peerCount,
     payload: entry.payload,
   };
+}
+
+function optionalUserEmail(req: Request, database: Database.Database): string | null {
+  const cookies = parseCookies(req.headers.cookie);
+  return getSessionUser(cookies.session, database)?.email || null;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 export function sessionsRouter(database: Database.Database = getDb()): Router {
@@ -132,9 +144,19 @@ export function sessionsRouter(database: Database.Database = getDb()): Router {
     });
   });
 
-  router.post('/meeting-sessions/:sessionId/diagnostics', auth, (req, res) => {
-    const authed = req as AuthenticatedRequest;
-    const entry = appendDiagnosticsEntry(String(req.params.sessionId || ''), authed.user.email, req.body, database);
+  router.post('/meeting-sessions/:sessionId/diagnostics', (req, res) => {
+    const sessionId = String(req.params.sessionId || '');
+    const userEmail = optionalUserEmail(req, database);
+    const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body) ? (req.body as Record<string, unknown>) : {};
+    const admitted = isAdmittedDiagnosticPoster({
+      sessionId,
+      clientId: stringOrNull(body.clientId),
+      participantId: stringOrNull(body.participantId),
+      clientKey: stringOrNull(body.clientKey),
+      userEmail,
+    });
+    if (!admitted) return res.status(403).json({ error: 'forbidden' });
+    const entry = appendDiagnosticsEntry(sessionId, null, req.body, database);
     if (!entry) return res.status(404).json({ error: 'not found' });
     return res.json({ ok: true, entry: mapDiagnosticEntry(entry) });
   });

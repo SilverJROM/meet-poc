@@ -361,6 +361,13 @@ h1 {
   gap: 12px;
 }
 
+.diagnostics-controls {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .relay-toggle {
   min-height: 34px;
   display: inline-flex;

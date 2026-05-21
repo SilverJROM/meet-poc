@@ -3,10 +3,11 @@ import type Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
-import { createRoom } from '../src/modules/rooms/store.js';
+import { createRoom, setRoomAccess } from '../src/modules/rooms/store.js';
 import { appendDiagnosticsEntry, getDiagnosticsForSession, openSession } from '../src/modules/sessions/store.js';
 import { createApp } from '../src/server.js';
 import { createTestDb } from './helpers.js';
+import { closeServer, closeWs, connectWs, nextMessage, startWsServer } from './signaling-helpers.js';
 
 const MAX_DIAGNOSTIC_ENTRIES_PER_SESSION = 720;
 
@@ -25,6 +26,8 @@ function samplePayload(overrides: Record<string, unknown> = {}): Record<string, 
     roomId: 'room',
     roomTitle: 'Diagnostics room',
     clientId: 'owner-client',
+    participantId: 'owner-participant',
+    clientKey: 'owner-key',
     clientName: 'Owner',
     createdAt: Date.now(),
     wsStatus: 'connected',
@@ -95,42 +98,49 @@ describe('meeting session diagnostics API', () => {
     seedUser(db);
     insertUser(db, 'other@silverjrom.app');
     const room = createRoom('Diagnostics room', 'jrom@silverjrom.app', db);
-    const session = openSession(room.id, 'jrom@silverjrom.app', db);
-    const app = createApp(db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const otherCookie = `session=${createSession('other@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', clientKey: 'owner-key' }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    const sessionId = String(ownerAdmitted.sessionId);
 
-    await request(app).post(`/api/meeting-sessions/${session.id}/diagnostics`).send(samplePayload()).expect(401);
-    await request(app)
-      .post(`/api/meeting-sessions/${session.id}/diagnostics`)
+    await request(server)
+      .post(`/api/meeting-sessions/${sessionId}/diagnostics`)
       .set('Cookie', otherCookie)
-      .send(samplePayload())
-      .expect(404);
+      .send(samplePayload({ clientId: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId }))
+      .expect(403);
+    await request(server)
+      .post(`/api/meeting-sessions/${sessionId}/diagnostics`)
+      .send(samplePayload({ clientId: 'never-admitted', participantId: 'never-participant', clientKey: 'never-key' }))
+      .expect(403);
 
-    const created = await request(app)
-      .post(`/api/meeting-sessions/${session.id}/diagnostics`)
+    const created = await request(server)
+      .post(`/api/meeting-sessions/${sessionId}/diagnostics`)
       .set('Cookie', ownerCookie)
-      .send(samplePayload())
+      .send(samplePayload({ clientId: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId }))
       .expect(200);
     expect(created.body.entry).toMatchObject({
-      sessionId: session.id,
+      sessionId,
       kind: 'sample',
       relayUsed: true,
       candidateTypes: ['relay'],
       peerCount: 1,
     });
 
-    const list = await request(app).get('/api/meeting-sessions/diagnostics-log').set('Cookie', ownerCookie).expect(200);
+    const list = await request(server).get('/api/meeting-sessions/diagnostics-log').set('Cookie', ownerCookie).expect(200);
     expect(list.body.total).toBe(1);
     expect(list.body.sessions[0]).toMatchObject({
-      id: session.id,
+      id: sessionId,
       roomTitle: 'Diagnostics room',
       diagnosticCount: 1,
       relayUsed: true,
       candidateTypes: ['relay'],
     });
 
-    const detail = await request(app).get(`/api/meeting-sessions/${session.id}/diagnostics`).set('Cookie', ownerCookie).expect(200);
+    const detail = await request(server).get(`/api/meeting-sessions/${sessionId}/diagnostics`).set('Cookie', ownerCookie).expect(200);
     expect(detail.body.entries[0].payload.peers[0].outboundAudio).toMatchObject({
       deviceId: 'external-mic-1',
       label: 'External USB Microphone',
@@ -146,8 +156,46 @@ describe('meeting session diagnostics API', () => {
       trackReadyState: 'live',
       trackMuted: false,
     });
-    await request(app).get(`/api/meeting-sessions/${session.id}/diagnostics`).set('Cookie', otherCookie).expect(404);
-    await request(app).get(`/api/meeting-sessions/${session.id}/diagnostics.json`).set('Cookie', ownerCookie).expect(200);
+    await request(server).get(`/api/meeting-sessions/${sessionId}/diagnostics`).set('Cookie', otherCookie).expect(404);
+    await request(server).get(`/api/meeting-sessions/${sessionId}/diagnostics.json`).set('Cookie', ownerCookie).expect(200);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('DR-41 accepts diagnostics from admitted guests and rejects never-admitted clients', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Guest diagnostics', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', clientKey: 'owner-key-dr41' }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', clientKey: 'guest-key-dr41' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock');
+    owner.send(JSON.stringify({ type: 'admit', clientId: String(knocking.clientId) }));
+    const guestAdmitted = await nextMessage(guest, (msg) => msg.type === 'admitted');
+
+    await request(server)
+      .post(`/api/meeting-sessions/${ownerAdmitted.sessionId}/diagnostics`)
+      .send(samplePayload({ clientId: guestAdmitted.clientId, participantId: guestAdmitted.participantId, clientKey: 'guest-key-dr41', clientName: 'Guest' }))
+      .expect(200);
+    await request(server)
+      .post(`/api/meeting-sessions/${ownerAdmitted.sessionId}/diagnostics`)
+      .send(samplePayload({ clientId: String(knocking.clientId), participantId: guestAdmitted.participantId, clientKey: 'wrong-key', clientName: 'Guest' }))
+      .expect(403);
+
+    const detail = await request(server).get(`/api/meeting-sessions/${ownerAdmitted.sessionId}/diagnostics`).set('Cookie', ownerCookie).expect(200);
+    expect(detail.body.entries).toHaveLength(1);
+    expect(detail.body.entries[0].payload.clientName).toBe('Guest');
+
+    closeWs(guest);
+    closeWs(owner);
+    await closeServer(server);
   });
 
   it('DR-28 retains a bounded number of diagnostics entries per session', async () => {

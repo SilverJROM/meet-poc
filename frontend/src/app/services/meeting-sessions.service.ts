@@ -82,6 +82,8 @@ export type DiagnosticsPayload = {
   roomId: string;
   roomTitle: string;
   clientId: string | null;
+  participantId: string | null;
+  clientKey: string;
   clientName: string;
   createdAt: number;
   wsStatus: string;

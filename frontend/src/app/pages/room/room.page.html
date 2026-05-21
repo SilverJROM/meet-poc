@@ -137,10 +137,16 @@
         <section class="diagnostics-panel" aria-label="Connection diagnostics">
           <div class="diagnostics-header">
             <h2>Connection diagnostics</h2>
-            <label class="relay-toggle">
-              <input type="checkbox" [checked]="webrtc.forceRelay()" (change)="setForceRelay($any($event.target).checked)">
-              <span>Force relay</span>
-            </label>
+            <div class="diagnostics-controls">
+              <label class="relay-toggle">
+                <input type="checkbox" [checked]="diagnosticsLoggingEnabled()" (change)="setDiagnosticsLogging($any($event.target).checked)">
+                <span>Diagnostics logging</span>
+              </label>
+              <label class="relay-toggle">
+                <input type="checkbox" [checked]="webrtc.forceRelay()" (change)="setForceRelay($any($event.target).checked)">
+                <span>Force relay</span>
+              </label>
+            </div>
           </div>
           <div class="diagnostics-list">
             @for (peer of webrtc.diagnostics(); track peer.participantId) {

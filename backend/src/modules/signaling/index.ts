@@ -45,6 +45,14 @@ type ClientIdentity = {
   revoked: boolean;
 };
 
+export type DiagnosticPoster = {
+  sessionId: string;
+  clientId?: string | null;
+  participantId?: string | null;
+  clientKey?: string | null;
+  userEmail?: string | null;
+};
+
 type ReconnectTicket = {
   clientId: string;
   participantId: string;
@@ -324,6 +332,41 @@ function peerSummaries(live: LiveRoom, roomId: string, database: Database.Databa
     name: p.name,
     host: isOwnerOf(roomId, p.userEmail, database),
   }));
+}
+
+function peerMatchesDiagnosticPoster(
+  clientId: string,
+  peer: Pick<PeerEntry | ReconnectingPeer, 'clientKey' | 'participantId' | 'userEmail'>,
+  poster: DiagnosticPoster,
+): boolean {
+  if (!poster.clientKey || !poster.participantId) return false;
+  if (peer.clientKey !== poster.clientKey || peer.participantId !== poster.participantId) return false;
+  if (poster.clientId && poster.clientId !== clientId) return false;
+  if (poster.userEmail !== undefined && poster.userEmail !== peer.userEmail) return false;
+  return true;
+}
+
+export function isAdmittedDiagnosticPoster(poster: DiagnosticPoster): boolean {
+  if (!poster.sessionId || !poster.clientKey || !poster.participantId) return false;
+  for (const live of liveRooms.values()) {
+    if (live.currentSessionId !== poster.sessionId) continue;
+    for (const [clientId, peer] of live.admitted) {
+      if (peerMatchesDiagnosticPoster(clientId, peer, poster)) return true;
+    }
+    for (const [clientId, peer] of live.reconnecting) {
+      if (peerMatchesDiagnosticPoster(clientId, peer, poster)) return true;
+    }
+    const identity = live.clientIdentities.get(poster.clientKey);
+    if (
+      identity?.wasAdmitted === true &&
+      identity.revoked !== true &&
+      identity.participantId === poster.participantId &&
+      !poster.clientId
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function expireReconnectingPeer(roomId: string, clientId: string, database: Database.Database): void {

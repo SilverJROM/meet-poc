@@ -27,6 +27,7 @@ import { WebrtcService } from '../../services/webrtc.service';
 
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
+const DIAGNOSTICS_LOGGING_STORAGE_KEY = 'meet-poc.diagnosticsLogging';
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
 type BufferedSignal = { from: string; data: unknown };
@@ -114,6 +115,7 @@ export class RoomPage implements OnDestroy {
   readonly setupWarning = signal<string | null>(null);
   readonly joinPrereqPopout = signal<string | null>(null);
   readonly myId = signal<string | null>(null);
+  readonly myParticipantId = signal<string | null>(null);
   readonly hostClientId = signal<string | null>(null);
   readonly isOwner = signal(false);
   readonly isHost = computed(() => this.isOwner() || (!!this.myId() && this.hostClientId() === this.myId()));
@@ -125,6 +127,7 @@ export class RoomPage implements OnDestroy {
   readonly leaveDialogOpen = signal(false);
   readonly meetingEndedToastOpen = signal(false);
   readonly diagnosticsOpen = signal(false);
+  readonly diagnosticsLoggingEnabled = signal(readDiagnosticsLoggingEnabled());
   readonly screenShareHelp = signal<string | null>(null);
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
@@ -217,7 +220,9 @@ export class RoomPage implements OnDestroy {
         wsReconnectAttempts: this.ws.reconnectAttempts(),
         reconnectTokenPresent: !!this.reconnectToken(),
         myClientId: this.myId(),
+        myParticipantId: this.myParticipantId(),
         roomState: this.state(),
+        diagnosticsLoggingEnabled: this.diagnosticsLoggingEnabled(),
         waitingRemainingSeconds: this.waitRemainingSeconds(),
         localAudioTrackId: this.media.localStream()?.getAudioTracks()[0]?.id,
         localVideoTrackId: this.media.localStream()?.getVideoTracks()[0]?.id,
@@ -658,6 +663,19 @@ export class RoomPage implements OnDestroy {
     this.queueDiagnosticsLog('state-change');
   }
 
+  setDiagnosticsLogging(enabled: boolean): void {
+    this.diagnosticsLoggingEnabled.set(enabled);
+    storeDiagnosticsLoggingEnabled(enabled);
+    if (!enabled) {
+      this.stopDiagnosticsLogger();
+      return;
+    }
+    if (this.state() === 'in-call' && this.currentSessionId()) {
+      this.startDiagnosticsLogger();
+      this.queueDiagnosticsLog('sample');
+    }
+  }
+
   async toggleAudioOnly(): Promise<void> {
     await this.webrtc.setManualAudioOnly(!this.webrtc.manualAudioOnly());
     this.status.set(this.webrtc.manualAudioOnly() ? 'Audio-only mode on.' : 'Audio-only mode off.');
@@ -767,6 +785,7 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'admitted') {
       const wasInCall = this.state() === 'in-call';
       this.myId.set(msg.clientId);
+      this.myParticipantId.set(msg.participantId || null);
       this.isOwner.set(!!msg.isOwner);
       this.currentSessionId.set(msg.sessionId || this.currentSessionId());
       this.recorder.setSessionId(msg.sessionId || this.currentSessionId());
@@ -1243,6 +1262,7 @@ export class RoomPage implements OnDestroy {
     this.reconnectToken.set(null);
     this.isOwner.set(false);
     this.myId.set(null);
+    this.myParticipantId.set(null);
     this.hostClientId.set(null);
     this.currentSessionId.set(null);
     this.sidebarOpen.set(false);
@@ -1403,7 +1423,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private startDiagnosticsLogger(): void {
-    if (this.diagnosticsLogTimer || !this.currentSessionId() || !this.isOwner()) return;
+    if (this.diagnosticsLogTimer || !this.currentSessionId() || !this.diagnosticsLoggingEnabled()) return;
     this.diagnosticsLogTimer = window.setInterval(() => {
       void this.flushDiagnosticsLog('sample');
     }, DIAGNOSTICS_LOG_INTERVAL_MS);
@@ -1417,7 +1437,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private queueDiagnosticsLog(kind: DiagnosticsPayload['kind'], error?: string): void {
-    if (this.state() !== 'in-call' || !this.currentSessionId() || !this.isOwner()) return;
+    if (this.state() !== 'in-call' || !this.currentSessionId() || !this.diagnosticsLoggingEnabled()) return;
     this.startDiagnosticsLogger();
     if (kind === 'sample') {
       void this.flushDiagnosticsLog(kind, { error });
@@ -1434,7 +1454,7 @@ export class RoomPage implements OnDestroy {
     options: { error?: string; useBeacon?: boolean } = {},
   ): Promise<void> {
     const sessionId = this.currentSessionId();
-    if (!sessionId || !this.isOwner()) return;
+    if (!sessionId || !this.diagnosticsLoggingEnabled()) return;
     const payload = this.buildDiagnosticsPayload(kind, options.error);
     if (options.useBeacon && this.meetingSessions.sendDiagnosticsBeacon(sessionId, payload)) return;
     if (this.diagnosticsLogInFlight) return;
@@ -1455,6 +1475,8 @@ export class RoomPage implements OnDestroy {
       roomId: this.roomId,
       roomTitle: this.roomTitle(),
       clientId: this.myId(),
+      participantId: this.myParticipantId(),
+      clientKey: readClientKey(),
       clientName: this.displayName().trim() || 'Anon',
       createdAt: Date.now(),
       wsStatus: this.ws.status(),
@@ -1641,6 +1663,23 @@ function readClientKey(): string {
   }
 }
 
+function readDiagnosticsLoggingEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(DIAGNOSTICS_LOGGING_STORAGE_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+function storeDiagnosticsLoggingEnabled(enabled: boolean): void {
+  try {
+    if (enabled) window.localStorage.removeItem(DIAGNOSTICS_LOGGING_STORAGE_KEY);
+    else window.localStorage.setItem(DIAGNOSTICS_LOGGING_STORAGE_KEY, '0');
+  } catch {
+    // Best effort only; diagnostics logging still follows the in-memory toggle.
+  }
+}
+
 function readReconnectToken(roomKey: string): string | null {
   try {
     return window.sessionStorage.getItem(reconnectTokenKey(roomKey));
@@ -1752,6 +1791,8 @@ declare global {
       wsReconnectAttempts?: number;
       reconnectTokenPresent?: boolean;
       myClientId?: string | null;
+      myParticipantId?: string | null;
+      diagnosticsLoggingEnabled?: boolean;
       roomState?: string;
       waitingRemainingSeconds?: number;
       localAudioTrackId?: string;
