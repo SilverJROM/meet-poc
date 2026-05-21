@@ -20,7 +20,7 @@ export class TileComponent {
   readonly remoteAudioBlocked = output<void>();
   readonly initials = computed(() => toInitials(this.peer().name));
   readonly videoStream = computed(() => this.displayStream() ?? this.peer().stream);
-  readonly showVideo = computed(() => this.forceVideo() || (this.peer().camEnabled && !!this.videoStream()?.getVideoTracks()?.length));
+  readonly showVideo = computed(() => this.forceVideo() || (!this.peer().screenOn && this.peer().camEnabled && !!this.videoStream()?.getVideoTracks()?.length));
   readonly isMirroredSelfView = computed(() => this.peer().isLocal && this.showVideo() && !this.displayStream() && this.variant() !== 'share-main');
   readonly avatarColor = computed(() => {
     const name = this.peer().name || 'x';

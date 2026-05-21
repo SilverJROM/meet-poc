@@ -222,6 +222,30 @@ export class MediaService {
     return true;
   }
 
+  async setCameraTrackEnabled(options: { enabled: boolean; videoDeviceId?: string; facingMode?: 'user' | 'environment' }): Promise<boolean> {
+    const stream = this.localStream();
+    if (!stream) return false;
+    const existing = stream.getVideoTracks()[0];
+    if (existing) {
+      existing.enabled = options.enabled;
+      this.cameraOn.set(options.enabled);
+      return options.enabled;
+    }
+    if (!options.enabled) {
+      this.cameraOn.set(false);
+      return false;
+    }
+
+    const camStream = await navigator.mediaDevices.getUserMedia({
+      video: this.videoConstraints(true, { deviceId: options.videoDeviceId, facingMode: options.facingMode }),
+    });
+    registerDebugTracks(camStream);
+    const track = camStream.getVideoTracks()[0];
+    stream.addTrack(track);
+    this.cameraOn.set(true);
+    return true;
+  }
+
   async toggleScreen(onVideoTrackChanged: (track: MediaStreamTrack | null) => Promise<void>): Promise<boolean> {
     if (this.screenTrack) {
       await this.stopScreen(onVideoTrackChanged);

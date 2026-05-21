@@ -135,6 +135,8 @@ export class RoomPage implements OnDestroy {
   readonly shareStripCollapsed = signal(false);
   readonly sharingPeer = computed(() => this.peers().find((peer) => peer.screenOn) ?? null);
   readonly shareLayoutActive = computed(() => !!this.sharingPeer());
+  readonly anyScreenShareActive = computed(() => this.media.screenOn() || this.peers().some((peer) => peer.screenOn));
+  readonly effectiveCameraOn = computed(() => this.media.cameraOn() && this.cameraVisibleDuringCurrentShare());
   readonly shareStream = computed(() => {
     const peer = this.sharingPeer();
     if (!peer) return null;
@@ -157,6 +159,10 @@ export class RoomPage implements OnDestroy {
   private diagnosticsLogTimer: ReturnType<typeof setInterval> | null = null;
   private lastDiagnosticsEventAt = 0;
   private diagnosticsLogInFlight = false;
+  private shareCameraActive = false;
+  private shareCameraPreShareOn: boolean | null = null;
+  private readonly shareCameraManualOverride = signal(false);
+  private shareCameraSyncRun = 0;
   private readonly pendingSignals = new Map<string, BufferedSignal[]>();
   private readonly reconnectToken = signal<string | null>(readReconnectToken(this.roomKey));
   private signalingResyncCount = 0;
@@ -205,6 +211,9 @@ export class RoomPage implements OnDestroy {
         }),
         shareLayoutActive: this.shareLayoutActive(),
         shareStripCollapsed: this.shareStripCollapsed(),
+        anyScreenShareActive: this.anyScreenShareActive(),
+        effectiveCameraOn: this.effectiveCameraOn(),
+        shareCameraManualOverride: this.shareCameraManualOverride(),
         isRecording: this.recorder.isRecording() || this.hostRecording(),
         screenShareAttempts: this.media.screenShareAttempts(),
         lastVideoConstraints: this.media.lastVideoConstraints(),
@@ -290,6 +299,9 @@ export class RoomPage implements OnDestroy {
     });
     effect(() => {
       this.webrtc.setActiveSpeakerPeer(this.activeSpeaker.activeFrame().id);
+    });
+    effect(() => {
+      void this.syncShareCameraCut(this.anyScreenShareActive(), this.media.screenOn(), this.shareCameraManualOverride());
     });
     effect(() => {
       const deviceId = this.selectedAudioOutputId();
@@ -547,6 +559,10 @@ export class RoomPage implements OnDestroy {
   }
 
   async toggleCamera(): Promise<void> {
+    if (this.anyScreenShareActive()) {
+      await this.toggleCameraDuringShare();
+      return;
+    }
     try {
       const cam = await this.media.toggleCamera((track) => this.webrtc.replaceVideoTrack(track), {
         videoDeviceId: this.selectedVideoDeviceIdForRequest(),
@@ -576,6 +592,36 @@ export class RoomPage implements OnDestroy {
       }
       this.screenShareHelp.set(null);
       this.status.set(`Screen share failed: ${err instanceof Error ? err.message : 'not available'}`);
+    }
+  }
+
+  private async toggleCameraDuringShare(): Promise<void> {
+    if (this.media.screenOn()) {
+      this.status.set('Camera stays off while your screen is shared.');
+      return;
+    }
+    try {
+      const nextOverride = !this.shareCameraManualOverride();
+      this.shareCameraManualOverride.set(nextOverride);
+      if (nextOverride) {
+        const enabled = await this.media.setCameraTrackEnabled({
+          enabled: true,
+          videoDeviceId: this.selectedVideoDeviceIdForRequest(),
+          facingMode: this.videoFacingModeForRequest(true),
+        });
+        await this.webrtc.replaceVideoTrack(enabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
+        await this.webrtc.setShareCameraPolicy({ suppressCamera: false, localScreenShareActive: false });
+        this.status.set('Camera on during screen share.');
+      } else {
+        await this.media.setCameraTrackEnabled({ enabled: false });
+        await this.webrtc.replaceVideoTrack(null);
+        await this.webrtc.setShareCameraPolicy({ suppressCamera: true, localScreenShareActive: false });
+        this.status.set('Camera hidden during screen share.');
+      }
+      this.updateLocalMediaState();
+      this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+    } catch (err) {
+      this.status.set(`Camera access failed: ${err instanceof Error ? err.message : 'unknown error'}`);
     }
   }
 
@@ -1299,6 +1345,9 @@ export class RoomPage implements OnDestroy {
     this.deviceFailureNotice.set(null);
     this.actionNotice.set(null);
     this.screenShareHelp.set(null);
+    this.shareCameraActive = false;
+    this.shareCameraPreShareOn = null;
+    this.shareCameraManualOverride.set(false);
     this.diagnosticsOpen.set(false);
     this.setupWarning.set(null);
     this.nameError.set(null);
@@ -1440,8 +1489,54 @@ export class RoomPage implements OnDestroy {
     this.queueDiagnosticsLog('error', 'local audio track failed');
   }
 
+  private async syncShareCameraCut(shareActive: boolean, localScreenShareActive: boolean, manualOverride: boolean): Promise<void> {
+    const run = ++this.shareCameraSyncRun;
+    if (shareActive && !this.shareCameraActive) {
+      this.shareCameraActive = true;
+      this.shareCameraPreShareOn = this.media.cameraOn();
+      this.shareCameraManualOverride.set(false);
+      await this.setCameraTrackForShare(false, false);
+    } else if (!shareActive && this.shareCameraActive) {
+      const restoreCamera = this.shareCameraPreShareOn === true;
+      this.shareCameraActive = false;
+      this.shareCameraPreShareOn = null;
+      this.shareCameraManualOverride.set(false);
+      await this.setCameraTrackForShare(restoreCamera, true);
+      manualOverride = false;
+    }
+    if (run !== this.shareCameraSyncRun) return;
+    await this.webrtc.setShareCameraPolicy({
+      suppressCamera: shareActive && !localScreenShareActive && !manualOverride,
+      localScreenShareActive,
+    });
+    this.updateLocalMediaState();
+  }
+
+  private async setCameraTrackForShare(enabled: boolean, updateSender: boolean): Promise<void> {
+    const nextEnabled = await this.media.setCameraTrackEnabled({
+      enabled,
+      videoDeviceId: enabled ? this.selectedVideoDeviceIdForRequest() : undefined,
+      facingMode: enabled ? this.videoFacingModeForRequest(true) : undefined,
+    });
+    if (updateSender && !this.media.screenOn()) {
+      await this.webrtc.replaceVideoTrack(nextEnabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
+    }
+    this.updateLocalMediaState();
+    this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+  }
+
+  private cameraVisibleDuringCurrentShare(): boolean {
+    if (!this.anyScreenShareActive()) return true;
+    if (this.media.screenOn()) return false;
+    return this.shareCameraManualOverride();
+  }
+
+  private effectiveCameraState(cam: boolean): boolean {
+    return cam && this.cameraVisibleDuringCurrentShare();
+  }
+
   private broadcastMediaState(mic: boolean, cam: boolean, screenOn = this.media.screenOn()): void {
-    this.ws.send({ type: 'media-state', mic, cam, screenOn });
+    this.ws.send({ type: 'media-state', mic, cam: this.effectiveCameraState(cam), screenOn });
     this.queueDiagnosticsLog('state-change');
   }
 
@@ -1568,7 +1663,7 @@ export class RoomPage implements OnDestroy {
   private updateLocalMediaState(): void {
     const id = this.myId();
     if (!id) return;
-    this.webrtc.updatePeer(id, { micEnabled: this.media.micOn(), camEnabled: this.media.cameraOn(), screenOn: this.media.screenOn() });
+    this.webrtc.updatePeer(id, { micEnabled: this.media.micOn(), camEnabled: this.effectiveCameraOn(), screenOn: this.media.screenOn() });
   }
 
   private shouldEnableBgPause(): boolean {
@@ -1793,6 +1888,9 @@ declare global {
       }[];
       shareLayoutActive?: boolean;
       shareStripCollapsed?: boolean;
+      anyScreenShareActive?: boolean;
+      effectiveCameraOn?: boolean;
+      shareCameraManualOverride?: boolean;
       screenShareAttempts: number;
       lastVideoConstraints?: MediaStreamConstraints | null;
       audioContextActivated?: boolean;

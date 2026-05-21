@@ -42,7 +42,7 @@
         [roomLabel]="roomTitle()"
         [elapsedLabel]="formattedElapsed()"
         [micOn]="media.micOn()"
-        [cameraOn]="media.cameraOn()"
+        [cameraOn]="effectiveCameraOn()"
         [screenOn]="media.screenOn()"
         [recording]="recorder.isRecording()"
         [uploading]="recorder.isUploading()"

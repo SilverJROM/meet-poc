@@ -173,6 +173,8 @@ export class WebrtcService {
   private readonly outboundVideoDegraded = new Map<string, boolean>();
   private readonly videoSenders = new Map<string, RTCRtpSender>();
   private readonly fallbackVideoTracks = new Map<string, MediaStreamTrack | null>();
+  private shareCameraSuppressed = false;
+  private localScreenShareActive = false;
   private qualityTimer: ReturnType<typeof setInterval> | null = null;
   private activeSpeakerId: string | null = null;
   readonly forceRelay = signal(readForceRelay());
@@ -378,6 +380,13 @@ export class WebrtcService {
       const stillDegraded = !stillPaused && this.autoDegradedReceivers.has(peer.id);
       this.sendReceiverVideoPolicy(peer.id, stillPaused, enabled ? 'manual-audio-only' : 'auto-poor', stillDegraded);
     }
+  }
+
+  async setShareCameraPolicy(options: { suppressCamera: boolean; localScreenShareActive: boolean }): Promise<void> {
+    if (this.shareCameraSuppressed === options.suppressCamera && this.localScreenShareActive === options.localScreenShareActive) return;
+    this.shareCameraSuppressed = options.suppressCamera;
+    this.localScreenShareActive = options.localScreenShareActive;
+    await this.applyAllVideoPolicies();
   }
 
   async sampleQualityNowForTest(quality?: ConnectionQuality | 'critical'): Promise<void> {
@@ -701,6 +710,8 @@ export class WebrtcService {
     this.outboundVideoDegraded.clear();
     this.videoSenders.clear();
     this.fallbackVideoTracks.clear();
+    this.shareCameraSuppressed = false;
+    this.localScreenShareActive = false;
     this.manualAudioOnly.set(false);
     this.stopQualityPolling();
   }
@@ -1645,7 +1656,8 @@ export class WebrtcService {
   }
 
   private shouldPauseOutboundVideo(clientId: string): boolean {
-    return this.manualAudioOnly() || this.remotePauseRequests.has(clientId);
+    if (this.localScreenShareActive) return false;
+    return this.manualAudioOnly() || this.remotePauseRequests.has(clientId) || this.shareCameraSuppressed;
   }
 
   private shouldDegradeOutboundVideo(clientId: string): boolean {
