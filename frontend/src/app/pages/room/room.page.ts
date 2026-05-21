@@ -25,6 +25,7 @@ import { RoomsService } from '../../services/rooms.service';
 import { ViewportService } from '../../services/viewport.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
 import { WebrtcService } from '../../services/webrtc.service';
+import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
 
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
@@ -77,6 +78,7 @@ export class RoomPage implements OnDestroy {
   private readonly remoteAudio = inject(RemoteAudioService);
   private readonly platform = inject(PlatformService);
   private readonly viewport = inject(ViewportService);
+  readonly sfuClient = inject(SfuClientService);
 
   readonly roomKey = this.route.snapshot.paramMap.get('slug') ?? this.route.snapshot.paramMap.get('id') ?? '';
   roomId = this.roomKey;
@@ -294,6 +296,7 @@ export class RoomPage implements OnDestroy {
         closeSignalingForTest: () => this.ws.debugDropForReconnect(),
         sampleConnectionQualityForTest: (quality?: 'good' | 'weak' | 'poor' | 'critical') => this.webrtc.sampleQualityNowForTest(quality),
         senderSnapshot: () => this.webrtc.debugSenderSnapshot(),
+        sfuPublishState: this.sfuClient.localPublishState(),
       };
       if (window.location.hostname === 'localhost') {
         debug.diagnosticSnapshot = () => this.webrtc.diagnosticSnapshot();
@@ -305,6 +308,7 @@ export class RoomPage implements OnDestroy {
         debug.forceNegotiationDeadlockForTest = (id?: string) => this.webrtc.debugForceNegotiationDeadlockForTest(id);
         debug.recoverySnapshot = (id?: string) => this.webrtc.debugRecoverySnapshot(id);
         debug.replaceRemoteAudioTrackForTest = (id: string) => this.replaceRemoteAudioTrackForTest(id);
+        debug.sfuGetStats = () => this.sfuClient.getStats();
       }
       window.__meetDebug = debug;
     });
@@ -792,6 +796,7 @@ export class RoomPage implements OnDestroy {
   ngOnDestroy(): void {
     this.uninstallPageLifecycleCleanup();
     this.uninstallDeviceChangeHandler();
+    this.sfuClient.destroy();
     this.cleanupCall();
     delete window.__meetDebug;
   }
@@ -880,6 +885,11 @@ export class RoomPage implements OnDestroy {
         await this.drainPendingSignals(peer.id);
       }
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+      if (this.route.snapshot.queryParamMap.get('sfu') === '1' && msg.participantId && msg.sessionId) {
+        void this.sfuClient
+          .publish({ clientKey: readClientKey(), participantId: msg.participantId, sessionId: msg.sessionId, localStream: this.media.localStream() })
+          .catch((err: unknown) => console.error('[sfu-client] publish failed', err));
+      }
       this.startDiagnosticsLogger();
       this.queueDiagnosticsLog('state-change');
       if (wasInCall) this.status.set('Reconnected.');
@@ -2208,6 +2218,8 @@ declare global {
         rollbackCount: number;
         forceRelay: boolean;
       }[];
+      sfuPublishState?: LocalPublishState | null;
+      sfuGetStats?: () => Promise<RTCStatsReport | null>;
     };
   }
 }
