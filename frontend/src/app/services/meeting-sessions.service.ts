@@ -83,7 +83,7 @@ export type DiagnosticsIceRestartAudit = {
   lastOutcome: 'recovered' | 'failed' | 'pending' | null;
   lastTimeToRecoverMs: number | null;
   terminalFailed: boolean;
-  autoRecoveryOutcome: null;
+  autoRecoveryOutcome: 'recovered' | 'failed' | null;
 };
 
 export type DiagnosticsNegotiationAudit = {

@@ -159,6 +159,7 @@ export class RoomPage implements OnDestroy {
   private diagnosticsLogInFlight = false;
   private readonly pendingSignals = new Map<string, BufferedSignal[]>();
   private readonly reconnectToken = signal<string | null>(readReconnectToken(this.roomKey));
+  private signalingResyncCount = 0;
   private pendingListInitialized = false;
   private lastDoorbellAt = 0;
   private deviceChangeListenerInstalled = false;
@@ -218,6 +219,7 @@ export class RoomPage implements OnDestroy {
         wsConnected: this.ws.connected(),
         wsStatus: this.ws.status(),
         wsReconnectAttempts: this.ws.reconnectAttempts(),
+        wsResyncCount: this.signalingResyncCount,
         reconnectTokenPresent: !!this.reconnectToken(),
         myClientId: this.myId(),
         myParticipantId: this.myParticipantId(),
@@ -275,6 +277,9 @@ export class RoomPage implements OnDestroy {
         debug.forceActiveSpeakerForTest = (id: string | null) => this.activeSpeaker.forceActivePeerForTest(id);
         debug.markPeerReconnectingForTest = (id: string) => this.webrtc.markPeerReconnecting(id);
         debug.markPeerRecoveredForTest = (id: string) => this.webrtc.debugMarkPeerRecoveredForTest(id);
+        debug.forceTerminalRecoveryForTest = (id?: string) => this.webrtc.debugForceTerminalRecoveryForTest(id);
+        debug.forceNegotiationDeadlockForTest = (id?: string) => this.webrtc.debugForceNegotiationDeadlockForTest(id);
+        debug.recoverySnapshot = (id?: string) => this.webrtc.debugRecoverySnapshot(id);
       }
       window.__meetDebug = debug;
     });
@@ -365,7 +370,7 @@ export class RoomPage implements OnDestroy {
     this.ws.connect(
       this.roomId,
       (msg) => void this.handleMessage(msg),
-      () => this.sendJoin(name),
+      () => this.resyncSignalingState(name),
       () => {
         if (this.state() !== 'in-call') {
           this.error.set('Signaling connection error.');
@@ -1586,6 +1591,15 @@ export class RoomPage implements OnDestroy {
     });
   }
 
+  private resyncSignalingState(name: string): void {
+    if (this.state() === 'in-call') {
+      this.signalingResyncCount += 1;
+      this.status.set('Reconnected to signaling. Resyncing room state...');
+      this.queueDiagnosticsLog('reconnect', 'signaling websocket reopened; resyncing room state');
+    }
+    this.sendJoin(name);
+  }
+
   private startClock(): void {
     this.stopClock();
     this.callStartMs.set(Date.now());
@@ -1790,6 +1804,7 @@ declare global {
       wsConnected?: boolean;
       wsStatus?: string;
       wsReconnectAttempts?: number;
+      wsResyncCount?: number;
       reconnectTokenPresent?: boolean;
       myClientId?: string | null;
       myParticipantId?: string | null;
@@ -1851,6 +1866,18 @@ declare global {
       forceActiveSpeakerForTest?: (id: string | null) => void;
       markPeerReconnectingForTest?: (id: string) => void;
       markPeerRecoveredForTest?: (id: string) => void;
+      forceTerminalRecoveryForTest?: (id?: string) => Promise<void>;
+      forceNegotiationDeadlockForTest?: (id?: string) => Promise<void>;
+      recoverySnapshot?: (id?: string) => {
+        id: string;
+        participantId: string;
+        pcPresent: boolean;
+        pcRecreateAttempts: number;
+        restartAttempts: number;
+        autoRecoveryOutcome: 'recovered' | 'failed' | null;
+        rollbackCount: number;
+        forceRelay: boolean;
+      }[];
     };
   }
 }

@@ -62,6 +62,13 @@ type PeerMeta = {
   restartAttempts: number;
   restartTimer: ReturnType<typeof setTimeout> | null;
   recoveryTimer: ReturnType<typeof setTimeout> | null;
+  pcRecreateAttempts: number;
+  pcRecreateTimer: ReturnType<typeof setTimeout> | null;
+  lastPcRecreateAt: number;
+  recreatingPc: boolean;
+  healthyPcSamples: number;
+  negotiationTimer: ReturnType<typeof setTimeout> | null;
+  negotiationRecoveryAttempts: number;
   lastRestartAt: number;
   currentRestartStartedAt: number | null;
 };
@@ -112,9 +119,14 @@ type PeerForensics = {
   lastSignalingState: string | null;
 };
 
-const ICE_RESTART_DEBOUNCE_MS = 1200;
-const ICE_RESTART_COOLDOWN_MS = 3000;
+const ICE_RESTART_DEBOUNCE_MS = 1500;
+const ICE_RESTART_COOLDOWN_MS = 5000;
 const MAX_ICE_RESTART_ATTEMPTS = 3;
+const PC_RECREATE_DEBOUNCE_MS = 1500;
+const PC_RECREATE_BACKOFF_MS = [10_000, 30_000];
+const MAX_CONSECUTIVE_PC_RECREATE_ATTEMPTS = 2;
+const NEGOTIATION_STUCK_MS = 8000;
+const MAX_NEGOTIATION_RECOVERY_ATTEMPTS = 2;
 const FORCE_RELAY_STORAGE_KEY = 'meet-poc.forceRelay';
 const QUALITY_POLL_MS = 2500;
 const AUTO_DEGRADE_POOR_SAMPLES = 3;
@@ -241,21 +253,18 @@ export class WebrtcService {
     }
     const blockedByLivePeer = this.removeStalePeersForParticipant(participantId, clientId);
     if (blockedByLivePeer) return;
-    const iceServers = await this.iceConfig.getIceServers();
-    const pc = new RTCPeerConnection(this.peerConnectionConfig(iceServers));
     const meta = this.createPeerMeta(clientId);
     this.peerMeta.set(clientId, meta);
-    this.peerForensics.set(clientId, createPeerForensics(pc));
     const peer: PeerState = {
       id: clientId,
       participantId,
       name,
-      pc,
+      pc: null,
       stream: options.stream ?? new MediaStream(),
-      connectionState: pc.connectionState,
-      iceConnectionState: pc.iceConnectionState,
-      iceGatheringState: pc.iceGatheringState,
-      signalingState: pc.signalingState,
+      connectionState: 'new',
+      iceConnectionState: 'new',
+      iceGatheringState: 'new',
+      signalingState: 'stable',
       selectedCandidateType: null,
       quality: 'good',
       packetLossPct: null,
@@ -274,71 +283,13 @@ export class WebrtcService {
     };
     this.mutatePeers((peers) => peers.set(clientId, peer));
 
-    for (const track of this.localStream.getTracks()) {
-      const sender = pc.addTrack(track, this.localStream);
-      if (track.kind === 'video') this.videoSenders.set(clientId, sender);
-    }
-    await this.applySenderBandwidthPreferences(pc, clientId);
-
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        this.recordGatheredCandidate(clientId, event.candidate.toJSON(), 'local');
-        this.sendSignal?.(clientId, { ice: event.candidate.toJSON() });
-      }
-    };
-    pc.ontrack = (event) => {
-      const nextStream = peer.stream ?? new MediaStream();
-      nextStream.addTrack(event.track);
-      peer.stream = nextStream;
-      this.touchPeer(clientId, { stream: nextStream });
-    };
-    pc.onconnectionstatechange = () => {
-      this.recordStateTransition(clientId, 'connection', pc.connectionState);
-      this.touchPeer(clientId, { connectionState: pc.connectionState, reconnecting: false, reconnectingSince: null });
-      console.log(`[webrtc] peer ${clientId} connectionState=${pc.connectionState} at ${new Date().toISOString()}`);
-      this.updateRecoveryState(clientId, pc);
-      void this.logSelectedCandidateType(clientId, pc);
-      this.maybeScheduleIceRestart(clientId, pc);
-    };
-    pc.oniceconnectionstatechange = () => {
-      this.recordStateTransition(clientId, 'iceConnection', pc.iceConnectionState);
-      this.touchPeer(clientId, { iceConnectionState: pc.iceConnectionState, reconnecting: false, reconnectingSince: null });
-      console.log(`[webrtc] peer ${clientId} iceConnectionState=${pc.iceConnectionState} at ${new Date().toISOString()}`);
-      this.updateRecoveryState(clientId, pc);
-      void this.logSelectedCandidateType(clientId, pc);
-      this.maybeScheduleIceRestart(clientId, pc);
-    };
-    pc.onicegatheringstatechange = () => {
-      this.recordStateTransition(clientId, 'iceGathering', pc.iceGatheringState);
-      this.touchPeer(clientId, { iceGatheringState: pc.iceGatheringState });
-      console.log(`[webrtc] peer ${clientId} iceGatheringState=${pc.iceGatheringState} at ${new Date().toISOString()}`);
-      void this.logSelectedCandidateType(clientId, pc);
-    };
-    pc.onsignalingstatechange = () => {
-      this.recordStateTransition(clientId, 'signaling', pc.signalingState);
-      this.touchPeer(clientId, { signalingState: pc.signalingState });
-      console.log(`[webrtc] peer ${clientId} signalingState=${pc.signalingState} at ${new Date().toISOString()}`);
-      void this.logSelectedCandidateType(clientId, pc);
-    };
-    pc.onnegotiationneeded = () => {
-      const forensics = this.ensureForensics(clientId, pc);
-      forensics.negotiation.negotiationNeededCount += 1;
-      this.pushTransition(clientId, {
-        scope: 'negotiation',
-        event: 'negotiationneeded',
-        detail: `makingOffer=${meta.makingOffer} signaling=${pc.signalingState}`,
-      });
-    };
-
-    if (isInitiator) {
-      await this.sendOffer(clientId, pc, meta, false);
-    }
-    this.startQualityPolling();
+    await this.createPeerConnectionForPeer(clientId, isInitiator, { resetForensics: true });
   }
 
   async resumePeer(oldClientId: string, clientId: string, name: string, isInitiator: boolean, options: { participantId?: string; isHost?: boolean } = {}): Promise<void> {
     const participantId = options.participantId || this.peers().get(oldClientId)?.participantId || clientId;
     if (oldClientId === clientId) {
+      this.cancelPeerConnectionRecreate(clientId);
       this.updatePeer(clientId, { name, participantId, isHost: !!options.isHost, reconnecting: false, reconnectingSince: null });
       return;
     }
@@ -351,6 +302,7 @@ export class WebrtcService {
   }
 
   markPeerReconnecting(clientId: string): void {
+    this.cancelPeerConnectionRecreate(clientId);
     this.touchPeer(clientId, {
       connectionState: 'disconnected',
       iceConnectionState: 'disconnected',
@@ -363,7 +315,12 @@ export class WebrtcService {
   debugMarkPeerRecoveredForTest(clientId: string): void {
     const meta = this.peerMeta.get(clientId);
     if (meta?.recoveryTimer) clearTimeout(meta.recoveryTimer);
-    if (meta) meta.recoveryTimer = null;
+    if (meta) {
+      meta.recoveryTimer = null;
+      meta.restartAttempts = 0;
+      meta.pcRecreateAttempts = 0;
+      meta.healthyPcSamples = 0;
+    }
     this.touchPeer(clientId, {
       connectionState: 'connected',
       iceConnectionState: 'connected',
@@ -471,6 +428,57 @@ export class WebrtcService {
           videoMaxFramerate: typeof videoEncoding?.maxFramerate === 'number' ? videoEncoding.maxFramerate : null,
           videoDegraded: this.shouldDegradeOutboundVideo(peer.id),
         };
+    });
+  }
+
+  async debugForceTerminalRecoveryForTest(clientId?: string): Promise<void> {
+    const peer = clientId ? this.peers().get(clientId) : this.peerList().find((candidate) => !candidate.isLocal && candidate.pc);
+    if (!peer?.pc) return;
+    const meta = this.peerMeta.get(peer.id) ?? this.createPeerMeta(peer.id);
+    this.peerMeta.set(peer.id, meta);
+    meta.restartAttempts = MAX_ICE_RESTART_ATTEMPTS;
+    const forensics = this.ensureForensics(peer.id, peer.pc);
+    forensics.iceRestart.attempts = MAX_ICE_RESTART_ATTEMPTS;
+    forensics.iceRestart.terminalFailed = true;
+    this.maybeSchedulePeerConnectionRecreate(peer.id, peer.pc);
+  }
+
+  async debugForceNegotiationDeadlockForTest(clientId?: string): Promise<void> {
+    const peer = clientId ? this.peers().get(clientId) : this.peerList().find((candidate) => !candidate.isLocal && candidate.pc);
+    if (!peer?.pc) return;
+    const meta = this.peerMeta.get(peer.id) ?? this.createPeerMeta(peer.id);
+    this.peerMeta.set(peer.id, meta);
+    const offer = await peer.pc.createOffer();
+    await peer.pc.setLocalDescription(offer);
+    this.recordNegotiationEvent(peer.id, 'offer-sent', peer.pc);
+    await this.breakNegotiationDeadlock(peer.id, peer.pc, meta);
+  }
+
+  debugRecoverySnapshot(clientId?: string): {
+    id: string;
+    participantId: string;
+    pcPresent: boolean;
+    pcRecreateAttempts: number;
+    restartAttempts: number;
+    autoRecoveryOutcome: 'recovered' | 'failed' | null;
+    rollbackCount: number;
+    forceRelay: boolean;
+  }[] {
+    return this.peerList()
+      .filter((peer) => !peer.isLocal && (!clientId || peer.id === clientId))
+      .map((peer) => {
+        const meta = this.peerMeta.get(peer.id);
+        const forensics = this.peerForensics.get(peer.id) ?? createEmptyForensics();
+        return {
+          id: peer.id,
+          participantId: peer.participantId,
+          pcPresent: !!peer.pc,
+          pcRecreateAttempts: meta?.pcRecreateAttempts ?? 0,
+          restartAttempts: meta?.restartAttempts ?? 0,
+          autoRecoveryOutcome: forensics.iceRestart.autoRecoveryOutcome,
+          rollbackCount: forensics.negotiation.rollbackCount,
+          forceRelay: this.forceRelay(),
+        };
       });
   }
 
@@ -556,7 +564,9 @@ export class WebrtcService {
       }
       meta.ignoreOffer = false;
       this.ensureForensics(from, pc).negotiation.ignoreOffer = false;
+      if (offerCollision && meta.polite) await this.rollbackLocalOffer(from, pc, meta, 'polite-offer-collision');
       await pc.setRemoteDescription(payload.sdp);
+      if (pc.signalingState === 'stable') this.clearNegotiationWatchdog(meta, true);
       if (payload.sdp.type === 'offer') await this.sendAnswer(from, pc);
     } else if (payload.ice) {
       try {
@@ -642,6 +652,8 @@ export class WebrtcService {
     for (const meta of this.peerMeta.values()) {
       if (meta.restartTimer) clearTimeout(meta.restartTimer);
       if (meta.recoveryTimer) clearTimeout(meta.recoveryTimer);
+      if (meta.pcRecreateTimer) clearTimeout(meta.pcRecreateTimer);
+      if (meta.negotiationTimer) clearTimeout(meta.negotiationTimer);
     }
     this.peerMeta.clear();
     this.qualityCounters.clear();
@@ -703,11 +715,110 @@ export class WebrtcService {
     );
   }
 
+  private async createPeerConnectionForPeer(clientId: string, isInitiator: boolean, options: { resetForensics: boolean }): Promise<RTCPeerConnection | null> {
+    if (!this.localStream || !this.sendSignal) return null;
+    const peer = this.peers().get(clientId);
+    if (!peer || peer.isLocal) return null;
+    const meta = this.peerMeta.get(clientId) ?? this.createPeerMeta(clientId);
+    this.peerMeta.set(clientId, meta);
+    const iceServers = await this.iceConfig.getIceServers();
+    const pc = new RTCPeerConnection(this.peerConnectionConfig(iceServers));
+    if (options.resetForensics || !this.peerForensics.has(clientId)) this.peerForensics.set(clientId, createPeerForensics(pc));
+    else {
+      const forensics = this.ensureForensics(clientId, pc);
+      forensics.lastConnectionState = pc.connectionState;
+      forensics.lastIceConnectionState = pc.iceConnectionState;
+      forensics.lastIceGatheringState = pc.iceGatheringState;
+      forensics.lastSignalingState = pc.signalingState;
+    }
+    this.previousStats.delete(clientId);
+    this.previousInboundAudioPackets.delete(clientId);
+    this.inboundAudioStats.delete(clientId);
+    this.videoSenders.delete(clientId);
+    this.fallbackVideoTracks.delete(clientId);
+    this.touchPeer(clientId, {
+      pc,
+      connectionState: pc.connectionState,
+      iceConnectionState: pc.iceConnectionState,
+      iceGatheringState: pc.iceGatheringState,
+      signalingState: pc.signalingState,
+      selectedCandidateType: null,
+      reconnecting: false,
+      reconnectingSince: null,
+    });
+
+    for (const track of this.localStream.getTracks()) {
+      const sender = pc.addTrack(track, this.localStream);
+      if (track.kind === 'video') this.videoSenders.set(clientId, sender);
+    }
+    await this.applySenderBandwidthPreferences(pc, clientId);
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        this.recordGatheredCandidate(clientId, event.candidate.toJSON(), 'local');
+        this.sendSignal?.(clientId, { ice: event.candidate.toJSON() });
+      }
+    };
+    pc.ontrack = (event) => {
+      const currentPeer = this.peers().get(clientId);
+      const nextStream = currentPeer?.stream ?? new MediaStream();
+      if (!nextStream.getTracks().some((track) => track.id === event.track.id)) nextStream.addTrack(event.track);
+      this.touchPeer(clientId, { stream: nextStream });
+    };
+    pc.onconnectionstatechange = () => {
+      this.recordStateTransition(clientId, 'connection', pc.connectionState);
+      this.touchPeer(clientId, { connectionState: pc.connectionState, reconnecting: false, reconnectingSince: null });
+      console.log(`[webrtc] peer ${clientId} connectionState=${pc.connectionState} at ${new Date().toISOString()}`);
+      this.updateRecoveryState(clientId, pc);
+      void this.logSelectedCandidateType(clientId, pc);
+      this.maybeScheduleIceRestart(clientId, pc);
+      this.maybeSchedulePeerConnectionRecreate(clientId, pc);
+    };
+    pc.oniceconnectionstatechange = () => {
+      this.recordStateTransition(clientId, 'iceConnection', pc.iceConnectionState);
+      this.touchPeer(clientId, { iceConnectionState: pc.iceConnectionState, reconnecting: false, reconnectingSince: null });
+      console.log(`[webrtc] peer ${clientId} iceConnectionState=${pc.iceConnectionState} at ${new Date().toISOString()}`);
+      this.updateRecoveryState(clientId, pc);
+      void this.logSelectedCandidateType(clientId, pc);
+      this.maybeScheduleIceRestart(clientId, pc);
+      this.maybeSchedulePeerConnectionRecreate(clientId, pc);
+    };
+    pc.onicegatheringstatechange = () => {
+      this.recordStateTransition(clientId, 'iceGathering', pc.iceGatheringState);
+      this.touchPeer(clientId, { iceGatheringState: pc.iceGatheringState });
+      console.log(`[webrtc] peer ${clientId} iceGatheringState=${pc.iceGatheringState} at ${new Date().toISOString()}`);
+      void this.logSelectedCandidateType(clientId, pc);
+    };
+    pc.onsignalingstatechange = () => {
+      this.recordStateTransition(clientId, 'signaling', pc.signalingState);
+      this.touchPeer(clientId, { signalingState: pc.signalingState });
+      console.log(`[webrtc] peer ${clientId} signalingState=${pc.signalingState} at ${new Date().toISOString()}`);
+      if (pc.signalingState === 'stable') this.clearNegotiationWatchdog(meta, true);
+      else this.scheduleNegotiationWatchdog(clientId, pc, meta);
+      void this.logSelectedCandidateType(clientId, pc);
+    };
+    pc.onnegotiationneeded = () => {
+      const forensics = this.ensureForensics(clientId, pc);
+      forensics.negotiation.negotiationNeededCount += 1;
+      this.pushTransition(clientId, {
+        scope: 'negotiation',
+        event: 'negotiationneeded',
+        detail: `makingOffer=${meta.makingOffer} signaling=${pc.signalingState}`,
+      });
+    };
+
+    if (isInitiator) await this.sendOffer(clientId, pc, meta, false);
+    this.startQualityPolling();
+    return pc;
+  }
+
   private removePeerResources(clientId: string, stopStreamTracks: boolean): void {
     const peer = this.peers().get(clientId);
     const meta = this.peerMeta.get(clientId);
     if (meta?.restartTimer) clearTimeout(meta.restartTimer);
     if (meta?.recoveryTimer) clearTimeout(meta.recoveryTimer);
+    if (meta?.pcRecreateTimer) clearTimeout(meta.pcRecreateTimer);
+    if (meta?.negotiationTimer) clearTimeout(meta.negotiationTimer);
     this.peerMeta.delete(clientId);
     this.qualityCounters.delete(clientId);
     this.previousStats.delete(clientId);
@@ -734,6 +845,13 @@ export class WebrtcService {
       restartAttempts: 0,
       restartTimer: null,
       recoveryTimer: null,
+      pcRecreateAttempts: 0,
+      pcRecreateTimer: null,
+      lastPcRecreateAt: 0,
+      recreatingPc: false,
+      healthyPcSamples: 0,
+      negotiationTimer: null,
+      negotiationRecoveryAttempts: 0,
       lastRestartAt: 0,
       currentRestartStartedAt: null,
     };
@@ -759,6 +877,7 @@ export class WebrtcService {
         if (meta.currentRestartStartedAt != null) {
           forensics.iceRestart.lastOutcome = 'recovered';
           forensics.iceRestart.lastTimeToRecoverMs = Date.now() - meta.currentRestartStartedAt;
+          if (meta.pcRecreateAttempts > 0) forensics.iceRestart.autoRecoveryOutcome = 'recovered';
           this.pushTransition(clientId, {
             scope: 'iceRestart',
             event: 'recovered',
@@ -797,6 +916,7 @@ export class WebrtcService {
       const offer = await pc.createOffer(iceRestart ? { iceRestart: true } : undefined);
       await pc.setLocalDescription(offer);
       this.recordNegotiationEvent(clientId, iceRestart ? 'ice-restart-offer-sent' : 'offer-sent', pc);
+      this.scheduleNegotiationWatchdog(clientId, pc, meta);
       this.sendSignal?.(clientId, { sdp: pc.localDescription?.toJSON() });
     } finally {
       meta.makingOffer = false;
@@ -808,6 +928,7 @@ export class WebrtcService {
     const answer = await pc.createAnswer();
     await pc.setLocalDescription(answer);
     this.recordNegotiationEvent(clientId, 'answer-sent', pc);
+    if (pc.signalingState === 'stable') this.clearNegotiationWatchdog(this.peerMeta.get(clientId) ?? null, true);
     this.sendSignal?.(clientId, { sdp: pc.localDescription?.toJSON() });
   }
 
@@ -845,6 +966,169 @@ export class WebrtcService {
     console.warn(`[webrtc] restarting ICE for peer ${clientId}; attempt=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS}`);
     pc.restartIce();
     await this.sendOffer(clientId, pc, meta, true);
+  }
+
+  private maybeSchedulePeerConnectionRecreate(clientId: string, pc: RTCPeerConnection): void {
+    const terminalFailed = pc.connectionState === 'failed' || pc.iceConnectionState === 'failed';
+    if (!terminalFailed || pc.signalingState === 'closed') return;
+    const peer = this.peers().get(clientId);
+    const meta = this.peerMeta.get(clientId);
+    if (!peer || peer.reconnecting || !meta || meta.recreatingPc || meta.pcRecreateTimer || meta.restartAttempts < MAX_ICE_RESTART_ATTEMPTS) return;
+    const forensics = this.ensureForensics(clientId, pc);
+    forensics.iceRestart.terminalFailed = true;
+    if (meta.pcRecreateAttempts >= MAX_CONSECUTIVE_PC_RECREATE_ATTEMPTS) {
+      forensics.iceRestart.autoRecoveryOutcome = 'failed';
+      this.pushTransition(clientId, {
+        scope: 'iceRestart',
+        event: 'pc-recreate-cap-hit',
+        detail: `attempts=${meta.pcRecreateAttempts}/${MAX_CONSECUTIVE_PC_RECREATE_ATTEMPTS}`,
+      });
+      return;
+    }
+    const backoff = meta.pcRecreateAttempts === 0 ? PC_RECREATE_DEBOUNCE_MS : PC_RECREATE_BACKOFF_MS[Math.min(meta.pcRecreateAttempts - 1, PC_RECREATE_BACKOFF_MS.length - 1)];
+    const elapsed = meta.lastPcRecreateAt ? Date.now() - meta.lastPcRecreateAt : Number.POSITIVE_INFINITY;
+    const delay = Math.max(PC_RECREATE_DEBOUNCE_MS, backoff - elapsed);
+    meta.pcRecreateTimer = setTimeout(() => {
+      meta.pcRecreateTimer = null;
+      void this.recreateFailedPeerConnection(clientId, pc);
+    }, delay);
+    this.pushTransition(clientId, {
+      scope: 'iceRestart',
+      event: 'pc-recreate-scheduled',
+      detail: `delayMs=${delay} restartAttempts=${meta.restartAttempts}/${MAX_ICE_RESTART_ATTEMPTS}`,
+    });
+  }
+
+  private async recreateFailedPeerConnection(clientId: string, failedPc: RTCPeerConnection): Promise<void> {
+    const peer = this.peers().get(clientId);
+    const meta = this.peerMeta.get(clientId);
+    if (!peer || !meta || peer.reconnecting || peer.pc !== failedPc || meta.recreatingPc) return;
+    const terminalFailed = failedPc.connectionState === 'failed' || failedPc.iceConnectionState === 'failed';
+    if (!terminalFailed || meta.restartAttempts < MAX_ICE_RESTART_ATTEMPTS) return;
+    if (meta.pcRecreateAttempts >= MAX_CONSECUTIVE_PC_RECREATE_ATTEMPTS) {
+      this.ensureForensics(clientId, failedPc).iceRestart.autoRecoveryOutcome = 'failed';
+      return;
+    }
+
+    meta.recreatingPc = true;
+    meta.pcRecreateAttempts += 1;
+    meta.lastPcRecreateAt = Date.now();
+    meta.restartAttempts = 0;
+    meta.currentRestartStartedAt = meta.lastPcRecreateAt;
+    meta.healthyPcSamples = 0;
+    const forensics = this.ensureForensics(clientId, failedPc);
+    forensics.iceRestart.fired = true;
+    forensics.iceRestart.lastOutcome = 'pending';
+    forensics.iceRestart.lastAttemptAt = meta.lastPcRecreateAt;
+    forensics.iceRestart.lastTimeToRecoverMs = null;
+    forensics.iceRestart.terminalFailed = true;
+    this.pushTransition(clientId, {
+      scope: 'iceRestart',
+      event: 'pc-recreate-fired',
+      detail: `attempt=${meta.pcRecreateAttempts}/${MAX_CONSECUTIVE_PC_RECREATE_ATTEMPTS} participantId=${peer.participantId}`,
+    });
+
+    if (!this.forceRelay() && meta.pcRecreateAttempts > 1) {
+      this.forceRelay.set(true);
+      storeForceRelay(true);
+      this.pushTransition(clientId, { scope: 'iceRestart', event: 'relay-policy-escalated', detail: 'forceRelay=true' });
+    }
+
+    try {
+      this.closePeerConnectionForRecreate(clientId, failedPc, meta);
+      const stream = peer.stream ?? new MediaStream();
+      for (const track of stream.getTracks()) stream.removeTrack(track);
+      this.touchPeer(clientId, { pc: null, stream, connectionState: 'new', iceConnectionState: 'new', iceGatheringState: 'new', signalingState: 'stable' });
+      await this.createPeerConnectionForPeer(clientId, true, { resetForensics: false });
+    } catch (err) {
+      forensics.iceRestart.autoRecoveryOutcome = 'failed';
+      forensics.iceRestart.lastOutcome = 'failed';
+      this.pushTransition(clientId, { scope: 'iceRestart', event: 'pc-recreate-failed', detail: err instanceof Error ? err.message : 'unknown' });
+      console.warn(`[webrtc] peer ${clientId} PC recreate failed`, err);
+    } finally {
+      meta.recreatingPc = false;
+    }
+  }
+
+  private closePeerConnectionForRecreate(clientId: string, pc: RTCPeerConnection, meta: PeerMeta): void {
+    if (meta.restartTimer) clearTimeout(meta.restartTimer);
+    if (meta.recoveryTimer) clearTimeout(meta.recoveryTimer);
+    if (meta.negotiationTimer) clearTimeout(meta.negotiationTimer);
+    meta.restartTimer = null;
+    meta.recoveryTimer = null;
+    meta.negotiationTimer = null;
+    this.previousStats.delete(clientId);
+    this.previousInboundAudioPackets.delete(clientId);
+    this.inboundAudioStats.delete(clientId);
+    this.videoSenders.delete(clientId);
+    this.fallbackVideoTracks.delete(clientId);
+    pc.close();
+  }
+
+  private cancelPeerConnectionRecreate(clientId: string): void {
+    const meta = this.peerMeta.get(clientId);
+    if (!meta?.pcRecreateTimer) return;
+    clearTimeout(meta.pcRecreateTimer);
+    meta.pcRecreateTimer = null;
+    this.pushTransition(clientId, { scope: 'iceRestart', event: 'pc-recreate-deferred', detail: 'peer-resume-in-progress' });
+  }
+
+  private scheduleNegotiationWatchdog(clientId: string, pc: RTCPeerConnection, meta: PeerMeta): void {
+    if (pc.signalingState === 'closed' || pc.signalingState === 'stable') return;
+    if (meta.negotiationTimer) return;
+    meta.negotiationTimer = setTimeout(() => {
+      meta.negotiationTimer = null;
+      void this.breakNegotiationDeadlock(clientId, pc, meta);
+    }, NEGOTIATION_STUCK_MS);
+  }
+
+  private clearNegotiationWatchdog(meta: PeerMeta | null, resetAttempts: boolean): void {
+    if (!meta) return;
+    if (meta.negotiationTimer) clearTimeout(meta.negotiationTimer);
+    meta.negotiationTimer = null;
+    if (resetAttempts) meta.negotiationRecoveryAttempts = 0;
+  }
+
+  private async breakNegotiationDeadlock(clientId: string, pc: RTCPeerConnection, meta: PeerMeta): Promise<void> {
+    const peer = this.peers().get(clientId);
+    if (!peer || peer.reconnecting || peer.pc !== pc || pc.signalingState === 'closed' || pc.signalingState === 'stable') return;
+    if (meta.negotiationRecoveryAttempts >= MAX_NEGOTIATION_RECOVERY_ATTEMPTS) {
+      this.pushTransition(clientId, {
+        scope: 'negotiation',
+        event: 'deadlock-cap-hit',
+        detail: `signaling=${pc.signalingState}`,
+      });
+      return;
+    }
+    meta.negotiationRecoveryAttempts += 1;
+    this.pushTransition(clientId, {
+      scope: 'negotiation',
+      event: 'deadlock-break',
+      detail: `attempt=${meta.negotiationRecoveryAttempts}/${MAX_NEGOTIATION_RECOVERY_ATTEMPTS} signaling=${pc.signalingState}`,
+    });
+    await this.rollbackLocalOffer(clientId, pc, meta, 'deadlock-watchdog');
+    if ((pc as RTCPeerConnection).signalingState === 'stable') await this.sendOffer(clientId, pc, meta, false);
+  }
+
+  private async rollbackLocalOffer(clientId: string, pc: RTCPeerConnection, meta: PeerMeta, reason: string): Promise<void> {
+    if (pc.signalingState !== 'have-local-offer' && !meta.makingOffer) return;
+    try {
+      await pc.setLocalDescription({ type: 'rollback' } as RTCSessionDescriptionInit);
+      meta.makingOffer = false;
+      const forensics = this.ensureForensics(clientId, pc);
+      forensics.negotiation.rollbackCount += 1;
+      this.pushTransition(clientId, {
+        scope: 'negotiation',
+        event: 'rollback',
+        detail: `${reason} signaling=${pc.signalingState}`,
+      });
+    } catch (err) {
+      this.pushTransition(clientId, {
+        scope: 'negotiation',
+        event: 'rollback-failed',
+        detail: err instanceof Error ? err.message : reason,
+      });
+    }
   }
 
   private async logSelectedCandidateType(clientId: string, pc: RTCPeerConnection): Promise<void> {
@@ -1007,6 +1291,7 @@ export class WebrtcService {
       counters.good = 0;
     }
     this.qualityCounters.set(clientId, counters);
+    this.updateSustainedHealthyRecoveryWindow(clientId, metrics);
     this.touchPeer(clientId, {
       quality: metrics.quality,
       packetLossPct: metrics.packetLossPct,
@@ -1035,6 +1320,29 @@ export class WebrtcService {
       if (!this.manualAudioOnly()) this.sendReceiverVideoPolicy(clientId, false, 'auto-poor', false);
       this.updateAudioOnlyReason(clientId);
     }
+  }
+
+  private updateSustainedHealthyRecoveryWindow(clientId: string, metrics: QualityMetrics): void {
+    const meta = this.peerMeta.get(clientId);
+    if (!meta) return;
+    const pc = this.peers().get(clientId)?.pc;
+    const connected = pc?.connectionState === 'connected' || pc?.iceConnectionState === 'connected' || pc?.iceConnectionState === 'completed';
+    if (metrics.quality === 'good' && connected) {
+      meta.healthyPcSamples += 1;
+      if (meta.healthyPcSamples >= AUTO_RESTORE_GOOD_SAMPLES) {
+        if (meta.pcRecreateAttempts > 0) {
+          this.pushTransition(clientId, {
+            scope: 'iceRestart',
+            event: 'pc-recreate-cap-reset',
+            detail: `healthySamples=${meta.healthyPcSamples}`,
+          });
+        }
+        meta.pcRecreateAttempts = 0;
+        meta.healthyPcSamples = 0;
+      }
+      return;
+    }
+    meta.healthyPcSamples = 0;
   }
 
   private async readQualityMetrics(clientId: string, pc: RTCPeerConnection, sampleOutboundAudio = false): Promise<QualityMetrics> {

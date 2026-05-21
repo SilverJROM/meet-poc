@@ -39,7 +39,7 @@ test('DR-37 full reload rejoin keeps the same participant identity', async ({ br
 
   await guest.evaluate(() => window.sessionStorage.clear());
   await guest.goto(room.url);
-  await expect.poll(() => remotePeerCountByParticipant(page, before!.participantId), { timeout: 8000 }).toBe(0);
+  await expect.poll(() => remotePeerCountByParticipant(page, before!.participantId), { timeout: 8000 }).toBe(1);
 
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill('guest-identity');
@@ -47,8 +47,8 @@ test('DR-37 full reload rejoin keeps the same participant identity', async ({ br
   const secondClientKey = await guest.evaluate(() => window.localStorage.getItem('meet-poc.clientKey'));
   expect(secondClientKey).toBe(firstClientKey);
 
-  await page.getByLabel('Waiting to join').locator('li').filter({ hasText: 'guest-identity' }).getByRole('button', { name: 'Admit' }).click();
   await expect(guest.locator('.call-panel')).toBeVisible();
+  await expect(page.getByLabel('Waiting to join').locator('li').filter({ hasText: 'guest-identity' })).toHaveCount(0);
   await expect(page.locator('app-tile')).toHaveCount(2);
   await expect.poll(() => remotePeerCountByParticipant(page, before!.participantId), { timeout: 10000 }).toBe(1);
   const after = await remotePeerByParticipant(page, before!.participantId);
