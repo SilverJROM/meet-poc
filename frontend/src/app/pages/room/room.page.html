@@ -113,9 +113,11 @@
           <span>Tap to enable audio</span>
           <div class="audio-unblock-actions">
             <button type="button" (click)="enableRemoteAudio()">Enable audio</button>
-            <button type="button" (click)="remoteAudioBlocked.set(false)">Dismiss</button>
           </div>
         </div>
+      }
+      @if (iosRemoteAudioMixerEnabled()) {
+        <audio #remoteAudioMixer class="remote-audio-mixer" data-remote-audio-mixer autoplay playsinline></audio>
       }
       @if (webrtc.manualAudioOnly()) {
         <div class="weak-connection-banner" role="status">
@@ -219,6 +221,7 @@
               [peer]="presenter"
               [displayStream]="shareStream()"
               [forceVideo]="true"
+              [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()"
               variant="share-main"
               [speaking]="activeSpeaker.activePeerId() === presenter.id"
               (remoteAudioBlocked)="handleRemoteAudioBlocked()"
@@ -236,7 +239,7 @@
             @if (!shareStripCollapsed()) {
               <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
                 @for (peer of orderedStripPeers(); track peer.participantId) {
-                  <app-tile [peer]="peer" variant="strip" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+                  <app-tile [peer]="peer" variant="strip" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
                 }
               </div>
             }
@@ -244,7 +247,7 @@
         } @else {
           <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
             @for (peer of peers(); track peer.participantId) {
-              <app-tile [peer]="peer" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+              <app-tile [peer]="peer" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
             }
           </div>
         }

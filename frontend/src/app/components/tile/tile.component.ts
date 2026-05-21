@@ -17,6 +17,7 @@ export class TileComponent {
   readonly variant = input<'grid' | 'strip' | 'share-main'>('grid');
   readonly displayStream = input<MediaStream | null>(null);
   readonly forceVideo = input(false);
+  readonly remoteAudioEnabled = input(true);
   readonly remoteAudioBlocked = output<void>();
   readonly initials = computed(() => toInitials(this.peer().name));
   readonly videoStream = computed(() => this.displayStream() ?? this.peer().stream);
@@ -43,7 +44,7 @@ export class TileComponent {
     });
     effect(() => {
       const audio = this.remoteAudio()?.nativeElement;
-      const stream = this.peer().isLocal ? null : this.peer().stream;
+      const stream = this.peer().isLocal || !this.remoteAudioEnabled() ? null : this.peer().stream;
       if (!audio) return;
       if (audio.srcObject !== stream) audio.srcObject = stream;
       audio.muted = false;

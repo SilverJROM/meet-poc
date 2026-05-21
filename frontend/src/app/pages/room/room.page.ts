@@ -20,6 +20,7 @@ import type { DiagnosticsPayload, DiagnosticsPeerSample } from '../../services/m
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
+import { RemoteAudioService } from '../../services/remote-audio.service';
 import { RoomsService } from '../../services/rooms.service';
 import { ViewportService } from '../../services/viewport.service';
 import { SignalingMessage, WsService } from '../../services/ws.service';
@@ -73,6 +74,7 @@ export class RoomPage implements OnDestroy {
   readonly recorder = inject(RecorderService);
   readonly webrtc = inject(WebrtcService);
   readonly activeSpeaker = inject(ActiveSpeakerService);
+  private readonly remoteAudio = inject(RemoteAudioService);
   private readonly platform = inject(PlatformService);
   private readonly viewport = inject(ViewportService);
 
@@ -102,6 +104,7 @@ export class RoomPage implements OnDestroy {
   readonly deviceDialogError = signal<string | null>(null);
   readonly canSelectAudioOutput = signal(canSetSinkId());
   readonly canFlipCamera = computed(() => this.viewport.isMobile() && (this.state() === 'in-call' ? this.media.cameraOn() : this.cameraRequested()));
+  readonly iosRemoteAudioMixerEnabled = computed(() => this.platform.isIOS());
   readonly permissionError = signal<LobbyError | null>(null);
   readonly hasBlockingLobbyError = computed(() => {
     const error = this.permissionError();
@@ -178,6 +181,7 @@ export class RoomPage implements OnDestroy {
   private videoRecoveryInFlight = false;
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
   private readonly chatMessageList = viewChild<ElementRef<HTMLElement>>('chatMessageList');
+  private readonly remoteAudioMixer = viewChild<ElementRef<HTMLAudioElement>>('remoteAudioMixer');
   readonly formattedElapsed = computed(() => {
     this.clockTick();
     const start = this.callStartMs();
@@ -258,6 +262,7 @@ export class RoomPage implements OnDestroy {
         activeSpeakerAnalyzerCount: this.activeSpeaker.analyzerCount(),
         activeSpeakerLastMaxRms: this.activeSpeaker.lastMaxRms(),
         activeSpeakerContextState: this.activeSpeaker.contextState(),
+        remoteAudioMixer: this.remoteAudio.debugSnapshot(),
         peerConnectionStates: () =>
           this.peers()
             .filter((peer) => !peer.isLocal && peer.pc)
@@ -279,6 +284,7 @@ export class RoomPage implements OnDestroy {
               videoTracks: peer.stream?.getVideoTracks().length ?? 0,
               hasVideoSrcObject: !!peer.stream?.getVideoTracks().length,
               hasRemoteAudioElement: !!document.querySelector(`article.tile[data-peer="${peer.id}"] audio[data-remote-audio]`),
+              hasRemoteAudioMixer: !!document.querySelector('audio[data-remote-audio-mixer]'),
               remoteAudioUsesPeerStream:
                 (document.querySelector(`article.tile[data-peer="${peer.id}"] audio[data-remote-audio]`) as HTMLAudioElement | null)?.srcObject === peer.stream,
             })),
@@ -298,11 +304,22 @@ export class RoomPage implements OnDestroy {
         debug.forceTerminalRecoveryForTest = (id?: string) => this.webrtc.debugForceTerminalRecoveryForTest(id);
         debug.forceNegotiationDeadlockForTest = (id?: string) => this.webrtc.debugForceNegotiationDeadlockForTest(id);
         debug.recoverySnapshot = (id?: string) => this.webrtc.debugRecoverySnapshot(id);
+        debug.replaceRemoteAudioTrackForTest = (id: string) => this.replaceRemoteAudioTrackForTest(id);
       }
       window.__meetDebug = debug;
     });
     effect(() => {
       this.activeSpeaker.observe(this.peers());
+    });
+    effect(() => {
+      this.remoteAudio.attachOutputElement(this.remoteAudioMixer()?.nativeElement ?? null);
+    });
+    effect(() => {
+      this.remoteAudio.syncPeers(this.peers());
+      if (this.state() !== 'in-call') return;
+      window.setTimeout(() => {
+        void this.unlockAudioFromGesture(false).catch((err) => console.debug('[media] remote audio sync failed', err));
+      }, 0);
     });
     effect(() => {
       this.webrtc.setActiveSpeakerPeer(this.activeSpeaker.activeFrame().id);
@@ -364,6 +381,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
 
+    await this.unlockAudioFromGesture(false);
     if (!this.hasMicAccess()) await this.startLobbyPreflight();
     const missing = this.missingJoinPrereqs();
     if (missing.length > 0) {
@@ -371,7 +389,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
 
-    this.activeSpeaker.unlock();
+    await this.unlockAudioFromGesture(false);
     this.joinPrereqPopout.set(null);
     this.nameError.set(null);
     this.error.set(null);
@@ -494,27 +512,7 @@ export class RoomPage implements OnDestroy {
   }
 
   async enableRemoteAudio(): Promise<void> {
-    const audios = Array.from(document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio]'));
-    let blocked = false;
-    const deviceId = this.selectedAudioOutputId();
-    if (deviceId) {
-      try {
-        await this.applySpeakerDevice(deviceId);
-      } catch (err) {
-        console.debug('[devices] speaker routing for remote audio failed', err);
-      }
-    }
-    await Promise.all(
-      audios.map(async (audio) => {
-        try {
-          await audio.play();
-        } catch (err) {
-          blocked = true;
-          console.debug('[media] remote audio still blocked after user gesture', err);
-        }
-      }),
-    );
-    this.remoteAudioBlocked.set(blocked);
+    await this.unlockAudioFromGesture(true);
   }
 
   async testSpeaker(): Promise<void> {
@@ -659,7 +657,7 @@ export class RoomPage implements OnDestroy {
   }
 
   admit(clientId: string): void {
-    this.activeSpeaker.unlock();
+    void this.unlockAudioFromGesture(false);
     this.ws.send({ type: 'admit', clientId });
     this.removeKnocker(clientId);
   }
@@ -1363,6 +1361,7 @@ export class RoomPage implements OnDestroy {
     this.recordingStartedAt.set(null);
     this.currentFacingMode.set('user');
     this.activeSpeaker.reset();
+    this.remoteAudio.reset();
     this.stopClock();
     this.uninstallMobileVisibilityPause();
   }
@@ -1471,6 +1470,38 @@ export class RoomPage implements OnDestroy {
         if (withSink.setSinkId) await withSink.setSinkId(deviceId);
       }),
     );
+    await this.remoteAudio.applyOutputDevice(deviceId);
+  }
+
+  private async unlockAudioFromGesture(showPromptOnFailure: boolean): Promise<boolean> {
+    this.activeSpeaker.unlock();
+    const micPreviewUnlock = this.media.activateMicPreview().catch((err) => {
+      console.debug('[media] mic preview unlock failed', err);
+      return false;
+    });
+    const remoteAudioUnlock = this.remoteAudio.unlockAndPlayRemoteSinks(this.selectedAudioOutputId() || undefined);
+    await micPreviewUnlock;
+    const allPlayable = await remoteAudioUnlock;
+    if (this.state() === 'in-call') this.remoteAudioBlocked.set(!allPlayable);
+    else if (showPromptOnFailure && !allPlayable) this.remoteAudioBlocked.set(true);
+    return allPlayable;
+  }
+
+  private async replaceRemoteAudioTrackForTest(id: string): Promise<{ oldTrackId: string | null; newTrackId: string } | null> {
+    const peer = this.peers().find((candidate) => candidate.id === id && !candidate.isLocal);
+    if (!peer) return null;
+    const remoteStream = peer.stream ?? new MediaStream();
+    const oldTrack = remoteStream.getAudioTracks()[0] ?? null;
+    const replacement = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    const nextTrack = replacement.getAudioTracks()[0];
+    if (!nextTrack) return null;
+    if (oldTrack) {
+      remoteStream.removeTrack(oldTrack);
+      oldTrack.stop();
+    }
+    remoteStream.addTrack(nextTrack);
+    this.webrtc.updatePeer(id, { stream: remoteStream });
+    return { oldTrackId: oldTrack?.id ?? null, newTrackId: nextTrack.id };
   }
 
   private installPageLifecycleCleanup(): void {
@@ -2107,6 +2138,14 @@ declare global {
       activeSpeakerAnalyzerCount?: number;
       activeSpeakerLastMaxRms?: number;
       activeSpeakerContextState?: string;
+      remoteAudioMixer?: {
+        mixerEnabled: boolean;
+        contextState: AudioContextState | 'none';
+        outputAttached: boolean;
+        outputPaused: boolean;
+        mixedPeerIds: string[];
+        mixedTrackIds: string[];
+      };
       peerConnectionStates?: () => {
         id: string;
         state: RTCPeerConnectionState | 'local';
@@ -2122,6 +2161,7 @@ declare global {
         videoTracks: number;
         hasVideoSrcObject: boolean;
         hasRemoteAudioElement: boolean;
+        hasRemoteAudioMixer: boolean;
         remoteAudioUsesPeerStream: boolean;
       }[];
       isMobile?: () => boolean;
@@ -2150,6 +2190,7 @@ declare global {
       markPeerRecoveredForTest?: (id: string) => void;
       forceTerminalRecoveryForTest?: (id?: string) => Promise<void>;
       forceNegotiationDeadlockForTest?: (id?: string) => Promise<void>;
+      replaceRemoteAudioTrackForTest?: (id: string) => Promise<{ oldTrackId: string | null; newTrackId: string } | null>;
       recoverySnapshot?: (id?: string) => {
         id: string;
         participantId: string;
