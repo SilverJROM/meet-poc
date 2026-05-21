@@ -853,9 +853,17 @@ export class WebrtcService {
       reconnectingSince: null,
     });
 
+    let hasLocalVideoTrack = false;
     for (const track of this.localStream.getTracks()) {
       const sender = pc.addTrack(track, this.localStream);
-      if (track.kind === 'video') this.videoSenders.set(clientId, sender);
+      if (track.kind === 'video') {
+        hasLocalVideoTrack = true;
+        this.videoSenders.set(clientId, sender);
+      }
+    }
+    if (!hasLocalVideoTrack) {
+      const transceiver = pc.addTransceiver('video', { direction: 'sendrecv', sendEncodings: [{}] });
+      this.videoSenders.set(clientId, transceiver.sender);
     }
     await this.applySenderBandwidthPreferences(pc, clientId);
 
@@ -904,19 +912,40 @@ export class WebrtcService {
       void this.logSelectedCandidateType(clientId, pc);
     };
     pc.onnegotiationneeded = () => {
-      const forensics = this.ensureForensics(clientId, pc);
-      forensics.negotiation.negotiationNeededCount += 1;
-      forensics.negotiation.lastNegotiationNeededOfferSent = false;
-      this.pushTransition(clientId, {
-        scope: 'negotiation',
-        event: 'negotiationneeded',
-        detail: `makingOffer=${meta.makingOffer} signaling=${pc.signalingState} offerSent=false`,
-      });
+      void this.handleNegotiationNeeded(clientId, pc, meta);
     };
 
     if (isInitiator) await this.sendOffer(clientId, pc, meta, false);
     this.startQualityPolling();
     return pc;
+  }
+
+  private async handleNegotiationNeeded(clientId: string, pc: RTCPeerConnection, meta: PeerMeta): Promise<void> {
+    const forensics = this.ensureForensics(clientId, pc);
+    forensics.negotiation.negotiationNeededCount += 1;
+    forensics.negotiation.lastNegotiationNeededOfferSent = false;
+    this.pushTransition(clientId, {
+      scope: 'negotiation',
+      event: 'negotiationneeded',
+      detail: `makingOffer=${meta.makingOffer} signaling=${pc.signalingState} offerSent=false`,
+    });
+    const peer = this.peers().get(clientId);
+    if (!peer || peer.reconnecting || peer.pc !== pc || pc.signalingState !== 'stable' || meta.makingOffer) return;
+    try {
+      await this.sendOffer(clientId, pc, meta, false);
+      this.pushTransition(clientId, {
+        scope: 'negotiation',
+        event: 'negotiationneeded-offer-sent',
+        detail: `signaling=${pc.signalingState}`,
+      });
+    } catch (err) {
+      this.pushTransition(clientId, {
+        scope: 'negotiation',
+        event: 'negotiationneeded-offer-failed',
+        detail: err instanceof Error ? err.message : 'sendOffer failed',
+      });
+      console.warn(`[webrtc] negotiationneeded offer failed for ${clientId}`, err);
+    }
   }
 
   private removePeerResources(clientId: string, stopStreamTracks: boolean): void {
@@ -2022,7 +2051,7 @@ export class WebrtcService {
     const degradeVideo = clientId ? this.shouldDegradeOutboundVideo(clientId) : false;
     await Promise.all(
       pc.getSenders().map(async (sender) => {
-        const kind = sender.track?.kind;
+        const kind = sender.track?.kind ?? (clientId && this.videoSenders.get(clientId) === sender ? 'video' : null);
         if (kind !== 'audio' && kind !== 'video') return;
         await this.applySenderPreference(sender, kind, degradeVideo);
       }),
