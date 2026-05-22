@@ -332,6 +332,44 @@ export class SfuClientService {
     });
   }
 
+  // Called when a drop-reconnect is detected (admitted with wasInCall=true, SFU mode).
+  // The old CF session is dead — no API calls needed. Clears all state so re-publish + re-subscribe start clean.
+  resetForReconnect(): void {
+    if (this.pc) {
+      this.pc.close();
+      this.pc = null;
+    }
+    this.audioSender = null;
+    this.videoSender = null;
+    this.screenSender = null;
+    this.callerCreds = null;
+    this.subscribedClientIds.clear();
+    this.midToEntry.clear();
+    this.opQueue = Promise.resolve();
+    this.localPublishState.set(null);
+    this.remotePublishers.set(new Map());
+    this.remoteStreams.set(new Map());
+    this.remoteScreenStreams.set(new Map());
+    this.subscribedTracks.set(new Map());
+  }
+
+  // Fire-and-forget: closes live published CF tracks before PC teardown on deliberate exit.
+  // CF 30s GC is the fallback if the request is cancelled by navigation.
+  closeLiveTracksForExit(): void {
+    const publishState = this.localPublishState();
+    const creds = this.callerCreds;
+    if (!publishState || !creds || publishState.status !== 'published') return;
+    const liveMids = publishState.tracks.filter((t) => t.status === 'live').map((t) => t.mid);
+    if (!liveMids.length) return;
+    this.http
+      .put('/api/sfu/tracks/close', {
+        ...creds,
+        cfSessionId: publishState.cfSessionId,
+        tracks: liveMids.map((mid) => ({ mid })),
+      })
+      .subscribe({ error: () => {} });
+  }
+
   destroy(): void {
     if (this.pc) {
       this.pc.close();

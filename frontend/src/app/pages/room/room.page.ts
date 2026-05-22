@@ -1014,6 +1014,9 @@ export class RoomPage implements OnDestroy {
       this.installMobileVisibilityPause();
       if (!this.callStartMs()) this.startClock();
       this.status.set(wasInCall ? 'Reconnected to signaling. Syncing peers...' : `You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
+      // SFU reconnect: reset BEFORE the async addPeer loop so the sfu-roster (which arrives during
+      // the loop's yields) populates remotePublishers into the already-reset state and isn't cleared.
+      if (wasInCall && this.isSfuMode()) this.sfuClient.resetForReconnect();
       for (const peer of msg.peers) {
         await this.webrtc.addPeer(peer.id, peer.name, true, {
           participantId: peer.participantId,
@@ -1082,6 +1085,7 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-resumed') {
       this.status.set(`${msg.name} reconnected.`);
+      if (this.isSfuMode()) this.sfuClient.removePeer(msg.oldClientId);
       await this.webrtc.resumePeer(msg.oldClientId, msg.clientId, msg.name, false, {
         participantId: msg.participantId,
         isHost: !!msg.host || msg.clientId === this.hostClientId(),
@@ -1493,6 +1497,7 @@ export class RoomPage implements OnDestroy {
     this.clearPreflightTimer();
     this.stopWaitingRoomCountdown();
     if (sendLeaveMessage && (this.state() === 'in-call' || this.state() === 'knocking' || this.state() === 'waiting-room')) this.ws.send({ type: 'leave' });
+    if (this.isSfuMode()) this.sfuClient.closeLiveTracksForExit();
     this.ws.close();
     this.recorder.discard();
     this.media.stopLocal();
