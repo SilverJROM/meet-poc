@@ -372,6 +372,7 @@ export class RoomPage implements OnDestroy {
         debug.recoverySnapshot = (id?: string) => this.webrtc.debugRecoverySnapshot(id);
         debug.replaceRemoteAudioTrackForTest = (id: string) => this.replaceRemoteAudioTrackForTest(id);
         debug.sfuGetStats = () => this.sfuClient.getStats();
+        debug.sfuVideoEncodings = () => this.sfuClient.getVideoEncodings();
       }
       window.__meetDebug = debug;
     });
@@ -2369,6 +2370,7 @@ declare global {
       sfuRemoteStreams?: Map<string, MediaStream>;
       sfuRemoteScreenStreams?: Map<string, MediaStream>;
       sfuGetStats?: () => Promise<RTCStatsReport | null>;
+      sfuVideoEncodings?: () => RTCRtpEncodingParameters[];
     };
   }
 }

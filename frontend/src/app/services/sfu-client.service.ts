@@ -26,6 +26,12 @@ export interface SubscribedTrackEntry {
   mid: string;
 }
 
+const VIDEO_SIMULCAST_ENCODINGS: RTCRtpEncodingParameters[] = [
+  { rid: 'h', scaleResolutionDownBy: 1, maxBitrate: 1_200_000 },
+  { rid: 'm', scaleResolutionDownBy: 2, maxBitrate: 400_000 },
+  { rid: 'l', scaleResolutionDownBy: 4, maxBitrate: 120_000 },
+];
+
 @Injectable({ providedIn: 'root' })
 export class SfuClientService {
   private readonly http = inject(HttpClient);
@@ -87,6 +93,10 @@ export class SfuClientService {
 
   getStats(): Promise<RTCStatsReport | null> {
     return this.pc ? this.pc.getStats() : Promise.resolve(null);
+  }
+
+  getVideoEncodings(): RTCRtpEncodingParameters[] {
+    return this.videoSender?.getParameters().encodings ?? [];
   }
 
   handleSfuPresence(msg: { clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }): void {
@@ -346,8 +356,8 @@ export class SfuClientService {
 
       const videoTrack = localStream?.getVideoTracks()[0];
       const videoTransceiver = videoTrack
-        ? this.pc.addTransceiver(videoTrack, { direction: 'sendrecv' })
-        : this.pc.addTransceiver('video', { direction: 'sendrecv' }); // Camera off: pre-negotiate so replaceTrack works later without renegotiation
+        ? this.pc.addTransceiver(videoTrack, { direction: 'sendrecv', sendEncodings: VIDEO_SIMULCAST_ENCODINGS })
+        : this.pc.addTransceiver('video', { direction: 'sendrecv', sendEncodings: VIDEO_SIMULCAST_ENCODINGS }); // Camera off: pre-negotiate so replaceTrack works later without renegotiation; sendEncodings persists through replaceTrack
       this.videoSender = videoTransceiver.sender;
 
       // createOffer → setLocalDescription (mids assigned after SLD)
