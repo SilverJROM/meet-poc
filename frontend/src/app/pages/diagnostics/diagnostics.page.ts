@@ -9,6 +9,10 @@ import {
   DiagnosticsPeerSample,
   DiagnosticsTrackInfo,
   MeetingSessionsService,
+  SfuDiagnosticsSnapshot,
+  SfuInboundTrackStats,
+  SfuOutboundTrackStats,
+  SfuSubscribeLatency,
 } from '../../services/meeting-sessions.service';
 import { IceConfigService, TurnHealthResult } from '../../services/ice-config.service';
 
@@ -263,6 +267,43 @@ export class DiagnosticsPage {
 
   relayLabel(session: DiagnosticSessionSummary | DiagnosticEntry): string {
     return session.relayUsed ? 'relay used' : 'no relay seen';
+  }
+
+  sfuDiag(entry: DiagnosticEntry): SfuDiagnosticsSnapshot | null {
+    return (entry.payload.sfuDiagnostics as SfuDiagnosticsSnapshot | undefined) ?? null;
+  }
+
+  sfuTransportSummary(diag: SfuDiagnosticsSnapshot): string {
+    const session = diag.cfSessionId ? diag.cfSessionId.slice(0, 12) + '…' : 'no session';
+    const state = `${diag.connectionState}/${diag.iceConnectionState}`;
+    const rtt = diag.rttMs !== null ? `RTT ${diag.rttMs}ms` : 'RTT n/a';
+    const local = diag.localCandidateType ?? 'local?';
+    const remote = diag.remoteCandidateType ?? 'remote?';
+    return `${session} · ${state} · ${rtt} · ${local}→${remote}`;
+  }
+
+  sfuOutboundSummary(track: SfuOutboundTrackStats): string {
+    const rid = track.rid ? ` [${track.rid}]` : '';
+    const frames = track.framesEncoded !== null ? `frames ${track.framesEncoded}` : 'frames n/a';
+    const bytes = track.bytesSent !== null ? `bytes ${track.bytesSent}` : 'bytes n/a';
+    const quality = track.qualityLimitationReason ?? 'quality n/a';
+    return `${track.kind}${rid} · ${frames} · ${bytes} · ${quality}`;
+  }
+
+  sfuInboundSummary(track: SfuInboundTrackStats): string {
+    const client = track.publisherClientId.slice(0, 8);
+    const rid = track.rid ? ` [${track.rid}]` : '';
+    const frames = track.framesDecoded !== null ? `frames ${track.framesDecoded}` : 'frames n/a';
+    const packets = track.packetsReceived !== null ? `pkts ${track.packetsReceived}` : 'pkts n/a';
+    const lost = track.packetsLost !== null ? `lost ${track.packetsLost}` : '';
+    const jb = track.jitterBufferDelay !== null && track.kind === 'audio' ? ` · jb ${track.jitterBufferDelay.toFixed(3)}s` : '';
+    return `${client} ${track.kind}${rid} · ${frames} · ${packets}${lost ? ' ' + lost : ''}${jb}`;
+  }
+
+  sfuLatencySummary(lat: SfuSubscribeLatency): string {
+    const client = lat.publisherClientId.slice(0, 8);
+    const latency = lat.latencyMs !== null ? `${lat.latencyMs}ms` : 'pending';
+    return `${client} · ${latency}`;
   }
 
   private booleanSetting(value: boolean | null | undefined): string {

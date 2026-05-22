@@ -5,6 +5,7 @@ import { IceConfigService } from './ice-config.service';
 import { ViewportService } from './viewport.service';
 import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster } from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
+import type { SfuDiagnosticsSnapshot, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair } from './meeting-sessions.service';
 export type { RemotePublisher } from './sfu-roster-utils.js';
 
 export interface SfuTrackModel {
@@ -60,6 +61,9 @@ export class SfuClientService {
   private midToEntry = new Map<string, SubscribedTrackEntry>();
   private subscribeRetryAttempts = new Map<string, number>();
   private readonly SUBSCRIBE_RETRY_CAP = 7;
+  // Subscribe-latency: time from subscribe issued → first ontrack arrival per publisher
+  private subscribeInitiatedAt = new Map<string, number>();
+  private subscribeFirstFrameAt = new Map<string, number>();
 
   enqueue<T>(op: () => Promise<T>): Promise<T> {
     const result = this.opQueue.then(() => op());
@@ -110,6 +114,116 @@ export class SfuClientService {
 
   getStats(): Promise<RTCStatsReport | null> {
     return this.pc ? this.pc.getStats() : Promise.resolve(null);
+  }
+
+  async collectDiagnostics(): Promise<SfuDiagnosticsSnapshot | null> {
+    const pc = this.pc;
+    const publishState = this.localPublishState();
+    if (!pc || !publishState) return null;
+
+    let stats: RTCStatsReport;
+    try {
+      stats = await pc.getStats();
+    } catch {
+      return null;
+    }
+
+    // --- Candidate pair / transport ---
+    let rttMs: number | null = null;
+    let localCandidateType: string | null = null;
+    let remoteCandidateType: string | null = null;
+    let selectedCandidatePair: DiagnosticsCandidatePair | null = null;
+
+    for (const stat of stats.values()) {
+      if (stat.type === 'candidate-pair' && (stat.nominated === true || stat.state === 'succeeded')) {
+        rttMs = typeof stat.currentRoundTripTime === 'number' ? Math.round(stat.currentRoundTripTime * 1000) : null;
+        const localCand = stat.localCandidateId ? stats.get(stat.localCandidateId) : null;
+        const remoteCand = stat.remoteCandidateId ? stats.get(stat.remoteCandidateId) : null;
+        localCandidateType = localCand?.candidateType ?? null;
+        remoteCandidateType = remoteCand?.candidateType ?? null;
+        selectedCandidatePair = {
+          id: stat.id ?? null,
+          state: stat.state ?? null,
+          selected: true,
+          nominated: stat.nominated ?? false,
+          local: localCand
+            ? { id: localCand.id ?? null, candidateType: localCand.candidateType ?? null, protocol: localCand.protocol ?? null, address: localCand.address ?? null, port: localCand.port ?? null }
+            : null,
+          remote: remoteCand
+            ? { id: remoteCand.id ?? null, candidateType: remoteCand.candidateType ?? null, protocol: remoteCand.protocol ?? null, address: remoteCand.address ?? null, port: remoteCand.port ?? null }
+            : null,
+        };
+        break;
+      }
+    }
+
+    // --- Outbound (publish) per track ---
+    const outboundTracks: SfuOutboundTrackStats[] = [];
+    const localTracksByMid = new Map(publishState.tracks.map((t) => [t.mid, t]));
+
+    for (const stat of stats.values()) {
+      if (stat.type !== 'outbound-rtp') continue;
+      const publishTrack = stat.mid ? localTracksByMid.get(stat.mid) : null;
+      outboundTracks.push({
+        trackName: publishTrack?.trackName ?? `${stat.kind ?? 'unknown'}:${stat.rid ?? stat.ssrc ?? '?'}`,
+        kind: publishTrack?.kind ?? stat.kind ?? 'unknown',
+        rid: stat.rid ?? null,
+        bytesSent: stat.bytesSent ?? null,
+        packetsSent: stat.packetsSent ?? null,
+        framesEncoded: stat.framesEncoded ?? null,
+        framesSent: stat.framesSent ?? null,
+        qualityLimitationReason: stat.qualityLimitationReason ?? null,
+      });
+    }
+
+    // --- Inbound (subscribe) per remote track ---
+    const inboundTracks: SfuInboundTrackStats[] = [];
+    for (const stat of stats.values()) {
+      if (stat.type !== 'inbound-rtp') continue;
+      const mid = stat.mid;
+      if (!mid) continue;
+      const entry = this.midToEntry.get(mid);
+      if (!entry) continue;
+      inboundTracks.push({
+        publisherClientId: entry.publisherClientId,
+        trackName: entry.trackName,
+        kind: entry.kind,
+        rid: stat.rid ?? null,
+        bytesReceived: stat.bytesReceived ?? null,
+        packetsReceived: stat.packetsReceived ?? null,
+        packetsLost: stat.packetsLost ?? null,
+        framesDecoded: stat.framesDecoded ?? null,
+        framesReceived: stat.framesReceived ?? null,
+        jitterBufferDelay: stat.jitterBufferDelay ?? null,
+        jitterBufferEmittedCount: stat.jitterBufferEmittedCount ?? null,
+        concealedSamples: stat.concealedSamples ?? null,
+      });
+    }
+
+    // --- Subscribe latencies ---
+    const subscribeLatencies: SfuSubscribeLatency[] = [];
+    for (const [publisherClientId, initiatedAtMs] of this.subscribeInitiatedAt) {
+      const firstFrameAtMs = this.subscribeFirstFrameAt.get(publisherClientId) ?? null;
+      subscribeLatencies.push({
+        publisherClientId,
+        initiatedAtMs,
+        firstFrameAtMs,
+        latencyMs: firstFrameAtMs !== null ? firstFrameAtMs - initiatedAtMs : null,
+      });
+    }
+
+    return {
+      cfSessionId: publishState.cfSessionId,
+      connectionState: pc.connectionState,
+      iceConnectionState: pc.iceConnectionState,
+      rttMs,
+      localCandidateType,
+      remoteCandidateType,
+      selectedCandidatePair,
+      outboundTracks,
+      inboundTracks,
+      subscribeLatencies,
+    };
   }
 
   getVideoEncodings(): RTCRtpEncodingParameters[] {
@@ -214,6 +328,8 @@ export class SfuClientService {
 
     this.subscribedClientIds.delete(clientId);
     this.subscribeRetryAttempts.delete(clientId);
+    this.subscribeInitiatedAt.delete(clientId);
+    this.subscribeFirstFrameAt.delete(clientId);
 
     if (mids.length > 0) {
       const creds = this.callerCreds;
@@ -383,6 +499,8 @@ export class SfuClientService {
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
     this.subscribeRetryAttempts.clear();
+    this.subscribeInitiatedAt.clear();
+    this.subscribeFirstFrameAt.clear();
     this.opQueue = Promise.resolve();
     this.localPublishState.set(null);
     this.remotePublishers.set(new Map());
@@ -433,6 +551,8 @@ export class SfuClientService {
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
     this.subscribeRetryAttempts.clear();
+    this.subscribeInitiatedAt.clear();
+    this.subscribeFirstFrameAt.clear();
     this.localPublishState.set(null);
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
@@ -459,6 +579,9 @@ export class SfuClientService {
         if (!mid) return;
         const entry = this.midToEntry.get(mid);
         if (!entry) return;
+        if (!this.subscribeFirstFrameAt.has(entry.publisherClientId)) {
+          this.subscribeFirstFrameAt.set(entry.publisherClientId, Date.now());
+        }
         if (entry.kind === 'screen') {
           const next = new Map(this.remoteScreenStreams());
           let stream = next.get(entry.publisherClientId);
@@ -557,6 +680,9 @@ export class SfuClientService {
       throw new Error('[sfu] doSubscribeTracks: not ready (no creds/publish/pc)');
     }
     if (!tracks.length) return;
+    if (!this.subscribeInitiatedAt.has(publisher.clientId)) {
+      this.subscribeInitiatedAt.set(publisher.clientId, Date.now());
+    }
 
     const cfSessionId = publishState.cfSessionId;
 
@@ -643,5 +769,9 @@ export class SfuClientService {
 
     // Set signal after mids are reconciled (not before — subscribedTracks must reflect real mids)
     this.subscribedTracks.set(nextSubscribed);
+    // Subscribe-latency: mark when this subscribe fully resolved (mids reconciled = tracks established)
+    if (!this.subscribeFirstFrameAt.has(publisher.clientId)) {
+      this.subscribeFirstFrameAt.set(publisher.clientId, Date.now());
+    }
   }
 }

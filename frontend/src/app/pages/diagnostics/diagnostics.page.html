@@ -125,6 +125,30 @@
                     </div>
                   }
                 </div>
+                @if (sfuDiag(entry); as sfu) {
+                  <div class="sfu-diag-section">
+                    <span class="label">SFU transport</span>
+                    <span>{{ sfuTransportSummary(sfu) }}</span>
+                    @if (sfu.outboundTracks.length) {
+                      <span class="label">Publish (outbound)</span>
+                      @for (track of sfu.outboundTracks; track track.trackName) {
+                        <span>{{ sfuOutboundSummary(track) }}</span>
+                      }
+                    }
+                    @if (sfu.inboundTracks.length) {
+                      <span class="label">Subscribe (inbound)</span>
+                      @for (track of sfu.inboundTracks; track track.trackName) {
+                        <span>{{ sfuInboundSummary(track) }}</span>
+                      }
+                    }
+                    @if (sfu.subscribeLatencies.length) {
+                      <span class="label">Subscribe latency</span>
+                      @for (lat of sfu.subscribeLatencies; track lat.publisherClientId) {
+                        <span>{{ sfuLatencySummary(lat) }}</span>
+                      }
+                    }
+                  </div>
+                }
               </article>
             }
           </div>

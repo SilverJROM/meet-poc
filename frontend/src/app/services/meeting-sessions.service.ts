@@ -253,6 +253,52 @@ export type DiagnosticsWsHealth = {
   cycles: DiagnosticsWsCycle[];
 };
 
+export type SfuOutboundTrackStats = {
+  trackName: string;
+  kind: string;
+  rid: string | null;
+  bytesSent: number | null;
+  packetsSent: number | null;
+  framesEncoded: number | null;
+  framesSent: number | null;
+  qualityLimitationReason: string | null;
+};
+
+export type SfuInboundTrackStats = {
+  publisherClientId: string;
+  trackName: string;
+  kind: string;
+  rid: string | null;
+  bytesReceived: number | null;
+  packetsReceived: number | null;
+  packetsLost: number | null;
+  framesDecoded: number | null;
+  framesReceived: number | null;
+  jitterBufferDelay: number | null;
+  jitterBufferEmittedCount: number | null;
+  concealedSamples: number | null;
+};
+
+export type SfuSubscribeLatency = {
+  publisherClientId: string;
+  initiatedAtMs: number;
+  firstFrameAtMs: number | null;
+  latencyMs: number | null;
+};
+
+export type SfuDiagnosticsSnapshot = {
+  cfSessionId: string;
+  connectionState: string;
+  iceConnectionState: string;
+  rttMs: number | null;
+  localCandidateType: string | null;
+  remoteCandidateType: string | null;
+  selectedCandidatePair: DiagnosticsCandidatePair | null;
+  outboundTracks: SfuOutboundTrackStats[];
+  inboundTracks: SfuInboundTrackStats[];
+  subscribeLatencies: SfuSubscribeLatency[];
+};
+
 export type DiagnosticsPayload = {
   kind: 'sample' | 'state-change' | 'reconnect' | 'error' | 'call-end';
   roomId: string;
@@ -271,6 +317,7 @@ export type DiagnosticsPayload = {
   outboundAudioEnergy: number | null;
   micSilent: boolean | null;
   peers: DiagnosticsPeerSample[];
+  sfuDiagnostics?: SfuDiagnosticsSnapshot;
   error?: string;
 };
 

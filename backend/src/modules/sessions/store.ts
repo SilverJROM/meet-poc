@@ -440,11 +440,24 @@ function summarizeDiagnosticsPayload(payload: DiagnosticsPayload): { kind: strin
     if (remoteType) candidateTypes.add(remoteType);
     if (candidateType === 'relay' || localType === 'relay' || remoteType === 'relay' || record.relayUsed === true) relayUsed = true;
   }
+
+  // SFU diagnostics — extract CF candidate types + relay flag
+  const sfuDiag = payload.sfuDiagnostics && typeof payload.sfuDiagnostics === 'object' ? (payload.sfuDiagnostics as Record<string, unknown>) : null;
+  let sfuPeerCount = 0;
+  if (sfuDiag) {
+    const localType = typeof sfuDiag.localCandidateType === 'string' ? sfuDiag.localCandidateType : '';
+    const remoteType = typeof sfuDiag.remoteCandidateType === 'string' ? sfuDiag.remoteCandidateType : '';
+    if (localType) candidateTypes.add(localType);
+    if (remoteType) candidateTypes.add(remoteType);
+    if (localType === 'relay' || remoteType === 'relay') relayUsed = true;
+    sfuPeerCount = Array.isArray(sfuDiag.inboundTracks) ? (sfuDiag.inboundTracks as unknown[]).length : 0;
+  }
+
   return {
     kind: String(payload.kind || 'sample'),
     relayUsed,
     candidateTypes: [...candidateTypes].sort(),
-    peerCount: peers.length,
+    peerCount: Math.max(peers.length, sfuPeerCount),
   };
 }
 

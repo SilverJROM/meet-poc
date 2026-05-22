@@ -16,7 +16,7 @@ import { ActiveSpeakerService } from '../../services/active-speaker.service';
 import { AuthService } from '../../services/auth.service';
 import { MediaError, MediaService } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
-import type { DiagnosticsPayload, DiagnosticsPeerSample } from '../../services/meeting-sessions.service';
+import type { DiagnosticsPayload, DiagnosticsPeerSample, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
@@ -1942,7 +1942,8 @@ export class RoomPage implements OnDestroy {
   ): Promise<void> {
     const sessionId = this.currentSessionId();
     if (!sessionId || !this.diagnosticsLoggingEnabled()) return;
-    const payload = this.buildDiagnosticsPayload(kind, options.error);
+    const sfuDiagnostics = this.isSfuMode() ? (await this.sfuClient.collectDiagnostics()) ?? undefined : undefined;
+    const payload = this.buildDiagnosticsPayload(kind, options.error, sfuDiagnostics);
     if (options.useBeacon && this.meetingSessions.sendDiagnosticsBeacon(sessionId, payload)) return;
     if (this.diagnosticsLogInFlight) return;
     this.diagnosticsLogInFlight = true;
@@ -1955,7 +1956,7 @@ export class RoomPage implements OnDestroy {
     }
   }
 
-  private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string): DiagnosticsPayload {
+  private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string, sfuDiagnostics?: SfuDiagnosticsSnapshot): DiagnosticsPayload {
     const diagnostics = this.webrtc.diagnosticSnapshot();
     const payload: DiagnosticsPayload = {
       kind,
@@ -1983,6 +1984,7 @@ export class RoomPage implements OnDestroy {
         ],
       })),
     };
+    if (sfuDiagnostics) payload.sfuDiagnostics = sfuDiagnostics;
     if (error) payload.error = error;
     return payload;
   }
