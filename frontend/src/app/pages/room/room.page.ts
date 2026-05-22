@@ -373,6 +373,8 @@ export class RoomPage implements OnDestroy {
         debug.replaceRemoteAudioTrackForTest = (id: string) => this.replaceRemoteAudioTrackForTest(id);
         debug.sfuGetStats = () => this.sfuClient.getStats();
         debug.sfuVideoEncodings = () => this.sfuClient.getVideoEncodings();
+        debug.sfuUpdateCameraLayer = () => this.sfuClient.updateCameraLayer();
+        debug.sfuSubscribedTracks = () => Object.fromEntries(this.sfuClient.subscribedTracks());
       }
       window.__meetDebug = debug;
     });
@@ -415,6 +417,13 @@ export class RoomPage implements OnDestroy {
         if (clientId === myId) continue;
         this.sfuClient.subscribeIfNeeded(publisher);
       }
+    });
+    // SFU layer preference: when screenshare activity changes, update camera layer for all subscribers.
+    // updateCameraLayer() is a no-op when no camera mids are subscribed (e.g. on init).
+    effect(() => {
+      if (!this.isSfuMode()) return;
+      const _active = this.anyScreenShareActive(); // reactive dep — effect re-runs on change
+      void this.sfuClient.updateCameraLayer();
     });
     effect(() => {
       const activePeerIds = new Set<string>();
@@ -2371,6 +2380,8 @@ declare global {
       sfuRemoteScreenStreams?: Map<string, MediaStream>;
       sfuGetStats?: () => Promise<RTCStatsReport | null>;
       sfuVideoEncodings?: () => RTCRtpEncodingParameters[];
+      sfuUpdateCameraLayer?: () => Promise<void>;
+      sfuSubscribedTracks?: () => Record<string, import('../../services/sfu-client.service').SubscribedTrackEntry>;
     };
   }
 }

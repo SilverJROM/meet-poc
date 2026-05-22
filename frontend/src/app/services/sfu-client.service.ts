@@ -2,6 +2,7 @@ import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { IceConfigService } from './ice-config.service';
+import { ViewportService } from './viewport.service';
 import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster } from './sfu-roster-utils.js';
 export type { RemotePublisher } from './sfu-roster-utils.js';
 
@@ -36,6 +37,7 @@ const VIDEO_SIMULCAST_ENCODINGS: RTCRtpEncodingParameters[] = [
 export class SfuClientService {
   private readonly http = inject(HttpClient);
   private readonly iceConfigService = inject(IceConfigService);
+  private readonly viewport = inject(ViewportService);
 
   readonly localPublishState = signal<LocalPublishState | null>(null);
   readonly remotePublishers = signal<Map<string, import('./sfu-roster-utils.js').RemotePublisher>>(new Map());
@@ -97,6 +99,46 @@ export class SfuClientService {
 
   getVideoEncodings(): RTCRtpEncodingParameters[] {
     return this.videoSender?.getParameters().encodings ?? [];
+  }
+
+  updateCameraLayer(): Promise<void> {
+    return this.enqueue(() => this.doUpdateCameraLayer());
+  }
+
+  private preferredCameraRid(): 'h' | 'm' | 'l' {
+    return this.viewport.isMobile() ? 'l' : 'h';
+  }
+
+  private isAnyScreenActive(): boolean {
+    if (this.remoteScreenStreams().size > 0) return true;
+    return this.localPublishState()?.tracks.some((t) => t.kind === 'screen' && t.status === 'live') ?? false;
+  }
+
+  private cameraRidNow(): 'h' | 'm' | 'l' {
+    return this.isAnyScreenActive() ? 'l' : this.preferredCameraRid();
+  }
+
+  private async doUpdateCameraLayer(): Promise<void> {
+    const creds = this.callerCreds;
+    const publishState = this.localPublishState();
+    if (!creds || !publishState || publishState.status !== 'published') return;
+
+    const cameraMids: string[] = [];
+    for (const [mid, entry] of this.midToEntry) {
+      if (entry.kind === 'video') cameraMids.push(mid);
+    }
+    if (!cameraMids.length) return;
+
+    const rid = this.cameraRidNow();
+    const priorityOrdering = rid === 'l' ? ['l', 'm', 'h'] : ['h', 'm', 'l'];
+
+    await firstValueFrom(
+      this.http.put('/api/sfu/tracks/update', {
+        ...creds,
+        cfSessionId: publishState.cfSessionId,
+        tracks: cameraMids.map((mid) => ({ mid, preferredRid: rid, priorityOrdering, ridNotAvailable: 'degrade' })),
+      }),
+    );
   }
 
   handleSfuPresence(msg: { clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }): void {
@@ -430,15 +472,20 @@ export class SfuClientService {
       tracks?: { trackName: string; mid: string }[];
     };
 
+    const rid = this.cameraRidNow();
+    const priorityOrdering = rid === 'l' ? ['l', 'm', 'h'] : ['h', 'm', 'l'];
+
     const res = await firstValueFrom(
       this.http.post<CfTracksResponse>('/api/sfu/tracks', {
         ...creds,
         cfSessionId,
-        tracks: tracks.map((t) => ({
-          location: 'remote',
-          sessionId: publisher.cfSessionId,
-          trackName: t.trackName,
-        })),
+        tracks: tracks.map((t) => {
+          const base = { location: 'remote' as const, sessionId: publisher.cfSessionId, trackName: t.trackName };
+          if (t.kind === 'video') {
+            return { ...base, preferredRid: rid, priorityOrdering, ridNotAvailable: 'degrade' };
+          }
+          return base;
+        }),
       }),
     );
 
