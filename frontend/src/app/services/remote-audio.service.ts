@@ -1,6 +1,6 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { PlatformService } from './platform.service';
-import { PeerState } from './webrtc.service';
+import { PeerState } from './peer-state';
 
 type RemoteSource = {
   stream: MediaStream;

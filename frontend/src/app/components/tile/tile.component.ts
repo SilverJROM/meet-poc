@@ -1,7 +1,7 @@
 import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, computed, effect, input, output, viewChild } from '@angular/core';
 import { addIcons } from 'ionicons';
 import { micOffOutline } from 'ionicons/icons';
-import { PeerState } from '../../services/webrtc.service';
+import { PeerState } from '../../services/peer-state';
 import { toInitials } from '../../utils/initials';
 
 @Component({

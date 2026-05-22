@@ -53,7 +53,6 @@
         [diagnosticsOpen]="diagnosticsOpen()"
         [chatOpen]="chatOpen()"
         [chatUnreadCount]="chatUnreadCount()"
-        [audioOnly]="webrtc.manualAudioOnly()"
         (mute)="toggleMic()"
         (camera)="toggleCamera()"
         (screen)="toggleScreen()"
@@ -61,7 +60,6 @@
         (sidebar)="toggleSidebar()"
         (chat)="toggleChat()"
         (diagnostics)="toggleDiagnostics()"
-        (audioOnlyToggle)="toggleAudioOnly()"
         (devices)="openInCallDeviceDialog()"
         (leave)="leave()"
       />
@@ -119,15 +117,6 @@
       @if (iosRemoteAudioMixerEnabled()) {
         <audio #remoteAudioMixer class="remote-audio-mixer" data-remote-audio-mixer autoplay playsinline></audio>
       }
-      @if (webrtc.manualAudioOnly()) {
-        <div class="weak-connection-banner" role="status">
-          <span>Audio-only mode is on</span>
-        </div>
-      } @else if (weakAudioOnlyPeers().length > 0) {
-        <div class="weak-connection-banner" role="status">
-          <span>Weak connection - audio only</span>
-        </div>
-      }
       @if (screenShareHelp()) {
         <div class="screen-share-help" role="alert" aria-label="Screen share permission help">
           <h2>Screen sharing needs macOS permission</h2>
@@ -144,65 +133,22 @@
                 <input type="checkbox" [checked]="diagnosticsLoggingEnabled()" (change)="setDiagnosticsLogging($any($event.target).checked)">
                 <span>Diagnostics logging</span>
               </label>
-              <label class="relay-toggle">
-                <input type="checkbox" [checked]="webrtc.forceRelay()" (change)="setForceRelay($any($event.target).checked)">
-                <span>Force relay</span>
-              </label>
             </div>
           </div>
           <div class="diagnostics-list">
-            @for (peer of webrtc.diagnostics(); track peer.participantId) {
+            @if (sfuClient.localPublishState(); as pub) {
               <article class="diagnostic-peer">
-                <h3>{{ peer.name }}</h3>
+                <h3>SFU publish</h3>
                 <dl>
-                  <div>
-                    <dt>Connection</dt>
-                    <dd>{{ peer.connectionState }}</dd>
-                  </div>
-                  <div>
-                    <dt>ICE</dt>
-                    <dd>{{ peer.iceConnectionState }}</dd>
-                  </div>
-                  <div>
-                    <dt>Gathering</dt>
-                    <dd>{{ peer.iceGatheringState }}</dd>
-                  </div>
-                  <div>
-                    <dt>Signaling</dt>
-                    <dd>{{ peer.signalingState }}</dd>
-                  </div>
-                  <div>
-                    <dt>Candidate</dt>
-                    <dd>{{ peer.selectedCandidateType || 'unknown' }}</dd>
-                  </div>
-                  <div>
-                    <dt>Quality</dt>
-                    <dd>{{ peer.quality }}</dd>
-                  </div>
-                  <div>
-                    <dt>Loss</dt>
-                    <dd>{{ peer.packetLossPct === null ? 'unknown' : peer.packetLossPct + '%' }}</dd>
-                  </div>
-                  <div>
-                    <dt>Jitter</dt>
-                    <dd>{{ peer.jitterMs === null ? 'unknown' : peer.jitterMs + 'ms' }}</dd>
-                  </div>
-                  <div>
-                    <dt>RTT</dt>
-                    <dd>{{ peer.rttMs === null ? 'unknown' : peer.rttMs + 'ms' }}</dd>
-                  </div>
-                  <div>
-                    <dt>Outgoing kbps</dt>
-                    <dd>{{ peer.availableOutgoingBitrateKbps === null ? 'unknown' : peer.availableOutgoingBitrateKbps }}</dd>
-                  </div>
-                  <div>
-                    <dt>Video</dt>
-                    <dd>{{ peer.audioOnlyReason || 'enabled' }}</dd>
-                  </div>
+                  <div><dt>Status</dt><dd>{{ pub.status }}</dd></div>
+                  <div><dt>Session</dt><dd>{{ pub.cfSessionId || 'pending' }}</dd></div>
+                  @for (track of pub.tracks; track track.trackName) {
+                    <div><dt>{{ track.kind }}</dt><dd>{{ track.status }}</dd></div>
+                  }
                 </dl>
               </article>
-            } @empty {
-              <p class="diagnostics-empty">No remote peers connected.</p>
+            } @else {
+              <p class="diagnostics-empty">SFU not yet publishing.</p>
             }
           </div>
         </section>
@@ -245,19 +191,11 @@
             }
           </aside>
         } @else {
-          @if (isSfuMode()) {
-            <div class="tiles-grid" aria-label="Participants" [attr.data-count]="sfuPeers().length">
-              @for (peer of sfuPeers(); track peer.participantId) {
-                <app-tile [peer]="peer" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
-              }
-            </div>
-          } @else {
-            <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
-              @for (peer of peers(); track peer.participantId) {
-                <app-tile [peer]="peer" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
-              }
-            </div>
-          }
+          <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
+            @for (peer of peers(); track peer.participantId) {
+              <app-tile [peer]="peer" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+            }
+          </div>
         }
         @if (chatOpen()) {
           <aside class="chat-panel" aria-label="Meeting chat">

@@ -2,7 +2,7 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, computed, inject, input, output, sig
 import { addIcons } from 'ionicons';
 import { ellipsisVerticalOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
 import { ViewportService } from '../../services/viewport.service';
-import { PeerState } from '../../services/webrtc.service';
+import { PeerState } from '../../services/peer-state';
 import { toInitials } from '../../utils/initials';
 
 export type Knocker = {

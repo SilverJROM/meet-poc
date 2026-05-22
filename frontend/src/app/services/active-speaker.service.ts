@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import { PeerState } from './webrtc.service';
+import { PeerState } from './peer-state';
 
 type SpeakerAnalyzer = {
   stream: MediaStream;
