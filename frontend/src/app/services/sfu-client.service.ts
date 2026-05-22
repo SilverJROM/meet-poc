@@ -45,6 +45,8 @@ export class SfuClientService {
   readonly remoteStreams = signal<Map<string, MediaStream>>(new Map());
   readonly remoteScreenStreams = signal<Map<string, MediaStream>>(new Map());
   readonly subscribedTracks = signal<Map<string, SubscribedTrackEntry>>(new Map());
+  // Bumped on doSubscribe failure so the subscription effect re-fires for a retry
+  readonly subscribeRetryVersion = signal(0);
 
   private pc: RTCPeerConnection | null = null;
   private audioSender: RTCRtpSender | null = null;
@@ -79,7 +81,12 @@ export class SfuClientService {
     if (!publisher.tracks.length) return;
     // Mark before enqueue to prevent double-subscribe
     this.subscribedClientIds.add(publisher.clientId);
-    void this.enqueue(() => this.doSubscribe(publisher));
+    void this.enqueue(() => this.doSubscribe(publisher)).catch(() => {
+      // On failure: clear the guard so a retry is possible, then bump the retry signal
+      // to cause the subscription effect to re-evaluate the roster.
+      this.subscribedClientIds.delete(publisher.clientId);
+      this.subscribeRetryVersion.update((v) => v + 1);
+    });
   }
 
   replaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
@@ -353,11 +360,24 @@ export class SfuClientService {
     this.subscribedTracks.set(new Map());
   }
 
-  // Fire-and-forget: closes live published CF tracks before PC teardown on deliberate exit.
-  // CF 30s GC is the fallback if the request is cancelled by navigation.
+  // Exit teardown: close the SFU PC immediately (stops media), then fire-and-forget the CF
+  // track-close PUT. State is cleared immediately so double-calls (deliberate-exit cleanupCall
+  // followed by ngOnDestroy cleanupCall) are no-ops. CF 30s GC is the fallback.
   closeLiveTracksForExit(): void {
+    if (this.pc) {
+      this.pc.close();
+      this.pc = null;
+      this.audioSender = null;
+      this.videoSender = null;
+      this.screenSender = null;
+    }
+
+    // Snapshot and clear immediately — makes this call idempotent (second call returns early)
     const publishState = this.localPublishState();
     const creds = this.callerCreds;
+    this.callerCreds = null;
+    this.localPublishState.set(null);
+
     if (!publishState || !creds || publishState.status !== 'published') return;
     const liveMids = publishState.tracks.filter((t) => t.status === 'live').map((t) => t.mid);
     if (!liveMids.length) return;
@@ -500,7 +520,9 @@ export class SfuClientService {
   ): Promise<void> {
     const creds = this.callerCreds;
     const publishState = this.localPublishState();
-    if (!creds || !publishState || publishState.status !== 'published' || !this.pc) return;
+    if (!creds || !publishState || publishState.status !== 'published' || !this.pc) {
+      throw new Error('[sfu] doSubscribeTracks: not ready (no creds/publish/pc)');
+    }
     if (!tracks.length) return;
 
     const cfSessionId = publishState.cfSessionId;

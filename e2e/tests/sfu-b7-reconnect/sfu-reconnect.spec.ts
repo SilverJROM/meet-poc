@@ -90,7 +90,7 @@ async function setupTwoClients(
 
   // A must have subscribed to B: 2 mids (audio+video) in subscribedTracks.
   // sfuSubscribedTracks() reads the signal directly so it's reliable regardless of zone.
-  await waitForSubscribedCount(page, 2, 90_000);
+  await waitForSubscribedCount(page, 2, 120_000);
 
   return { guestCtx, guest };
 }
@@ -124,10 +124,10 @@ test('B7-drop: reconnect creates new CF session, A sees B again with no ghost ti
   // A must have EXACTLY 2 subscribed tracks after reconnect (not 4 = ghost, not 0 = broken).
   // Ghost scenario: removePeer(oldClientId) not called → old 2 mids stay + new 2 mids added = 4.
   // Correct scenario: removePeer(oldClientId) called → old mids removed, new mids added = 2.
-  await waitForSubscribedCount(page, 2, 120_000);
+  await waitForSubscribedCount(page, 2, 180_000);
 
   // B also re-subscribed to A: 2 mids (after re-publish + roster re-subscribe)
-  await waitForSubscribedCount(guest, 2, 90_000);
+  await waitForSubscribedCount(guest, 2, 120_000);
 
   await guestCtx.close();
 });

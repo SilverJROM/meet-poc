@@ -408,9 +408,12 @@ export class RoomPage implements OnDestroy {
     // SFU subscribe: react to remotePublishers changes, but only after local publish is done.
     // The sfu-roster can arrive mid-admitted handler (between awaits) before sfuClient.publish()
     // is called, so we guard on 'published' status and let the effect re-fire when it transitions.
+    // subscribeRetryVersion() is also read as a dep: when doSubscribe fails (CF error), subscribeIfNeeded
+    // clears the guard and bumps the version so this effect re-fires and retries the full roster.
     effect(() => {
       if (!this.isSfuMode()) return;
       if (this.sfuClient.localPublishState()?.status !== 'published') return;
+      this.sfuClient.subscribeRetryVersion(); // reactive dep — re-evaluates roster on subscribe failure
       const publishers = this.sfuClient.remotePublishers();
       const myId = this.myId();
       for (const [clientId, publisher] of publishers) {
@@ -934,8 +937,12 @@ export class RoomPage implements OnDestroy {
   ngOnDestroy(): void {
     this.uninstallPageLifecycleCleanup();
     this.uninstallDeviceChangeHandler();
-    this.sfuClient.destroy();
+    // cleanupCall before destroy: closeLiveTracksForExit (in cleanupCall) needs callerCreds +
+    // localPublishState to fire the CF track-close HTTP. destroy() would clear those first.
+    // closeLiveTracksForExit is idempotent (clears state it consumed) so the second call from
+    // ngOnDestroy after a deliberate exit is a no-op.
     this.cleanupCall();
+    this.sfuClient.destroy();
     delete window.__meetDebug;
   }
 
