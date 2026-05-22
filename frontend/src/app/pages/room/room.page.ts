@@ -146,6 +146,7 @@ export class RoomPage implements OnDestroy {
     const localPeer = this.peers().find((p) => p.isLocal);
     if (localPeer) result.push(localPeer);
     const streams = this.sfuClient.remoteStreams();
+    const screenStreams = this.sfuClient.remoteScreenStreams();
     const allPeers = this.peers();
     for (const [clientId, publisher] of this.sfuClient.remotePublishers()) {
       const stream = streams.get(clientId) ?? null;
@@ -172,7 +173,7 @@ export class RoomPage implements OnDestroy {
         isHost: false,
         micEnabled: meshPeer?.micEnabled ?? true,
         camEnabled: meshPeer?.camEnabled ?? !!(stream?.getVideoTracks().length),
-        screenOn: false,
+        screenOn: screenStreams.has(clientId),
         reconnecting: false,
         reconnectingSince: null,
         isMobile: false,
@@ -181,14 +182,34 @@ export class RoomPage implements OnDestroy {
     return result;
   });
   readonly shareStripCollapsed = signal(false);
-  readonly sharingPeer = computed(() => this.peers().find((peer) => peer.screenOn) ?? null);
+  readonly sharingPeer = computed(() => {
+    if (this.isSfuMode()) {
+      const localScreenPeer = this.peers().find((p) => p.isLocal && p.screenOn);
+      if (localScreenPeer) return localScreenPeer;
+      const screenStreams = this.sfuClient.remoteScreenStreams();
+      const sfuPeerList = this.sfuPeers();
+      for (const [clientId] of screenStreams) {
+        const peer = sfuPeerList.find((p) => p.id === clientId);
+        if (peer) return peer;
+      }
+      return null;
+    }
+    return this.peers().find((peer) => peer.screenOn) ?? null;
+  });
   readonly shareLayoutActive = computed(() => !!this.sharingPeer());
-  readonly anyScreenShareActive = computed(() => this.media.screenOn() || this.peers().some((peer) => peer.screenOn));
+  readonly anyScreenShareActive = computed(
+    () =>
+      this.media.screenOn() ||
+      this.peers().some((peer) => peer.screenOn) ||
+      (this.isSfuMode() && this.sfuClient.remoteScreenStreams().size > 0),
+  );
   readonly effectiveCameraOn = computed(() => this.media.cameraOn() && this.cameraVisibleDuringCurrentShare());
   readonly shareStream = computed(() => {
     const peer = this.sharingPeer();
     if (!peer) return null;
-    return peer.isLocal ? this.media.screenStream() : peer.stream;
+    if (peer.isLocal) return this.media.screenStream();
+    if (this.isSfuMode()) return this.sfuClient.remoteScreenStreams().get(peer.id) ?? null;
+    return peer.stream;
   });
   readonly orderedStripPeers = computed(() => this.peers());
   readonly showPeerWarning = computed(() => this.peers().length >= 6 && !this.warningDismissed());
@@ -338,6 +359,7 @@ export class RoomPage implements OnDestroy {
         senderSnapshot: () => this.webrtc.debugSenderSnapshot(),
         sfuPublishState: this.sfuClient.localPublishState(),
         sfuRemoteStreams: this.sfuClient.remoteStreams(),
+        sfuRemoteScreenStreams: this.sfuClient.remoteScreenStreams(),
       };
       if (window.location.hostname === 'localhost') {
         debug.diagnosticSnapshot = () => this.webrtc.diagnosticSnapshot();
@@ -642,6 +664,10 @@ export class RoomPage implements OnDestroy {
   }
 
   async toggleScreen(): Promise<void> {
+    if (this.isSfuMode()) {
+      await this.toggleScreenSfu();
+      return;
+    }
     try {
       await this.media.toggleScreen((track) => this.webrtc.replaceVideoTrack(track));
       this.screenShareHelp.set(null);
@@ -658,6 +684,51 @@ export class RoomPage implements OnDestroy {
       }
       this.screenShareHelp.set(null);
       this.status.set(`Screen share failed: ${err instanceof Error ? err.message : 'not available'}`);
+    }
+  }
+
+  private async toggleScreenSfu(): Promise<void> {
+    try {
+      await this.media.toggleScreen(async (track) => {
+        // Distinguish start from stop by checking whether a live screen track is already published.
+        // This is safe for both explicit stop (button) and implicit stop (browser "Stop sharing" native UI).
+        const hasScreenNow = this.sfuClient.localPublishState()?.tracks.some((t) => t.kind === 'screen' && t.status === 'live') ?? false;
+        try {
+          if (!hasScreenNow && track) {
+            await this.sfuClient.publishScreen(track);
+          } else if (hasScreenNow) {
+            await this.sfuClient.stopScreen();
+          }
+        } finally {
+          // Always announce so peers update their roster even if SFU close had a non-fatal error.
+          this.announceSfuPublishState();
+        }
+      });
+      this.screenShareHelp.set(null);
+      this.updateLocalMediaState();
+      this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+      this.status.set(this.media.screenOn() ? 'Screen sharing.' : 'Screen sharing stopped.');
+    } catch (err) {
+      if (isDisplayMediaPermissionError(err)) {
+        this.screenShareHelp.set(
+          'Enable Screen Recording for Chrome in macOS System Settings, then fully quit and reopen Chrome with Cmd+Q before sharing again.',
+        );
+        this.status.set('Screen sharing needs macOS Screen Recording permission.');
+        return;
+      }
+      this.screenShareHelp.set(null);
+      this.status.set(`Screen share failed: ${err instanceof Error ? err.message : 'not available'}`);
+    }
+  }
+
+  private announceSfuPublishState(): void {
+    const state = this.sfuClient.localPublishState();
+    if (state?.status === 'published') {
+      this.ws.send({
+        type: 'sfu-publish',
+        cfSessionId: state.cfSessionId,
+        tracks: state.tracks.filter((t) => t.status === 'live').map((t) => ({ trackName: t.trackName, kind: t.kind })),
+      });
     }
   }
 
@@ -2296,6 +2367,7 @@ declare global {
       }[];
       sfuPublishState?: LocalPublishState | null;
       sfuRemoteStreams?: Map<string, MediaStream>;
+      sfuRemoteScreenStreams?: Map<string, MediaStream>;
       sfuGetStats?: () => Promise<RTCStatsReport | null>;
     };
   }

@@ -34,11 +34,13 @@ export class SfuClientService {
   readonly localPublishState = signal<LocalPublishState | null>(null);
   readonly remotePublishers = signal<Map<string, import('./sfu-roster-utils.js').RemotePublisher>>(new Map());
   readonly remoteStreams = signal<Map<string, MediaStream>>(new Map());
+  readonly remoteScreenStreams = signal<Map<string, MediaStream>>(new Map());
   readonly subscribedTracks = signal<Map<string, SubscribedTrackEntry>>(new Map());
 
   private pc: RTCPeerConnection | null = null;
   private audioSender: RTCRtpSender | null = null;
   private videoSender: RTCRtpSender | null = null;
+  private screenSender: RTCRtpSender | null = null;
   // Single serialized queue — all PC-mutating ops run through enqueue() (publish/subscribe/close/renegotiate)
   private opQueue: Promise<void> = Promise.resolve();
 
@@ -75,13 +77,33 @@ export class SfuClientService {
     return this.enqueue(() => this.doReplaceVideoTrack(track));
   }
 
+  publishScreen(displayTrack: MediaStreamTrack): Promise<void> {
+    return this.enqueue(() => this.doPublishScreen(displayTrack));
+  }
+
+  stopScreen(): Promise<void> {
+    return this.enqueue(() => this.doStopScreen());
+  }
+
   getStats(): Promise<RTCStatsReport | null> {
     return this.pc ? this.pc.getStats() : Promise.resolve(null);
   }
 
   handleSfuPresence(msg: { clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }): void {
+    const prev = this.remotePublishers().get(msg.clientId);
+    const prevHadScreen = prev?.tracks.some((t) => t.kind === 'screen') ?? false;
     const next = applyPresenceUpdate(this.remotePublishers(), msg);
     if (next !== this.remotePublishers()) this.remotePublishers.set(next);
+    const nowPublisher = next.get(msg.clientId);
+    const nowHasScreen = nowPublisher?.tracks.some((t) => t.kind === 'screen') ?? false;
+    if (prevHadScreen && !nowHasScreen) {
+      this.tearDownScreenSubscription(msg.clientId);
+    } else if (!prevHadScreen && nowHasScreen && nowPublisher) {
+      // Screen track added mid-call — subscribe to just the new screen track.
+      // subscribeIfNeeded is guarded by subscribedClientIds (publisher already subscribed for camera/audio),
+      // so we need a separate partial-subscribe path for the screen track.
+      this.subscribeNewScreenTrack(nowPublisher);
+    }
   }
 
   handleSfuRoster(publishers: { clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }[]): void {
@@ -112,9 +134,50 @@ export class SfuClientService {
     nextStreams.delete(clientId);
     this.remoteStreams.set(nextStreams);
 
+    const nextScreenStreams = new Map(this.remoteScreenStreams());
+    if (nextScreenStreams.has(clientId)) {
+      nextScreenStreams.delete(clientId);
+      this.remoteScreenStreams.set(nextScreenStreams);
+    }
+
     this.subscribedClientIds.delete(clientId);
 
     if (mids.length > 0) {
+      const creds = this.callerCreds;
+      const cfSessionId = this.localPublishState()?.cfSessionId ?? '';
+      if (creds && cfSessionId) {
+        void this.enqueue(() => this.doClose(mids, creds, cfSessionId));
+      }
+    }
+  }
+
+  private subscribeNewScreenTrack(publisher: import('./sfu-roster-utils.js').RemotePublisher): void {
+    const screenTracks = publisher.tracks.filter((t) => t.kind === 'screen');
+    if (!screenTracks.length) return;
+    // Skip any screen tracks already in our midToEntry (avoid double-subscribe on rapid presence updates)
+    const alreadySubscribed = new Set([...this.midToEntry.values()].map((e) => e.trackName));
+    const newTracks = screenTracks.filter((t) => !alreadySubscribed.has(t.trackName));
+    if (!newTracks.length) return;
+    void this.enqueue(() => this.doSubscribeTracks(publisher, newTracks));
+  }
+
+  private tearDownScreenSubscription(clientId: string): void {
+    const nextScreenStreams = new Map(this.remoteScreenStreams());
+    if (!nextScreenStreams.has(clientId)) return;
+    nextScreenStreams.delete(clientId);
+    this.remoteScreenStreams.set(nextScreenStreams);
+
+    const mids: string[] = [];
+    const nextSubscribed = new Map(this.subscribedTracks());
+    for (const [mid, entry] of nextSubscribed) {
+      if (entry.publisherClientId === clientId && entry.kind === 'screen') {
+        mids.push(mid);
+        nextSubscribed.delete(mid);
+        this.midToEntry.delete(mid);
+      }
+    }
+    if (mids.length > 0) {
+      this.subscribedTracks.set(nextSubscribed);
       const creds = this.callerCreds;
       const cfSessionId = this.localPublishState()?.cfSessionId ?? '';
       if (creds && cfSessionId) {
@@ -138,6 +201,84 @@ export class SfuClientService {
     await this.videoSender.replaceTrack(track);
   }
 
+  private async doPublishScreen(displayTrack: MediaStreamTrack): Promise<void> {
+    const publishState = this.localPublishState();
+    const creds = this.callerCreds;
+    if (!publishState || publishState.status !== 'published' || !this.pc || !creds) return;
+
+    const { clientKey, participantId, sessionId } = creds;
+    const cfSessionId = publishState.cfSessionId;
+    const trackName = `${participantId}:${Date.now()}:screen:${crypto.randomUUID()}`;
+
+    // Add screen as a NEW transceiver — requires renegotiation (publish-style, not replaceTrack)
+    const transceiver = this.pc.addTransceiver(displayTrack, { direction: 'sendrecv' });
+    const offer = await this.pc.createOffer();
+    await this.pc.setLocalDescription(offer);
+    const mid = transceiver.mid!;
+
+    const tracksRes = await firstValueFrom(
+      this.http.post<{ sessionDescription: RTCSessionDescriptionInit }>('/api/sfu/tracks', {
+        clientKey,
+        participantId,
+        sessionId,
+        cfSessionId,
+        sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+        tracks: [{ location: 'local', mid, trackName }],
+      }),
+    );
+
+    await this.pc.setRemoteDescription(tracksRes.sessionDescription);
+    this.screenSender = transceiver.sender;
+
+    this.localPublishState.set({
+      ...publishState,
+      tracks: [...publishState.tracks, { trackName, kind: 'screen', mid, status: 'live' }],
+    });
+  }
+
+  private async doStopScreen(): Promise<void> {
+    const publishState = this.localPublishState();
+    const creds = this.callerCreds;
+    if (!publishState || !creds) return;
+
+    const screenTrack = publishState.tracks.find((t) => t.kind === 'screen' && t.status === 'live');
+    if (!screenTrack) return;
+
+    type CloseResponse = { requiresImmediateRenegotiation?: boolean; sessionDescription?: RTCSessionDescriptionInit };
+    let closeRes: CloseResponse | null = null;
+    try {
+      closeRes = await firstValueFrom(
+        this.http.put<CloseResponse>('/api/sfu/tracks/close', {
+          ...creds,
+          cfSessionId: publishState.cfSessionId,
+          tracks: [{ mid: screenTrack.mid }],
+        }),
+      );
+    } catch (err) {
+      console.warn('[sfu] tracks/close for screen failed (track may already be gone):', err);
+    }
+
+    // Handle renegotiation that CF may require on close
+    if (closeRes?.requiresImmediateRenegotiation && closeRes.sessionDescription && this.pc) {
+      await this.pc.setRemoteDescription(closeRes.sessionDescription);
+      const answer = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(answer);
+      await firstValueFrom(
+        this.http.put('/api/sfu/renegotiate', {
+          ...creds,
+          cfSessionId: publishState.cfSessionId,
+          sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+        }),
+      );
+    }
+
+    this.screenSender = null;
+    this.localPublishState.set({
+      ...publishState,
+      tracks: publishState.tracks.map((t) => (t.mid === screenTrack.mid ? { ...t, status: 'closed' as const } : t)),
+    });
+  }
+
   destroy(): void {
     if (this.pc) {
       this.pc.close();
@@ -145,12 +286,14 @@ export class SfuClientService {
     }
     this.audioSender = null;
     this.videoSender = null;
+    this.screenSender = null;
     this.callerCreds = null;
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
     this.localPublishState.set(null);
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
+    this.remoteScreenStreams.set(new Map());
     this.subscribedTracks.set(new Map());
   }
 
@@ -173,14 +316,25 @@ export class SfuClientService {
         if (!mid) return;
         const entry = this.midToEntry.get(mid);
         if (!entry) return;
-        const next = new Map(this.remoteStreams());
-        let stream = next.get(entry.publisherClientId);
-        if (!stream) {
-          stream = new MediaStream();
-          next.set(entry.publisherClientId, stream);
+        if (entry.kind === 'screen') {
+          const next = new Map(this.remoteScreenStreams());
+          let stream = next.get(entry.publisherClientId);
+          if (!stream) {
+            stream = new MediaStream();
+            next.set(entry.publisherClientId, stream);
+          }
+          stream.addTrack(event.track);
+          this.remoteScreenStreams.set(next);
+        } else {
+          const next = new Map(this.remoteStreams());
+          let stream = next.get(entry.publisherClientId);
+          if (!stream) {
+            stream = new MediaStream();
+            next.set(entry.publisherClientId, stream);
+          }
+          stream.addTrack(event.track);
+          this.remoteStreams.set(next);
         }
-        stream.addTrack(event.track);
-        this.remoteStreams.set(next);
       };
 
       // Add local tracks with pre-negotiated video transceiver (DR-55/F2: always negotiate video up-front)
@@ -246,9 +400,17 @@ export class SfuClientService {
   }
 
   private async doSubscribe(publisher: import('./sfu-roster-utils.js').RemotePublisher): Promise<void> {
+    await this.doSubscribeTracks(publisher, publisher.tracks);
+  }
+
+  private async doSubscribeTracks(
+    publisher: import('./sfu-roster-utils.js').RemotePublisher,
+    tracks: { trackName: string; kind: string }[],
+  ): Promise<void> {
     const creds = this.callerCreds;
     const publishState = this.localPublishState();
     if (!creds || !publishState || publishState.status !== 'published' || !this.pc) return;
+    if (!tracks.length) return;
 
     const cfSessionId = publishState.cfSessionId;
 
@@ -262,7 +424,7 @@ export class SfuClientService {
       this.http.post<CfTracksResponse>('/api/sfu/tracks', {
         ...creds,
         cfSessionId,
-        tracks: publisher.tracks.map((t) => ({
+        tracks: tracks.map((t) => ({
           location: 'remote',
           sessionId: publisher.cfSessionId,
           trackName: t.trackName,
@@ -274,7 +436,7 @@ export class SfuClientService {
     const responseTracks = res.tracks ?? [];
     const nextSubscribed = new Map(this.subscribedTracks());
     for (const rt of responseTracks) {
-      const kind = publisher.tracks.find((t) => t.trackName === rt.trackName)?.kind ?? 'unknown';
+      const kind = tracks.find((t) => t.trackName === rt.trackName)?.kind ?? 'unknown';
       const entry: SubscribedTrackEntry = {
         publisherClientId: publisher.clientId,
         trackName: rt.trackName,
