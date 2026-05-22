@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 import { IceConfigService } from './ice-config.service';
 import { ViewportService } from './viewport.service';
 import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster } from './sfu-roster-utils.js';
+import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
 export type { RemotePublisher } from './sfu-roster-utils.js';
 
 export interface SfuTrackModel {
@@ -475,7 +476,10 @@ export class SfuClientService {
     const rid = this.cameraRidNow();
     const priorityOrdering = rid === 'l' ? ['l', 'm', 'h'] : ['h', 'm', 'l'];
 
-    // Snapshot existing transceiver mids before POST so we can identify the new ones CF adds
+    // kind lookup used by reconcileSubscribedMids below
+    const kindMap = new Map(tracks.map((t) => [t.trackName, t.kind]));
+
+    // Snapshot existing transceiver mids before POST — new ones added by CF renegotiation
     const existingMids = new Set(this.pc.getTransceivers().map((t) => t.mid).filter((m): m is string => !!m));
 
     const res = await firstValueFrom(
@@ -492,15 +496,11 @@ export class SfuClientService {
       }),
     );
 
-    // Seed midToEntry with CF response tracks (mids may be empty — reconciled after renegotiation)
+    // CF returns mid:"" for ALL remote-subscribe tracks. With audio+video together that means
+    // multiple tracks share the same empty key — seeding midToEntry by rt.mid would collide.
+    // Never seed under rt.mid. Populate ONLY after reconciliation with real transceiver mids.
     const responseTracks = res.tracks ?? [];
     const nextSubscribed = new Map(this.subscribedTracks());
-    for (const rt of responseTracks) {
-      const kind = tracks.find((t) => t.trackName === rt.trackName)?.kind ?? 'unknown';
-      const entry: SubscribedTrackEntry = { publisherClientId: publisher.clientId, trackName: rt.trackName, kind, mid: rt.mid };
-      this.midToEntry.set(rt.mid, entry);
-      nextSubscribed.set(rt.mid, entry);
-    }
 
     // Full renegotiation inside this enqueue op — must not interleave with other ops
     if (res.requiresImmediateRenegotiation && res.sessionDescription) {
@@ -508,22 +508,18 @@ export class SfuClientService {
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
 
-      // CF can return mid:"" in the subscribe response (real mid is in the negotiated SDP).
-      // After setLocalDescription the transceivers have real mids — reconcile midToEntry now.
-      const newTransceivers = this.pc.getTransceivers().filter((t) => t.mid && !existingMids.has(t.mid));
-      for (let i = 0; i < responseTracks.length && i < newTransceivers.length; i++) {
-        const rt = responseTracks[i];
-        const realMid = newTransceivers[i].mid!;
-        if (realMid !== rt.mid) {
-          const staleEntry = this.midToEntry.get(rt.mid);
-          if (staleEntry) {
-            this.midToEntry.delete(rt.mid);
-            nextSubscribed.delete(rt.mid);
-            const fixedEntry = { ...staleEntry, mid: realMid };
-            this.midToEntry.set(realMid, fixedEntry);
-            nextSubscribed.set(realMid, fixedEntry);
-          }
-        }
+      // Real mids are now assigned in the negotiated SDP. Match positionally:
+      // responseTracks[i] ↔ newTransceiverMids[i] (CF preserves request order).
+      const newTransceiverMids = this.pc
+        .getTransceivers()
+        .map((t) => t.mid)
+        .filter((m): m is string => !!m && !existingMids.has(m));
+
+      const reconciled = reconcileSubscribedMids(responseTracks, newTransceiverMids, kindMap, publisher.clientId);
+      for (const r of reconciled) {
+        const entry: SubscribedTrackEntry = { publisherClientId: r.publisherClientId, trackName: r.trackName, kind: r.kind, mid: r.realMid };
+        this.midToEntry.set(r.realMid, entry);
+        nextSubscribed.set(r.realMid, entry);
       }
 
       await firstValueFrom(
@@ -533,9 +529,17 @@ export class SfuClientService {
           sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
         }),
       );
+    } else {
+      // No renegotiation — CF mids should be valid (non-empty) in this path
+      for (const rt of responseTracks) {
+        if (!rt.mid) continue;
+        const entry: SubscribedTrackEntry = { publisherClientId: publisher.clientId, trackName: rt.trackName, kind: kindMap.get(rt.trackName) ?? 'unknown', mid: rt.mid };
+        this.midToEntry.set(rt.mid, entry);
+        nextSubscribed.set(rt.mid, entry);
+      }
     }
 
-    // Set signal after mids are reconciled
+    // Set signal after mids are reconciled (not before — subscribedTracks must reflect real mids)
     this.subscribedTracks.set(nextSubscribed);
   }
 }

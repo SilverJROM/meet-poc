@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster } from './sfu-roster-utils.js';
 import type { RemotePublisher } from './sfu-roster-utils.js';
+import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
 
 function makePublisher(clientId: string, revision: number): RemotePublisher {
   return { clientId, participantId: `p-${clientId}`, cfSessionId: `cf-${clientId}`, tracks: [], revision };
@@ -75,6 +76,36 @@ function makePublisher(clientId: string, revision: number): RemotePublisher {
   const initial = new Map([['alice', makePublisher('alice', 1)]]);
   const next = removeFromRoster(initial, 'nobody');
   assert.equal(next, initial, 'should return the same map when entry does not exist');
+}
+
+// reconcileSubscribedMids — audio+video both mid:"" (duplicate-key collision case)
+{
+  const responseTracks = [
+    { trackName: 'p1:1:audio:a1', mid: '' },
+    { trackName: 'p1:1:video:v1', mid: '' },
+  ];
+  const newTransceiverMids = ['2', '3'];
+  const kindMap = new Map([['p1:1:audio:a1', 'audio'], ['p1:1:video:v1', 'video']]);
+  const result = reconcileSubscribedMids(responseTracks, newTransceiverMids, kindMap, 'client-a');
+  assert.equal(result.length, 2, 'both tracks should be reconciled');
+  assert.equal(result[0].realMid, '2', 'audio gets first new transceiver mid');
+  assert.equal(result[0].kind, 'audio', 'audio kind correct');
+  assert.equal(result[0].trackName, 'p1:1:audio:a1', 'audio trackName preserved');
+  assert.equal(result[0].publisherClientId, 'client-a', 'publisherClientId set');
+  assert.equal(result[1].realMid, '3', 'video gets second new transceiver mid');
+  assert.equal(result[1].kind, 'video', 'video kind correct');
+  assert.equal(result[1].trackName, 'p1:1:video:v1', 'video trackName preserved');
+}
+
+// reconcileSubscribedMids — single track (screen only), no collision
+{
+  const responseTracks = [{ trackName: 'p2:1:screen:s1', mid: '' }];
+  const newTransceiverMids = ['7'];
+  const kindMap = new Map([['p2:1:screen:s1', 'screen']]);
+  const result = reconcileSubscribedMids(responseTracks, newTransceiverMids, kindMap, 'client-b');
+  assert.equal(result.length, 1);
+  assert.equal(result[0].realMid, '7');
+  assert.equal(result[0].kind, 'screen');
 }
 
 console.log('sfu-client roster utils: all assertions passed');
