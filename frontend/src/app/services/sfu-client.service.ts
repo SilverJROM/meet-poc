@@ -37,6 +37,8 @@ export class SfuClientService {
   readonly subscribedTracks = signal<Map<string, SubscribedTrackEntry>>(new Map());
 
   private pc: RTCPeerConnection | null = null;
+  private audioSender: RTCRtpSender | null = null;
+  private videoSender: RTCRtpSender | null = null;
   // Single serialized queue — all PC-mutating ops run through enqueue() (publish/subscribe/close/renegotiate)
   private opQueue: Promise<void> = Promise.resolve();
 
@@ -67,6 +69,10 @@ export class SfuClientService {
     // Mark before enqueue to prevent double-subscribe
     this.subscribedClientIds.add(publisher.clientId);
     void this.enqueue(() => this.doSubscribe(publisher));
+  }
+
+  replaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
+    return this.enqueue(() => this.doReplaceVideoTrack(track));
   }
 
   getStats(): Promise<RTCStatsReport | null> {
@@ -127,11 +133,18 @@ export class SfuClientService {
     );
   }
 
+  private async doReplaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
+    if (!this.videoSender) return;
+    await this.videoSender.replaceTrack(track);
+  }
+
   destroy(): void {
     if (this.pc) {
       this.pc.close();
       this.pc = null;
     }
+    this.audioSender = null;
+    this.videoSender = null;
     this.callerCreds = null;
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
@@ -172,18 +185,16 @@ export class SfuClientService {
 
       // Add local tracks with pre-negotiated video transceiver (DR-55/F2: always negotiate video up-front)
       const audioTrack = localStream?.getAudioTracks()[0];
-      if (audioTrack) {
-        this.pc.addTransceiver(audioTrack, { direction: 'sendrecv' });
-      } else {
-        this.pc.addTransceiver('audio', { direction: 'sendrecv' });
-      }
+      const audioTransceiver = audioTrack
+        ? this.pc.addTransceiver(audioTrack, { direction: 'sendrecv' })
+        : this.pc.addTransceiver('audio', { direction: 'sendrecv' });
+      this.audioSender = audioTransceiver.sender;
+
       const videoTrack = localStream?.getVideoTracks()[0];
-      if (videoTrack) {
-        this.pc.addTransceiver(videoTrack, { direction: 'sendrecv' });
-      } else {
-        // Camera off: pre-negotiate so replaceTrack works later without renegotiation
-        this.pc.addTransceiver('video', { direction: 'sendrecv' });
-      }
+      const videoTransceiver = videoTrack
+        ? this.pc.addTransceiver(videoTrack, { direction: 'sendrecv' })
+        : this.pc.addTransceiver('video', { direction: 'sendrecv' }); // Camera off: pre-negotiate so replaceTrack works later without renegotiation
+      this.videoSender = videoTransceiver.sender;
 
       // createOffer → setLocalDescription (mids assigned after SLD)
       const offer = await this.pc.createOffer();

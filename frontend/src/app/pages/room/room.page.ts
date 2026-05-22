@@ -146,8 +146,10 @@ export class RoomPage implements OnDestroy {
     const localPeer = this.peers().find((p) => p.isLocal);
     if (localPeer) result.push(localPeer);
     const streams = this.sfuClient.remoteStreams();
+    const allPeers = this.peers();
     for (const [clientId, publisher] of this.sfuClient.remotePublishers()) {
       const stream = streams.get(clientId) ?? null;
+      const meshPeer = allPeers.find((p) => p.id === clientId);
       result.push({
         id: clientId,
         participantId: publisher.participantId,
@@ -168,8 +170,8 @@ export class RoomPage implements OnDestroy {
         updatedAt: Date.now(),
         isLocal: false,
         isHost: false,
-        micEnabled: true,
-        camEnabled: !!(stream?.getVideoTracks().length),
+        micEnabled: meshPeer?.micEnabled ?? true,
+        camEnabled: meshPeer?.camEnabled ?? !!(stream?.getVideoTracks().length),
         screenOn: false,
         reconnecting: false,
         reconnectingSince: null,
@@ -624,8 +626,11 @@ export class RoomPage implements OnDestroy {
       await this.toggleCameraDuringShare();
       return;
     }
+    const replaceTrack = this.isSfuMode()
+      ? (track: MediaStreamTrack | null) => this.sfuClient.replaceVideoTrack(track)
+      : (track: MediaStreamTrack | null) => this.webrtc.replaceVideoTrack(track);
     try {
-      const cam = await this.media.toggleCamera((track) => this.webrtc.replaceVideoTrack(track), {
+      const cam = await this.media.toggleCamera(replaceTrack, {
         videoDeviceId: this.selectedVideoDeviceIdForRequest(),
         facingMode: this.videoFacingModeForRequest(true),
       });
