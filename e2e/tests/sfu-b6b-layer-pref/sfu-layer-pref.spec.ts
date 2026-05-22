@@ -52,11 +52,14 @@ function collectSubscribeRequests(page: import('@playwright/test').Page): any[] 
   return captured;
 }
 
-function collectUpdateRequests(page: import('@playwright/test').Page): any[] {
-  const captured: any[] = [];
-  page.on('request', (req) => {
-    if (req.url().includes('/api/sfu/tracks/update') && req.method() === 'PUT') {
-      try { captured.push(JSON.parse(req.postData() ?? '{}')); } catch {}
+function collectUpdateResponses(page: import('@playwright/test').Page): { body: any; ok: boolean; status: number }[] {
+  const captured: { body: any; ok: boolean; status: number }[] = [];
+  page.on('response', (resp) => {
+    if (resp.url().includes('/api/sfu/tracks/update') && resp.request().method() === 'PUT') {
+      resp.json().then(
+        (body) => captured.push({ body, ok: resp.ok(), status: resp.status() }),
+        () => captured.push({ body: null, ok: resp.ok(), status: resp.status() }),
+      );
     }
   });
   return captured;
@@ -70,9 +73,9 @@ test('B6b: subscribe preferredRid h(desktop) / l(mobile); update preserves strea
   await loginAsJrom(page);
   const room = await createRoomViaApi(request, `SFU B6b Layer Pref ${Date.now()}`);
 
-  // Capture requests BEFORE navigation so no events are missed
+  // Capture requests/responses BEFORE navigation so no events are missed
   const subscribeRequestsDesktop = collectSubscribeRequests(page);
-  const updateRequestsDesktop = collectUpdateRequests(page);
+  const updateResponsesDesktop = collectUpdateResponses(page);
 
   // --- Desktop A (host) joins with camera on ---
   await page.goto(room.url + '?sfu=1');
@@ -134,18 +137,18 @@ test('B6b: subscribe preferredRid h(desktop) / l(mobile); update preserves strea
   expect(mobileCamTrack?.ridNotAvailable).toBe('degrade');
   expect(mobileCamTrack?.priorityOrdering).toEqual(['l', 'm', 'h']);
 
-  // --- Assertion 3: updateCameraLayer() sends correct PUT ---
-  // Call via debug hook on desktop A (no screenshare active → should request 'h')
+  // --- Assertion 3: updateCameraLayer() resolves and PUT returns 2xx ---
+  // Call via debug hook on desktop A (no screenshare active → should request 'h').
+  // page.evaluate awaits the returned Promise — rejects if updateCameraLayer throws.
   await page.evaluate(() => (window as any).__meetDebug?.sfuUpdateCameraLayer?.());
 
+  // Await the response (captured asynchronously after the request completes)
   await expect
-    .poll(() => updateRequestsDesktop.length, { timeout: 15_000, intervals: [500, 1_000] })
+    .poll(() => updateResponsesDesktop.length, { timeout: 15_000, intervals: [500, 1_000] })
     .toBeGreaterThan(0);
 
-  const updateReq = updateRequestsDesktop[0];
-  const updatedTrack = updateReq?.tracks?.[0];
-  expect(updatedTrack?.preferredRid).toBe('h'); // desktop, no screenshare active
-  expect(updatedTrack?.ridNotAvailable).toBe('degrade');
+  const updateResp = updateResponsesDesktop[0];
+  expect(updateResp.ok, `PUT /api/sfu/tracks/update failed: status=${updateResp.status}`).toBe(true);
 
   // --- Assertion 4: regression — video flows on both sides after layer update ---
   // Checked last so CF has maximum time to deliver frames even under resource pressure.

@@ -475,6 +475,9 @@ export class SfuClientService {
     const rid = this.cameraRidNow();
     const priorityOrdering = rid === 'l' ? ['l', 'm', 'h'] : ['h', 'm', 'l'];
 
+    // Snapshot existing transceiver mids before POST so we can identify the new ones CF adds
+    const existingMids = new Set(this.pc.getTransceivers().map((t) => t.mid).filter((m): m is string => !!m));
+
     const res = await firstValueFrom(
       this.http.post<CfTracksResponse>('/api/sfu/tracks', {
         ...creds,
@@ -489,27 +492,40 @@ export class SfuClientService {
       }),
     );
 
-    // Map mid → entry using the CF response, update subscribedTracks signal
+    // Seed midToEntry with CF response tracks (mids may be empty — reconciled after renegotiation)
     const responseTracks = res.tracks ?? [];
     const nextSubscribed = new Map(this.subscribedTracks());
     for (const rt of responseTracks) {
       const kind = tracks.find((t) => t.trackName === rt.trackName)?.kind ?? 'unknown';
-      const entry: SubscribedTrackEntry = {
-        publisherClientId: publisher.clientId,
-        trackName: rt.trackName,
-        kind,
-        mid: rt.mid,
-      };
+      const entry: SubscribedTrackEntry = { publisherClientId: publisher.clientId, trackName: rt.trackName, kind, mid: rt.mid };
       this.midToEntry.set(rt.mid, entry);
       nextSubscribed.set(rt.mid, entry);
     }
-    this.subscribedTracks.set(nextSubscribed);
 
     // Full renegotiation inside this enqueue op — must not interleave with other ops
     if (res.requiresImmediateRenegotiation && res.sessionDescription) {
       await this.pc.setRemoteDescription(res.sessionDescription);
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
+
+      // CF can return mid:"" in the subscribe response (real mid is in the negotiated SDP).
+      // After setLocalDescription the transceivers have real mids — reconcile midToEntry now.
+      const newTransceivers = this.pc.getTransceivers().filter((t) => t.mid && !existingMids.has(t.mid));
+      for (let i = 0; i < responseTracks.length && i < newTransceivers.length; i++) {
+        const rt = responseTracks[i];
+        const realMid = newTransceivers[i].mid!;
+        if (realMid !== rt.mid) {
+          const staleEntry = this.midToEntry.get(rt.mid);
+          if (staleEntry) {
+            this.midToEntry.delete(rt.mid);
+            nextSubscribed.delete(rt.mid);
+            const fixedEntry = { ...staleEntry, mid: realMid };
+            this.midToEntry.set(realMid, fixedEntry);
+            nextSubscribed.set(realMid, fixedEntry);
+          }
+        }
+      }
+
       await firstValueFrom(
         this.http.put('/api/sfu/renegotiate', {
           ...creds,
@@ -518,5 +534,8 @@ export class SfuClientService {
         }),
       );
     }
+
+    // Set signal after mids are reconciled
+    this.subscribedTracks.set(nextSubscribed);
   }
 }
