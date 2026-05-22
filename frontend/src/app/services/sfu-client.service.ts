@@ -247,13 +247,30 @@ export class SfuClientService {
   }
 
   private async doClose(mids: string[], creds: { clientKey: string; participantId: string; sessionId: string }, cfSessionId: string): Promise<void> {
-    await firstValueFrom(
-      this.http.put('/api/sfu/tracks/close', {
-        ...creds,
-        cfSessionId,
-        tracks: mids.map((mid) => ({ mid })),
-      }),
-    );
+    type CloseResp = { requiresImmediateRenegotiation?: boolean; sessionDescription?: RTCSessionDescriptionInit };
+    let resp: CloseResp | null = null;
+    try {
+      resp = await firstValueFrom(this.http.put<CloseResp>('/api/sfu/tracks/close', { ...creds, cfSessionId, tracks: mids.map((mid) => ({ mid })) }));
+    } catch {
+      // CF may reject close of remote-subscriber tracks — safe to ignore, CF auto-cleans on session GC
+    }
+    if (resp?.requiresImmediateRenegotiation && resp.sessionDescription && this.pc) {
+      try {
+        await this.pc.setRemoteDescription(resp.sessionDescription);
+        const answer = await this.pc.createAnswer();
+        await this.pc.setLocalDescription(answer);
+        await firstValueFrom(
+          this.http.put('/api/sfu/renegotiate', {
+            ...creds,
+            cfSessionId,
+            sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+          }),
+        );
+      } catch {
+        // Renegotiation on close failed — PC may be in a partially stale state; next subscribe
+        // will re-sync via its own renegotiation cycle
+      }
+    }
   }
 
   private async doReplaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
@@ -560,6 +577,15 @@ export class SfuClientService {
     // multiple tracks share the same empty key — seeding midToEntry by rt.mid would collide.
     // Never seed under rt.mid. Populate ONLY after reconciliation with real transceiver mids.
     const responseTracks = res.tracks ?? [];
+
+    // CF may return errorCode (e.g. not_found_track_error) when a reconnecting peer's tracks
+    // haven't fully propagated in CF yet — the subscribe fires within ms of the publish completing.
+    // Throw so subscribeIfNeeded.catch() clears the guard and retries; subsequent retry wins.
+    const errorTrack = (responseTracks as Array<{ trackName: string; mid: string; errorCode?: string }>).find((t) => t.errorCode);
+    if (errorTrack) {
+      throw new Error(`[sfu] CF subscribe not ready: ${errorTrack.errorCode}`);
+    }
+
     const nextSubscribed = new Map(this.subscribedTracks());
 
     // Full renegotiation inside this enqueue op — must not interleave with other ops
