@@ -78,7 +78,7 @@ test('DR-51/DR-52 mobile receives degraded video, culls non-speaker video under 
 });
 
 async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.locator('input[name="cameraRequested"]').check({ force: true });
@@ -87,7 +87,7 @@ async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Pr
 }
 
 async function joinGuestWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.locator('input[name="cameraRequested"]').check({ force: true });

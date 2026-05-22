@@ -127,7 +127,7 @@ async function createFixRoom(request: APIRequestContext, suffix: string): Promis
 }
 
 async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.getByLabel('Start with camera on').check();
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getVideoTracks().length || 0)).toBeGreaterThan(0);
@@ -137,7 +137,7 @@ async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Pr
 }
 
 async function joinGuestWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.getByLabel('Start with camera on').check();
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getVideoTracks().length || 0)).toBeGreaterThan(0);
@@ -147,7 +147,7 @@ async function joinGuestWithCamera(page: Page, room: TestRoom, name: string): Pr
 }
 
 async function joinGuest(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Ask to join' }).click();
   await expect(page.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();

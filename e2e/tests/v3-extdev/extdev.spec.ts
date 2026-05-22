@@ -25,7 +25,7 @@ test('DR-29 publishes the selected external mic sender through join, switch, fal
   await installExternalMicMedia(page, 'host');
   const room = await createRoomViaApi(request, `${EXTDEV_PREFIX} external mic ${Date.now()}`);
   await loginAsJrom(page);
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await openLobbyDeviceDialog(page);
   await expect(page.locator('app-device-dialog .mic-select')).toHaveValue('extdev-external', { timeout: 10_000 });

@@ -63,7 +63,7 @@ test('DR-38 explicit Exit removes the card and requires re-admit, then later dro
   await expect(page.locator('app-tile').filter({ hasText: 'guest-exit' })).toHaveCount(0);
   await page.screenshot({ path: `${SCREENSHOT_DIR}/explicit-exit-card-removed.png`, fullPage: true });
 
-  await guest.goto(room.url);
+  await guest.goto(room.url + '?sfu=0');
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill('guest-exit');
   await guest.getByRole('button', { name: 'Ask to join' }).click();

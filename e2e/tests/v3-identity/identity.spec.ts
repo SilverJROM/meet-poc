@@ -38,7 +38,7 @@ test('DR-37 full reload rejoin keeps the same participant identity', async ({ br
   expect(firstClientKey).toBeTruthy();
 
   await guest.evaluate(() => window.sessionStorage.clear());
-  await guest.goto(room.url);
+  await guest.goto(room.url + '?sfu=0');
   await expect.poll(() => remotePeerCountByParticipant(page, before!.participantId), { timeout: 8000 }).toBe(1);
 
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();

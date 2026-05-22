@@ -30,3 +30,4 @@
 [projcore callback] B9 PROPOSED 2026-05-22 — SFU diagnostics shape, getStats mapping, subscribe-latency via ontrack, two-sided POST to existing endpoint, backend summary patch, diagnostics page SFU section; awaiting APPROVED-PLAN
 
 [projcore callback] B9 DONE 2026-05-22 — SR-9 complete. SfuDiagnosticsSnapshot (outbound-rtp per layer, inbound-rtp per remote track via mid→midToEntry, candidate-pair ICE/RTT, subscribe-latency) gathered from single PC getStats; persisted via existing diagnostics POST to meeting_session_diagnostics; backend summarizeDiagnosticsPayload updated for CF candidate types; diagnostics page SFU section added. Fix: subscribeFirstFrameAt recorded at doSubscribeTracks reconciliation (ontrack fires before midToEntry is set). e2e B9 1/1 PASS + B4a regression 1/1 PASS. Committed 920ce49.
+[projcore callback] B10 PROPOSED 2026-05-22 — see STATUS: PROPOSED below

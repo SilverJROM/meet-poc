@@ -66,7 +66,7 @@ async function createFixRoom(request: APIRequestContext, suffix: string): Promis
 }
 
 async function joinOwnerWithCamera(page: Page, room: TestRoom): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.getByLabel('Start with camera on').check();
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getVideoTracks().length || 0)).toBeGreaterThan(0);

@@ -55,7 +55,7 @@ test('DR-28 persists per-call diagnostics with active outbound sender track devi
 });
 
 async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.getByLabel('Start with camera on').check();
   await page.locator('#display-name').fill(name);

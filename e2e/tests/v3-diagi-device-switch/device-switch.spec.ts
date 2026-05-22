@@ -17,7 +17,7 @@ test('DR-25 lobby picker sends exact camera/mic deviceId, while mobile flip send
   await installFakeDeviceMedia(page);
   const room = await createRoomViaApi(request, `DIAGI lobby ${Date.now()}`);
   await loginAsJrom(page);
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
 
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.getByLabel('Start with camera on').check();
@@ -263,7 +263,7 @@ async function installFakeDeviceMedia(page: Page): Promise<void> {
 }
 
 async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.getByLabel('Start with camera on').check();
   await expect
@@ -285,7 +285,7 @@ async function createGuest(browser: Browser, room: TestRoom, name: string): Prom
   const context = await browser.newContext();
   const page = await context.newPage();
   await installFakeDeviceMedia(page);
-  await page.goto(new URL(room.url, process.env.E2E_BASE_URL || 'http://localhost:4710').toString());
+  await page.goto(new URL(room.url + '?sfu=0', process.env.E2E_BASE_URL || 'http://localhost:4710').toString());
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Ask to join' }).click();

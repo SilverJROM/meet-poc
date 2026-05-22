@@ -81,7 +81,7 @@ test('DR-32 active-speaker highlight does not reorder gallery or share-strip til
 async function admitCameraGuest(browser: Browser, owner: Page, room: TestRoom, name: string): Promise<BrowserContext> {
   const context = await browser.newContext();
   const guest = await context.newPage();
-  await guest.goto(room.url);
+  await guest.goto(room.url + '?sfu=0');
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill(name);
   await guest.getByLabel('Start with camera on').check();

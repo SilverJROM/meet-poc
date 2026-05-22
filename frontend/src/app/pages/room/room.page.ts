@@ -140,7 +140,7 @@ export class RoomPage implements OnDestroy {
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
   readonly peers = this.webrtc.peerList;
-  readonly isSfuMode = signal(this.route.snapshot.queryParamMap.get('sfu') === '1');
+  readonly isSfuMode = signal(this.route.snapshot.queryParamMap.get('sfu') !== '0'); // mesh is deprecated fallback (B8 deferred); ?sfu=0 opts in to mesh
   readonly sfuPeers = computed<PeerState[]>(() => {
     const result: PeerState[] = [];
     const localPeer = this.peers().find((p) => p.isLocal);
@@ -1033,7 +1033,7 @@ export class RoomPage implements OnDestroy {
         await this.drainPendingSignals(peer.id);
       }
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
-      if (this.route.snapshot.queryParamMap.get('sfu') === '1' && msg.participantId && msg.sessionId) {
+      if (this.isSfuMode() && msg.participantId && msg.sessionId) {
         void this.sfuClient
           .publish({ clientKey: readClientKey(), participantId: msg.participantId, sessionId: msg.sessionId, localStream: this.media.localStream() })
           .then(() => {

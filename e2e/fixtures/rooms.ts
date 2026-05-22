@@ -97,7 +97,7 @@ export async function openOwnerSocket(roomId: string, cookie: string, name: stri
 }
 
 export async function joinOwnerCall(page: Page, room: TestRoom, name = 'jrom'): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Join' }).click();
@@ -106,7 +106,7 @@ export async function joinOwnerCall(page: Page, room: TestRoom, name = 'jrom'): 
 }
 
 export async function joinGuestAndWait(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Ask to join' }).click();

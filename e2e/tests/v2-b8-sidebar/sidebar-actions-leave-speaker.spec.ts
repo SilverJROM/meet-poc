@@ -137,7 +137,7 @@ test('S8.9 active speaker highlights one remote tile and exposes 8Hz cadence', a
   const context = await browser.newContext();
   const guest = await context.newPage();
   await installGeneratedAudioMedia(guest);
-  await guest.goto(room.url);
+  await guest.goto(room.url + '?sfu=0');
   await guest.locator('#display-name').fill('speaker');
   await guest.getByRole('button', { name: 'Ask to join' }).click();
   await openParticipants(page);

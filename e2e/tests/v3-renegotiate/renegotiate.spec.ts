@@ -78,7 +78,7 @@ test('DR-55 camera-on at join still negotiates video and decodes frames', async 
 });
 
 async function joinOwner(page: Page, room: TestRoom, name: string, cameraOn: boolean): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   const cameraToggle = page.locator('input[name="cameraRequested"]');
   if ((await cameraToggle.isChecked()) !== cameraOn) await cameraToggle.setChecked(cameraOn);
@@ -91,7 +91,7 @@ async function admitGuest(browser: Browser, owner: Page, room: TestRoom, name: s
   const context = await browser.newContext();
   await installRenegotiateMedia(context, name);
   const guest = await context.newPage();
-  await guest.goto(room.url);
+  await guest.goto(room.url + '?sfu=0');
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   const cameraToggle = guest.locator('input[name="cameraRequested"]');
   if ((await cameraToggle.isChecked()) !== cameraOn) await cameraToggle.setChecked(cameraOn);

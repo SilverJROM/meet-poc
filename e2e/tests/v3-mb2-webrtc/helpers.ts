@@ -26,7 +26,7 @@ export async function createMb2RoomViaApi(request: APIRequestContext, suffix: st
 }
 
 export async function joinOwnerWithCamera(page: Page, room: TestRoom, name = 'host'): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.getByLabel('Start with camera on').check();
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getVideoTracks().length || 0)).toBeGreaterThan(0);

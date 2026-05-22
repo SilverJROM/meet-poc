@@ -28,6 +28,6 @@ export default defineConfig({
     cwd: '..',
     url: `${baseURL}/login`,
     timeout: 120_000,
-    reuseExistingServer: false,
+    reuseExistingServer: true,
   },
 });

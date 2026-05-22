@@ -18,7 +18,7 @@ export function testRoomId(): string {
 export async function gotoOwnedLobby(page: Page): Promise<string> {
   const roomId = testRoomId();
   await loginAsJrom(page);
-  await page.goto(`/room/${roomId}`);
+  await page.goto(`/room/${roomId}?sfu=0`);
   return roomId;
 }
 

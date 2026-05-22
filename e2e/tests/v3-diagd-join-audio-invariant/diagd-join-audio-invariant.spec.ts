@@ -21,7 +21,7 @@ test.afterAll(() => {
 
 test('DR-12 join button stays clickable and names missing name only', async ({ page, request }) => {
   const room = await createRoomViaApi(request, `${DIAGD_PREFIX} name ${Date.now()}`);
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getAudioTracks().length || 0), { timeout: 8000 }).toBeGreaterThan(0);
 
   const joinButton = page.getByRole('button', { name: 'Ask to join' });
@@ -37,7 +37,7 @@ test('DR-12 join button stays clickable and names missing name only', async ({ p
 test('DR-12 blocked microphone names mic only even when camera is requested', async ({ page, request }) => {
   await blockMicrophone(page.context());
   const room = await createRoomViaApi(request, `${DIAGD_PREFIX} mic ${Date.now()}`);
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await page.locator('#display-name').fill('mic-blocked');
   await page.locator('input[name="cameraRequested"]').check({ force: true });
 
@@ -54,7 +54,7 @@ test('DR-12 blocked microphone names mic only even when camera is requested', as
 test('DR-12 missing name and mic names both prerequisites', async ({ page, request }) => {
   await blockMicrophone(page.context());
   const room = await createRoomViaApi(request, `${DIAGD_PREFIX} both ${Date.now()}`);
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
 
   const joinButton = page.getByRole('button', { name: 'Ask to join' });
   await expect(joinButton).toBeEnabled();
@@ -67,7 +67,7 @@ test('DR-12 missing name and mic names both prerequisites', async ({ page, reque
 test('DR-12 satisfied prerequisites join even when the user starts muted', async ({ page, request }) => {
   const room = await createRoomViaApi(request, `${DIAGD_PREFIX} muted ${Date.now()}`);
   await loginAsJrom(page);
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await page.locator('#display-name').fill('host-muted');
   await page.locator('input[name="microphoneRequested"]').uncheck({ force: true });
 
@@ -144,7 +144,7 @@ async function blockMicrophone(context: BrowserContext): Promise<void> {
 
 async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
   await loginAsJrom(page);
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.locator('input[name="cameraRequested"]').check({ force: true });
@@ -153,7 +153,7 @@ async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Pr
 }
 
 async function joinGuestWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.locator('input[name="cameraRequested"]').check({ force: true });

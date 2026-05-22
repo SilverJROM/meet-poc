@@ -93,7 +93,7 @@ test('DR-47 excludes intentional camera-off peers from media-dead recovery', asy
 });
 
 async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Join' }).click();
@@ -103,7 +103,7 @@ async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void
 async function admitGuest(browser: Browser, owner: Page, room: TestRoom, name: string, cameraOn: boolean): Promise<Page> {
   const context = await browser.newContext();
   const guest = await context.newPage();
-  await guest.goto(room.url);
+  await guest.goto(room.url + '?sfu=0');
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill(name);
   const cameraToggle = guest.locator('input[name="cameraRequested"]');

@@ -83,7 +83,7 @@ test('DR-45 iOS uses one shared remote-audio mixer and rewires when a remote aud
 });
 
 async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url);
+  await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Join' }).click();
@@ -94,7 +94,7 @@ async function joinGuest(browser: Browser, owner: Page, room: TestRoom, name: st
   const context = await browser.newContext();
   const guest = await context.newPage();
   await installFakeMedia(guest, name, false);
-  await guest.goto(room.url);
+  await guest.goto(room.url + '?sfu=0');
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill(name);
   await guest.getByRole('button', { name: 'Ask to join' }).click();
