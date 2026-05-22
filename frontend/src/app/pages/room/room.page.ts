@@ -16,7 +16,7 @@ import { ActiveSpeakerService } from '../../services/active-speaker.service';
 import { AuthService } from '../../services/auth.service';
 import { MediaError, MediaService } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
-import type { DiagnosticsPayload, DiagnosticsPeerSample, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
+import type { DiagnosticsPayload, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
@@ -35,7 +35,6 @@ const DEVICE_RECOVERY_MAX_ATTEMPTS = 3;
 const DEVICE_RECOVERY_BACKOFF_MS = 650;
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
-type BufferedSignal = { from: string; data: unknown };
 type ChatMessage = { id: string; clientId: string; sender: string; text: string; sentAt: number; mine: boolean };
 type LobbyError =
   | { kind: 'denied' }
@@ -140,7 +139,6 @@ export class RoomPage implements OnDestroy {
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
   readonly peers = this.webrtc.peerList;
-  readonly isSfuMode = signal(this.route.snapshot.queryParamMap.get('sfu') !== '0'); // mesh is deprecated fallback (B8 deferred); ?sfu=0 opts in to mesh
   readonly sfuPeers = computed<PeerState[]>(() => {
     const result: PeerState[] = [];
     const localPeer = this.peers().find((p) => p.isLocal);
@@ -183,37 +181,32 @@ export class RoomPage implements OnDestroy {
   });
   readonly shareStripCollapsed = signal(false);
   readonly sharingPeer = computed(() => {
-    if (this.isSfuMode()) {
-      const localScreenPeer = this.peers().find((p) => p.isLocal && p.screenOn);
-      if (localScreenPeer) return localScreenPeer;
-      const screenStreams = this.sfuClient.remoteScreenStreams();
-      const sfuPeerList = this.sfuPeers();
-      for (const [clientId] of screenStreams) {
-        const peer = sfuPeerList.find((p) => p.id === clientId);
-        if (peer) return peer;
-      }
-      return null;
+    const localScreenPeer = this.peers().find((p) => p.isLocal && p.screenOn);
+    if (localScreenPeer) return localScreenPeer;
+    const screenStreams = this.sfuClient.remoteScreenStreams();
+    const sfuPeerList = this.sfuPeers();
+    for (const [clientId] of screenStreams) {
+      const peer = sfuPeerList.find((p) => p.id === clientId);
+      if (peer) return peer;
     }
-    return this.peers().find((peer) => peer.screenOn) ?? null;
+    return null;
   });
   readonly shareLayoutActive = computed(() => !!this.sharingPeer());
   readonly anyScreenShareActive = computed(
     () =>
       this.media.screenOn() ||
       this.peers().some((peer) => peer.screenOn) ||
-      (this.isSfuMode() && this.sfuClient.remoteScreenStreams().size > 0),
+      this.sfuClient.remoteScreenStreams().size > 0,
   );
   readonly effectiveCameraOn = computed(() => this.media.cameraOn() && this.cameraVisibleDuringCurrentShare());
   readonly shareStream = computed(() => {
     const peer = this.sharingPeer();
     if (!peer) return null;
     if (peer.isLocal) return this.media.screenStream();
-    if (this.isSfuMode()) return this.sfuClient.remoteScreenStreams().get(peer.id) ?? null;
-    return peer.stream;
+    return this.sfuClient.remoteScreenStreams().get(peer.id) ?? null;
   });
   readonly orderedStripPeers = computed(() => this.peers());
   readonly showPeerWarning = computed(() => this.peers().length >= 6 && !this.warningDismissed());
-  readonly weakAudioOnlyPeers = computed(() => this.peers().filter((peer) => !peer.isLocal && peer.audioOnlyReason === 'auto-poor'));
   readonly hostRecording = signal(false);
   readonly recordingStartedAt = signal<number | null>(null);
   readonly currentSessionId = signal<string | null>(null);
@@ -232,7 +225,6 @@ export class RoomPage implements OnDestroy {
   private shareCameraPreShareOn: boolean | null = null;
   private readonly shareCameraManualOverride = signal(false);
   private shareCameraSyncRun = 0;
-  private readonly pendingSignals = new Map<string, BufferedSignal[]>();
   private readonly reconnectToken = signal<string | null>(readReconnectToken(this.roomKey));
   private signalingResyncCount = 0;
   private pendingListInitialized = false;
@@ -295,11 +287,6 @@ export class RoomPage implements OnDestroy {
         speakerTestCount: window.__meetDebug?.speakerTestCount ?? 0,
         doorbellCount: window.__meetDebug?.doorbellCount ?? 0,
         waitingKnockers: this.knockers().map((knocker) => ({ ...knocker })),
-        diagnostics: this.webrtc.diagnostics(),
-        forceRelay: this.webrtc.forceRelay(),
-        manualAudioOnly: this.webrtc.manualAudioOnly(),
-        lastPeerConnectionPolicy: this.webrtc.lastPeerConnectionPolicy(),
-        lastPeerConnectionConfig: this.webrtc.lastPeerConnectionConfig(),
         wsConnected: this.ws.connected(),
         wsStatus: this.ws.status(),
         wsReconnectAttempts: this.ws.reconnectAttempts(),
@@ -326,17 +313,6 @@ export class RoomPage implements OnDestroy {
         activeSpeakerLastMaxRms: this.activeSpeaker.lastMaxRms(),
         activeSpeakerContextState: this.activeSpeaker.contextState(),
         remoteAudioMixer: this.remoteAudio.debugSnapshot(),
-        peerConnectionStates: () =>
-          this.peers()
-            .filter((peer) => !peer.isLocal && peer.pc)
-            .map((peer) => ({
-              id: peer.id,
-              state: peer.pc?.connectionState ?? peer.connectionState,
-              iceConnectionState: peer.pc?.iceConnectionState ?? peer.iceConnectionState,
-              iceGatheringState: peer.pc?.iceGatheringState ?? peer.iceGatheringState,
-              signalingState: peer.pc?.signalingState ?? peer.signalingState,
-              selectedCandidateType: peer.selectedCandidateType,
-            })),
         remoteMedia: () =>
           this.peers()
             .filter((peer) => !peer.isLocal)
@@ -355,21 +331,14 @@ export class RoomPage implements OnDestroy {
         isIOS: () => this.platform.isIOS(),
         isAndroid: () => this.platform.isAndroid(),
         closeSignalingForTest: () => this.ws.debugDropForReconnect(),
-        sampleConnectionQualityForTest: (quality?: 'good' | 'weak' | 'poor' | 'critical') => this.webrtc.sampleQualityNowForTest(quality),
-        senderSnapshot: () => this.webrtc.debugSenderSnapshot(),
         sfuPublishState: this.sfuClient.localPublishState(),
         sfuRemoteStreams: this.sfuClient.remoteStreams(),
         sfuRemoteScreenStreams: this.sfuClient.remoteScreenStreams(),
       };
       if (window.location.hostname === 'localhost') {
-        debug.diagnosticSnapshot = () => this.webrtc.diagnosticSnapshot();
         debug.injectActiveSpeakerStream = (id: string, stream: MediaStream) => this.activeSpeaker.injectDebugStream(id, stream);
         debug.forceActiveSpeakerForTest = (id: string | null) => this.activeSpeaker.forceActivePeerForTest(id);
         debug.markPeerReconnectingForTest = (id: string) => this.webrtc.markPeerReconnecting(id);
-        debug.markPeerRecoveredForTest = (id: string) => this.webrtc.debugMarkPeerRecoveredForTest(id);
-        debug.forceTerminalRecoveryForTest = (id?: string) => this.webrtc.debugForceTerminalRecoveryForTest(id);
-        debug.forceNegotiationDeadlockForTest = (id?: string) => this.webrtc.debugForceNegotiationDeadlockForTest(id);
-        debug.recoverySnapshot = (id?: string) => this.webrtc.debugRecoverySnapshot(id);
         debug.replaceRemoteAudioTrackForTest = (id: string) => this.replaceRemoteAudioTrackForTest(id);
         debug.sfuGetStats = () => this.sfuClient.getStats();
         debug.sfuVideoEncodings = () => this.sfuClient.getVideoEncodings();
@@ -392,9 +361,6 @@ export class RoomPage implements OnDestroy {
       }, 0);
     });
     effect(() => {
-      this.webrtc.setActiveSpeakerPeer(this.activeSpeaker.activeFrame().id);
-    });
-    effect(() => {
       void this.syncShareCameraCut(this.anyScreenShareActive(), this.media.screenOn(), this.shareCameraManualOverride());
     });
     effect(() => {
@@ -411,7 +377,6 @@ export class RoomPage implements OnDestroy {
     // subscribeRetryVersion() is also read as a dep: when doSubscribe fails (CF error), subscribeIfNeeded
     // clears the guard and bumps the version so this effect re-fires and retries the full roster.
     effect(() => {
-      if (!this.isSfuMode()) return;
       if (this.sfuClient.localPublishState()?.status !== 'published') return;
       this.sfuClient.subscribeRetryVersion(); // reactive dep — re-evaluates roster on subscribe failure
       const publishers = this.sfuClient.remotePublishers();
@@ -424,7 +389,6 @@ export class RoomPage implements OnDestroy {
     // SFU layer preference: when screenshare activity changes, update camera layer for all subscribers.
     // updateCameraLayer() is a no-op when no camera mids are subscribed (e.g. on init).
     effect(() => {
-      if (!this.isSfuMode()) return;
       const _active = this.anyScreenShareActive(); // reactive dep — effect re-runs on change
       void this.sfuClient.updateCameraLayer();
     });
@@ -661,9 +625,7 @@ export class RoomPage implements OnDestroy {
       await this.toggleCameraDuringShare();
       return;
     }
-    const replaceTrack = this.isSfuMode()
-      ? (track: MediaStreamTrack | null) => this.sfuClient.replaceVideoTrack(track)
-      : (track: MediaStreamTrack | null) => this.webrtc.replaceVideoTrack(track);
+    const replaceTrack = (track: MediaStreamTrack | null) => this.sfuClient.replaceVideoTrack(track);
     try {
       const cam = await this.media.toggleCamera(replaceTrack, {
         videoDeviceId: this.selectedVideoDeviceIdForRequest(),
@@ -677,27 +639,7 @@ export class RoomPage implements OnDestroy {
   }
 
   async toggleScreen(): Promise<void> {
-    if (this.isSfuMode()) {
-      await this.toggleScreenSfu();
-      return;
-    }
-    try {
-      await this.media.toggleScreen((track) => this.webrtc.replaceVideoTrack(track));
-      this.screenShareHelp.set(null);
-      this.updateLocalMediaState();
-      this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
-      this.status.set(this.media.screenOn() ? 'Screen sharing.' : 'Screen sharing stopped.');
-    } catch (err) {
-      if (isDisplayMediaPermissionError(err)) {
-        this.screenShareHelp.set(
-          'Enable Screen Recording for Chrome in macOS System Settings, then fully quit and reopen Chrome with Cmd+Q before sharing again.',
-        );
-        this.status.set('Screen sharing needs macOS Screen Recording permission.');
-        return;
-      }
-      this.screenShareHelp.set(null);
-      this.status.set(`Screen share failed: ${err instanceof Error ? err.message : 'not available'}`);
-    }
+    await this.toggleScreenSfu();
   }
 
   private async toggleScreenSfu(): Promise<void> {
@@ -759,13 +701,11 @@ export class RoomPage implements OnDestroy {
           videoDeviceId: this.selectedVideoDeviceIdForRequest(),
           facingMode: this.videoFacingModeForRequest(true),
         });
-        await this.webrtc.replaceVideoTrack(enabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
-        await this.webrtc.setShareCameraPolicy({ suppressCamera: false, localScreenShareActive: false });
+        await this.sfuClient.replaceVideoTrack(enabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
         this.status.set('Camera on during screen share.');
       } else {
         await this.media.setCameraTrackEnabled({ enabled: false });
-        await this.webrtc.replaceVideoTrack(null);
-        await this.webrtc.setShareCameraPolicy({ suppressCamera: true, localScreenShareActive: false });
+        await this.sfuClient.replaceVideoTrack(null);
         this.status.set('Camera hidden during screen share.');
       }
       this.updateLocalMediaState();
@@ -863,12 +803,6 @@ export class RoomPage implements OnDestroy {
     return new Date(sentAt).toISOString();
   }
 
-  async setForceRelay(enabled: boolean): Promise<void> {
-    await this.webrtc.setForceRelay(enabled);
-    this.status.set(enabled ? 'Force relay enabled. Recreated peer connections through TURN only.' : 'Force relay disabled. Recreated peer connections with default ICE.');
-    this.queueDiagnosticsLog('state-change');
-  }
-
   setDiagnosticsLogging(enabled: boolean): void {
     this.diagnosticsLoggingEnabled.set(enabled);
     storeDiagnosticsLoggingEnabled(enabled);
@@ -880,12 +814,6 @@ export class RoomPage implements OnDestroy {
       this.startDiagnosticsLogger();
       this.queueDiagnosticsLog('sample');
     }
-  }
-
-  async toggleAudioOnly(): Promise<void> {
-    await this.webrtc.setManualAudioOnly(!this.webrtc.manualAudioOnly());
-    this.status.set(this.webrtc.manualAudioOnly() ? 'Audio-only mode on.' : 'Audio-only mode off.');
-    this.queueDiagnosticsLog('state-change');
   }
 
   toggleShareStrip(): void {
@@ -1003,12 +931,9 @@ export class RoomPage implements OnDestroy {
       if (msg.roomTitle) this.roomTitle.set(msg.roomTitle);
       const stream = this.media.localStream();
       if (stream) {
-        this.webrtc.configure(stream, (to, data) => this.ws.send({ type: 'signal', to, data }), { isMobile: this.viewport.isMobile() });
+        this.webrtc.configure(stream, () => undefined, { isMobile: this.viewport.isMobile() });
         this.hostClientId.set(msg.hostClientId || (msg.isOwner ? msg.clientId : null));
-        if (wasInCall) {
-          this.pendingSignals.clear();
-          this.webrtc.resetRemotePeers();
-        }
+        if (wasInCall) this.webrtc.resetRemotePeers();
         this.webrtc.setLocalPeer(msg.clientId, this.displayName().trim() || 'Anon', {
           participantId: msg.participantId,
           isHost: msg.isOwner,
@@ -1023,17 +948,16 @@ export class RoomPage implements OnDestroy {
       this.status.set(wasInCall ? 'Reconnected to signaling. Syncing peers...' : `You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
       // SFU reconnect: reset BEFORE the async addPeer loop so the sfu-roster (which arrives during
       // the loop's yields) populates remotePublishers into the already-reset state and isn't cleared.
-      if (wasInCall && this.isSfuMode()) this.sfuClient.resetForReconnect();
+      if (wasInCall) this.sfuClient.resetForReconnect();
       for (const peer of msg.peers) {
         await this.webrtc.addPeer(peer.id, peer.name, true, {
           participantId: peer.participantId,
           isHost: !!peer.host || peer.id === this.hostClientId(),
           isMobile: !!peer.isMobile,
         });
-        await this.drainPendingSignals(peer.id);
       }
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
-      if (this.isSfuMode() && msg.participantId && msg.sessionId) {
+      if (msg.participantId && msg.sessionId) {
         void this.sfuClient
           .publish({ clientKey: readClientKey(), participantId: msg.participantId, sessionId: msg.sessionId, localStream: this.media.localStream() })
           .then(() => {
@@ -1080,7 +1004,6 @@ export class RoomPage implements OnDestroy {
         displayName: msg.name,
         isHost: !!msg.host || msg.clientId === this.hostClientId(),
       });
-      await this.drainPendingSignals(msg.clientId);
       this.queueDiagnosticsLog('state-change');
       return;
     }
@@ -1092,23 +1015,17 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-resumed') {
       this.status.set(`${msg.name} reconnected.`);
-      if (this.isSfuMode()) this.sfuClient.removePeer(msg.oldClientId);
+      this.sfuClient.removePeer(msg.oldClientId);
       await this.webrtc.resumePeer(msg.oldClientId, msg.clientId, msg.name, false, {
         participantId: msg.participantId,
         isHost: !!msg.host || msg.clientId === this.hostClientId(),
         isMobile: !!msg.isMobile,
       });
-      const queued = this.pendingSignals.get(msg.oldClientId);
-      if (queued?.length) {
-        this.pendingSignals.delete(msg.oldClientId);
-        this.pendingSignals.set(msg.clientId, queued);
-      }
       this.recorder.notifyParticipantJoined({
         clientId: msg.clientId,
         displayName: msg.name,
         isHost: !!msg.host || msg.clientId === this.hostClientId(),
       });
-      await this.drainPendingSignals(msg.clientId);
       this.queueDiagnosticsLog('reconnect');
       return;
     }
@@ -1162,7 +1079,6 @@ export class RoomPage implements OnDestroy {
       this.recorder.notifyParticipantLeft(msg.clientId);
       this.webrtc.removePeer(msg.clientId);
       this.sfuClient.removePeer(msg.clientId);
-      this.pendingSignals.delete(msg.clientId);
       this.removeKnocker(msg.clientId);
       this.queueDiagnosticsLog('state-change');
       return;
@@ -1173,14 +1089,6 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'sfu-roster') {
       this.sfuClient.handleSfuRoster(msg.publishers);
-      return;
-    }
-    if (msg.type === 'signal') {
-      if (!this.hasPeerConnection(msg.from)) {
-        this.bufferSignal(msg);
-        return;
-      }
-      await this.webrtc.handleSignal(msg.from, msg.data);
       return;
     }
     if (msg.type === 'error') {
@@ -1504,12 +1412,11 @@ export class RoomPage implements OnDestroy {
     this.clearPreflightTimer();
     this.stopWaitingRoomCountdown();
     if (sendLeaveMessage && (this.state() === 'in-call' || this.state() === 'knocking' || this.state() === 'waiting-room')) this.ws.send({ type: 'leave' });
-    if (this.isSfuMode()) this.sfuClient.closeLiveTracksForExit();
+    this.sfuClient.closeLiveTracksForExit();
     this.ws.close();
     this.recorder.discard();
     this.media.stopLocal();
     this.webrtc.reset();
-    this.pendingSignals.clear();
     this.knockers.set([]);
     this.pendingListInitialized = false;
     clearReconnectToken(this.roomKey);
@@ -1549,7 +1456,7 @@ export class RoomPage implements OnDestroy {
     this.deviceDialogBusy.set(true);
     this.deviceDialogError.set(null);
     try {
-      const track = await this.media.replaceAudioTrack(deviceId || undefined, (nextTrack) => this.webrtc.replaceLocalSenderTrack('audio', nextTrack));
+      const track = await this.media.replaceAudioTrack(deviceId || undefined, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
       if (track) {
         this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
         this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([track])));
@@ -1560,7 +1467,7 @@ export class RoomPage implements OnDestroy {
     } catch (err) {
       if (deviceId) {
         try {
-          const fallbackTrack = await this.media.replaceAudioTrack(undefined, (nextTrack) => this.webrtc.replaceLocalSenderTrack('audio', nextTrack));
+          const fallbackTrack = await this.media.replaceAudioTrack(undefined, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
           if (fallbackTrack) {
             this.syncSelectedAudioIdToTrack(fallbackTrack);
             this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([fallbackTrack]));
@@ -1626,7 +1533,7 @@ export class RoomPage implements OnDestroy {
     try {
       const track = await this.media.replaceVideoTrack(
         this.selectedVideoDeviceIdForRequest(),
-        (nextTrack) => this.webrtc.replaceLocalSenderTrack('video', nextTrack),
+        (nextTrack) => this.sfuClient.replaceVideoTrack(nextTrack),
         this.videoFacingModeForRequest(true),
       );
       if (track) {
@@ -1778,7 +1685,7 @@ export class RoomPage implements OnDestroy {
       const candidates = this.deviceCandidates(this.selectedAudioId(), devices.audioInputs);
       for (const candidate of candidates) {
         try {
-          const track = await this.media.replaceAudioTrack(candidate.deviceId, (nextTrack) => this.webrtc.replaceLocalSenderTrack('audio', nextTrack));
+          const track = await this.media.replaceAudioTrack(candidate.deviceId, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
           if (!track) continue;
           this.syncSelectedAudioIdToTrack(track);
           this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
@@ -1793,7 +1700,7 @@ export class RoomPage implements OnDestroy {
         }
       }
     }
-    await this.webrtc.replaceLocalSenderTrack('audio', null);
+    await this.sfuClient.replaceAudioTrack(null);
     this.media.removeAudioTrack();
     this.updateLocalMediaState();
     this.broadcastMediaState(false, this.media.cameraOn());
@@ -1813,7 +1720,7 @@ export class RoomPage implements OnDestroy {
       const candidates = this.deviceCandidates(this.selectedVideoId(), devices.videoInputs);
       for (const candidate of candidates) {
         try {
-          const track = await this.media.replaceVideoTrack(candidate.deviceId, (nextTrack) => this.webrtc.replaceLocalSenderTrack('video', nextTrack));
+          const track = await this.media.replaceVideoTrack(candidate.deviceId, (nextTrack) => this.sfuClient.replaceVideoTrack(nextTrack));
           if (!track) continue;
           this.syncSelectedVideoIdToTrack(track);
           this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
@@ -1827,7 +1734,7 @@ export class RoomPage implements OnDestroy {
         }
       }
     }
-    await this.webrtc.replaceVideoTrack(null);
+    await this.sfuClient.replaceVideoTrack(null);
     this.media.removeVideoTrack();
     this.updateLocalMediaState();
     this.broadcastMediaState(this.media.micOn(), false);
@@ -1874,10 +1781,6 @@ export class RoomPage implements OnDestroy {
       manualOverride = false;
     }
     if (run !== this.shareCameraSyncRun) return;
-    await this.webrtc.setShareCameraPolicy({
-      suppressCamera: shareActive && !localScreenShareActive && !manualOverride,
-      localScreenShareActive,
-    });
     this.updateLocalMediaState();
   }
 
@@ -1888,7 +1791,7 @@ export class RoomPage implements OnDestroy {
       facingMode: enabled ? this.videoFacingModeForRequest(true) : undefined,
     });
     if (updateSender && !this.media.screenOn()) {
-      await this.webrtc.replaceVideoTrack(nextEnabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
+      await this.sfuClient.replaceVideoTrack(nextEnabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
     }
     this.updateLocalMediaState();
     this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
@@ -1942,7 +1845,7 @@ export class RoomPage implements OnDestroy {
   ): Promise<void> {
     const sessionId = this.currentSessionId();
     if (!sessionId || !this.diagnosticsLoggingEnabled()) return;
-    const sfuDiagnostics = this.isSfuMode() ? (await this.sfuClient.collectDiagnostics()) ?? undefined : undefined;
+    const sfuDiagnostics = (await this.sfuClient.collectDiagnostics()) ?? undefined;
     const payload = this.buildDiagnosticsPayload(kind, options.error, sfuDiagnostics);
     if (options.useBeacon && this.meetingSessions.sendDiagnosticsBeacon(sessionId, payload)) return;
     if (this.diagnosticsLogInFlight) return;
@@ -1957,7 +1860,6 @@ export class RoomPage implements OnDestroy {
   }
 
   private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string, sfuDiagnostics?: SfuDiagnosticsSnapshot): DiagnosticsPayload {
-    const diagnostics = this.webrtc.diagnosticSnapshot();
     const payload: DiagnosticsPayload = {
       kind,
       roomId: this.roomId,
@@ -1970,19 +1872,12 @@ export class RoomPage implements OnDestroy {
       wsStatus: this.ws.status(),
       wsReconnectAttempts: this.ws.reconnectAttempts(),
       wsHealth: this.ws.diagnosticsSnapshot(),
-      forceRelay: this.webrtc.forceRelay(),
-      manualAudioOnly: this.webrtc.manualAudioOnly(),
-      outboundAudioLevel: diagnostics.outboundAudioLevel,
-      outboundAudioEnergy: diagnostics.outboundAudioEnergy,
-      micSilent: diagnostics.micSilent,
-      peers: diagnostics.peers.map((peer) => ({
-        ...peer,
-        diagnosticLabels: [
-          ...(peer.diagnosticLabels ?? []),
-          ...(diagnostics.micSilent === true && peer.isLocal ? ['sender-silent'] : []),
-          ...(this.remoteAudioBlocked() && !peer.isLocal ? ['autoplay-blocked'] : []),
-        ],
-      })),
+      forceRelay: false,
+      manualAudioOnly: false,
+      outboundAudioLevel: null,
+      outboundAudioEnergy: null,
+      micSilent: null,
+      peers: [],
     };
     if (sfuDiagnostics) payload.sfuDiagnostics = sfuDiagnostics;
     if (error) payload.error = error;
@@ -2048,28 +1943,6 @@ export class RoomPage implements OnDestroy {
     return this.viewport.isMobile() && this.platform.isMobileUA();
   }
 
-  private hasPeerConnection(clientId: string): boolean {
-    return !!this.webrtc.peers().get(clientId)?.pc;
-  }
-
-  private bufferSignal(msg: Extract<SignalingMessage, { type: 'signal' }>): void {
-    const queue = this.pendingSignals.get(msg.from) ?? [];
-    if (queue.length >= 20) queue.shift();
-    queue.push({ from: msg.from, data: msg.data });
-    this.pendingSignals.set(msg.from, queue);
-    console.debug(`[signaling] buffered ${signalKind(msg.data)} from ${msg.from} (queue=${queue.length})`);
-  }
-
-  private async drainPendingSignals(clientId: string): Promise<void> {
-    const queue = this.pendingSignals.get(clientId);
-    if (!queue?.length) return;
-    this.pendingSignals.delete(clientId);
-    console.debug(`[signaling] drained ${queue.length} queued signals for ${clientId}`);
-    for (const msg of queue) {
-      await this.webrtc.handleSignal(msg.from, msg.data);
-    }
-  }
-
   private sendJoin(name: string): void {
     this.ws.send({
       type: 'join',
@@ -2126,13 +1999,6 @@ function delay(ms: number): Promise<void> {
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T | null): Promise<T | null> {
   return Promise.race([promise, new Promise<T | null>((resolve) => setTimeout(() => resolve(fallback), ms))]);
-}
-
-function signalKind(data: unknown): string {
-  const payload = data as { sdp?: { type?: string }; ice?: unknown };
-  if (payload?.sdp?.type) return payload.sdp.type;
-  if (payload?.ice) return 'ice';
-  return 'unknown';
 }
 
 function isDisplayMediaPermissionError(err: unknown): boolean {
@@ -2279,27 +2145,6 @@ declare global {
       speakerTestCount?: number;
       doorbellCount?: number;
       waitingKnockers?: { id: string; name: string }[];
-      diagnostics?: {
-        id: string;
-        name: string;
-        connectionState: string;
-        iceConnectionState: string;
-        iceGatheringState: string;
-        signalingState: string;
-        selectedCandidateType: string | null;
-        quality: 'good' | 'weak' | 'poor';
-        packetLossPct: number | null;
-        jitterMs: number | null;
-        rttMs: number | null;
-        availableOutgoingBitrateKbps: number | null;
-        audioOnlyReason: 'auto-poor' | 'manual-audio-only' | 'remote-request' | null;
-        updatedAt: number;
-      }[];
-      diagnosticSnapshot?: () => Pick<DiagnosticsPayload, 'outboundAudioLevel' | 'outboundAudioEnergy' | 'micSilent' | 'peers'>;
-      forceRelay?: boolean;
-      manualAudioOnly?: boolean;
-      lastPeerConnectionPolicy?: RTCIceTransportPolicy | 'all';
-      lastPeerConnectionConfig?: RTCConfiguration | null;
       wsConnected?: boolean;
       wsStatus?: string;
       wsReconnectAttempts?: number;
@@ -2334,14 +2179,6 @@ declare global {
         mixedPeerIds: string[];
         mixedTrackIds: string[];
       };
-      peerConnectionStates?: () => {
-        id: string;
-        state: RTCPeerConnectionState | 'local';
-        iceConnectionState: RTCIceConnectionState | 'local';
-        iceGatheringState: RTCIceGatheringState | 'local';
-        signalingState: RTCSignalingState | 'local';
-        selectedCandidateType: string | null;
-      }[];
       remoteMedia?: () => {
         id: string;
         isMobile: boolean;
@@ -2356,39 +2193,10 @@ declare global {
       isIOS?: () => boolean;
       isAndroid?: () => boolean;
       closeSignalingForTest?: () => void;
-      sampleConnectionQualityForTest?: (quality?: 'good' | 'weak' | 'poor' | 'critical') => Promise<void>;
-      senderSnapshot?: () => {
-        id: string;
-        videoPaused: boolean;
-        audioActive: boolean;
-        videoActive: boolean;
-        audioPriority: unknown;
-        audioNetworkPriority: unknown;
-        videoPriority: unknown;
-        videoNetworkPriority: unknown;
-        videoMaxBitrate: number | null;
-        videoScaleResolutionDownBy: number | null;
-        videoMaxFramerate: number | null;
-        videoDegraded: boolean;
-        remoteIsMobile: boolean;
-      }[];
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
       forceActiveSpeakerForTest?: (id: string | null) => void;
       markPeerReconnectingForTest?: (id: string) => void;
-      markPeerRecoveredForTest?: (id: string) => void;
-      forceTerminalRecoveryForTest?: (id?: string) => Promise<void>;
-      forceNegotiationDeadlockForTest?: (id?: string) => Promise<void>;
       replaceRemoteAudioTrackForTest?: (id: string) => Promise<{ oldTrackId: string | null; newTrackId: string } | null>;
-      recoverySnapshot?: (id?: string) => {
-        id: string;
-        participantId: string;
-        pcPresent: boolean;
-        pcRecreateAttempts: number;
-        restartAttempts: number;
-        autoRecoveryOutcome: 'recovered' | 'failed' | null;
-        rollbackCount: number;
-        forceRelay: boolean;
-      }[];
       sfuPublishState?: LocalPublishState | null;
       sfuRemoteStreams?: Map<string, MediaStream>;
       sfuRemoteScreenStreams?: Map<string, MediaStream>;

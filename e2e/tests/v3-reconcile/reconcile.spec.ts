@@ -37,7 +37,6 @@ test('DR-31 guest reconnect resumes the same participant tile without re-admit o
   const before = await remotePeerByName(page, 'guest-reconcile');
   expect(before?.id).toBeTruthy();
   expect(before?.participantId).toBeTruthy();
-  await expectAudioPriority(page);
 
   const attemptsBefore = await guest.evaluate(() => window.__meetDebug?.wsReconnectAttempts || 0);
   await guest.evaluate(() => window.__meetDebug?.closeSignalingForTest?.());
@@ -58,7 +57,6 @@ test('DR-31 guest reconnect resumes the same participant tile without re-admit o
   expect(after?.reconnecting).toBe(false);
   await expect(page.getByText(/Asking the host to admit you|The host is available/)).toHaveCount(0);
   await expect(page.locator('app-tile')).toHaveCount(2);
-  await expectAudioPriority(page);
   await page.screenshot({ path: `${SCREENSHOT_DIR}/guest-resumed-no-ghost.png`, fullPage: true });
 
   await guest.getByRole('button', { name: 'Leave call' }).click();
@@ -119,27 +117,3 @@ async function remotePeerCountByParticipant(page: Page, participantId: string): 
   return page.evaluate((id) => window.__meetDebug?.peers.filter((peer) => peer.participantId === id && !peer.name.includes('(you)')).length || 0, participantId);
 }
 
-async function expectAudioPriority(page: Page): Promise<void> {
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() => {
-          const snapshot = window.__meetDebug?.senderSnapshot?.()[0];
-          return {
-            audioPriority: snapshot?.audioPriority ?? null,
-            audioNetworkPriority: snapshot?.audioNetworkPriority ?? null,
-            videoPriority: snapshot?.videoPriority ?? null,
-            videoNetworkPriority: snapshot?.videoNetworkPriority ?? null,
-            videoMaxBitrate: snapshot?.videoMaxBitrate ?? null,
-          };
-        }),
-      { timeout: 8000 },
-    )
-    .toEqual({
-      audioPriority: 'high',
-      audioNetworkPriority: 'high',
-      videoPriority: 'low',
-      videoNetworkPriority: 'low',
-      videoMaxBitrate: 700000,
-    });
-}

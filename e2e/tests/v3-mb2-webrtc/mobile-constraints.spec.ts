@@ -13,7 +13,7 @@ test.afterAll(() => {
 test('S5.1 mobile camera preflight requests 480p constraints', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   const room = await createMb2Room(page, 'mobile-constraints');
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
 
   await page.getByLabel('Start with camera on').check();

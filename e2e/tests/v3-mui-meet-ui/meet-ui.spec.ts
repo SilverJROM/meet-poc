@@ -45,14 +45,8 @@ test('DR-26 Meet-like control bar keeps every existing control wired', async ({ 
   await expect(page.getByRole('dialog', { name: 'Check your camera and audio' })).toBeVisible();
   await page.getByRole('button', { name: 'Close device settings' }).click();
 
-  await page.getByRole('button', { name: 'Enable audio-only mode' }).click();
-  await expect(page.locator('.weak-connection-banner')).toContainText('Audio-only mode is on');
-  await expect.poll(() => page.evaluate(() => window.__meetDebug?.manualAudioOnly)).toBe(true);
-
   await page.getByRole('button', { name: 'Show connection diagnostics' }).click();
   await expect(page.locator('.diagnostics-panel')).toBeVisible();
-  await page.getByLabel('Force relay').check();
-  await expect.poll(() => page.evaluate(() => window.__meetDebug?.forceRelay)).toBe(true);
 
   await page.getByRole('button', { name: 'Show participants' }).click();
   await expect(page.locator('app-participant-sidebar .participant-sidebar.open')).toBeVisible();

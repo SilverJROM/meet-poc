@@ -106,7 +106,7 @@ async function createFixRoom(request: APIRequestContext, suffix: string): Promis
 }
 
 async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Join' }).click();
@@ -116,7 +116,7 @@ async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void
 async function admitBrowserGuest(browser: Browser, owner: Page, room: TestRoom, name: string): Promise<Page> {
   const context = await browser.newContext();
   const guest = await context.newPage();
-  await guest.goto(room.url + '?sfu=0');
+  await guest.goto(room.url);
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill(name);
   await guest.getByRole('button', { name: 'Ask to join' }).click();

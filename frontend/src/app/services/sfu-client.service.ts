@@ -104,6 +104,10 @@ export class SfuClientService {
     return this.enqueue(() => this.doReplaceVideoTrack(track));
   }
 
+  replaceAudioTrack(track: MediaStreamTrack | null): Promise<void> {
+    return this.enqueue(() => this.doReplaceAudioTrack(track));
+  }
+
   publishScreen(displayTrack: MediaStreamTrack): Promise<void> {
     return this.enqueue(() => this.doPublishScreen(displayTrack));
   }
@@ -405,6 +409,11 @@ export class SfuClientService {
   private async doReplaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
     if (!this.videoSender) return;
     await this.videoSender.replaceTrack(track);
+  }
+
+  private async doReplaceAudioTrack(track: MediaStreamTrack | null): Promise<void> {
+    if (!this.audioSender) return;
+    await this.audioSender.replaceTrack(track);
   }
 
   private async doPublishScreen(displayTrack: MediaStreamTrack): Promise<void> {

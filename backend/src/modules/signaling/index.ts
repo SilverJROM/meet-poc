@@ -794,16 +794,6 @@ export function attachSignaling(server: http.Server, database: Database.Database
         return;
       }
 
-      if (msg.type === 'signal') {
-        if (state !== 'admitted') return;
-        const live = currentRoom ? liveRooms.get(currentRoom) : null;
-        if (!live) return;
-        const target = live.admitted.get(String(msg.to || ''));
-        if (!target) return;
-        send(target.ws, { type: 'signal', from: clientId, data: msg.data });
-        return;
-      }
-
       if (msg.type === 'media-state') {
         if (state !== 'admitted') return;
         const live = currentRoom ? liveRooms.get(currentRoom) : null;

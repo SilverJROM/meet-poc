@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, type BrowserContext, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { createRoomFromDashboard, joinGuestAndWait, joinOwnerCall } from '../../fixtures/rooms';
 
 const DIAGB2_PREFIX = 'DIAGB2';
@@ -34,41 +34,6 @@ test('DR-1 screen-share permission denial shows the macOS helper', async ({ page
   await page.screenshot({ path: `${SCREENSHOT_DIR}/screen-share-helper.png`, fullPage: true });
 });
 
-test.skip('DR-2 diagnostics panel lists peer states and force-relay recreates peer connections with relay policy', async ({ browser, page }) => {
-  // QUARANTINE B10: pre-existing mesh WebRTC failure (peer state stuck at "new"), unrelated to B10 SFU-default flip
-  await installPeerConnectionProbe(page.context(), 'relay');
-  const room = await createRoomFromDashboard(page, `${DIAGB2_PREFIX} diagnostics ${Date.now()}`);
-  await joinOwnerCall(page, room, 'host');
-
-  const guestContext = await browser.newContext();
-  await installPeerConnectionProbe(guestContext, 'relay');
-  const guest = await guestContext.newPage();
-  await joinGuestAndWait(guest, room, 'guest');
-  await page.getByRole('button', { name: 'Show participants' }).click();
-  await page.getByLabel('Waiting to join').locator('li').filter({ hasText: 'guest' }).getByRole('button', { name: 'Admit' }).click();
-  await expect(page.locator('app-tile').filter({ hasText: 'guest' }).locator('.state')).toHaveText('connected', { timeout: 12000 });
-
-  await page.getByRole('button', { name: 'Show connection diagnostics' }).click();
-  const diagnostics = page.getByRole('region', { name: 'Connection diagnostics' });
-  await expect(diagnostics).toBeVisible();
-  await expect(page.locator('.diagnostic-peer').filter({ hasText: 'guest' })).toContainText('Connection');
-  await expect(page.locator('.diagnostic-peer').filter({ hasText: 'guest' })).toContainText('ICE');
-  await expect.poll(() => page.evaluate(() => window.__meetDebug?.forceRelay)).toBe(false);
-  await expect.poll(() => page.evaluate(() => window.__diagPeerConfigs?.some((config) => config.iceTransportPolicy === 'relay') || false)).toBe(false);
-
-  await diagnostics.getByLabel('Force relay').check();
-
-  await expect.poll(() => page.evaluate(() => window.__meetDebug?.forceRelay), { timeout: 5000 }).toBe(true);
-  await expect.poll(() => page.evaluate(() => window.localStorage.getItem('meet-poc.forceRelay'))).toBe('1');
-  await expect.poll(() => page.evaluate(() => window.__meetDebug?.lastPeerConnectionPolicy)).toBe('relay');
-  await expect.poll(() => page.evaluate(() => window.__diagPeerConfigs?.some((config) => config.iceTransportPolicy === 'relay') || false), {
-    timeout: 8000,
-  }).toBe(true);
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/diagnostics-panel.png`, fullPage: true });
-
-  await guestContext.close();
-});
-
 test('DR-3 reconnect resync keeps owner and admitted guest in-call without stale local peers', async ({ browser, page }) => {
   const room = await createRoomFromDashboard(page, `${DIAGB2_PREFIX} reconnect ${Date.now()}`);
   await joinOwnerCall(page, room, 'host');
@@ -99,32 +64,3 @@ test('DR-3 reconnect resync keeps owner and admitted guest in-call without stale
   await guestContext.close();
 });
 
-async function installPeerConnectionProbe(context: BrowserContext, candidateType: 'host' | 'srflx' | 'relay'): Promise<void> {
-  await context.addInitScript((type) => {
-    window.__diagPeerConfigs = [];
-    const NativePc = window.RTCPeerConnection;
-    class ProbedPeerConnection extends NativePc {
-      constructor(configuration?: RTCConfiguration) {
-        super(configuration);
-        window.__diagPeerConfigs?.push(configuration || {});
-      }
-
-      getStats(selector?: MediaStreamTrack | null): Promise<RTCStatsReport> {
-        const stats = new Map<string, any>([
-          ['transport', { id: 'transport', type: 'transport', selectedCandidatePairId: 'pair' }],
-          ['pair', { id: 'pair', type: 'candidate-pair', localCandidateId: 'local', remoteCandidateId: 'remote', selected: true }],
-          ['local', { id: 'local', type: 'local-candidate', candidateType: type }],
-        ]);
-        return Promise.resolve(stats as RTCStatsReport);
-      }
-    }
-    Object.assign(ProbedPeerConnection, NativePc);
-    window.RTCPeerConnection = ProbedPeerConnection;
-  }, candidateType);
-}
-
-declare global {
-  interface Window {
-    __diagPeerConfigs?: RTCConfiguration[];
-  }
-}

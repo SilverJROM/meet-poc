@@ -25,7 +25,7 @@ test('DR-16 closed room shows timed wait and host open transitions guest into ad
   const room = await createRoomViaApi(request, `${DIAGE2_PREFIX} closed wait ${Date.now()}`, { open: false });
   await request.put(`/api/rooms/${room.id}/access`, { data: { isOpen: false, waitTimeoutMinutes: 0.05 } });
 
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill('closed-guest');
   await page.getByRole('button', { name: 'Ask to join' }).click();

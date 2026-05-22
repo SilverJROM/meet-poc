@@ -73,7 +73,7 @@ test('DR-41 admitted owner and guest both post diagnostics, and logging toggle s
 });
 
 async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Join' }).click();

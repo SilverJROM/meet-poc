@@ -53,7 +53,7 @@ test('DR-34 remote audio uses a live dedicated audio sink when camera turns off'
 });
 
 async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Join' }).click();
@@ -64,7 +64,7 @@ async function admitCameraGuest(browser: Browser, owner: Page, room: TestRoom, n
   const context = await browser.newContext();
   const guest = await context.newPage();
   await installAudiofixMedia(guest, 'guest');
-  await guest.goto(room.url + '?sfu=0');
+  await guest.goto(room.url);
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill(name);
   await guest.getByLabel('Start with camera on').check();

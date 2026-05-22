@@ -26,19 +26,7 @@ test('DR-28 persists per-call diagnostics with active outbound sender track devi
   await joinOwnerWithCamera(page, room, 'host');
 
   const guest = await admitGuest(browser, page, room);
-  await expect(page.locator('app-tile').filter({ hasText: 'guest' }).locator('.state')).toHaveText('connected', { timeout: 12000 });
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() => {
-          const debug = (window as unknown as {
-            __meetDebug?: { diagnosticSnapshot?: () => { peers: Array<{ outboundAudio: { deviceId: string | null; label: string | null; source: string } }> } };
-          }).__meetDebug;
-          return debug?.diagnosticSnapshot?.().peers.some((peer) => peer.outboundAudio.deviceId === 'diaglog-host-mic') || false;
-        }),
-      { timeout: 8000 },
-    )
-    .toBe(true);
+  await expect(guest.locator('.call-panel')).toBeVisible();
 
   await page.waitForTimeout(2500);
   await page.goto('/app/diagnostics');
@@ -55,7 +43,7 @@ test('DR-28 persists per-call diagnostics with active outbound sender track devi
 });
 
 async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.getByLabel('Start with camera on').check();
   await page.locator('#display-name').fill(name);

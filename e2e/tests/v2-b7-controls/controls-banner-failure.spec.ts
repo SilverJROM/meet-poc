@@ -61,7 +61,7 @@ test('S7.4 shows polished permission-denied lobby copy and Retry re-runs preflig
     });
   });
   const room = await createApiRoom(request, 'permission-denied');
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
 
   await expect(page.getByRole('heading', { name: 'Microphone access denied' })).toBeVisible();
   await expect(page.getByText('allow microphone access for')).toBeVisible();
@@ -84,7 +84,7 @@ test('S7.4 shows no-devices lobby copy without a Retry button', async ({ page, r
     });
   });
   const room = await createApiRoom(request, 'no-devices');
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
 
   await expect(page.getByRole('heading', { name: 'No microphone detected' })).toBeVisible();
   await expect(page.getByText('Please connect a microphone and refresh the page.')).toBeVisible();
@@ -119,7 +119,7 @@ test('S7.5 local camera-off in call renders the initials avatar', async ({ page 
 
 async function createAndJoinOwnerWithLobbyControl(page: Page, suffix: string) {
   const room = await createRoomFromDashboard(page, `B7CTRL ${suffix} ${Date.now()}`);
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill('host');
   await page.getByLabel('Start with camera on').check();

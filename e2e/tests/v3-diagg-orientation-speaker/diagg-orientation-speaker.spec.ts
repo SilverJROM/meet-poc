@@ -20,7 +20,7 @@ test.afterEach(() => {
 test('DR-17/30 renders lobby/device previews true, mirrors only local self-view, and leaves remote tile unmirrored', async ({ browser, page, request }) => {
   const room = await createDiagRoom(request, 'orientation');
   await loginAsJrom(page);
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
 
   await page.getByLabel('Start with camera on').check();
@@ -79,7 +79,7 @@ async function createDiagRoom(request: APIRequestContext, suffix: string): Promi
 }
 
 async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.locator('#display-name').fill(name);
   await page.getByRole('button', { name: 'Join' }).click();
@@ -89,7 +89,7 @@ async function joinOwner(page: Page, room: TestRoom, name: string): Promise<void
 async function admitBrowserGuest(browser: Browser, owner: Page, room: TestRoom, name: string): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext();
   const guest = await context.newPage();
-  await guest.goto(room.url + '?sfu=0');
+  await guest.goto(room.url);
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill(name);
   await guest.getByLabel('Start with camera on').check();

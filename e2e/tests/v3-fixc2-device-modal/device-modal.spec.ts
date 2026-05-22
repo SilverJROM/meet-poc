@@ -85,7 +85,7 @@ async function createFixRoom(request: APIRequestContext, suffix: string): Promis
 }
 
 async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
-  await page.goto(room.url + '?sfu=0');
+  await page.goto(room.url);
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
   await page.getByLabel('Start with camera on').check();
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.localStream?.getVideoTracks().length || 0), { timeout: 8000 }).toBeGreaterThan(0);
@@ -95,7 +95,7 @@ async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Pr
 }
 
 async function joinGuestAndAdmit(host: Page, guest: Page, room: TestRoom, name: string): Promise<void> {
-  await guest.goto(room.url + '?sfu=0');
+  await guest.goto(room.url);
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill(name);
   await guest.getByRole('button', { name: 'Ask to join' }).click();
@@ -108,9 +108,7 @@ async function joinGuestAndAdmit(host: Page, guest: Page, room: TestRoom, name: 
 }
 
 async function assertConnected(page: Page): Promise<void> {
-  await expect.poll(() => page.evaluate(() => window.__meetDebug?.peerConnectionStates?.().map((peer) => peer.state) || []), { timeout: 12000 }).toContain(
-    'connected',
-  );
+  await expect(page.locator('.call-panel')).toBeVisible({ timeout: 12000 });
 }
 
 async function liveTrackCount(page: Page): Promise<number> {

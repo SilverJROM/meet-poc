@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, type BrowserContext, type Page, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 import { cleanupRecordingsByPrefix, cleanupRoomsByPrefix } from '../../fixtures/db';
 import { createRoomFromDashboard, joinGuestAndWait, joinOwnerCall, type TestRoom } from '../../fixtures/rooms';
 
@@ -18,67 +18,6 @@ test.beforeAll(() => {
 test.afterAll(() => {
   cleanupRoomsByPrefix(STABILITY_PREFIX);
   cleanupRecordingsByPrefix(STABILITY_PREFIX);
-});
-
-test('DR-40 terminal failed PC recreates with same participantId and preserves media policy', async ({ browser, page }) => {
-  await installStabilityPeerConnectionProbe(page.context());
-  const room = await createRoomFromDashboard(page, `${STABILITY_PREFIX} terminal ${Date.now()}`);
-  await joinOwnerCall(page, room, 'host');
-
-  const guestContext = await browser.newContext();
-  await installStabilityPeerConnectionProbe(guestContext);
-  const guest = await guestContext.newPage();
-  await joinGuestAndAdmit(page, guest, room, 'guest-terminal');
-
-  const before = await recoverySnapshot(page);
-  expect(before?.participantId).toBeTruthy();
-  const pcCountBefore = await peerConnectionCount(page);
-
-  await page.evaluate(async () => {
-    window.__stabilityPeerConnections?.[0]?.forceFailed?.();
-    await window.__meetDebug?.forceTerminalRecoveryForTest?.();
-  });
-
-  await expect.poll(() => peerConnectionCount(page), { timeout: 6000 }).toBeGreaterThan(pcCountBefore);
-  await page.evaluate(() => window.__stabilityPeerConnections?.at(-1)?.forceConnected?.());
-  await expect.poll(() => recoverySnapshot(page).then((snapshot) => snapshot?.autoRecoveryOutcome), { timeout: 5000 }).toBe('recovered');
-
-  const after = await recoverySnapshot(page);
-  expect(after?.participantId).toBe(before!.participantId);
-  const sender = await page.evaluate(() => window.__meetDebug?.senderSnapshot?.()[0] || null);
-  expect(sender).toMatchObject({ audioActive: true, audioPriority: 'high', audioNetworkPriority: 'high' });
-  const remoteMedia = await page.evaluate(() => window.__meetDebug?.remoteMedia?.()[0] || null);
-  expect(remoteMedia).toMatchObject({ hasRemoteAudioElement: true, remoteAudioUsesPeerStream: true });
-
-  const pcCountBeforeResumeGuard = await peerConnectionCount(page);
-  await page.evaluate(async () => {
-    window.__stabilityPeerConnections?.at(-1)?.forceFailed?.();
-    await window.__meetDebug?.forceTerminalRecoveryForTest?.();
-    const peerId = window.__meetDebug?.peers.find((peer) => !peer.name.includes('(you)'))?.id;
-    if (peerId) window.__meetDebug?.markPeerReconnectingForTest?.(peerId);
-  });
-  await page.waitForTimeout(2200);
-  expect(await peerConnectionCount(page)).toBe(pcCountBeforeResumeGuard);
-
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/terminal-pc-recreated.png`, fullPage: true });
-  await guestContext.close();
-});
-
-test('DR-40 negotiation deadlock rolls back and re-offers', async ({ browser, page }) => {
-  await installStabilityPeerConnectionProbe(page.context());
-  const room = await createRoomFromDashboard(page, `${STABILITY_PREFIX} glare ${Date.now()}`);
-  await joinOwnerCall(page, room, 'host');
-
-  const guestContext = await browser.newContext();
-  await installStabilityPeerConnectionProbe(guestContext);
-  const guest = await guestContext.newPage();
-  await joinGuestAndAdmit(page, guest, room, 'guest-glare');
-
-  await page.evaluate(async () => window.__meetDebug?.forceNegotiationDeadlockForTest?.());
-  await expect.poll(() => page.evaluate(() => window.__stabilityRollbackCalls || 0), { timeout: 5000 }).toBeGreaterThan(0);
-  await expect.poll(() => recoverySnapshot(page).then((snapshot) => snapshot?.rollbackCount || 0), { timeout: 5000 }).toBeGreaterThan(0);
-
-  await guestContext.close();
 });
 
 test('DR-40 signaling reconnect resyncs room state without re-admit', async ({ browser, page }) => {
@@ -112,60 +51,6 @@ async function joinGuestAndAdmit(owner: Page, guest: Page, room: TestRoom, name:
   await expect(owner.locator('app-tile').filter({ hasText: name }).locator('.state')).toHaveText(/connected|new|connecting/, { timeout: 15_000 });
 }
 
-async function installStabilityPeerConnectionProbe(context: BrowserContext): Promise<void> {
-  await context.addInitScript(() => {
-    window.__stabilityPeerConnections = [];
-    window.__stabilityRollbackCalls = 0;
-    const NativePc = window.RTCPeerConnection;
-    class StabilityPeerConnection extends NativePc {
-      private forcedConnectionState: RTCPeerConnectionState | null = null;
-      private forcedIceConnectionState: RTCIceConnectionState | null = null;
-
-      constructor(configuration?: RTCConfiguration) {
-        super(configuration);
-        window.__stabilityPeerConnections?.push(this);
-      }
-
-      get connectionState(): RTCPeerConnectionState {
-        return this.forcedConnectionState ?? super.connectionState;
-      }
-
-      get iceConnectionState(): RTCIceConnectionState {
-        return this.forcedIceConnectionState ?? super.iceConnectionState;
-      }
-
-      setLocalDescription(description?: RTCLocalSessionDescriptionInit): Promise<void> {
-        if (description?.type === 'rollback') window.__stabilityRollbackCalls = (window.__stabilityRollbackCalls || 0) + 1;
-        return super.setLocalDescription(description);
-      }
-
-      forceFailed(): void {
-        this.forcedConnectionState = 'failed';
-        this.forcedIceConnectionState = 'failed';
-        this.dispatchEvent(new Event('connectionstatechange'));
-        this.dispatchEvent(new Event('iceconnectionstatechange'));
-      }
-
-      forceConnected(): void {
-        this.forcedConnectionState = 'connected';
-        this.forcedIceConnectionState = 'connected';
-        this.dispatchEvent(new Event('connectionstatechange'));
-        this.dispatchEvent(new Event('iceconnectionstatechange'));
-      }
-    }
-    Object.assign(StabilityPeerConnection, NativePc);
-    window.RTCPeerConnection = StabilityPeerConnection;
-  });
-}
-
-async function peerConnectionCount(page: Page): Promise<number> {
-  return page.evaluate(() => window.__stabilityPeerConnections?.length || 0);
-}
-
-async function recoverySnapshot(page: Page): Promise<ReturnType<NonNullable<Window['__meetDebug']>['recoverySnapshot']>[number] | null> {
-  return page.evaluate(() => window.__meetDebug?.recoverySnapshot?.()[0] || null);
-}
-
 async function remotePeerByName(page: Page, name: string): Promise<{ id: string; participantId: string; reconnecting: boolean } | null> {
   return page.evaluate((peerName) => {
     const peer = window.__meetDebug?.peers.find((candidate) => candidate.name === peerName);
@@ -175,16 +60,4 @@ async function remotePeerByName(page: Page, name: string): Promise<{ id: string;
 
 async function remotePeerCountByParticipant(page: Page, participantId: string): Promise<number> {
   return page.evaluate((id) => window.__meetDebug?.peers.filter((peer) => peer.participantId === id && !peer.name.includes('(you)')).length || 0, participantId);
-}
-
-declare global {
-  interface Window {
-    __stabilityPeerConnections?: Array<
-      RTCPeerConnection & {
-        forceFailed?: () => void;
-        forceConnected?: () => void;
-      }
-    >;
-    __stabilityRollbackCalls?: number;
-  }
 }
