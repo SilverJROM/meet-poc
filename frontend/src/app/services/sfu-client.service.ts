@@ -58,6 +58,8 @@ export class SfuClientService {
   private callerCreds: { clientKey: string; participantId: string; sessionId: string } | null = null;
   private subscribedClientIds = new Set<string>();
   private midToEntry = new Map<string, SubscribedTrackEntry>();
+  private subscribeRetryAttempts = new Map<string, number>();
+  private readonly SUBSCRIBE_RETRY_CAP = 7;
 
   enqueue<T>(op: () => Promise<T>): Promise<T> {
     const result = this.opQueue.then(() => op());
@@ -82,10 +84,15 @@ export class SfuClientService {
     // Mark before enqueue to prevent double-subscribe
     this.subscribedClientIds.add(publisher.clientId);
     void this.enqueue(() => this.doSubscribe(publisher)).catch(() => {
-      // On failure: clear the guard so a retry is possible, then bump the retry signal
-      // to cause the subscription effect to re-evaluate the roster.
+      const attempts = (this.subscribeRetryAttempts.get(publisher.clientId) ?? 0) + 1;
+      this.subscribeRetryAttempts.set(publisher.clientId, attempts);
+      if (attempts > this.SUBSCRIBE_RETRY_CAP) {
+        console.warn(`[SFU] subscribe permanently stopped for ${publisher.clientId} after ${attempts} attempts — guard stays set until cfSessionId changes`);
+        return; // guard stays set, no more retries
+      }
+      const backoffMs = Math.min(250 * Math.pow(2, attempts - 1), 4000);
       this.subscribedClientIds.delete(publisher.clientId);
-      this.subscribeRetryVersion.update((v) => v + 1);
+      setTimeout(() => this.subscribeRetryVersion.update((v) => v + 1), backoffMs);
     });
   }
 
@@ -151,6 +158,11 @@ export class SfuClientService {
 
   handleSfuPresence(msg: { clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }): void {
     const prev = this.remotePublishers().get(msg.clientId);
+    // New cfSessionId = publisher reconnected — reset retry state so fresh subscribe can happen
+    if (prev && prev.cfSessionId !== msg.cfSessionId) {
+      this.subscribeRetryAttempts.delete(msg.clientId);
+      this.subscribedClientIds.delete(msg.clientId);
+    }
     const prevHadScreen = prev?.tracks.some((t) => t.kind === 'screen') ?? false;
     const next = applyPresenceUpdate(this.remotePublishers(), msg);
     if (next !== this.remotePublishers()) this.remotePublishers.set(next);
@@ -201,6 +213,7 @@ export class SfuClientService {
     }
 
     this.subscribedClientIds.delete(clientId);
+    this.subscribeRetryAttempts.delete(clientId);
 
     if (mids.length > 0) {
       const creds = this.callerCreds;
@@ -369,6 +382,7 @@ export class SfuClientService {
     this.callerCreds = null;
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
+    this.subscribeRetryAttempts.clear();
     this.opQueue = Promise.resolve();
     this.localPublishState.set(null);
     this.remotePublishers.set(new Map());
@@ -418,6 +432,7 @@ export class SfuClientService {
     this.callerCreds = null;
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
+    this.subscribeRetryAttempts.clear();
     this.localPublishState.set(null);
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
@@ -529,6 +544,7 @@ export class SfuClientService {
 
   private async doSubscribe(publisher: import('./sfu-roster-utils.js').RemotePublisher): Promise<void> {
     await this.doSubscribeTracks(publisher, publisher.tracks);
+    this.subscribeRetryAttempts.delete(publisher.clientId);
   }
 
   private async doSubscribeTracks(
