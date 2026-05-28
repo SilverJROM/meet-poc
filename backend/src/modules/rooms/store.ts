@@ -146,6 +146,14 @@ export function setRoomAccess(
   return { ok: true, room: getRoom(room.id, database)! };
 }
 
+export function openRoomBySystem(roomId: string, database: Database.Database = getDb()): Room | null {
+  return setRoomOpenBySystem(roomId, true, database);
+}
+
+export function closeRoomBySystem(roomId: string, database: Database.Database = getDb()): Room | null {
+  return setRoomOpenBySystem(roomId, false, database);
+}
+
 export function setRoomSlug(
   roomId: string,
   slugInput: unknown,
@@ -215,6 +223,13 @@ function normalizeRoomSearch(value: string): string {
 function titleSearchFilter(search: string): { sql: string; params: string[] } {
   if (!search) return { sql: '', params: [] };
   return { sql: " AND title COLLATE NOCASE LIKE ? ESCAPE '\\'", params: [`%${escapeLike(search)}%`] };
+}
+
+function setRoomOpenBySystem(roomId: string, isOpen: boolean, database: Database.Database): Room | null {
+  const room = getRoom(roomId, database);
+  if (!room) return null;
+  database.prepare('UPDATE rooms SET is_open = ? WHERE id = ?').run(isOpen ? 1 : 0, room.id);
+  return getRoom(room.id, database);
 }
 
 function escapeLike(value: string): string {

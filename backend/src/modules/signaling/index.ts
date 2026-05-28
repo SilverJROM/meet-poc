@@ -5,7 +5,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { getDb } from '../../db.js';
 import { parseCookies } from '../../lib/cookies.js';
 import { getSessionUser } from '../auth/sessions.js';
-import { getRoom, getRoomBySlugOrId, isOwnerOf } from '../rooms/store.js';
+import { closeRoomBySystem, getRoom, getRoomBySlugOrId, isOwnerOf, openRoomBySystem } from '../rooms/store.js';
 import { bumpPeak, closeSession, openSession } from '../sessions/store.js';
 
 type PeerState = 'idle' | 'admitted' | 'pending' | 'waiting';
@@ -156,6 +156,18 @@ function getOrCreateLiveRoom(roomId: string): LiveRoom {
 
 function send(ws: WebSocket, msg: Record<string, unknown>): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+}
+
+function closePeerSocket(ws: WebSocket, reason: string): void {
+  try {
+    ws.close(1000, reason);
+  } catch {
+    // Best effort close after the terminal room lifecycle message.
+  }
+}
+
+function broadcastToAdmitted(live: LiveRoom, msg: Record<string, unknown>): void {
+  for (const [, peer] of live.admitted) send(peer.ws, msg);
 }
 
 function broadcastToOwners(live: LiveRoom, roomId: string, msg: Record<string, unknown>, database: Database.Database): void {
@@ -518,6 +530,56 @@ function promoteClosedWaiters(roomId: string, waitTimeoutMinutes: number, databa
   console.log(`[room ${roomId}] OPENED promoted ${waiters.length} waiter(s) timeout=${waitTimeoutMinutes}`);
 }
 
+function openRoomForOwnerAdmission(roomId: string, live: LiveRoom, database: Database.Database): void {
+  const opened = openRoomBySystem(roomId, database);
+  if (!opened) return;
+  broadcastToAdmitted(live, { type: 'room-opened' });
+  promoteClosedWaiters(roomId, opened.waitTimeoutMinutes, database);
+  console.log(`[room ${roomId}] AUTO-OPENED by owner admission`);
+}
+
+function closeRoomForHost(roomId: string, live: LiveRoom, database: Database.Database): void {
+  closeRoomBySystem(roomId, database);
+  closeSession(live.currentSessionId, 'host-close-room', database);
+
+  const admitted = [...live.admitted.values()];
+  const pending = [...live.pending.values()];
+  const closedWaiters = [...live.closedWaiters.values()];
+
+  for (const reconnecting of live.reconnecting.values()) {
+    if (reconnecting.timer) clearTimeout(reconnecting.timer);
+  }
+  for (const waiter of closedWaiters) clearTimeout(waiter.timer);
+
+  live.admitted.clear();
+  live.pending.clear();
+  live.closedWaiters.clear();
+  live.reconnecting.clear();
+  live.reconnectTickets.clear();
+  live.clientIdentities.clear();
+  live.sfuPresence.clear();
+  live.currentSessionId = null;
+  liveRooms.delete(roomId);
+
+  for (const peer of admitted) {
+    peer.setState('idle');
+    send(peer.ws, { type: 'room-closed', reason: 'host' });
+  }
+  for (const knocker of pending) {
+    knocker.setState('idle');
+    send(knocker.ws, { type: 'room-closed', reason: 'host' });
+  }
+  for (const waiter of closedWaiters) {
+    waiter.setState('idle');
+    send(waiter.ws, { type: 'room-closed', reason: 'host' });
+  }
+
+  for (const peer of admitted) closePeerSocket(peer.ws, 'room closed by host');
+  for (const knocker of pending) closePeerSocket(knocker.ws, 'room closed by host');
+  for (const waiter of closedWaiters) closePeerSocket(waiter.ws, 'room closed by host');
+  console.log(`[room ${roomId}] CLOSED by host admitted=${admitted.length} pending=${pending.length} waiting=${closedWaiters.length}`);
+}
+
 function sendSfuRosterToNewPeer(live: LiveRoom, ws: WebSocket): void {
   send(ws, { type: 'sfu-roster', publishers: [...live.sfuPresence.values()] });
 }
@@ -657,7 +719,13 @@ export function attachSignaling(server: http.Server, database: Database.Database
           return;
         }
         const roomId = room.id;
-        const joinName = String(msg.name || 'Anon').slice(0, 64);
+        const requestedName = String(msg.name ?? '').trim().slice(0, 64);
+        if (!userEmail && !requestedName) {
+          send(ws, { type: 'error', error: 'name required' });
+          ws.close();
+          return;
+        }
+        const joinName = requestedName || 'Anon';
         const live = getOrCreateLiveRoom(roomId);
         pruneReconnectTickets(live);
         const declaredMobile = Boolean(msg.mobile);
@@ -765,6 +833,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
           const peers = peerSummaries(live, roomId, database).filter((peer) => peer.id !== clientId);
           const hostClientId = getHostClientId(roomId, database) || (owner ? clientId : null);
           send(ws, { type: 'admitted', clientId, participantId, peers, roomTitle: room.title, isOwner: owner, hostClientId, sessionId: live.currentSessionId });
+          if (owner && !room.isOpen) openRoomForOwnerAdmission(roomId, live, database);
           sendSfuRosterToNewPeer(live, ws);
           issueReconnectToken(live, clientId, entry, supportsReconnect);
           for (const [id, peer] of live.admitted) {
@@ -930,6 +999,14 @@ export function attachSignaling(server: http.Server, database: Database.Database
             // Best effort close after the rejection message.
           }
         }
+        return;
+      }
+
+      if (msg.type === 'close-room') {
+        const live = getLiveAdmittedRoom(currentRoom, state);
+        if (!live || !currentRoom) return;
+        if (!isHostCommandAllowed('close-room', currentRoom, userEmail, database)) return;
+        closeRoomForHost(currentRoom, live, database);
         return;
       }
 

@@ -28,6 +28,8 @@ export type SignalingMessage =
   | { type: 'recording-started'; clientId: string; sessionId: string }
   | { type: 'recording-stopped'; clientId: string; sessionId: string }
   | { type: 'meeting-ended'; reason?: string }
+  | { type: 'room-opened' }
+  | { type: 'room-closed'; reason?: string }
   | { type: 'mute-request'; from: string }
   | { type: 'peer-removed'; reason?: string }
   | { type: 'knock-cancelled'; clientId: string }
@@ -46,6 +48,7 @@ export type OutgoingSignalingMessage =
   | { type: 'chat'; text: string; clientMessageId?: string }
   | { type: 'recording-state'; state: 'started' | 'stopped' }
   | { type: 'meeting-ended-by-host' }
+  | { type: 'close-room' }
   | { type: 'mute-target'; clientId: string }
   | { type: 'remove-peer'; clientId: string }
   | { type: 'leave' }
