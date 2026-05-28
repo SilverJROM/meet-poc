@@ -416,7 +416,12 @@ export class RoomPage implements OnDestroy {
   async bootstrap(): Promise<void> {
     await this.auth.checkSession();
     const user = this.auth.user();
-    if (user && !this.displayName()) this.displayName.set(user.email.split('@')[0] || user.email);
+    const storedName = readGuestDisplayName();
+    if (storedName && !this.displayName()) {
+      this.displayName.set(storedName);
+    } else if (user && !this.displayName()) {
+      this.displayName.set(user.email.split('@')[0] || user.email);
+    }
     try {
       const info = await this.rooms.exists(this.roomKey);
       if (!info.exists) {
@@ -515,6 +520,7 @@ export class RoomPage implements OnDestroy {
 
   updateDisplayName(value: string): void {
     this.displayName.set(value);
+    storeGuestDisplayName(value.trim());
     if (value.trim()) {
       this.nameError.set(null);
       if (this.joinPrereqPopout()?.includes('name')) this.joinPrereqPopout.set(null);
@@ -2136,7 +2142,7 @@ function readStoredDevice(key: string): string {
 
 function readGuestDisplayName(): string {
   try {
-    return window.sessionStorage.getItem(GUEST_DISPLAY_NAME_KEY) || '';
+    return window.localStorage.getItem(GUEST_DISPLAY_NAME_KEY) || '';
   } catch {
     return '';
   }
@@ -2144,7 +2150,7 @@ function readGuestDisplayName(): string {
 
 function storeGuestDisplayName(name: string): void {
   try {
-    window.sessionStorage.setItem(GUEST_DISPLAY_NAME_KEY, name);
+    window.localStorage.setItem(GUEST_DISPLAY_NAME_KEY, name);
   } catch {
     // Best effort only.
   }
