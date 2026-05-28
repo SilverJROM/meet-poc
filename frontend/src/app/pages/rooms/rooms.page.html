@@ -19,7 +19,7 @@
       >
       <button type="submit" class="primary-btn" [disabled]="busy()">
         <ion-icon name="videocam-outline"></ion-icon>
-        New room
+        Create room
       </button>
     </form>
   </header>
@@ -102,7 +102,7 @@
 
             <div class="room-card-top">
               <h2>{{ room.title }}</h2>
-              <span class="status-chip" [class.open]="room.isOpen">{{ room.isOpen ? 'Open' : 'Closed' }}</span>
+              <span class="status-chip" [class.open]="room.isOpen">{{ room.isOpen ? 'Open for guests' : 'Closed' }}</span>
             </div>
 
             <div class="room-meta">
@@ -117,7 +117,7 @@
 
             <div class="room-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
               <div class="room-action-section quick-actions" aria-label="Quick actions">
-                <button type="button" class="primary-btn" (click)="openRoom(room)">Start</button>
+                <a class="primary-btn" [routerLink]="['/room', roomUrlKey(room)]">Join</a>
                 <button type="button" class="secondary-btn" (click)="copyJoinLink(room)">
                   <ion-icon name="clipboard-outline"></ion-icon>
                   Copy link
@@ -136,7 +136,7 @@
                     (click)="toggleRoomOpen(room, $event)"
                   >
                     <ion-icon [name]="room.isOpen ? 'lock-open-outline' : 'lock-closed-outline'"></ion-icon>
-                    {{ room.isOpen ? 'Open' : 'Closed' }}
+                    {{ room.isOpen ? 'Close' : 'Open' }}
                   </button>
                   <label class="wait-timeout-control">
                     <span>Lobby timeout</span>
