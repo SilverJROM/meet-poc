@@ -4,8 +4,8 @@
     <h2 id="leave-title">Leave meeting</h2>
     <p>You're the host. What would you like to do?</p>
     <div class="actions">
-      <button type="button" class="danger-btn" [disabled]="busy()" (click)="end()">End meeting for everyone</button>
-      <button type="button" class="secondary-btn" [disabled]="busy()" (click)="justLeave.emit()">Leave but keep meeting going</button>
+      <button type="button" class="danger-btn" [disabled]="busy()" (click)="end()">Close room</button>
+      <button type="button" class="secondary-btn" [disabled]="busy()" (click)="justLeave.emit()">Leave</button>
     </div>
     @if (busy()) {
       <p class="spinner-line">Finalizing meeting...</p>

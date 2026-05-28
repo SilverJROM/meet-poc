@@ -866,7 +866,7 @@ export class RoomPage implements OnDestroy {
           console.warn('[end-for-all] recorder flush failed', err);
         }
       }
-      this.ws.send({ type: 'meeting-ended-by-host' });
+      this.ws.send({ type: 'close-room' });
       await delay(1000);
     } finally {
       this.leaveDialogOpen.set(false);
@@ -1109,6 +1109,25 @@ export class RoomPage implements OnDestroy {
       if (!this.isHost()) {
         this.meetingEndedToastOpen.set(true);
       }
+      return;
+    }
+    if (msg.type === 'room-closed') {
+      const wasHost = this.isHost();
+      this.flushDiagnosticsLog('call-end', { useBeacon: true });
+      this.stopDiagnosticsLogger();
+      this.ws.close();
+      this.leaveDialogOpen.set(false);
+      if (wasHost) {
+        await this.directLeave(false);
+        return;
+      }
+      const message = this.state() === 'knocking' || this.state() === 'waiting-room' ? 'Room has been closed.' : 'Room has been closed by the host.';
+      this.actionNotice.set(message);
+      this.status.set(message);
+      this.error.set(message);
+      setTimeout(() => {
+        void this.directLeave(false);
+      }, 900);
       return;
     }
     if (msg.type === 'recording-started') {
