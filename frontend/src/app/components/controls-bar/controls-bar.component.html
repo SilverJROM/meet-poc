@@ -100,6 +100,16 @@
             <ion-icon name="color-wand-outline" aria-hidden="true"></ion-icon>
             <span>Background effects</span>
           </button>
+          <button
+            type="button"
+            class="settings-option settings-toggle"
+            role="menuitemcheckbox"
+            [attr.aria-checked]="equalSizeTiles()"
+            (click)="toggleEqualSizeTiles()"
+          >
+            <span class="settings-check" [class.checked]="equalSizeTiles()" aria-hidden="true"></span>
+            <span>Equal-size tiles</span>
+          </button>
         </div>
       }
     </div>

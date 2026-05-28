@@ -79,6 +79,7 @@
         [chatOpen]="chatOpen()"
         [chatUnreadCount]="chatUnreadCount()"
         [raiseHandOn]="myRaisedHand()"
+        [equalSizeTiles]="equalSizeTiles()"
         (mute)="toggleMic()"
         (camera)="toggleCamera()"
         (screen)="toggleScreen()"
@@ -88,6 +89,7 @@
         (reaction)="sendReaction($event)"
         (devices)="openInCallDeviceDialog()"
         (backgroundEffects)="openBackgroundPickerFromControls()"
+        (equalSizeTilesChange)="setEqualSizeTiles($event)"
         (leave)="leave()"
       />
       <button
@@ -234,9 +236,26 @@
             }
           </aside>
         } @else {
-          <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
+          <div
+            class="tiles-grid"
+            [class.emphasize-remote]="remoteEmphasisActive()"
+            aria-label="Participants"
+            [attr.data-count]="peers().length"
+            [attr.data-remote-count]="remotePeerCount()"
+          >
             @for (peer of peers(); track peer.participantId) {
-              <app-tile [peer]="peer" [displayStream]="peer.isLocal ? effectiveLocalStream() : null" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+              <app-tile
+                [class.local-tile]="peer.isLocal"
+                [class.remote-tile]="!peer.isLocal"
+                [peer]="peer"
+                [displayStream]="peer.isLocal ? effectiveLocalStream() : null"
+                [variant]="peer.isLocal && remoteEmphasisActive() ? 'self-pip' : 'grid'"
+                [remoteAudioEnabled]="!remoteAudioMixerEnabled()"
+                [raisedHand]="raisedHands().has(peer.id)"
+                [reactions]="tileReactions(peer.id)"
+                [speaking]="activeSpeaker.activePeerId() === peer.id"
+                (remoteAudioBlocked)="handleRemoteAudioBlocked()"
+              />
             }
           </div>
         }

@@ -32,11 +32,26 @@
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.42);
 }
 
+.tile.self-pip-tile {
+  min-height: 0;
+  aspect-ratio: 16 / 10;
+  border-radius: 14px;
+  background: #111827;
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.42),
+    0 0 0 1px rgba(248, 250, 252, 0.12);
+}
+
 @include bp.mobile {
   .tile {
     height: 100%;
     min-height: 0;
     aspect-ratio: auto;
+  }
+
+  .tile.self-pip-tile {
+    height: auto;
+    aspect-ratio: 16 / 10;
   }
 
   .tile-overlays {
@@ -261,28 +276,34 @@ video.is-mirrored-self-view {
   text-transform: uppercase;
 }
 
-.strip-tile .tile-overlays {
+.strip-tile .tile-overlays,
+.self-pip-tile .tile-overlays {
   inset: 8px;
 }
 
-.strip-tile .camera-off-avatar span {
+.strip-tile .camera-off-avatar span,
+.self-pip-tile .camera-off-avatar span {
   width: 52px;
   font-size: 24px;
 }
 
 .strip-tile .name-label,
 .strip-tile .state,
-.strip-tile .quality-pill {
+.strip-tile .quality-pill,
+.self-pip-tile .name-label,
+.self-pip-tile .state {
   padding: 5px 7px;
   font-size: 11px;
 }
 
-.strip-tile .raised-hand-badge {
+.strip-tile .raised-hand-badge,
+.self-pip-tile .raised-hand-badge {
   width: 28px;
   height: 28px;
   font-size: 15px;
 }
 
-.strip-tile .floating-reaction {
+.strip-tile .floating-reaction,
+.self-pip-tile .floating-reaction {
   font-size: 32px;
 }

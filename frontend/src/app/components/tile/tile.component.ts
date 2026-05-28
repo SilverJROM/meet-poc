@@ -17,7 +17,7 @@ type TileReaction = { id: string; kind: Exclude<ReactionKind, 'raise-hand'> };
 export class TileComponent {
   readonly peer = input.required<PeerState>();
   readonly speaking = input(false);
-  readonly variant = input<'grid' | 'strip' | 'share-main'>('grid');
+  readonly variant = input<'grid' | 'strip' | 'share-main' | 'self-pip'>('grid');
   readonly displayStream = input<MediaStream | null>(null);
   readonly forceVideo = input(false);
   readonly remoteAudioEnabled = input(true);

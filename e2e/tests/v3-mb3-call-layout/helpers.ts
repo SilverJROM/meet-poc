@@ -30,6 +30,15 @@ export async function admitBrowserGuest(browser: Browser, owner: Page, room: Tes
   const context = await browser.newContext();
   const guest = await context.newPage();
   await joinGuestAndWait(guest, room, name);
+  const toast = owner.locator('.knock-toast').filter({ hasText: name });
+  await toast.waitFor({ state: 'visible', timeout: 1000 }).catch(() => undefined);
+  if (await toast.isVisible().catch(() => false)) {
+    const expectedTiles = (await owner.locator('app-tile').count()) + 1;
+    await toast.getByRole('button', { name: 'Admit' }).click();
+    await expect(guest.locator('.call-panel')).toBeVisible();
+    await expect(owner.locator('app-tile')).toHaveCount(expectedTiles);
+    return guest;
+  }
   await openParticipants(owner);
   const waitingTab = owner.getByRole('tab', { name: 'Waiting' });
   if ((await waitingTab.count()) > 0) await waitingTab.click();
@@ -58,7 +67,7 @@ export async function addKnocker(browser: Browser, room: TestRoom, name = 'waiti
 
 export async function openParticipants(page: Page): Promise<void> {
   const sidebar = page.locator('app-participant-sidebar .participant-sidebar.open');
-  if ((await sidebar.count()) === 0) await page.getByRole('button', { name: 'Show participants' }).click();
+  if ((await sidebar.count()) === 0) await page.getByRole('button', { name: 'Show participants' }).click({ force: true });
   await expect(page.locator('app-participant-sidebar .participant-sidebar.open')).toBeVisible();
 }
 

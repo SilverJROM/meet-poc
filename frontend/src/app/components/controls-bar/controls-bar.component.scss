@@ -254,6 +254,7 @@
   color: #f8fafc;
   background: rgba(17, 24, 39, 0.96);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
+  pointer-events: auto;
   transform: translateX(-50%);
 }
 
@@ -291,6 +292,37 @@
 .settings-option ion-icon {
   flex: 0 0 auto;
   font-size: 20px;
+}
+
+.settings-toggle {
+  justify-content: flex-start;
+}
+
+.settings-check {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(248, 250, 252, 0.62);
+  border-radius: 6px;
+  background: rgba(248, 250, 252, 0.08);
+}
+
+.settings-check.checked {
+  border-color: #bfdbfe;
+  background: #2563eb;
+}
+
+.settings-check.checked::after {
+  content: '';
+  position: absolute;
+  left: 5px;
+  top: 2px;
+  width: 5px;
+  height: 10px;
+  border-right: 2px solid #fff;
+  border-bottom: 2px solid #fff;
+  transform: rotate(45deg);
 }
 
 .settings-option:hover,
@@ -538,6 +570,14 @@
     border-radius: 999px;
     background: rgba(19, 22, 27, 0.72);
     backdrop-filter: blur(14px);
+  }
+
+  .settings-popover {
+    position: fixed;
+    z-index: 40;
+    left: 50%;
+    bottom: calc(82px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
   }
 }
 

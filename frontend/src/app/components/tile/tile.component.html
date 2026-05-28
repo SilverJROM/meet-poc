@@ -3,6 +3,7 @@
   [class.is-speaking]="speaking()"
   [class.strip-tile]="variant() === 'strip'"
   [class.share-main-tile]="variant() === 'share-main'"
+  [class.self-pip-tile]="variant() === 'self-pip'"
   [attr.data-peer]="peer().id"
   [attr.data-state]="peer().connectionState"
   [attr.data-reconnecting]="peer().reconnecting"

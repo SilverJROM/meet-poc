@@ -45,6 +45,7 @@ export class ControlsBarComponent {
   readonly chatOpen = input(false);
   readonly chatUnreadCount = input(0);
   readonly raiseHandOn = input(false);
+  readonly equalSizeTiles = input(false);
   readonly audioOnly = input(false);
   readonly mute = output<void>();
   readonly camera = output<void>();
@@ -56,6 +57,7 @@ export class ControlsBarComponent {
   readonly audioOnlyToggle = output<void>();
   readonly devices = output<void>();
   readonly backgroundEffects = output<void>();
+  readonly equalSizeTilesChange = output<boolean>();
   readonly leave = output<void>();
   readonly volumePopoverOpen = signal(false);
   readonly reactionsPopoverOpen = signal(false);
@@ -129,6 +131,10 @@ export class ControlsBarComponent {
   chooseBackgroundEffects(): void {
     this.settingsPopoverOpen.set(false);
     this.backgroundEffects.emit();
+  }
+
+  toggleEqualSizeTiles(): void {
+    this.equalSizeTilesChange.emit(!this.equalSizeTiles());
   }
 
   @HostListener('document:click', ['$event'])

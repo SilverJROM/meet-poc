@@ -32,6 +32,7 @@ import { SfuClientService, type LocalPublishState } from '../../services/sfu-cli
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
 const DIAGNOSTICS_LOGGING_STORAGE_KEY = 'meet-poc.diagnosticsLogging';
+const EQUAL_SIZE_TILES_STORAGE_KEY = 'meet-poc.layout.equalSizeTiles';
 const LOCAL_TRACK_MUTE_DEBOUNCE_MS = 1_200;
 const DEVICE_RECOVERY_MAX_ATTEMPTS = 3;
 const DEVICE_RECOVERY_BACKOFF_MS = 650;
@@ -145,6 +146,7 @@ export class RoomPage implements OnDestroy {
   readonly waitRemainingSeconds = signal(0);
   readonly deviceFailureNotice = signal<string | null>(null);
   readonly remoteAudioBlocked = signal(false);
+  readonly equalSizeTiles = signal(readEqualSizeTiles());
   readonly setupWarning = signal<string | null>(null);
   readonly joinPrereqPopout = signal<string | null>(null);
   readonly myId = signal<string | null>(null);
@@ -233,6 +235,8 @@ export class RoomPage implements OnDestroy {
     }
     return result;
   });
+  readonly remotePeerCount = computed(() => this.peers().filter((peer) => !peer.isLocal).length);
+  readonly remoteEmphasisActive = computed(() => this.remotePeerCount() > 0 && !this.equalSizeTiles());
   readonly chatRecipientTabs = computed<ChatRecipientTab[]>(() => {
     const myId = this.myId();
     const names = this.chatRecipientNames();
@@ -1054,6 +1058,11 @@ export class RoomPage implements OnDestroy {
 
   toggleShareStrip(): void {
     this.shareStripCollapsed.update((collapsed) => !collapsed);
+  }
+
+  setEqualSizeTiles(enabled: boolean): void {
+    this.equalSizeTiles.set(enabled);
+    storeEqualSizeTiles(enabled);
   }
 
   async leave(): Promise<void> {
@@ -2457,6 +2466,22 @@ function readDiagnosticsLoggingEnabled(): boolean {
     return window.localStorage.getItem(DIAGNOSTICS_LOGGING_STORAGE_KEY) !== '0';
   } catch {
     return true;
+  }
+}
+
+function readEqualSizeTiles(): boolean {
+  try {
+    return window.localStorage.getItem(EQUAL_SIZE_TILES_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function storeEqualSizeTiles(enabled: boolean): void {
+  try {
+    window.localStorage.setItem(EQUAL_SIZE_TILES_STORAGE_KEY, enabled ? '1' : '0');
+  } catch {
+    // Best effort only.
   }
 }
 
