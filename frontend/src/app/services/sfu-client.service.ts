@@ -64,6 +64,8 @@ export class SfuClientService {
   // Subscribe-latency: time from subscribe issued → first ontrack arrival per publisher
   private subscribeInitiatedAt = new Map<string, number>();
   private subscribeFirstFrameAt = new Map<string, number>();
+  private subscribeStuckTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly SUBSCRIBE_STUCK_THRESHOLD_MS = 10_000;
 
   enqueue<T>(op: () => Promise<T>): Promise<T> {
     const result = this.opQueue.then(() => op());
@@ -87,6 +89,7 @@ export class SfuClientService {
     if (!publisher.tracks.length) return;
     // Mark before enqueue to prevent double-subscribe
     this.subscribedClientIds.add(publisher.clientId);
+    this.armSubscribeStuckWatchdog(publisher.clientId);
     void this.enqueue(() => this.doSubscribe(publisher)).catch(() => {
       const attempts = (this.subscribeRetryAttempts.get(publisher.clientId) ?? 0) + 1;
       this.subscribeRetryAttempts.set(publisher.clientId, attempts);
@@ -98,6 +101,38 @@ export class SfuClientService {
       this.subscribedClientIds.delete(publisher.clientId);
       setTimeout(() => this.subscribeRetryVersion.update((v) => v + 1), backoffMs);
     });
+  }
+
+  private armSubscribeStuckWatchdog(publisherClientId: string): void {
+    if (this.subscribeStuckTimers.has(publisherClientId)) return;
+    const initiatedAt = this.subscribeInitiatedAt.get(publisherClientId) ?? Date.now();
+    const timer = setTimeout(() => {
+      this.subscribeStuckTimers.delete(publisherClientId);
+      if (this.subscribeFirstFrameAt.has(publisherClientId)) return;
+      console.warn('[sfu] subscribe stuck >10s — no ontrack from publisher', {
+        publisherClientId,
+        initiatedAtMs: initiatedAt,
+        elapsedMs: Date.now() - initiatedAt,
+        subscribedClientIds: [...this.subscribedClientIds],
+        pcConnectionState: this.pc?.connectionState ?? null,
+        pcIceConnectionState: this.pc?.iceConnectionState ?? null,
+        retryAttempts: this.subscribeRetryAttempts.get(publisherClientId) ?? 0,
+      });
+    }, this.SUBSCRIBE_STUCK_THRESHOLD_MS);
+    this.subscribeStuckTimers.set(publisherClientId, timer);
+  }
+
+  private disarmSubscribeStuckWatchdog(publisherClientId: string): void {
+    const timer = this.subscribeStuckTimers.get(publisherClientId);
+    if (timer) {
+      clearTimeout(timer);
+      this.subscribeStuckTimers.delete(publisherClientId);
+    }
+  }
+
+  private clearAllSubscribeStuckWatchdogs(): void {
+    for (const timer of this.subscribeStuckTimers.values()) clearTimeout(timer);
+    this.subscribeStuckTimers.clear();
   }
 
   replaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
@@ -280,6 +315,7 @@ export class SfuClientService {
     if (prev && prev.cfSessionId !== msg.cfSessionId) {
       this.subscribeRetryAttempts.delete(msg.clientId);
       this.subscribedClientIds.delete(msg.clientId);
+      this.disarmSubscribeStuckWatchdog(msg.clientId);
     }
     const prevHadScreen = prev?.tracks.some((t) => t.kind === 'screen') ?? false;
     const next = applyPresenceUpdate(this.remotePublishers(), msg);
@@ -334,6 +370,7 @@ export class SfuClientService {
     this.subscribeRetryAttempts.delete(clientId);
     this.subscribeInitiatedAt.delete(clientId);
     this.subscribeFirstFrameAt.delete(clientId);
+    this.disarmSubscribeStuckWatchdog(clientId);
 
     if (mids.length > 0) {
       const creds = this.callerCreds;
@@ -510,6 +547,7 @@ export class SfuClientService {
     this.subscribeRetryAttempts.clear();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
+    this.clearAllSubscribeStuckWatchdogs();
     this.opQueue = Promise.resolve();
     this.localPublishState.set(null);
     this.remotePublishers.set(new Map());
@@ -535,6 +573,7 @@ export class SfuClientService {
     const creds = this.callerCreds;
     this.callerCreds = null;
     this.localPublishState.set(null);
+    this.clearAllSubscribeStuckWatchdogs();
 
     if (!publishState || !creds || publishState.status !== 'published') return;
     const liveMids = publishState.tracks.filter((t) => t.status === 'live').map((t) => t.mid);
@@ -562,6 +601,7 @@ export class SfuClientService {
     this.subscribeRetryAttempts.clear();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
+    this.clearAllSubscribeStuckWatchdogs();
     this.localPublishState.set(null);
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
@@ -590,6 +630,7 @@ export class SfuClientService {
         if (!entry) return;
         if (!this.subscribeFirstFrameAt.has(entry.publisherClientId)) {
           this.subscribeFirstFrameAt.set(entry.publisherClientId, Date.now());
+          this.disarmSubscribeStuckWatchdog(entry.publisherClientId);
         }
         if (entry.kind === 'screen') {
           const next = new Map(this.remoteScreenStreams());
@@ -778,9 +819,5 @@ export class SfuClientService {
 
     // Set signal after mids are reconciled (not before — subscribedTracks must reflect real mids)
     this.subscribedTracks.set(nextSubscribed);
-    // Subscribe-latency: mark when this subscribe fully resolved (mids reconciled = tracks established)
-    if (!this.subscribeFirstFrameAt.has(publisher.clientId)) {
-      this.subscribeFirstFrameAt.set(publisher.clientId, Date.now());
-    }
   }
 }

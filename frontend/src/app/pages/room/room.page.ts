@@ -945,7 +945,7 @@ export class RoomPage implements OnDestroy {
         const participantId = msg.participantId;
         const sessionId = msg.sessionId;
         void (async () => {
-          const deadline = Date.now() + 5000;
+          const deadline = Date.now() + 1500;
           let stream = this.media.localStream();
           while (!stream?.getAudioTracks().some((t) => t.readyState !== 'ended') && Date.now() < deadline) {
             await new Promise<void>((r) => setTimeout(r, 100));
