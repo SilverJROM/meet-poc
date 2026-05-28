@@ -227,7 +227,7 @@
             @if (!shareStripCollapsed()) {
               <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
                 @for (peer of orderedStripPeers(); track peer.participantId) {
-                  <app-tile [peer]="peer" variant="strip" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+                  <app-tile [peer]="peer" [displayStream]="peer.isLocal ? effectiveLocalStream() : null" variant="strip" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
                 }
               </div>
             }
@@ -235,7 +235,7 @@
         } @else {
           <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
             @for (peer of peers(); track peer.participantId) {
-              <app-tile [peer]="peer" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+              <app-tile [peer]="peer" [displayStream]="peer.isLocal ? effectiveLocalStream() : null" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
             }
           </div>
         }

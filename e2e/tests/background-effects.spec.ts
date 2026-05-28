@@ -37,6 +37,7 @@ test.describe('Background effects', () => {
       await expect(page.locator('app-lobby-preview video')).toBeVisible();
       await page.waitForFunction(() => !!window.__meetDebug?.localStream?.getVideoTracks()[0]);
 
+      await page.locator('app-lobby-preview').getByRole('button', { name: 'Background' }).click();
       await page.locator('app-background-picker').getByRole('radio', { name: 'Blur' }).click();
 
       await page.waitForFunction(
