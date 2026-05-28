@@ -39,6 +39,19 @@ test('fixloop multi-peer — four peers connect without host subscribe-stuck war
   }
 });
 
+test('fixloop SFU cleanup — camera self-view survives same-context leave and rejoin', async ({ page }) => {
+  const room = await createRoomFromDashboard(page, `RejoinSelfView ${Date.now()}`);
+  await joinOwnerCallWithCamera(page, room, 'host');
+  await expectLocalVideo(page);
+
+  await page.getByRole('button', { name: 'Leave call' }).click();
+  await page.getByRole('dialog', { name: 'Leave meeting' }).getByRole('button', { name: 'Leave' }).click();
+  await expect(page).toHaveURL(/\/app\/rooms$/);
+
+  await joinOwnerCallWithCamera(page, room, 'host');
+  await expectLocalVideo(page);
+});
+
 async function joinOwnerCallWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
   await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
@@ -56,6 +69,13 @@ async function joinGuestWithCameraAndWait(page: Page, room: TestRoom, name: stri
   await page.locator('input[name="cameraRequested"]').check({ force: true });
   await page.getByRole('button', { name: 'Ask to join' }).click();
   await expect(page.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();
+}
+
+async function expectLocalVideo(page: Page): Promise<void> {
+  const localTile = page.locator('.tile[data-state="local"]');
+  await expect(localTile).toHaveCount(1, { timeout: 20_000 });
+  await expect(localTile.locator('.camera-off-avatar')).toHaveCount(0, { timeout: 10_000 });
+  await expect(localTile.locator('.tile-content video')).toHaveCount(1, { timeout: 10_000 });
 }
 
 async function waitForConnectedTiles(page: Page, expectedPeers: number): Promise<void> {

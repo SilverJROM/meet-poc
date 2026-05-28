@@ -704,6 +704,18 @@ export class SfuClientService {
     this.opQueue = Promise.resolve();
     this.pendingOntrack.clear();
     this.clearAllSubscribeStuckWatchdogs();
+    this.subscribedClientIds.clear();
+    this.midToEntry.clear();
+    this.subscribeRetryAttempts.clear();
+    this.subscribeInitiatedAt.clear();
+    this.subscribeFirstFrameAt.clear();
+    this.remotePublishers.set(new Map());
+    this.remoteStreams.set(new Map());
+    this.remoteScreenStreams.set(new Map());
+    this.subscribedTracks.set(new Map());
+    this.audioSender = null;
+    this.videoSender = null;
+    this.screenSender = null;
 
     if (!publishState || !creds || publishState.status !== 'published') return;
     const liveMids = publishState.tracks.filter((t) => t.status === 'live').map((t) => t.mid);
