@@ -14,6 +14,7 @@ import { RecordingBannerComponent } from '../../components/recording-banner/reco
 import { TileComponent } from '../../components/tile/tile.component';
 import { ActiveSpeakerService } from '../../services/active-speaker.service';
 import { AuthService } from '../../services/auth.service';
+import { BackgroundEffectsService } from '../../services/background-effects.service';
 import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
 import type { DiagnosticsPayload, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
@@ -95,6 +96,7 @@ export class RoomPage implements OnDestroy {
   private readonly platform = inject(PlatformService);
   private readonly viewport = inject(ViewportService);
   readonly sfuClient = inject(SfuClientService);
+  readonly backgroundEffects = inject(BackgroundEffectsService);
 
   readonly roomKey = this.route.snapshot.paramMap.get('slug') ?? this.route.snapshot.paramMap.get('id') ?? '';
   roomId = this.roomKey;
@@ -119,6 +121,7 @@ export class RoomPage implements OnDestroy {
   readonly selectedVideoId = signal(readStoredDevice(DEVICE_STORAGE.videoInput));
   private readonly videoDevicePinned = signal(!!readStoredDevice(DEVICE_STORAGE.videoInput));
   readonly currentFacingMode = signal<'user' | 'environment'>('user');
+  readonly devModeBgBlur = signal(true);
   readonly lobbyDeviceDialogOpen = signal(true);
   readonly devicePermissionIntro = signal(true);
   readonly inCallDeviceDialogOpen = signal(false);
@@ -188,7 +191,7 @@ export class RoomPage implements OnDestroy {
         id: myId,
         participantId: this.myParticipantId() ?? myId,
         name: this.displayName().trim() || 'Anon',
-        stream: this.media.localStream(),
+        stream: this.effectiveLocalStream(),
         pc: null,
         connectionState: 'local',
         isLocal: true,
@@ -293,6 +296,7 @@ export class RoomPage implements OnDestroy {
     return this.sfuClient.remoteScreenStreams().get(peer.id) ?? null;
   });
   readonly orderedStripPeers = computed(() => this.peers());
+  readonly effectiveLocalStream = computed(() => this.effectiveStreamForSourceTrack());
   readonly showPeerWarning = computed(() => this.peers().length >= 6 && !this.warningDismissed());
   readonly hostRecording = signal(false);
   readonly recordingStartedAt = signal<number | null>(null);
@@ -321,6 +325,7 @@ export class RoomPage implements OnDestroy {
   private videoRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private audioRecoveryInFlight = false;
   private videoRecoveryInFlight = false;
+  private lastSfuVideoTrack: MediaStreamTrack | null = null;
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
   private readonly chatMessageList = viewChild<ElementRef<HTMLElement>>('chatMessageList');
   private readonly remoteAudioMixer = viewChild<ElementRef<HTMLAudioElement>>('remoteAudioMixer');
@@ -343,6 +348,7 @@ export class RoomPage implements OnDestroy {
     effect(() => {
       const debug: NonNullable<Window['__meetDebug']> = {
         localStream: this.media.localStream(),
+        effectiveLocalStream: this.effectiveLocalStream(),
         peers: this.peers().map((peer) => ({
           id: peer.id,
           participantId: peer.participantId,
@@ -473,6 +479,20 @@ export class RoomPage implements OnDestroy {
       for (const peer of this.peers()) {
         if (!peer.isLocal && !activePeerIds.has(peer.id)) this.recorder.removePeerStream(peer.id);
       }
+    });
+    effect(() => {
+      const publishStatus = this.sfuClient.localPublishState()?.status ?? null;
+      const state = this.state();
+      const cameraOn = this.media.cameraOn();
+      const screenOn = this.media.screenOn();
+      const localStream = this.media.localStream();
+      this.backgroundEffects.mode();
+      this.backgroundEffects.modelReady();
+      if (state !== 'in-call' || publishStatus !== 'published' || screenOn) return;
+      const sourceTrack = cameraOn ? localStream?.getVideoTracks()[0] ?? null : null;
+      void this.replaceSfuVideoTrackIfChanged(this.effectiveVideoTrackForSource(sourceTrack)).catch((err) => {
+        console.warn('[background-effects] unable to sync SFU video track', err);
+      });
     });
   }
 
@@ -700,6 +720,12 @@ export class RoomPage implements OnDestroy {
     await this.media.activateMicPreview(this.localStream());
   }
 
+  async togglePreviewBlur(): Promise<void> {
+    const next = this.backgroundEffects.mode() === 'blur' ? 'none' : 'blur';
+    await this.backgroundEffects.setMode(next);
+    await this.replaceEffectiveVideoTrack(this.media.cameraOn() ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
+  }
+
   async flipCamera(): Promise<void> {
     const videoEnabled = this.state() === 'in-call' ? this.media.cameraOn() : this.cameraRequested();
     if (!this.viewport.isMobile() || !videoEnabled) return;
@@ -726,7 +752,7 @@ export class RoomPage implements OnDestroy {
     }
     try {
       const cam = await this.media.toggleCamera(
-        (track: MediaStreamTrack | null) => this.sfuClient.replaceVideoTrack(track),
+        (track: MediaStreamTrack | null) => this.replaceEffectiveVideoTrack(track),
         {
           videoDeviceId: this.selectedVideoDeviceIdForRequest(),
           facingMode: this.videoFacingModeForRequest(true),
@@ -840,6 +866,42 @@ export class RoomPage implements OnDestroy {
     }
   }
 
+  private effectiveStreamForSourceTrack(sourceTrack?: MediaStreamTrack | null): MediaStream | null {
+    const rawStream = this.media.localStream();
+    if (!rawStream) return null;
+    const rawVideoTrack = rawStream.getVideoTracks()[0] ?? null;
+    const selectedVideoTrack = sourceTrack === undefined ? rawVideoTrack : sourceTrack;
+    if (!selectedVideoTrack) return rawStream;
+
+    const sourceStream =
+      selectedVideoTrack === rawVideoTrack
+        ? rawStream
+        : new MediaStream([...rawStream.getAudioTracks(), selectedVideoTrack]);
+    if (this.backgroundEffects.mode() === 'none' || !this.backgroundEffects.modelReady()) {
+      return sourceStream;
+    }
+
+    const processedVideoStream = this.backgroundEffects.processStream(sourceStream);
+    if (processedVideoStream === sourceStream) return sourceStream;
+    return new MediaStream([...sourceStream.getAudioTracks(), ...processedVideoStream.getVideoTracks()]);
+  }
+
+  private effectiveVideoTrackForSource(sourceTrack: MediaStreamTrack | null): MediaStreamTrack | null {
+    if (!sourceTrack || !sourceTrack.enabled) return null;
+    return this.effectiveStreamForSourceTrack(sourceTrack)?.getVideoTracks()[0] ?? null;
+  }
+
+  private async replaceEffectiveVideoTrack(sourceTrack: MediaStreamTrack | null): Promise<void> {
+    if (this.state() !== 'in-call' || this.sfuClient.localPublishState()?.status !== 'published' || this.media.screenOn()) return;
+    await this.replaceSfuVideoTrackIfChanged(this.effectiveVideoTrackForSource(sourceTrack));
+  }
+
+  private async replaceSfuVideoTrackIfChanged(nextTrack: MediaStreamTrack | null): Promise<void> {
+    if (this.lastSfuVideoTrack === nextTrack) return;
+    this.lastSfuVideoTrack = nextTrack;
+    await this.sfuClient.replaceVideoTrack(nextTrack);
+  }
+
   private async toggleCameraDuringShare(): Promise<void> {
     if (this.media.screenOn()) {
       this.status.set('Camera stays off while your screen is shared.');
@@ -854,11 +916,11 @@ export class RoomPage implements OnDestroy {
           videoDeviceId: this.selectedVideoDeviceIdForRequest(),
           facingMode: this.videoFacingModeForRequest(true),
         });
-        await this.sfuClient.replaceVideoTrack(enabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
+        await this.replaceEffectiveVideoTrack(enabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
         this.status.set('Camera on during screen share.');
       } else {
         await this.media.setCameraTrackEnabled({ enabled: false });
-        await this.sfuClient.replaceVideoTrack(null);
+        await this.replaceEffectiveVideoTrack(null);
         this.status.set('Camera hidden during screen share.');
       }
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
@@ -1132,7 +1194,9 @@ export class RoomPage implements OnDestroy {
           if (!stream?.getAudioTracks().some((t) => t.readyState !== 'ended')) {
             console.warn('[sfu] publish proceeding without live audio track — mic may be unavailable');
           }
-          await this.sfuClient.publish({ clientKey: readClientKey(), participantId, sessionId, localStream: stream });
+          const publishStream = this.effectiveLocalStream() ?? stream;
+          await this.sfuClient.publish({ clientKey: readClientKey(), participantId, sessionId, localStream: publishStream });
+          this.lastSfuVideoTrack = publishStream?.getVideoTracks()[0] ?? null;
           const state = this.sfuClient.localPublishState();
           if (state?.status === 'published') {
             this.ws.send({
@@ -1722,6 +1786,8 @@ export class RoomPage implements OnDestroy {
     this.sfuClient.closeLiveTracksForExit();
     this.ws.close();
     this.recorder.discard();
+    this.backgroundEffects.dispose();
+    this.lastSfuVideoTrack = null;
     this.media.stopLocal();
     this.peerIdentities.set(new Map());
     this.knockers.set([]);
@@ -1806,7 +1872,7 @@ export class RoomPage implements OnDestroy {
     try {
       const track = await this.media.replaceVideoTrack(
         this.selectedVideoDeviceIdForRequest(),
-        (nextTrack) => this.sfuClient.replaceVideoTrack(nextTrack),
+        (nextTrack) => this.replaceEffectiveVideoTrack(nextTrack),
         this.videoFacingModeForRequest(true),
       );
       if (track) {
@@ -2011,7 +2077,7 @@ export class RoomPage implements OnDestroy {
       const candidates = this.deviceCandidates(this.selectedVideoId(), devices.videoInputs);
       for (const candidate of candidates) {
         try {
-          const track = await this.media.replaceVideoTrack(candidate.deviceId, (nextTrack) => this.sfuClient.replaceVideoTrack(nextTrack));
+          const track = await this.media.replaceVideoTrack(candidate.deviceId, (nextTrack) => this.replaceEffectiveVideoTrack(nextTrack));
           if (!track) continue;
           this.syncSelectedVideoIdToTrack(track);
           this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
@@ -2024,7 +2090,7 @@ export class RoomPage implements OnDestroy {
         }
       }
     }
-    await this.sfuClient.replaceVideoTrack(null);
+    await this.replaceEffectiveVideoTrack(null);
     this.media.removeVideoTrack();
     this.broadcastMediaState(this.media.micOn(), false);
     this.actionNotice.set(null);
@@ -2082,7 +2148,7 @@ export class RoomPage implements OnDestroy {
       facingMode: enabled ? this.videoFacingModeForRequest(true) : undefined,
     });
     if (updateSender && !this.media.screenOn()) {
-      await this.sfuClient.replaceVideoTrack(nextEnabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
+      await this.replaceEffectiveVideoTrack(nextEnabled ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
     }
     this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
   }
@@ -2470,6 +2536,7 @@ declare global {
   interface Window {
     __meetDebug?: {
       localStream: MediaStream | null;
+      effectiveLocalStream?: MediaStream | null;
       peers: {
         id: string;
         participantId: string;

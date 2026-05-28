@@ -25,11 +25,14 @@ export class LobbyPreviewComponent {
   readonly level = input<Signal<number>>(signal(0).asReadonly());
   readonly audioContextActivated = input(false);
   readonly facingMode = input<'user' | 'environment'>('user');
+  readonly devModeBgBlur = input(false);
+  readonly backgroundBlurActive = input(false);
 
   readonly audioDeviceChange = output<string>();
   readonly videoDeviceChange = output<string>();
   readonly enableMicPreview = output<void>();
   readonly flipCamera = output<void>();
+  readonly previewBlurToggle = output<void>();
   readonly isMobile = this.viewport.isMobile;
 
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');

@@ -130,12 +130,12 @@ export class MediaService {
       return null;
     }
     stream.addTrack(nextTrack);
-    await onVideoTrackChanged(nextTrack);
     if (oldTrack) {
       stream.removeTrack(oldTrack);
       oldTrack.stop();
     }
     this.cameraOn.set(true);
+    await onVideoTrackChanged(nextTrack);
     return nextTrack;
   }
 

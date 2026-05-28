@@ -18,6 +18,12 @@
     }
   </div>
 
+  @if (devModeBgBlur()) {
+    <button type="button" class="preview-blur-toggle" (click)="previewBlurToggle.emit()">
+      {{ backgroundBlurActive() ? 'Remove blur (preview)' : 'Try blur (preview)' }}
+    </button>
+  }
+
   @if (!compact()) {
     <div class="meter-row">
       <span>Mic level</span>

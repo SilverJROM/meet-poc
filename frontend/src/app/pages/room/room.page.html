@@ -341,7 +341,7 @@
       <div class="prejoin-grid">
         <div class="quick-join">
           <app-lobby-preview
-            [stream]="localStream()"
+            [stream]="effectiveLocalStream()"
             [audioInputs]="audioInputs()"
             [videoInputs]="videoInputs()"
             [selectedAudioId]="selectedAudioId()"
@@ -351,10 +351,13 @@
             [level]="micLevel()"
             [audioContextActivated]="media.audioContextActivated()"
             [facingMode]="currentFacingMode()"
+            [devModeBgBlur]="devModeBgBlur()"
+            [backgroundBlurActive]="backgroundEffects.mode() === 'blur'"
             (audioDeviceChange)="changeAudioDevice($event)"
             (videoDeviceChange)="changeVideoDevice($event)"
             (enableMicPreview)="enableMicPreview()"
             (flipCamera)="flipCamera()"
+            (previewBlurToggle)="togglePreviewBlur()"
           />
         </div>
         <div class="prejoin-controls">
