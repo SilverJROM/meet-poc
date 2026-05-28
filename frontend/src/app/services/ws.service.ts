@@ -33,6 +33,10 @@ export type SignalingMessage =
   | { type: 'mute-request'; from: string }
   | { type: 'peer-removed'; reason?: string }
   | { type: 'knock-cancelled'; clientId: string }
+  | { type: 'share-request-incoming'; clientId: string; name: string }
+  | { type: 'share-decision'; approved: boolean; reason?: string }
+  | { type: 'share-request-cancelled'; clientId: string }
+  | { type: 'reaction'; clientId: string; kind: ReactionKind; state?: 'on' | 'off' }
   | { type: 'signal'; from: string; data: unknown }
   | { type: 'rejected'; reason?: string }
   | { type: 'error'; error: string }
@@ -52,7 +56,12 @@ export type OutgoingSignalingMessage =
   | { type: 'mute-target'; clientId: string }
   | { type: 'remove-peer'; clientId: string }
   | { type: 'leave' }
+  | { type: 'share-request' }
+  | { type: 'share-decision'; clientId: string; approved: boolean; reason?: string }
+  | { type: 'reaction'; kind: ReactionKind; state?: 'on' | 'off' }
   | { type: 'sfu-publish'; cfSessionId: string; tracks: { trackName: string; kind: string }[] };
+
+export type ReactionKind = 'raise-hand' | 'thumbs-up' | 'clap' | 'heart';
 
 @Injectable({ providedIn: 'root' })
 export class WsService {

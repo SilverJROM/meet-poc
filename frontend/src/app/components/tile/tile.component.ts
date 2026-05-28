@@ -2,7 +2,10 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, computed, effect, input,
 import { addIcons } from 'ionicons';
 import { micOffOutline } from 'ionicons/icons';
 import { PeerState } from '../../services/peer-state';
+import { ReactionKind } from '../../services/ws.service';
 import { toInitials } from '../../utils/initials';
+
+type TileReaction = { id: string; kind: Exclude<ReactionKind, 'raise-hand'> };
 
 @Component({
   selector: 'app-tile',
@@ -18,6 +21,8 @@ export class TileComponent {
   readonly displayStream = input<MediaStream | null>(null);
   readonly forceVideo = input(false);
   readonly remoteAudioEnabled = input(true);
+  readonly raisedHand = input(false);
+  readonly reactions = input<TileReaction[]>([]);
   readonly remoteAudioBlocked = output<void>();
   readonly initials = computed(() => toInitials(this.peer().name));
   readonly videoStream = computed(() => this.displayStream() ?? this.peer().stream);
@@ -32,6 +37,12 @@ export class TileComponent {
   });
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
   private readonly remoteAudio = viewChild<ElementRef<HTMLAudioElement>>('remoteAudio');
+
+  reactionEmoji(kind: TileReaction['kind']): string {
+    if (kind === 'thumbs-up') return '👍';
+    if (kind === 'clap') return '👏';
+    return '❤️';
+  }
 
   constructor() {
     addIcons({ micOffOutline });

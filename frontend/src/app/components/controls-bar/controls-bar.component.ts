@@ -7,6 +7,7 @@ import {
   desktopOutline,
   ellipseOutline,
   ellipse,
+  happyOutline,
   micOffOutline,
   micOutline,
   peopleOutline,
@@ -17,6 +18,7 @@ import {
   volumeMuteOutline,
 } from 'ionicons/icons';
 import { RemoteAudioService } from '../../services/remote-audio.service';
+import { ReactionKind } from '../../services/ws.service';
 
 @Component({
   selector: 'app-controls-bar',
@@ -41,6 +43,7 @@ export class ControlsBarComponent {
   readonly sidebarOpen = input(false);
   readonly chatOpen = input(false);
   readonly chatUnreadCount = input(0);
+  readonly raiseHandOn = input(false);
   readonly audioOnly = input(false);
   readonly mute = output<void>();
   readonly camera = output<void>();
@@ -48,10 +51,12 @@ export class ControlsBarComponent {
   readonly record = output<void>();
   readonly sidebar = output<void>();
   readonly chat = output<void>();
+  readonly reaction = output<ReactionKind>();
   readonly audioOnlyToggle = output<void>();
   readonly devices = output<void>();
   readonly leave = output<void>();
   readonly volumePopoverOpen = signal(false);
+  readonly reactionsPopoverOpen = signal(false);
   readonly volumeLabel = computed(() => {
     const percent = Math.round(this.remoteAudio.volume() * 100);
     return percent > 100 ? `${percent}% (amp)` : `${percent}%`;
@@ -65,6 +70,7 @@ export class ControlsBarComponent {
       desktopOutline,
       ellipse,
       ellipseOutline,
+      happyOutline,
       micOffOutline,
       micOutline,
       peopleOutline,
@@ -74,6 +80,17 @@ export class ControlsBarComponent {
       volumeHighOutline,
       volumeMuteOutline,
     });
+  }
+
+  toggleReactionsPopover(event: Event): void {
+    event.stopPropagation();
+    this.reactionsPopoverOpen.update((open) => !open);
+    this.volumePopoverOpen.set(false);
+  }
+
+  chooseReaction(kind: ReactionKind): void {
+    this.reaction.emit(kind);
+    if (kind !== 'raise-hand') this.reactionsPopoverOpen.set(false);
   }
 
   toggleSpeakerMuted(): void {
@@ -92,13 +109,15 @@ export class ControlsBarComponent {
 
   @HostListener('document:click', ['$event'])
   closeVolumePopoverOnOutsideClick(event: MouseEvent): void {
-    if (!this.volumePopoverOpen()) return;
+    if (!this.volumePopoverOpen() && !this.reactionsPopoverOpen()) return;
     if (this.elementRef.nativeElement.contains(event.target as Node)) return;
     this.volumePopoverOpen.set(false);
+    this.reactionsPopoverOpen.set(false);
   }
 
   @HostListener('document:keydown.escape')
   closeVolumePopoverOnEscape(): void {
     this.volumePopoverOpen.set(false);
+    this.reactionsPopoverOpen.set(false);
   }
 }

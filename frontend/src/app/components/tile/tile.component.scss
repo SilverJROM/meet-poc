@@ -146,6 +146,7 @@ video.is-mirrored-self-view {
 }
 
 .host-badge,
+.raised-hand-badge,
 .mute-icon,
 .quality-pill,
 .name-label,
@@ -163,6 +164,49 @@ video.is-mirrored-self-view {
   font-size: 11px;
   font-weight: 900;
   letter-spacing: 0;
+}
+
+.raised-hand-badge {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  color: #111827;
+  background: rgba(254, 243, 199, 0.94);
+  font-size: 18px;
+  box-shadow: 0 8px 18px rgba(0, 0, 0, 0.22);
+}
+
+.reaction-layer {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.floating-reaction {
+  position: absolute;
+  font-size: clamp(34px, 8vw, 68px);
+  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.35));
+  animation: reaction-float 3s ease-out forwards;
+}
+
+@keyframes reaction-float {
+  0% {
+    opacity: 0;
+    transform: translateY(26px) scale(0.82);
+  }
+
+  14% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-82px) scale(1.12);
+  }
 }
 
 .mute-icon {
@@ -231,4 +275,14 @@ video.is-mirrored-self-view {
 .strip-tile .quality-pill {
   padding: 5px 7px;
   font-size: 11px;
+}
+
+.strip-tile .raised-hand-badge {
+  width: 28px;
+  height: 28px;
+  font-size: 15px;
+}
+
+.strip-tile .floating-reaction {
+  font-size: 32px;
 }

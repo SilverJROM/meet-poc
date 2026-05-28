@@ -78,16 +78,18 @@
         [sidebarOpen]="sidebarOpen()"
         [chatOpen]="chatOpen()"
         [chatUnreadCount]="chatUnreadCount()"
+        [raiseHandOn]="myRaisedHand()"
         (mute)="toggleMic()"
         (camera)="toggleCamera()"
         (screen)="toggleScreen()"
         (record)="toggleRecording()"
         (sidebar)="toggleSidebar()"
         (chat)="toggleChat()"
+        (reaction)="sendReaction($event)"
         (devices)="openInCallDeviceDialog()"
         (leave)="leave()"
       />
-      @if (isHost() && knockers().length > 0) {
+      @if (isHost() && (knockers().length > 0 || pendingShareRequests().length > 0)) {
         <div class="knock-toast-stack" role="region" aria-label="Waiting to join">
           @for (knocker of knockers(); track knocker.id) {
             <div class="knock-toast" role="alert">
@@ -98,10 +100,22 @@
               </div>
             </div>
           }
+          @for (request of pendingShareRequests(); track request.clientId) {
+            <div class="knock-toast share-request-toast" role="alert">
+              <span class="knock-name"><strong>{{ request.name }}</strong> wants to share screen</span>
+              <div class="knock-toast-actions">
+                <button type="button" class="primary-btn" (click)="approveShare(request.clientId)" title="Allow screen share">Allow</button>
+                <button type="button" class="secondary-btn" (click)="denyShare(request.clientId)" title="Deny screen share">Deny</button>
+              </div>
+            </div>
+          }
           @if (knockers().length >= 2) {
             <button type="button" class="admit-all-btn" (click)="admitAll()">Admit all ({{ knockers().length }})</button>
           }
         </div>
+      }
+      @if (myShareRequestPending()) {
+        <div class="share-request-status" role="status">Requesting permission to share...</div>
       }
       <app-device-dialog
         [open]="inCallDeviceDialogOpen()"
@@ -179,6 +193,8 @@
               [displayStream]="shareStream()"
               [forceVideo]="true"
               [remoteAudioEnabled]="!remoteAudioMixerEnabled()"
+              [raisedHand]="raisedHands().has(presenter.id)"
+              [reactions]="tileReactions(presenter.id)"
               variant="share-main"
               [speaking]="activeSpeaker.activePeerId() === presenter.id"
               (remoteAudioBlocked)="handleRemoteAudioBlocked()"
@@ -196,7 +212,7 @@
             @if (!shareStripCollapsed()) {
               <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
                 @for (peer of orderedStripPeers(); track peer.participantId) {
-                  <app-tile [peer]="peer" variant="strip" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+                  <app-tile [peer]="peer" variant="strip" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
                 }
               </div>
             }
@@ -204,7 +220,7 @@
         } @else {
           <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
             @for (peer of peers(); track peer.participantId) {
-              <app-tile [peer]="peer" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+              <app-tile [peer]="peer" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
             }
           </div>
         }

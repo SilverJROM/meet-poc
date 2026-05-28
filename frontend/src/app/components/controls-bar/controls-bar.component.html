@@ -134,6 +134,37 @@
       }
     </div>
 
+    <div class="reaction-control">
+      <button
+        type="button"
+        class="control-btn"
+        [class.active]="reactionsPopoverOpen() || raiseHandOn()"
+        [attr.aria-expanded]="reactionsPopoverOpen()"
+        aria-label="Reactions"
+        title="Reactions"
+        (click)="toggleReactionsPopover($event)"
+      >
+        <ion-icon name="happy-outline"></ion-icon>
+      </button>
+      @if (reactionsPopoverOpen()) {
+        <div class="reactions-popover" role="dialog" aria-label="Reactions" (click)="$event.stopPropagation()">
+          <button
+            type="button"
+            class="reaction-option"
+            [class.active]="raiseHandOn()"
+            [attr.aria-pressed]="raiseHandOn()"
+            (click)="chooseReaction('raise-hand')"
+          >
+            <span aria-hidden="true">✋</span>
+            <span>{{ raiseHandOn() ? 'Lower hand' : 'Raise hand' }}</span>
+          </button>
+          <button type="button" class="reaction-option reaction-emoji" aria-label="Thumbs up" (click)="chooseReaction('thumbs-up')">👍</button>
+          <button type="button" class="reaction-option reaction-emoji" aria-label="Clap" (click)="chooseReaction('clap')">👏</button>
+          <button type="button" class="reaction-option reaction-emoji" aria-label="Heart" (click)="chooseReaction('heart')">❤️</button>
+        </div>
+      }
+    </div>
+
     <button type="button" class="leave-btn" (click)="leave.emit()" aria-label="Leave call" title="Leave call">
       <ion-icon name="call-outline"></ion-icon>
     </button>

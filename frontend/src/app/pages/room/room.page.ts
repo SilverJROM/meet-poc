@@ -24,7 +24,7 @@ import { ParticipantSnapshot, RecorderService } from '../../services/recorder.se
 import { RemoteAudioService } from '../../services/remote-audio.service';
 import { RoomsService } from '../../services/rooms.service';
 import { ViewportService } from '../../services/viewport.service';
-import { SignalingMessage, WsService } from '../../services/ws.service';
+import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.service';
 import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
 
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
@@ -37,6 +37,8 @@ const GUEST_DISPLAY_NAME_KEY = 'guestDisplayName';
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
 type ChatMessage = { id: string; clientId: string; sender: string; text: string; sentAt: number; mine: boolean };
+type ShareRequest = { clientId: string; name: string };
+type TransientReaction = { id: string; clientId: string; kind: Exclude<ReactionKind, 'raise-hand'>; timestamp: number };
 type LobbyError =
   | { kind: 'denied' }
   | { kind: 'no-devices' }
@@ -152,8 +154,16 @@ export class RoomPage implements OnDestroy {
   readonly meetingEndedToastOpen = signal(false);
   readonly diagnosticsLoggingEnabled = signal(readDiagnosticsLoggingEnabled());
   readonly screenShareHelp = signal<string | null>(null);
+  readonly pendingShareRequests = signal<ShareRequest[]>([]);
+  readonly myShareRequestPending = signal(false);
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
+  readonly raisedHands = signal<Set<string>>(new Set());
+  readonly transientReactions = signal<TransientReaction[]>([]);
+  readonly myRaisedHand = computed(() => {
+    const myId = this.myId();
+    return !!myId && this.raisedHands().has(myId);
+  });
 
   // Identity map: clientId → PeerIdentity (name, participantId, media state, flags).
   // The local peer is NOT stored here — it's always derived from media signals in peers computed.
@@ -308,6 +318,10 @@ export class RoomPage implements OnDestroy {
         anyScreenShareActive: this.anyScreenShareActive(),
         effectiveCameraOn: this.effectiveCameraOn(),
         shareCameraManualOverride: this.shareCameraManualOverride(),
+        pendingShareRequests: this.pendingShareRequests().map((request) => ({ ...request })),
+        myShareRequestPending: this.myShareRequestPending(),
+        raisedHands: [...this.raisedHands()],
+        transientReactions: this.transientReactions().map((reaction) => ({ ...reaction })),
         isRecording: this.recorder.isRecording() || this.hostRecording(),
         screenShareAttempts: this.media.screenShareAttempts(),
         lastVideoConstraints: this.media.lastVideoConstraints(),
@@ -675,6 +689,18 @@ export class RoomPage implements OnDestroy {
   }
 
   async toggleScreen(): Promise<void> {
+    if (!this.media.screenOn() && !this.isHost()) {
+      if (this.myShareRequestPending()) return;
+      this.myShareRequestPending.set(true);
+      this.actionNotice.set(null);
+      this.status.set('Requesting permission to share screen...');
+      this.ws.send({ type: 'share-request' });
+      return;
+    }
+    await this.executeScreenToggle();
+  }
+
+  private async executeScreenToggle(): Promise<void> {
     try {
       await this.media.toggleScreen(async (track) => {
         const hasScreenNow = this.sfuClient.localPublishState()?.tracks.some((t) => t.kind === 'screen' && t.status === 'live') ?? false;
@@ -702,6 +728,39 @@ export class RoomPage implements OnDestroy {
       this.screenShareHelp.set(null);
       this.status.set(`Screen share failed: ${err instanceof Error ? err.message : 'not available'}`);
     }
+  }
+
+  approveShare(clientId: string): void {
+    this.pendingShareRequests.set(this.pendingShareRequests().filter((request) => request.clientId !== clientId));
+    this.ws.send({ type: 'share-decision', clientId, approved: true });
+  }
+
+  denyShare(clientId: string): void {
+    this.pendingShareRequests.set(this.pendingShareRequests().filter((request) => request.clientId !== clientId));
+    this.ws.send({ type: 'share-decision', clientId, approved: false, reason: 'Host denied screen share.' });
+  }
+
+  sendReaction(kind: ReactionKind): void {
+    if (kind === 'raise-hand') {
+      this.toggleRaiseHand();
+      return;
+    }
+    const myId = this.myId();
+    if (!myId) return;
+    this.addTransientReaction(myId, kind);
+    this.ws.send({ type: 'reaction', kind });
+  }
+
+  toggleRaiseHand(): void {
+    const myId = this.myId();
+    if (!myId) return;
+    const nextState = this.raisedHands().has(myId) ? 'off' : 'on';
+    this.setRaisedHand(myId, nextState === 'on');
+    this.ws.send({ type: 'reaction', kind: 'raise-hand', state: nextState });
+  }
+
+  tileReactions(clientId: string): TransientReaction[] {
+    return this.transientReactions().filter((reaction) => reaction.clientId === clientId);
   }
 
   private announceSfuPublishState(): void {
@@ -1011,6 +1070,31 @@ export class RoomPage implements OnDestroy {
       this.removeKnocker(msg.clientId);
       return;
     }
+    if (msg.type === 'share-request-incoming') {
+      if (!this.isHost()) return;
+      this.pendingShareRequests.update((requests) => {
+        const next = requests.filter((request) => request.clientId !== msg.clientId);
+        next.push({ clientId: msg.clientId, name: msg.name });
+        return next;
+      });
+      this.status.set(`${msg.name} wants to share screen.`);
+      return;
+    }
+    if (msg.type === 'share-request-cancelled') {
+      this.pendingShareRequests.set(this.pendingShareRequests().filter((request) => request.clientId !== msg.clientId));
+      return;
+    }
+    if (msg.type === 'share-decision') {
+      this.myShareRequestPending.set(false);
+      if (msg.approved) {
+        this.status.set('Screen share approved.');
+        await this.executeScreenToggle();
+        return;
+      }
+      this.actionNotice.set(msg.reason || 'Host denied screen share');
+      this.status.set(msg.reason || 'Screen share request denied.');
+      return;
+    }
     if (msg.type === 'peer-joined') {
       this.status.set(`${msg.name} joined.`);
       const next = new Map(this.peerIdentities());
@@ -1093,6 +1177,12 @@ export class RoomPage implements OnDestroy {
       if (!this.chatOpen()) this.chatUnreadCount.update((count) => Math.min(99, count + 1));
       return;
     }
+    if (msg.type === 'reaction') {
+      if (msg.clientId === this.myId()) return;
+      if (msg.kind === 'raise-hand') this.setRaisedHand(msg.clientId, msg.state !== 'off');
+      else this.addTransientReaction(msg.clientId, msg.kind);
+      return;
+    }
     if (msg.type === 'mute-request') {
       this.media.muteMic();
       this.broadcastMediaState(false, this.media.cameraOn());
@@ -1152,6 +1242,9 @@ export class RoomPage implements OnDestroy {
       next.delete(msg.clientId);
       this.peerIdentities.set(next);
       this.removeKnocker(msg.clientId);
+      this.pendingShareRequests.set(this.pendingShareRequests().filter((request) => request.clientId !== msg.clientId));
+      this.setRaisedHand(msg.clientId, false);
+      this.transientReactions.set(this.transientReactions().filter((reaction) => reaction.clientId !== msg.clientId));
       this.queueDiagnosticsLog('state-change');
       return;
     }
@@ -1193,6 +1286,21 @@ export class RoomPage implements OnDestroy {
 
   private removeKnocker(clientId: string): void {
     this.knockers.set(this.knockers().filter((item) => item.id !== clientId));
+  }
+
+  private setRaisedHand(clientId: string, raised: boolean): void {
+    const next = new Set(this.raisedHands());
+    if (raised) next.add(clientId);
+    else next.delete(clientId);
+    this.raisedHands.set(next);
+  }
+
+  private addTransientReaction(clientId: string, kind: Exclude<ReactionKind, 'raise-hand'>): void {
+    const reaction: TransientReaction = { id: `${clientId}-${Date.now()}-${Math.random().toString(16).slice(2)}`, clientId, kind, timestamp: Date.now() };
+    this.transientReactions.update((reactions) => [...reactions, reaction]);
+    window.setTimeout(() => {
+      this.transientReactions.set(this.transientReactions().filter((item) => item.id !== reaction.id));
+    }, 3000);
   }
 
   private startWaitingRoomCountdown(expiresAt: number | null): void {
@@ -1507,6 +1615,10 @@ export class RoomPage implements OnDestroy {
     this.chatMessages.set([]);
     this.chatDraft.set('');
     this.chatUnreadCount.set(0);
+    this.pendingShareRequests.set([]);
+    this.myShareRequestPending.set(false);
+    this.raisedHands.set(new Set());
+    this.transientReactions.set([]);
     this.shareStripCollapsed.set(false);
     this.leaveDialogOpen.set(false);
     this.meetingEndedToastOpen.set(false);
@@ -2185,6 +2297,10 @@ declare global {
       anyScreenShareActive?: boolean;
       effectiveCameraOn?: boolean;
       shareCameraManualOverride?: boolean;
+      pendingShareRequests?: { clientId: string; name: string }[];
+      myShareRequestPending?: boolean;
+      raisedHands?: string[];
+      transientReactions?: { id: string; clientId: string; kind: string; timestamp: number }[];
       screenShareAttempts: number;
       lastVideoConstraints?: MediaStreamConstraints | null;
       audioContextActivated?: boolean;

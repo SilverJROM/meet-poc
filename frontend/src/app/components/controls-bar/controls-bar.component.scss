@@ -93,6 +93,11 @@
   background: #2f3338;
 }
 
+.reaction-control {
+  position: relative;
+  display: inline-flex;
+}
+
 .control-btn,
 .control-chevron,
 .leave-btn,
@@ -213,6 +218,70 @@
   background: rgba(17, 24, 39, 0.96);
   box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
   transform: translateX(-50%);
+}
+
+.reactions-popover {
+  position: absolute;
+  z-index: 30;
+  bottom: 58px;
+  left: 50%;
+  min-width: 210px;
+  min-height: 54px;
+  padding: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(248, 250, 252, 0.12);
+  border-radius: 8px;
+  color: #f8fafc;
+  background: rgba(17, 24, 39, 0.96);
+  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
+  transform: translateX(-50%);
+}
+
+.reactions-popover::after {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  left: calc(50% - 7px);
+  width: 14px;
+  height: 14px;
+  border-right: 1px solid rgba(248, 250, 252, 0.12);
+  border-bottom: 1px solid rgba(248, 250, 252, 0.12);
+  background: rgba(17, 24, 39, 0.96);
+  transform: rotate(45deg);
+}
+
+.reaction-option {
+  min-width: 42px;
+  height: 38px;
+  border: 1px solid rgba(248, 250, 252, 0.12);
+  border-radius: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #f8fafc;
+  background: rgba(248, 250, 252, 0.08);
+  cursor: pointer;
+  font-size: 20px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.reaction-option:hover,
+.reaction-option.active {
+  background: rgba(59, 130, 246, 0.42);
+}
+
+.reaction-option:not(.reaction-emoji) {
+  min-width: 110px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.reaction-emoji {
+  line-height: 1;
 }
 
 .volume-popover::after {

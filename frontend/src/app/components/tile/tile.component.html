@@ -23,6 +23,9 @@
 
     <div class="tile-overlays">
       <div class="top-row">
+        @if (raisedHand()) {
+          <span class="raised-hand-badge" aria-label="hand raised">✋</span>
+        }
         @if (peer().isHost) {
           <span class="host-badge">HOST</span>
         }
@@ -35,6 +38,11 @@
           <span class="quality-pill" [attr.data-quality]="peer().audioOnlyReason ? 'audio-only' : peer().quality">
             {{ peer().audioOnlyReason ? 'audio only' : peer().quality }}
           </span>
+        }
+      </div>
+      <div class="reaction-layer" aria-hidden="true">
+        @for (reaction of reactions(); track reaction.id) {
+          <span class="floating-reaction">{{ reactionEmoji(reaction.kind) }}</span>
         }
       </div>
       <div class="bottom-row">
