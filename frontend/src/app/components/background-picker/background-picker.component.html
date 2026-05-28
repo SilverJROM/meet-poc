@@ -13,9 +13,16 @@
   (click)="$event.stopPropagation()"
 >
   <header class="picker-header" (pointerdown)="startDrag($event)">
-    <h2>Background</h2>
+    <h2>
+      @if (presentation() === 'overlay') {
+        <span class="drag-grip" aria-hidden="true">⋮⋮</span>
+      }
+      Background
+    </h2>
     @if (presentation() === 'overlay') {
-      <button type="button" class="close-btn" aria-label="Close background picker" (click)="requestClose()">x</button>
+      <button type="button" class="close-btn" aria-label="Close background picker" (click)="requestClose()">
+        <ion-icon name="close-outline" aria-hidden="true"></ion-icon>
+      </button>
     }
   </header>
 

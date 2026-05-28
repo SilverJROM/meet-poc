@@ -72,16 +72,39 @@
 }
 
 .close-btn {
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   border: 1px solid rgba(148, 163, 184, 0.42);
-  border-radius: 6px;
+  border-radius: 8px;
   display: grid;
   place-items: center;
   color: #172033;
   background: #fff;
   cursor: pointer;
   font-weight: 900;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.close-btn ion-icon {
+  font-size: 22px;
+  pointer-events: none;
+}
+
+.close-btn:hover,
+.close-btn:focus-visible {
+  border-color: #0f172a;
+  background: #f1f5f9;
+}
+
+.drag-grip {
+  display: inline-block;
+  margin-right: 8px;
+  color: #64748b;
+  letter-spacing: 1px;
+  font-size: 14px;
+  font-weight: 900;
+  transform: rotate(90deg);
 }
 
 .picker-grid {
@@ -270,7 +293,7 @@
   line-height: 1.3;
 }
 
-@media (max-width: 520px) {
+@media (max-width: 600px) {
   :host.overlay .picker-panel {
     right: 12px;
     bottom: calc(82px + env(safe-area-inset-bottom));
@@ -281,5 +304,15 @@
   :host.overlay .picker-header {
     cursor: default;
     touch-action: auto;
+  }
+
+  .close-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+  }
+
+  .close-btn ion-icon {
+    font-size: 26px;
   }
 }

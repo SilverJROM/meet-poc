@@ -1,5 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, ElementRef, HostListener, ViewChild, computed, inject, input, output, signal } from '@angular/core';
+import { addIcons } from 'ionicons';
+import { closeOutline } from 'ionicons/icons';
 import { BackgroundEffectsService, type BackgroundEffectMode } from '../../services/background-effects.service';
 import { ViewportService } from '../../services/viewport.service';
 
@@ -135,6 +137,7 @@ export class BackgroundPickerComponent {
   private dragState: DragState | null = null;
 
   constructor() {
+    addIcons({ closeOutline });
     void this.restoreSelection();
   }
 
@@ -237,7 +240,10 @@ export class BackgroundPickerComponent {
   }
 
   startDrag(event: PointerEvent): void {
-    if (this.presentation() !== 'overlay' || this.isMobile()) return;
+    if (this.presentation() !== 'overlay') return;
+    // Disable drag only on true phone-sized viewports where the panel takes
+    // most of the screen anyway; let narrow desktop windows still drag.
+    if (typeof window !== 'undefined' && window.innerWidth <= 600) return;
     if ((event.target as HTMLElement).closest('button')) return;
 
     const panel = this.pickerPanel?.nativeElement;
