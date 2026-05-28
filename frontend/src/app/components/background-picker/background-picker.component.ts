@@ -1,8 +1,16 @@
 import { CommonModule } from '@angular/common';
-import { Component, HostListener, inject, input, output, signal } from '@angular/core';
+import { Component, ElementRef, HostListener, ViewChild, inject, input, output, signal } from '@angular/core';
 import { BackgroundEffectsService, type BackgroundEffectMode } from '../../services/background-effects.service';
 
 const STORAGE_KEY = 'meet-poc:bg:selected';
+const CUSTOM_INDEX_KEY = 'meet-poc:bg:custom:index';
+const CUSTOM_STORAGE_PREFIX = 'meet-poc:bg:custom:';
+const MAX_CUSTOM_BACKGROUNDS = 5;
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_PROCESSED_BYTES = 1_000_000;
+const MAX_CUSTOM_WIDTH = 1280;
+const MAX_CUSTOM_HEIGHT = 720;
+const JPEG_QUALITIES = [0.85, 0.7, 0.6, 0.5] as const;
 
 type BackgroundOption =
   | { id: 'none'; label: string; mode: 'none'; assetUrl?: never }
@@ -10,8 +18,10 @@ type BackgroundOption =
   | ImageBackgroundOption;
 
 type ImageBackgroundOption = { id: string; label: string; mode: 'image'; assetUrl: string };
+type CustomBackground = { id: string; label: string; mode: 'image'; assetUrl: string; isCustom: true };
 
-type StoredSelection = { mode: BackgroundEffectMode; asset?: string };
+type SelectableBackgroundOption = BackgroundOption | CustomBackground;
+type StoredSelection = { mode: BackgroundEffectMode; asset?: string; custom?: boolean };
 
 const IMAGE_OPTIONS: ImageBackgroundOption[] = [
   {
@@ -97,12 +107,17 @@ const OPTIONS: BackgroundOption[] = [{ id: 'none', label: 'None', mode: 'none' }
   },
 })
 export class BackgroundPickerComponent {
+  @ViewChild('fileInput') private fileInput?: ElementRef<HTMLInputElement>;
+
   readonly backgroundEffects = inject(BackgroundEffectsService);
   readonly closeRequested = output<void>();
   readonly presentation = input<'inline' | 'overlay'>('inline');
   readonly options = OPTIONS;
   readonly selectedId = signal(readStoredSelection()?.asset ?? readStoredSelection()?.mode ?? 'none');
   readonly busyId = signal<string | null>(null);
+  readonly customs = signal<CustomBackground[]>(readCustomBackgrounds());
+  readonly uploadBusy = signal(false);
+  readonly uploadError = signal<string | null>(null);
 
   private restored = false;
 
@@ -110,12 +125,12 @@ export class BackgroundPickerComponent {
     void this.restoreSelection();
   }
 
-  async select(option: BackgroundOption): Promise<void> {
+  async select(option: SelectableBackgroundOption): Promise<void> {
     this.selectedId.set(option.id);
     this.busyId.set(option.id);
     try {
       if (option.mode === 'image') {
-        writeStoredSelection({ mode: 'image', asset: option.id });
+        writeStoredSelection({ mode: 'image', asset: option.id, custom: isCustomBackground(option) || undefined });
         await this.backgroundEffects.setBackgroundImage(option.assetUrl);
         await this.backgroundEffects.setMode('image');
         return;
@@ -132,9 +147,71 @@ export class BackgroundPickerComponent {
     if (key !== 'ArrowRight' && key !== 'ArrowDown' && key !== 'ArrowLeft' && key !== 'ArrowUp') return;
     event.preventDefault();
     const direction = key === 'ArrowRight' || key === 'ArrowDown' ? 1 : -1;
-    const nextIndex = (index + direction + this.options.length) % this.options.length;
-    const target = (event.currentTarget as HTMLElement).parentElement?.children.item(nextIndex) as HTMLElement | null;
+    const tiles = Array.from(
+      (event.currentTarget as HTMLElement).closest('.picker-grid')?.querySelectorAll<HTMLElement>('.background-tile') ?? [],
+    );
+    if (!tiles.length) return;
+    const nextIndex = (index + direction + tiles.length) % tiles.length;
+    const target = tiles.at(nextIndex);
     target?.focus();
+  }
+
+  requestUpload(): void {
+    this.uploadError.set(null);
+    this.fileInput?.nativeElement.click();
+  }
+
+  async onFileSelected(event: Event): Promise<void> {
+    const inputEl = event.target as HTMLInputElement;
+    const file = inputEl.files?.item(0);
+    inputEl.value = '';
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      this.uploadError.set('Choose an image file.');
+      return;
+    }
+
+    if (file.size > MAX_UPLOAD_BYTES) {
+      this.uploadError.set('Image must be 10MB or smaller.');
+      return;
+    }
+
+    this.uploadBusy.set(true);
+    this.busyId.set('upload-custom');
+    this.uploadError.set(null);
+
+    try {
+      const sourceDataUrl = await readFileAsDataUrl(file);
+      const sourceImage = await loadImage(sourceDataUrl);
+      const processedDataUrl = resizeAndEncode(sourceImage);
+      const addedCustom = saveCustomBackground(processedDataUrl);
+      this.customs.set(readCustomBackgrounds());
+      await this.select(addedCustom);
+    } catch (error) {
+      this.uploadError.set(error instanceof Error ? error.message : 'Could not upload image.');
+    } finally {
+      this.uploadBusy.set(false);
+      if (this.busyId() === 'upload-custom') this.busyId.set(null);
+    }
+  }
+
+  async deleteCustom(event: MouseEvent, custom: CustomBackground): Promise<void> {
+    event.stopPropagation();
+    this.uploadError.set(null);
+    removeCustomBackground(custom.id);
+    this.customs.set(readCustomBackgrounds());
+
+    if (this.selectedId() !== custom.id) return;
+
+    this.selectedId.set('none');
+    this.busyId.set('none');
+    try {
+      writeStoredSelection({ mode: 'none' });
+      await this.backgroundEffects.setMode('none');
+    } finally {
+      this.busyId.set(null);
+    }
   }
 
   requestClose(): void {
@@ -152,8 +229,12 @@ export class BackgroundPickerComponent {
     const stored = readStoredSelection();
     if (!stored) return;
     if (stored.mode === 'image') {
-      const option = IMAGE_OPTIONS.find((item) => item.id === stored.asset);
-      if (!option) return;
+      const option = IMAGE_OPTIONS.find((item) => item.id === stored.asset) ?? this.customs().find((item) => item.id === stored.asset);
+      if (!option) {
+        this.selectedId.set('none');
+        writeStoredSelection({ mode: 'none' });
+        return;
+      }
       this.selectedId.set(option.id);
       await this.backgroundEffects.setBackgroundImage(option.assetUrl);
       await this.backgroundEffects.setMode('image');
@@ -164,6 +245,10 @@ export class BackgroundPickerComponent {
   }
 }
 
+function isCustomBackground(option: SelectableBackgroundOption): option is CustomBackground {
+  return 'isCustom' in option && option.isCustom;
+}
+
 function readStoredSelection(): StoredSelection | null {
   if (typeof window === 'undefined') return null;
   try {
@@ -171,7 +256,9 @@ function readStoredSelection(): StoredSelection | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Partial<StoredSelection>;
     if (parsed.mode === 'none' || parsed.mode === 'blur') return { mode: parsed.mode };
-    if (parsed.mode === 'image' && typeof parsed.asset === 'string') return { mode: 'image', asset: parsed.asset };
+    if (parsed.mode === 'image' && typeof parsed.asset === 'string') {
+      return { mode: 'image', asset: parsed.asset, custom: parsed.custom === true };
+    }
   } catch {
     window.localStorage.removeItem(STORAGE_KEY);
   }
@@ -181,6 +268,140 @@ function readStoredSelection(): StoredSelection | null {
 function writeStoredSelection(selection: StoredSelection): void {
   if (typeof window === 'undefined') return;
   window.localStorage.setItem(STORAGE_KEY, JSON.stringify(selection));
+}
+
+function readCustomBackgrounds(): CustomBackground[] {
+  const ids = readCustomIds();
+  const validIds: string[] = [];
+  const customs: CustomBackground[] = [];
+
+  for (const id of ids) {
+    const assetUrl = readCustomData(id);
+    if (!assetUrl) continue;
+    validIds.push(id);
+    customs.push({ id, label: `Custom ${customs.length + 1}`, mode: 'image', assetUrl, isCustom: true });
+  }
+
+  if (validIds.length !== ids.length) writeCustomIds(validIds);
+  return customs;
+}
+
+function saveCustomBackground(assetUrl: string): CustomBackground {
+  if (typeof window === 'undefined') throw new Error('Custom backgrounds require a browser.');
+
+  const id = createCustomId();
+  const nextIds = [...readCustomIds(), id];
+  const evictedIds: string[] = [];
+
+  while (nextIds.length > MAX_CUSTOM_BACKGROUNDS) {
+    const evictedId = nextIds.shift();
+    if (evictedId) evictedIds.push(evictedId);
+  }
+
+  try {
+    window.localStorage.setItem(customStorageKey(id), assetUrl);
+    for (const evictedId of evictedIds) window.localStorage.removeItem(customStorageKey(evictedId));
+    writeCustomIds(nextIds);
+  } catch {
+    window.localStorage.removeItem(customStorageKey(id));
+    throw new Error('Could not save image. Browser storage is full.');
+  }
+
+  return { id, label: `Custom ${nextIds.length}`, mode: 'image', assetUrl, isCustom: true };
+}
+
+function removeCustomBackground(id: string): void {
+  if (typeof window === 'undefined') return;
+  const nextIds = readCustomIds().filter((item) => item !== id);
+  window.localStorage.removeItem(customStorageKey(id));
+  writeCustomIds(nextIds);
+}
+
+function readCustomIds(): string[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_INDEX_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('Invalid custom background index');
+    const ids = parsed.filter((id): id is string => typeof id === 'string');
+    if (ids.length !== parsed.length) writeCustomIds(ids);
+    return ids;
+  } catch {
+    window.localStorage.removeItem(CUSTOM_INDEX_KEY);
+    return [];
+  }
+}
+
+function writeCustomIds(ids: string[]): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(CUSTOM_INDEX_KEY, JSON.stringify(ids));
+}
+
+function readCustomData(id: string): string | null {
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(customStorageKey(id));
+}
+
+function customStorageKey(id: string): string {
+  return `${CUSTOM_STORAGE_PREFIX}${id}`;
+}
+
+function createCustomId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
+        return;
+      }
+      reject(new Error('Could not read image file.'));
+    };
+    reader.onerror = () => reject(new Error('Could not read image file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('Could not load image file.'));
+    image.src = dataUrl;
+  });
+}
+
+function resizeAndEncode(image: HTMLImageElement): string {
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  if (!sourceWidth || !sourceHeight) throw new Error('Could not determine image size.');
+
+  const scale = Math.min(MAX_CUSTOM_WIDTH / sourceWidth, MAX_CUSTOM_HEIGHT / sourceHeight, 1);
+  const outputWidth = Math.max(1, Math.round(sourceWidth * scale));
+  const outputHeight = Math.max(1, Math.round(sourceHeight * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not process image.');
+  context.drawImage(image, 0, 0, outputWidth, outputHeight);
+
+  for (const quality of JPEG_QUALITIES) {
+    const dataUrl = canvas.toDataURL('image/jpeg', quality);
+    if (approximateDataUrlBytes(dataUrl) <= MAX_PROCESSED_BYTES) return dataUrl;
+  }
+
+  throw new Error('Image too large after compression');
+}
+
+function approximateDataUrlBytes(dataUrl: string): number {
+  return Math.ceil(dataUrl.length * 0.75);
 }
 
 function svgDataUrl(svg: string): string {

@@ -75,7 +75,12 @@
   gap: 8px;
 }
 
+.file-input {
+  display: none;
+}
+
 .background-tile {
+  width: 100%;
   min-width: 0;
   border: 1px solid rgba(148, 163, 184, 0.42);
   border-radius: 8px;
@@ -111,6 +116,46 @@
 
 .background-tile.loading {
   opacity: 0.72;
+}
+
+.background-tile:disabled {
+  cursor: wait;
+}
+
+.custom-tile {
+  position: relative;
+  min-width: 0;
+  display: block;
+}
+
+.delete-custom {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 22px;
+  height: 22px;
+  border: 1px solid rgba(15, 23, 42, 0.22);
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #172033;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 3px 8px rgba(15, 23, 42, 0.18);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.delete-custom:hover,
+.delete-custom:focus-visible {
+  border-color: rgba(220, 38, 38, 0.5);
+  color: #991b1b;
+}
+
+.delete-custom:focus-visible {
+  outline: 2px solid rgba(59, 130, 246, 0.8);
+  outline-offset: 2px;
 }
 
 .thumbnail {
@@ -155,6 +200,31 @@
   filter: blur(0.2px);
 }
 
+.upload-tile {
+  border-style: dashed;
+  background: #f8fafc;
+}
+
+.upload-thumb {
+  background:
+    linear-gradient(135deg, rgba(248, 250, 252, 0.95), rgba(226, 232, 240, 0.92)),
+    repeating-linear-gradient(45deg, rgba(148, 163, 184, 0.26) 0 8px, transparent 8px 16px);
+}
+
+.upload-plus {
+  width: 30px;
+  height: 30px;
+  border: 2px solid rgba(23, 32, 51, 0.68);
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #172033;
+  background: rgba(255, 255, 255, 0.72);
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 1;
+}
+
 .tile-label {
   max-width: 96px;
   overflow: hidden;
@@ -163,6 +233,14 @@
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.upload-error {
+  margin: 10px 0 0;
+  color: #991b1b;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
 }
 
 @media (max-width: 520px) {

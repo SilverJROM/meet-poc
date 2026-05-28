@@ -10,6 +10,8 @@
     }
   </header>
 
+  <input #fileInput class="file-input" type="file" accept="image/*" (change)="onFileSelected($event)">
+
   <div class="picker-grid" role="radiogroup" aria-label="Camera background">
     @for (option of options; track option.id; let index = $index) {
       <button
@@ -38,5 +40,51 @@
         <span class="tile-label">{{ option.label }}</span>
       </button>
     }
+
+    @for (custom of customs(); track custom.id; let customIndex = $index) {
+      <span class="custom-tile">
+        <button
+          type="button"
+          class="background-tile custom-background-tile"
+          role="radio"
+          [class.selected]="selectedId() === custom.id"
+          [class.loading]="busyId() === custom.id"
+          [attr.aria-checked]="selectedId() === custom.id"
+          (click)="select(custom)"
+          (keydown)="onTileKeydown($event, options.length + customIndex)"
+        >
+          <span class="thumbnail" aria-hidden="true">
+            <img [src]="custom.assetUrl" alt="">
+          </span>
+          <span class="tile-label">{{ custom.label }}</span>
+        </button>
+        <button
+          type="button"
+          class="delete-custom"
+          [attr.aria-label]="'Delete ' + custom.label"
+          (click)="deleteCustom($event, custom)"
+        >
+          x
+        </button>
+      </span>
+    }
+
+    <button
+      type="button"
+      class="background-tile upload-tile"
+      [class.loading]="uploadBusy()"
+      [disabled]="uploadBusy()"
+      (click)="requestUpload()"
+      (keydown)="onTileKeydown($event, options.length + customs().length)"
+    >
+      <span class="thumbnail upload-thumb" aria-hidden="true">
+        <span class="upload-plus">+</span>
+      </span>
+      <span class="tile-label">Upload custom</span>
+    </button>
   </div>
+
+  @if (uploadError()) {
+    <p class="upload-error" role="alert">{{ uploadError() }}</p>
+  }
 </section>
