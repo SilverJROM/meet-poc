@@ -106,6 +106,19 @@
           <button type="button" (click)="actionNotice.set(null)">Dismiss</button>
         </div>
       }
+      @if (isHost() && knockers().length > 0) {
+        <div class="knock-banner" role="alert">
+          @for (knocker of knockers(); track knocker.id) {
+            <div class="knock-banner-row">
+              <span class="knock-name"><strong>{{ knocker.name }}</strong> wants to join</span>
+              <div class="knock-banner-actions">
+                <button type="button" class="primary-btn" (click)="admit(knocker.id)">Admit</button>
+                <button type="button" class="secondary-btn" (click)="reject(knocker.id)">Reject</button>
+              </div>
+            </div>
+          }
+        </div>
+      }
       @if (remoteAudioBlocked()) {
         <div class="audio-unblock-notice" role="status">
           <span>Tap to enable audio</span>

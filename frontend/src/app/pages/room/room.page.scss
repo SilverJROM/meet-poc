@@ -882,3 +882,72 @@ app-tile {
     gap: 8px;
   }
 }
+
+.knock-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #1a73e8;
+  color: #fff;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin: 8px 12px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  animation: knock-slide-in 200ms ease-out;
+}
+
+.knock-banner-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.knock-name {
+  font-size: 15px;
+}
+
+.knock-banner-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.knock-banner .primary-btn {
+  background: #fff;
+  color: #1a73e8;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.knock-banner .primary-btn:hover {
+  background: #f1f3f4;
+}
+
+.knock-banner .secondary-btn {
+  background: transparent;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  padding: 6px 14px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.knock-banner .secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@keyframes knock-slide-in {
+  from {
+    transform: translateY(-8px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
