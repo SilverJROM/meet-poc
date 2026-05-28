@@ -293,8 +293,7 @@
       }
     </section>
   } @else {
-    <section class="lobby-panel">
-      <h1>{{ roomTitle() }}</h1>
+    <section class="lobby-panel prejoin-panel">
       @if (permissionError(); as lobbyError) {
         @if (lobbyError.kind === 'denied') {
           <div class="lobby-error" role="alert">
@@ -319,25 +318,28 @@
           </div>
         }
       }
-      <div class="quick-join">
-        <app-lobby-preview
-          [stream]="localStream()"
-          [audioInputs]="audioInputs()"
-          [videoInputs]="videoInputs()"
-          [selectedAudioId]="selectedAudioId()"
-          [selectedVideoId]="selectedVideoId()"
-          [videoEnabled]="cameraRequested()"
-          [compact]="true"
-          [level]="micLevel()"
-          [audioContextActivated]="media.audioContextActivated()"
-          [facingMode]="currentFacingMode()"
-          (audioDeviceChange)="changeAudioDevice($event)"
-          (videoDeviceChange)="changeVideoDevice($event)"
-          (enableMicPreview)="enableMicPreview()"
-          (flipCamera)="flipCamera()"
-        />
-      </div>
-      <form class="join-form" novalidate (ngSubmit)="join()">
+      <div class="prejoin-grid">
+        <div class="quick-join">
+          <app-lobby-preview
+            [stream]="localStream()"
+            [audioInputs]="audioInputs()"
+            [videoInputs]="videoInputs()"
+            [selectedAudioId]="selectedAudioId()"
+            [selectedVideoId]="selectedVideoId()"
+            [videoEnabled]="cameraRequested()"
+            [compact]="false"
+            [level]="micLevel()"
+            [audioContextActivated]="media.audioContextActivated()"
+            [facingMode]="currentFacingMode()"
+            (audioDeviceChange)="changeAudioDevice($event)"
+            (videoDeviceChange)="changeVideoDevice($event)"
+            (enableMicPreview)="enableMicPreview()"
+            (flipCamera)="flipCamera()"
+          />
+        </div>
+        <div class="prejoin-controls">
+          <h1>{{ roomTitle() }}</h1>
+          <form class="join-form" novalidate (ngSubmit)="join()">
           <div class="field">
             <label for="display-name">Name</label>
             <input
@@ -371,7 +373,7 @@
                 [disabled]="state() === 'connecting'"
               >
               <ion-icon [name]="microphoneRequested() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
-              <span>{{ microphoneRequested() ? 'Microphone on' : 'Microphone off' }}</span>
+              <span>{{ microphoneRequested() ? 'Mic on' : 'Mic off' }}</span>
             </label>
             <label class="toggle-row">
               <input
@@ -382,7 +384,7 @@
                 [disabled]="state() === 'connecting'"
               >
               <ion-icon [name]="cameraRequested() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
-              <span>Start with camera on</span>
+              <span>{{ cameraRequested() ? 'Camera on' : 'Camera off' }}</span>
             </label>
           </div>
           @if (setupWarning()) {
@@ -401,12 +403,14 @@
             class="primary-btn"
             [disabled]="state() === 'connecting'"
           >
-            {{ auth.user() ? 'Join' : 'Ask to join' }}
+            {{ auth.user() ? 'Join now' : 'Ask to join' }}
           </button>
-      </form>
-      <button type="button" class="configure-toggle" [attr.aria-expanded]="lobbyDeviceDialogOpen()" (click)="toggleLobbyDeviceDialog()">
-        {{ lobbyDeviceDialogOpen() ? 'Hide device test' : 'Test / configure devices' }}
-      </button>
+          </form>
+          <button type="button" class="configure-toggle" [attr.aria-expanded]="lobbyDeviceDialogOpen()" (click)="toggleLobbyDeviceDialog()">
+            {{ lobbyDeviceDialogOpen() ? 'Hide device test' : 'Test / configure devices' }}
+          </button>
+        </div>
+      </div>
       @if (lobbyDeviceDialogOpen()) {
         <app-device-dialog
           [open]="true"
