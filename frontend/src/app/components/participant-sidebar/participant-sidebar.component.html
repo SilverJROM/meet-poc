@@ -71,17 +71,29 @@
 
   @if (isHost()) {
     @if (!isMobile() || activeSection() === 'waiting') {
-    <section aria-label="Waiting to join">
-      <h3>Waiting to join</h3>
+    <section class="waiting-section" aria-label="Waiting to join">
+      <div class="waiting-header">
+        <h3>Waiting to join</h3>
+        @if (knockers().length > 0) {
+          <span class="waiting-count-badge">{{ knockers().length }}</span>
+        }
+      </div>
       @if (knockers().length === 0) {
-        <p class="empty">No one is waiting.</p>
+        <p class="empty waiting-empty"><span class="waiting-empty-icon" aria-hidden="true"></span>No one is waiting.</p>
       } @else {
         <ul class="waiting-list">
           @for (knocker of knockers(); track knocker.id) {
             <li>
-              <span>{{ knocker.name }}</span>
-              <button type="button" class="primary-btn" (click)="admit.emit(knocker.id)">Admit</button>
-              <button type="button" class="secondary-btn" (click)="reject.emit(knocker.id)">Reject</button>
+              <span class="waiting-avatar" aria-hidden="true">
+                {{ ((knocker.name.trim().split(' ')[0] || '?').charAt(0) + (knocker.name.trim().split(' ')[1] || '').charAt(0)).toUpperCase() }}
+              </span>
+              <span class="waiting-main">
+                <span class="waiting-name">{{ knocker.name }}</span>
+              </span>
+              <span class="waiting-actions">
+                <button type="button" class="primary-btn" (click)="admit.emit(knocker.id)">Admit</button>
+                <button type="button" class="secondary-btn" (click)="reject.emit(knocker.id)">Deny</button>
+              </span>
             </li>
           }
         </ul>

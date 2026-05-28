@@ -1144,13 +1144,16 @@ app-tile {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
   background: #1a73e8;
   color: #fff;
   padding: 12px 16px;
   border-radius: 8px;
   margin: 8px 12px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-  animation: knock-slide-in 200ms ease-out;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  animation:
+    knock-slide-in 200ms ease-out,
+    knock-pulse-glow 800ms ease-out 1;
 }
 
 .knock-banner-row {
@@ -1206,5 +1209,25 @@ app-tile {
   to {
     transform: translateY(0);
     opacity: 1;
+  }
+}
+
+@keyframes knock-pulse-glow {
+  0% {
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.18),
+      0 0 0 0 rgba(26, 115, 232, 0.42);
+  }
+
+  45% {
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.18),
+      0 0 0 6px rgba(26, 115, 232, 0.24);
+  }
+
+  100% {
+    box-shadow:
+      0 4px 12px rgba(0, 0, 0, 0.18),
+      0 0 0 0 rgba(26, 115, 232, 0);
   }
 }
