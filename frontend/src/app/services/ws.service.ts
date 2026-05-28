@@ -19,6 +19,7 @@ export type SignalingMessage =
   | { type: 'knocking'; clientId: string; roomTitle?: string }
   | { type: 'knock'; clientId: string; name: string }
   | { type: 'pending-list'; knockers: { id: string; name: string }[] }
+  | { type: 'host-role'; clientId: string; isHost: boolean }
   | { type: 'peer-joined'; clientId: string; participantId?: string; name: string; host?: boolean; isMobile?: boolean }
   | { type: 'peer-reconnecting'; clientId: string; participantId?: string; name: string; host?: boolean }
   | { type: 'peer-resumed'; oldClientId: string; clientId: string; participantId?: string; name: string; host?: boolean; isMobile?: boolean }

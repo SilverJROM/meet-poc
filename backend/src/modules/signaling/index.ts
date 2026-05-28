@@ -53,6 +53,8 @@ type LiveRoom = {
   sfuPresenceRevision: number;
   pendingShareRequest: ShareRequestEntry | null;
   shareGrants: Set<string>;
+  actingHostClientId: string | null;
+  ownerHasJoined: boolean;
 };
 
 type ClientIdentity = {
@@ -161,6 +163,8 @@ function getOrCreateLiveRoom(roomId: string): LiveRoom {
       sfuPresenceRevision: 0,
       pendingShareRequest: null,
       shareGrants: new Set(),
+      actingHostClientId: null,
+      ownerHasJoined: false,
     };
     liveRooms.set(roomId, live);
   }
@@ -183,9 +187,75 @@ function broadcastToAdmitted(live: LiveRoom, msg: Record<string, unknown>): void
   for (const [, peer] of live.admitted) send(peer.ws, msg);
 }
 
+function getAdmittedOwnerClientId(live: LiveRoom, roomId: string, database: Database.Database): string | null {
+  for (const [clientId, peer] of live.admitted) {
+    if (isOwnerOf(roomId, peer.userEmail, database)) return clientId;
+  }
+  return null;
+}
+
+function getActingHostClientId(live: LiveRoom, roomId: string, database: Database.Database): string | null {
+  if (!live.actingHostClientId || live.ownerHasJoined) return null;
+  const peer = live.admitted.get(live.actingHostClientId);
+  if (!peer || isOwnerOf(roomId, peer.userEmail, database)) return null;
+  return live.actingHostClientId;
+}
+
+function getEffectiveHostClientId(live: LiveRoom, roomId: string, database: Database.Database): string | null {
+  return getAdmittedOwnerClientId(live, roomId, database) ?? getActingHostClientId(live, roomId, database);
+}
+
+function sendHostRole(live: LiveRoom, clientId: string, isHost: boolean): void {
+  const peer = live.admitted.get(clientId);
+  if (peer) send(peer.ws, { type: 'host-role', clientId, isHost });
+}
+
+function broadcastHostRole(live: LiveRoom, clientId: string, isHost: boolean): void {
+  for (const [, peer] of live.admitted) send(peer.ws, { type: 'host-role', clientId, isHost });
+}
+
+function setActingHostClientId(live: LiveRoom, nextClientId: string | null): void {
+  const previousClientId = live.actingHostClientId;
+  if (previousClientId === nextClientId) return;
+  live.actingHostClientId = nextClientId;
+  if (previousClientId) broadcastHostRole(live, previousClientId, false);
+  if (nextClientId) broadcastHostRole(live, nextClientId, true);
+}
+
+function promoteNextActingHost(roomId: string, live: LiveRoom, database: Database.Database): void {
+  if (live.ownerHasJoined || getAdmittedOwnerClientId(live, roomId, database)) {
+    setActingHostClientId(live, null);
+    return;
+  }
+  const room = getRoom(roomId, database);
+  if (!room?.isOpen) {
+    setActingHostClientId(live, null);
+    return;
+  }
+  const current = getActingHostClientId(live, roomId, database);
+  if (current) return;
+  for (const [clientId, peer] of live.admitted) {
+    if (!isOwnerOf(roomId, peer.userEmail, database)) {
+      setActingHostClientId(live, clientId);
+      broadcastPendingListToOwners(live, roomId, database);
+      return;
+    }
+  }
+  setActingHostClientId(live, null);
+}
+
 function broadcastToOwners(live: LiveRoom, roomId: string, msg: Record<string, unknown>, database: Database.Database): void {
+  let sentToOwner = false;
   for (const [, peer] of live.admitted) {
-    if (isOwnerOf(roomId, peer.userEmail, database)) send(peer.ws, msg);
+    if (isOwnerOf(roomId, peer.userEmail, database)) {
+      sentToOwner = true;
+      send(peer.ws, msg);
+    }
+  }
+  if (!sentToOwner) {
+    const actingHostClientId = getActingHostClientId(live, roomId, database);
+    const actingHost = actingHostClientId ? live.admitted.get(actingHostClientId) : null;
+    if (actingHost) send(actingHost.ws, msg);
   }
 }
 
@@ -203,6 +273,10 @@ function ownerCount(live: LiveRoom, roomId: string, database: Database.Database)
     if (isOwnerOf(roomId, peer.userEmail, database)) count += 1;
   }
   return count;
+}
+
+function hostCount(live: LiveRoom, roomId: string, database: Database.Database): number {
+  return ownerCount(live, roomId, database) + (getActingHostClientId(live, roomId, database) ? 1 : 0);
 }
 
 function clearPendingShareRequestForPeer(live: LiveRoom, roomId: string, clientId: string, database: Database.Database): void {
@@ -264,6 +338,7 @@ function closeSupersededAdmittedPeer(live: LiveRoom, clientId: string): void {
   const entry = live.admitted.get(clientId);
   if (!entry) return;
   live.admitted.delete(clientId);
+  if (live.actingHostClientId === clientId) live.actingHostClientId = null;
   live.shareGrants.delete(clientId);
   entry.setState('idle');
   try {
@@ -386,18 +461,20 @@ function getLiveAdmittedRoom(currentRoom: string | null, state: PeerState): Live
   return liveRooms.get(currentRoom) || null;
 }
 
-function isHostCommandAllowed(command: string, roomId: string | null, userEmail: string | null, database: Database.Database): boolean {
-  const allowed = isOwnerOf(roomId, userEmail, database);
+function isHostCommandAllowed(command: string, roomId: string | null, clientId: string, userEmail: string | null, database: Database.Database): boolean {
+  const live = roomId ? liveRooms.get(roomId) : null;
+  const allowed = isOwnerOf(roomId, userEmail, database) || (!!roomId && !!live && getActingHostClientId(live, roomId, database) === clientId);
   if (!allowed) logRejectedHostCommand(command, userEmail, roomId);
   return allowed;
 }
 
 function peerSummaries(live: LiveRoom, roomId: string, database: Database.Database): { id: string; participantId: string; name: string; host: boolean; isMobile: boolean }[] {
+  const hostClientId = getEffectiveHostClientId(live, roomId, database);
   return [...live.admitted.entries()].map(([id, p]) => ({
     id,
     participantId: p.participantId,
     name: p.name,
-    host: isOwnerOf(roomId, p.userEmail, database),
+    host: id === hostClientId || isOwnerOf(roomId, p.userEmail, database),
     isMobile: p.isMobile,
   }));
 }
@@ -480,7 +557,9 @@ function removeAdmittedPeer(roomId: string, clientId: string, live: LiveRoom, da
   const entry = live.admitted.get(clientId);
   if (!entry) return;
   const isHost = isOwnerOf(roomId, entry.userEmail, database);
+  const wasActingHost = live.actingHostClientId === clientId;
   live.admitted.delete(clientId);
+  if (wasActingHost) live.actingHostClientId = null;
   live.sfuPresence.delete(clientId);
   live.shareGrants.delete(clientId);
   clearPendingShareRequestForPeer(live, roomId, clientId, database);
@@ -489,6 +568,7 @@ function removeAdmittedPeer(roomId: string, clientId: string, live: LiveRoom, da
     send(peer.ws, { type: 'peer-left', clientId, participantId: entry.participantId });
   }
   console.log(`[room ${roomId}] - ${entry.name} (${clientId})  admitted=${live.admitted.size}`);
+  if (wasActingHost) promoteNextActingHost(roomId, live, database);
   maybeCloseEmptyRoom(roomId, live, isHost ? 'host-disconnect-empty' : 'last-peer-left', database);
 }
 
@@ -591,6 +671,8 @@ function closeRoomForHost(roomId: string, live: LiveRoom, database: Database.Dat
   live.sfuPresence.clear();
   live.shareGrants.clear();
   live.pendingShareRequest = null;
+  live.actingHostClientId = null;
+  live.ownerHasJoined = false;
   live.currentSessionId = null;
   liveRooms.delete(roomId);
 
@@ -649,6 +731,7 @@ function admitPeer(roomId: string, clientId: string, database: Database.Database
     send(peer.ws, { type: 'peer-joined', clientId, participantId: pending.participantId, name: pending.name, isMobile: pending.isMobile });
   }
   live.admitted.set(clientId, pending);
+  promoteNextActingHost(roomId, live, database);
   bumpAdmittedPeak(live, database);
   broadcastToOwners(live, roomId, { type: 'knock-cancelled', clientId }, database);
   broadcastPendingListToOwners(live, roomId, database);
@@ -854,17 +937,33 @@ export function attachSignaling(server: http.Server, database: Database.Database
           ws.close();
           return;
         }
-        if (owner || canResume) {
+        const shouldActAsFirstOpenRoomHost =
+          !ownerResume &&
+          !canResume &&
+          !owner &&
+          room.isOpen &&
+          !live.ownerHasJoined &&
+          !getEffectiveHostClientId(live, roomId, database) &&
+          live.admitted.size === 0;
+        if (owner || canResume || shouldActAsFirstOpenRoomHost) {
           if (resumeOldClientId) {
             cleanupReconnectState(live, resumeOldClientId);
             if (live.admitted.has(resumeOldClientId)) closeSupersededAdmittedPeer(live, resumeOldClientId);
           }
           rememberClientIdentity(live, clientKey, participantId, myName, true);
           live.admitted.set(clientId, entry);
+          if (owner) {
+            live.ownerHasJoined = true;
+            setActingHostClientId(live, null);
+          } else if (shouldActAsFirstOpenRoomHost) {
+            live.actingHostClientId = clientId;
+          } else {
+            promoteNextActingHost(roomId, live, database);
+          }
           bumpAdmittedPeak(live, database);
           state = 'admitted';
           const peers = peerSummaries(live, roomId, database).filter((peer) => peer.id !== clientId);
-          const hostClientId = getHostClientId(roomId, database) || (owner ? clientId : null);
+          const hostClientId = getHostClientId(roomId, database) || (owner ? clientId : shouldActAsFirstOpenRoomHost ? clientId : null);
           send(ws, { type: 'admitted', clientId, participantId, peers, roomTitle: room.title, isOwner: owner, hostClientId, sessionId: live.currentSessionId });
           if (owner && !room.isOpen) openRoomForOwnerAdmission(roomId, live, database);
           sendSfuRosterToNewPeer(live, ws);
@@ -875,12 +974,13 @@ export function attachSignaling(server: http.Server, database: Database.Database
                 peer.ws,
                 resumeOldClientId
                   ? { type: 'peer-resumed', oldClientId: resumeOldClientId, clientId, participantId, name: myName, host: owner, isMobile: entry.isMobile }
-                  : owner && supportsReconnect
+                  : owner
                     ? { type: 'peer-joined', clientId, participantId, name: myName, host: true, isMobile: entry.isMobile }
-                    : { type: 'peer-joined', clientId, participantId, name: myName, isMobile: entry.isMobile },
+                    : { type: 'peer-joined', clientId, participantId, name: myName, host: shouldActAsFirstOpenRoomHost, isMobile: entry.isMobile },
               );
             }
           }
+          if (owner) broadcastHostRole(live, clientId, true);
           if (owner && live.pending.size > 0) {
             send(ws, { type: 'pending-list', knockers: pendingSummaries(live) });
           }
@@ -1015,7 +1115,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
           send(ws, { type: 'share-decision', approved: false, reason: 'Host is reviewing another screen share request.' });
           return;
         }
-        if (ownerCount(live, currentRoom, database) === 0) {
+        if (hostCount(live, currentRoom, database) === 0) {
           send(ws, { type: 'share-decision', approved: false, reason: 'Host is not available to approve screen sharing.' });
           return;
         }
@@ -1027,7 +1127,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
       if (msg.type === 'share-decision') {
         const live = getLiveAdmittedRoom(currentRoom, state);
         if (!live || !currentRoom) return;
-        if (!isHostCommandAllowed('share-decision', currentRoom, userEmail, database)) return;
+        if (!isHostCommandAllowed('share-decision', currentRoom, clientId, userEmail, database)) return;
         const targetId = String(msg.clientId || '');
         const pending = live.pendingShareRequest;
         if (!pending || pending.clientId !== targetId) return;
@@ -1047,7 +1147,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
       if (msg.type === 'share-revoke') {
         const live = getLiveAdmittedRoom(currentRoom, state);
         if (!live || !currentRoom) return;
-        if (!isHostCommandAllowed('share-revoke', currentRoom, userEmail, database)) return;
+        if (!isHostCommandAllowed('share-revoke', currentRoom, clientId, userEmail, database)) return;
         const targetId = String(msg.clientId || '');
         live.shareGrants.delete(targetId);
         const target = live.admitted.get(targetId);
@@ -1075,7 +1175,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
       if (msg.type === 'admit' || msg.type === 'reject') {
         if (state !== 'admitted') return;
         if (!currentRoom) return;
-        if (!isOwnerOf(currentRoom, userEmail, database)) return;
+        if (!isHostCommandAllowed(msg.type, currentRoom, clientId, userEmail, database)) return;
         const targetId = String(msg.clientId || '');
         if (msg.type === 'admit') admitPeer(currentRoom, targetId, database);
         else rejectPeer(currentRoom, targetId, database, msg.reason == null ? undefined : String(msg.reason));
@@ -1085,7 +1185,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
       if (msg.type === 'recording-state') {
         const live = getLiveAdmittedRoom(currentRoom, state);
         if (!live || !currentRoom) return;
-        if (!isHostCommandAllowed('recording-state', currentRoom, userEmail, database)) return;
+        if (!isHostCommandAllowed('recording-state', currentRoom, clientId, userEmail, database)) return;
         const recordingState = String(msg.state || '');
         if (recordingState !== 'started' && recordingState !== 'stopped') return;
         const wireType = recordingState === 'started' ? 'recording-started' : 'recording-stopped';
@@ -1099,7 +1199,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
       if (msg.type === 'meeting-ended-by-host') {
         const live = getLiveAdmittedRoom(currentRoom, state);
         if (!live || !currentRoom) return;
-        if (!isHostCommandAllowed('meeting-ended-by-host', currentRoom, userEmail, database)) return;
+        if (!isHostCommandAllowed('meeting-ended-by-host', currentRoom, clientId, userEmail, database)) return;
         closeSession(live.currentSessionId, 'host-end', database);
         const admitted = [...live.admitted.values()];
         const pending = [...live.pending.values()];
@@ -1133,7 +1233,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
       if (msg.type === 'close-room') {
         const live = getLiveAdmittedRoom(currentRoom, state);
         if (!live || !currentRoom) return;
-        if (!isHostCommandAllowed('close-room', currentRoom, userEmail, database)) return;
+        if (!isHostCommandAllowed('close-room', currentRoom, clientId, userEmail, database)) return;
         closeRoomForHost(currentRoom, live, database);
         return;
       }
@@ -1141,7 +1241,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
       if (msg.type === 'mute-target') {
         const live = getLiveAdmittedRoom(currentRoom, state);
         if (!live || !currentRoom) return;
-        if (!isHostCommandAllowed('mute-target', currentRoom, userEmail, database)) return;
+        if (!isHostCommandAllowed('mute-target', currentRoom, clientId, userEmail, database)) return;
         const targetId = String(msg.clientId || '');
         const target = live.admitted.get(targetId);
         if (!target) return;
@@ -1152,7 +1252,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
       if (msg.type === 'remove-peer') {
         const live = getLiveAdmittedRoom(currentRoom, state);
         if (!live || !currentRoom) return;
-        if (!isHostCommandAllowed('remove-peer', currentRoom, userEmail, database)) return;
+        if (!isHostCommandAllowed('remove-peer', currentRoom, clientId, userEmail, database)) return;
         const targetId = String(msg.clientId || '');
         if (targetId === getHostClientId(currentRoom, database)) return;
         const target = live.admitted.get(targetId);
@@ -1200,12 +1300,15 @@ export function attachSignaling(server: http.Server, database: Database.Database
       const closingPeerWasHost = currentRoomOwner;
       if (state === 'admitted') {
         const closingEntry = live.admitted.get(clientId);
+        const closingPeerWasActingHost = live.actingHostClientId === clientId;
         if (closingEntry) startReconnectGrace(currentRoom, clientId, closingEntry, closingPeerWasHost, live, database);
         live.admitted.delete(clientId);
+        if (closingPeerWasActingHost) live.actingHostClientId = null;
         live.sfuPresence.delete(clientId);
         live.shareGrants.delete(clientId);
         clearPendingShareRequestForPeer(live, currentRoom, clientId, database);
         console.log(`[room ${currentRoom}] RECONNECTING ${myName} (${clientId})  admitted=${live.admitted.size}`);
+        if (closingPeerWasActingHost) promoteNextActingHost(currentRoom, live, database);
       } else if (state === 'pending') {
         live.pending.delete(clientId);
         try {
@@ -1247,12 +1350,8 @@ export function notifyRoomAccessChanged(roomId: string, isOpen: boolean, waitTim
 
 export function getHostClientId(roomId: string, database: Database.Database = getDb()): string | null {
   const live = liveRooms.get(roomId);
-  const room = getRoom(roomId, database);
-  if (!live || !room) return null;
-  for (const [clientId, entry] of live.admitted) {
-    if (entry.userEmail === room.ownerEmail) return clientId;
-  }
-  return null;
+  if (!live) return null;
+  return getEffectiveHostClientId(live, roomId, database);
 }
 
 export function hasLiveRoom(roomId: string): boolean {

@@ -361,6 +361,7 @@ export class RoomPage implements OnDestroy {
           name: peer.name,
           state: peer.connectionState,
           reconnecting: peer.reconnecting,
+          isHost: peer.isHost,
           audioMuted: peer.stream?.getAudioTracks()[0]?.muted,
           audioReadyState: peer.stream?.getAudioTracks()[0]?.readyState,
           audioEnabled: peer.stream?.getAudioTracks()[0]?.enabled,
@@ -1234,6 +1235,10 @@ export class RoomPage implements OnDestroy {
       this.syncKnockers(msg.knockers || []);
       return;
     }
+    if (msg.type === 'host-role') {
+      this.applyHostRole(msg.clientId, !!msg.isHost);
+      return;
+    }
     if (msg.type === 'knock') {
       const wasKnown = this.knockers().some((knocker) => knocker.id === msg.clientId);
       this.upsertKnocker({ id: msg.clientId, name: msg.name });
@@ -1488,6 +1493,30 @@ export class RoomPage implements OnDestroy {
 
   private removeKnocker(clientId: string): void {
     this.knockers.set(this.knockers().filter((item) => item.id !== clientId));
+  }
+
+  private applyHostRole(clientId: string, isHost: boolean): void {
+    const currentHostId = this.hostClientId();
+    if (isHost) {
+      this.hostClientId.set(clientId);
+    } else if (currentHostId === clientId) {
+      this.hostClientId.set(this.isOwner() && this.myId() ? this.myId() : null);
+    }
+    const nextHostId = this.hostClientId();
+    const identities = new Map(this.peerIdentities());
+    let changed = false;
+    for (const [id, identity] of identities) {
+      const nextIsHost = id === nextHostId;
+      if (identity.isHost !== nextIsHost) {
+        identities.set(id, { ...identity, isHost: nextIsHost });
+        changed = true;
+      }
+    }
+    if (changed) this.peerIdentities.set(identities);
+    if (!this.isHost()) {
+      this.knockers.set([]);
+      this.pendingShareRequests.set([]);
+    }
   }
 
   private setRaisedHand(clientId: string, raised: boolean): void {
