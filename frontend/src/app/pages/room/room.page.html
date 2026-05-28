@@ -92,18 +92,6 @@
         (equalSizeTilesChange)="setEqualSizeTiles($event)"
         (leave)="leave()"
       />
-      <button
-        type="button"
-        class="icon-btn"
-        style="position: fixed; z-index: 32; right: 104px; bottom: calc(22px + env(safe-area-inset-bottom)); width: 48px; height: 48px; border-color: rgba(248, 250, 252, 0.14); border-radius: 999px; color: #f8fafc; background: #2f3338;"
-        [class.active]="backgroundPickerOpen()"
-        [attr.aria-expanded]="backgroundPickerOpen()"
-        aria-label="Background effects"
-        title="Background effects"
-        (click)="toggleBackgroundPicker($event)"
-      >
-        <ion-icon name="color-wand-outline" style="font-size: 24px;"></ion-icon>
-      </button>
       @if (backgroundPickerOpen()) {
         <app-background-picker presentation="overlay" (closeRequested)="backgroundPickerOpen.set(false)" />
       }

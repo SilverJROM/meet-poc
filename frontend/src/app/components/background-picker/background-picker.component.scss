@@ -310,9 +310,15 @@
     width: 44px;
     height: 44px;
     border-radius: 10px;
+    border-color: rgba(15, 23, 42, 0.55);
   }
 
   .close-btn ion-icon {
-    font-size: 26px;
+    font-size: 28px;
+    color: #0f172a;
+  }
+
+  .drag-grip {
+    display: none;
   }
 }
