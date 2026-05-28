@@ -205,7 +205,9 @@ export class BackgroundEffectsService {
     context.save();
     context.clearRect(0, 0, width, height);
 
-    // 1. Draw blurred or image background filling the whole canvas.
+    // 1. Draw background first (blurred frame OR background image).
+    //    Canvas filter must be applied during a source-over draw or some
+    //    browsers silently drop it.
     if (this.mode() === 'image' && this.backgroundImage) {
       drawCoverImage(context, this.backgroundImage, width, height);
     } else {
@@ -214,25 +216,51 @@ export class BackgroundEffectsService {
       context.filter = 'none';
     }
 
-    // 2. Cut a person-shaped hole using the segmentation mask. MediaPipe's
-    //    segmentationMask is a grayscale image with full alpha — convert its
-    //    luminance to alpha first so destination-out only erases the person area.
+    // 2. Build a "person-only" canvas: original image masked by segmentation.
+    //    MediaPipe's segmentationMask is grayscale with alpha=255 everywhere,
+    //    so we convert red→alpha so destination-in keeps only the person area.
     const maskCanvas = this.getMaskAlphaCanvas(results.segmentationMask, width, height);
-    if (maskCanvas) {
-      context.globalCompositeOperation = 'destination-out';
-      context.drawImage(maskCanvas, 0, 0, width, height);
-    }
+    const personCanvas = this.getPersonCanvas(results.image, maskCanvas, width, height);
 
-    // 3. Put the original (sharp) frame underneath; it shows through where the
-    //    mask erased the background, leaving the person sharp on top of bg.
-    context.globalCompositeOperation = 'destination-over';
-    context.drawImage(results.image, 0, 0, width, height);
+    // 3. Overlay person on top of background. captureStream sees fully
+    //    opaque content (bg covers everything; person sharp on top).
+    if (personCanvas) {
+      context.drawImage(personCanvas, 0, 0, width, height);
+    }
 
     context.restore();
   }
 
   private maskWorkCanvas: HTMLCanvasElement | null = null;
   private maskWorkContext: CanvasRenderingContext2D | null = null;
+  private personWorkCanvas: HTMLCanvasElement | null = null;
+  private personWorkContext: CanvasRenderingContext2D | null = null;
+
+  private getPersonCanvas(
+    image: CanvasImageSource,
+    maskCanvas: HTMLCanvasElement | null,
+    width: number,
+    height: number,
+  ): HTMLCanvasElement | null {
+    if (typeof document === 'undefined' || !maskCanvas) return null;
+    if (!this.personWorkCanvas) {
+      this.personWorkCanvas = document.createElement('canvas');
+      this.personWorkContext = this.personWorkCanvas.getContext('2d');
+    }
+    const work = this.personWorkCanvas;
+    const ctx = this.personWorkContext;
+    if (!ctx) return null;
+    if (work.width !== width) work.width = width;
+    if (work.height !== height) work.height = height;
+    ctx.save();
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, width, height);
+    ctx.drawImage(image, 0, 0, width, height);
+    ctx.globalCompositeOperation = 'destination-in';
+    ctx.drawImage(maskCanvas, 0, 0, width, height);
+    ctx.restore();
+    return work;
+  }
 
   private getMaskAlphaCanvas(
     mask: CanvasImageSource,
