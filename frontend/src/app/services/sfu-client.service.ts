@@ -69,6 +69,7 @@ export class SfuClientService {
   private callerCreds: { clientKey: string; participantId: string; sessionId: string } | null = null;
   private subscribedClientIds = new Set<string>();
   private midToEntry = new Map<string, SubscribedTrackEntry>();
+  private pendingOntrack = new Map<string, RTCTrackEvent>();
   private subscribeRetryAttempts = new Map<string, number>();
   private readonly SUBSCRIBE_RETRY_CAP = 7;
   // Subscribe-latency: time from subscribe issued → first ontrack arrival per publisher
@@ -319,6 +320,41 @@ export class SfuClientService {
       publishStatus: publishState?.status ?? null,
       publishError: publishState?.error ?? null,
     };
+  }
+
+  private processOntrack(event: RTCTrackEvent, entry: SubscribedTrackEntry): void {
+    if (!this.subscribeFirstFrameAt.has(entry.publisherClientId)) {
+      this.subscribeFirstFrameAt.set(entry.publisherClientId, Date.now());
+      this.disarmSubscribeStuckWatchdog(entry.publisherClientId);
+    }
+    if (entry.kind === 'screen') {
+      const next = new Map(this.remoteScreenStreams());
+      let stream = next.get(entry.publisherClientId);
+      if (!stream) {
+        stream = new MediaStream();
+        next.set(entry.publisherClientId, stream);
+      }
+      stream.addTrack(event.track);
+      this.remoteScreenStreams.set(next);
+    } else {
+      const next = new Map(this.remoteStreams());
+      let stream = next.get(entry.publisherClientId);
+      if (!stream) {
+        stream = new MediaStream();
+        next.set(entry.publisherClientId, stream);
+      }
+      stream.addTrack(event.track);
+      this.remoteStreams.set(next);
+    }
+  }
+
+  private flushPendingOntrack(): void {
+    for (const [mid, event] of [...this.pendingOntrack]) {
+      const entry = this.midToEntry.get(mid);
+      if (!entry) continue;
+      this.pendingOntrack.delete(mid);
+      this.processOntrack(event, entry);
+    }
   }
 
   getVideoEncodings(): RTCRtpEncodingParameters[] {
@@ -624,6 +660,7 @@ export class SfuClientService {
     this.callerCreds = null;
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
+    this.pendingOntrack.clear();
     this.subscribeRetryAttempts.clear();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
@@ -656,6 +693,7 @@ export class SfuClientService {
     this.localPublishState.set(null);
     this.setPublishPhase(null);
     this.opQueue = Promise.resolve();
+    this.pendingOntrack.clear();
     this.clearAllSubscribeStuckWatchdogs();
 
     if (!publishState || !creds || publishState.status !== 'published') return;
@@ -681,6 +719,7 @@ export class SfuClientService {
     this.callerCreds = null;
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
+    this.pendingOntrack.clear();
     this.subscribeRetryAttempts.clear();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
@@ -714,30 +753,12 @@ export class SfuClientService {
         const mid = event.transceiver.mid;
         if (!mid) return;
         const entry = this.midToEntry.get(mid);
-        if (!entry) return;
-        if (!this.subscribeFirstFrameAt.has(entry.publisherClientId)) {
-          this.subscribeFirstFrameAt.set(entry.publisherClientId, Date.now());
-          this.disarmSubscribeStuckWatchdog(entry.publisherClientId);
+        if (!entry) {
+          console.warn(`[sfu] ontrack arrived early for mid=${mid}, buffering for replay`);
+          this.pendingOntrack.set(mid, event);
+          return;
         }
-        if (entry.kind === 'screen') {
-          const next = new Map(this.remoteScreenStreams());
-          let stream = next.get(entry.publisherClientId);
-          if (!stream) {
-            stream = new MediaStream();
-            next.set(entry.publisherClientId, stream);
-          }
-          stream.addTrack(event.track);
-          this.remoteScreenStreams.set(next);
-        } else {
-          const next = new Map(this.remoteStreams());
-          let stream = next.get(entry.publisherClientId);
-          if (!stream) {
-            stream = new MediaStream();
-            next.set(entry.publisherClientId, stream);
-          }
-          stream.addTrack(event.track);
-          this.remoteStreams.set(next);
-        }
+        this.processOntrack(event, entry);
       };
 
       // Add local tracks with pre-negotiated video transceiver (DR-55/F2: always negotiate video up-front)
@@ -886,11 +907,8 @@ export class SfuClientService {
     // Full renegotiation inside this enqueue op — must not interleave with other ops
     if (res.requiresImmediateRenegotiation && res.sessionDescription) {
       await this.pc.setRemoteDescription(res.sessionDescription);
-      const answer = await this.pc.createAnswer();
-      await this.pc.setLocalDescription(answer);
 
-      // Real mids are now assigned in the negotiated SDP. Match positionally:
-      // responseTracks[i] ↔ newTransceiverMids[i] (CF preserves request order).
+      // Populate before the next event-loop yield; ontrack from SRD can fire before createAnswer resolves.
       const newTransceiverMids = this.pc
         .getTransceivers()
         .map((t) => t.mid)
@@ -902,6 +920,10 @@ export class SfuClientService {
         this.midToEntry.set(r.realMid, entry);
         nextSubscribed.set(r.realMid, entry);
       }
+      this.flushPendingOntrack();
+
+      const answer = await this.pc.createAnswer();
+      await this.pc.setLocalDescription(answer);
 
       await withTimeout(
         firstValueFrom(
@@ -922,6 +944,7 @@ export class SfuClientService {
         this.midToEntry.set(rt.mid, entry);
         nextSubscribed.set(rt.mid, entry);
       }
+      this.flushPendingOntrack();
     }
 
     // Set signal after mids are reconciled (not before — subscribedTracks must reflect real mids)
