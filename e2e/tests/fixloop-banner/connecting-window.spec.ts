@@ -35,7 +35,7 @@ test('fixloop R6 — subscribe-stuck watchdog fires after 10s when ontrack never
   });
   try {
     await joinGuestAndWait(guest, room, 'WatchdogGuest');
-    await page.locator('.knock-banner').getByRole('button', { name: 'Admit' }).click();
+    await page.locator('.knock-toast-stack').getByRole('button', { name: 'Admit' }).click();
     await expect(guest.locator('.call-panel')).toBeVisible({ timeout: 8_000 });
 
     // Wait long enough for the 10s watchdog to fire on either side if stuck.

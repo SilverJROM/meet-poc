@@ -9,7 +9,7 @@ test('fixloop camera privacy — camera off propagates to remote tiles', async (
   const guest = await guestContext.newPage();
   try {
     await joinGuestWithCameraAndWait(guest, room, 'guest');
-    await page.locator('.knock-banner').getByRole('button', { name: 'Admit' }).click();
+    await page.locator('.knock-toast-stack').getByRole('button', { name: 'Admit' }).click();
     await expect(guest.locator('.call-panel')).toBeVisible({ timeout: 12_000 });
 
     await expectRemoteVideo(page, 'guest');

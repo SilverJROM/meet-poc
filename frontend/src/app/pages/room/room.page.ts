@@ -150,7 +150,6 @@ export class RoomPage implements OnDestroy {
   readonly chatUnreadCount = signal(0);
   readonly leaveDialogOpen = signal(false);
   readonly meetingEndedToastOpen = signal(false);
-  readonly diagnosticsOpen = signal(false);
   readonly diagnosticsLoggingEnabled = signal(readDiagnosticsLoggingEnabled());
   readonly screenShareHelp = signal<string | null>(null);
   readonly warningDismissed = signal(false);
@@ -775,6 +774,12 @@ export class RoomPage implements OnDestroy {
     this.removeKnocker(clientId);
   }
 
+  admitAll(): void {
+    for (const knocker of this.knockers()) {
+      this.admit(knocker.id);
+    }
+  }
+
   reject(clientId: string): void {
     this.ws.send({ type: 'reject', clientId });
     this.removeKnocker(clientId);
@@ -804,10 +809,6 @@ export class RoomPage implements OnDestroy {
     }
   }
 
-  toggleDiagnostics(): void {
-    this.diagnosticsOpen.update((open) => !open);
-  }
-
   sendChat(event?: Event): void {
     event?.preventDefault();
     const text = this.chatDraft().trim().slice(0, 2000);
@@ -829,19 +830,6 @@ export class RoomPage implements OnDestroy {
 
   chatDateTime(sentAt: number): string {
     return new Date(sentAt).toISOString();
-  }
-
-  setDiagnosticsLogging(enabled: boolean): void {
-    this.diagnosticsLoggingEnabled.set(enabled);
-    storeDiagnosticsLoggingEnabled(enabled);
-    if (!enabled) {
-      this.stopDiagnosticsLogger();
-      return;
-    }
-    if (this.state() === 'in-call' && this.currentSessionId()) {
-      this.startDiagnosticsLogger();
-      this.queueDiagnosticsLog('sample');
-    }
   }
 
   toggleShareStrip(): void {
@@ -1528,7 +1516,6 @@ export class RoomPage implements OnDestroy {
     this.shareCameraActive = false;
     this.shareCameraPreShareOn = null;
     this.shareCameraManualOverride.set(false);
-    this.diagnosticsOpen.set(false);
     this.setupWarning.set(null);
     this.nameError.set(null);
     this.hostRecording.set(false);
@@ -2092,15 +2079,6 @@ function readDiagnosticsLoggingEnabled(): boolean {
     return window.localStorage.getItem(DIAGNOSTICS_LOGGING_STORAGE_KEY) !== '0';
   } catch {
     return true;
-  }
-}
-
-function storeDiagnosticsLoggingEnabled(enabled: boolean): void {
-  try {
-    if (enabled) window.localStorage.removeItem(DIAGNOSTICS_LOGGING_STORAGE_KEY);
-    else window.localStorage.setItem(DIAGNOSTICS_LOGGING_STORAGE_KEY, '0');
-  } catch {
-    // Best effort only.
   }
 }
 

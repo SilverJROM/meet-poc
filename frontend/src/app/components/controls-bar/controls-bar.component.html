@@ -100,35 +100,12 @@
       <ion-icon name="volume-high-outline"></ion-icon>
     </button>
 
-    <button
-      type="button"
-      class="control-btn"
-      [class.active]="diagnosticsOpen()"
-      [attr.aria-pressed]="diagnosticsOpen()"
-      [attr.aria-label]="diagnosticsOpen() ? 'Hide connection diagnostics' : 'Show connection diagnostics'"
-      (click)="diagnostics.emit()"
-      [title]="diagnosticsOpen() ? 'Hide connection diagnostics' : 'Show connection diagnostics'"
-    >
-      <ion-icon name="pulse-outline"></ion-icon>
-    </button>
-
     <button type="button" class="leave-btn" (click)="leave.emit()" aria-label="Leave call" title="Leave call">
       <ion-icon name="call-outline"></ion-icon>
     </button>
   </div>
 
   <div class="meeting-corner meeting-corner-right" aria-label="Meeting tools">
-    <button
-      type="button"
-      class="corner-btn"
-      [class.active]="diagnosticsOpen()"
-      [attr.aria-pressed]="diagnosticsOpen()"
-      [attr.aria-label]="diagnosticsOpen() ? 'Hide meeting info' : 'Show meeting info'"
-      (click)="diagnostics.emit()"
-      [title]="diagnosticsOpen() ? 'Hide meeting info' : 'Show meeting info'"
-    >
-      <ion-icon name="information-circle-outline"></ion-icon>
-    </button>
     <button
       type="button"
       class="corner-btn chat-toggle"

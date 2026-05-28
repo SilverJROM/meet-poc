@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { createRoomFromDashboard, joinGuestAndWait, joinOwnerCall } from '../../fixtures/rooms';
 
-// Validates fix-loop B1+B2:
-// R1: host sees a banner with guest name + Admit/Reject BEFORE opening the sidebar
-// R3: banner auto-dismisses after Admit
+// Validates fix-loop B1+B2 and in-call UX Batch A:
+// R1: host sees a knock toast with guest name + Admit/Reject BEFORE opening the sidebar
+// R3: toast auto-dismisses after Admit
 // R5/R6 are not directly tested here (code-review-only per og-requirements.md)
-test('fixloop B1 — host sees knock banner with guest name + admit before sidebar open', async ({ browser, page }) => {
+test('fixloop B1 — host sees knock toast with guest name + admit before sidebar open', async ({ browser, page }) => {
   const room = await createRoomFromDashboard(page, `FixLoop ${Date.now()}`);
   await joinOwnerCall(page, room, 'host');
 
@@ -14,32 +14,33 @@ test('fixloop B1 — host sees knock banner with guest name + admit before sideb
   const sidebar = page.locator('app-participant-sidebar');
   await expect(sidebar).toHaveCount(0);
 
-  // Banner should not be present before any knock
-  await expect(page.locator('.knock-banner')).toHaveCount(0);
+  // Toast should not be present before any knock
+  await expect(page.locator('.knock-toast-stack')).toHaveCount(0);
 
   const guestContext = await browser.newContext();
   const guest = await guestContext.newPage();
   try {
     await joinGuestAndWait(guest, room, 'BannerGuest');
 
-    // R1: banner appears with the guest's name + Admit button
-    const banner = page.locator('.knock-banner');
-    await expect(banner).toBeVisible({ timeout: 10_000 });
-    await expect(banner.getByText('BannerGuest')).toBeVisible();
-    await expect(banner.getByRole('button', { name: 'Admit' })).toBeVisible();
-    await expect(banner.getByRole('button', { name: 'Reject' })).toBeVisible();
+    // R1: toast appears with the guest's name + Admit button
+    const toastStack = page.locator('.knock-toast-stack');
+    await expect(toastStack).toBeVisible({ timeout: 10_000 });
+    await expect(toastStack.locator('.knock-toast')).toHaveCount(1);
+    await expect(toastStack.getByText('BannerGuest')).toBeVisible();
+    await expect(toastStack.getByRole('button', { name: 'Admit' })).toBeVisible();
+    await expect(toastStack.getByRole('button', { name: 'Reject' })).toBeVisible();
 
     // R1 (continued): sidebar is STILL not open at this point
     await expect(page.locator('app-participant-sidebar')).toHaveCount(0);
 
-    // Admit from the banner
-    await banner.getByRole('button', { name: 'Admit' }).click();
+    // Admit from the toast
+    await toastStack.getByRole('button', { name: 'Admit' }).click();
 
     // Guest enters the call
     await expect(guest.locator('.call-panel')).toBeVisible({ timeout: 8_000 });
 
-    // R3: banner auto-dismisses
-    await expect(page.locator('.knock-banner')).toHaveCount(0, { timeout: 5_000 });
+    // R3: toast auto-dismisses
+    await expect(page.locator('.knock-toast-stack')).toHaveCount(0, { timeout: 5_000 });
 
     // Host sees the guest's tile present
     await expect(page.locator('app-tile')).toHaveCount(2);
@@ -48,7 +49,7 @@ test('fixloop B1 — host sees knock banner with guest name + admit before sideb
   }
 });
 
-test('fixloop B1 — banner reject path also clears banner', async ({ browser, page }) => {
+test('fixloop B1 — toast reject path also clears toast', async ({ browser, page }) => {
   const room = await createRoomFromDashboard(page, `FixLoopReject ${Date.now()}`);
   await joinOwnerCall(page, room, 'host');
 
@@ -57,14 +58,14 @@ test('fixloop B1 — banner reject path also clears banner', async ({ browser, p
   try {
     await joinGuestAndWait(guest, room, 'RejectGuest');
 
-    const banner = page.locator('.knock-banner');
-    await expect(banner).toBeVisible({ timeout: 10_000 });
-    await expect(banner.getByText('RejectGuest')).toBeVisible();
+    const toastStack = page.locator('.knock-toast-stack');
+    await expect(toastStack).toBeVisible({ timeout: 10_000 });
+    await expect(toastStack.getByText('RejectGuest')).toBeVisible();
 
-    await banner.getByRole('button', { name: 'Reject' }).click();
+    await toastStack.getByRole('button', { name: 'Reject' }).click();
 
-    // Banner clears
-    await expect(page.locator('.knock-banner')).toHaveCount(0, { timeout: 5_000 });
+    // Toast clears
+    await expect(page.locator('.knock-toast-stack')).toHaveCount(0, { timeout: 5_000 });
 
     // Guest gets the rejected screen
     await expect(guest.getByRole('heading', { name: 'Request declined' })).toBeVisible({ timeout: 5_000 });
@@ -73,8 +74,33 @@ test('fixloop B1 — banner reject path also clears banner', async ({ browser, p
   }
 });
 
-test('fixloop B1 — non-host never sees banner', async ({ browser, page }) => {
-  // Set up a fresh room and admit one peer first so we can verify peer's view doesn't show the banner
+test('fixloop Batch A — host can admit all waiting guests from knock toast', async ({ browser, page }) => {
+  const room = await createRoomFromDashboard(page, `FixLoopAdmitAll ${Date.now()}`);
+  await joinOwnerCall(page, room, 'host');
+
+  const guestContexts = await Promise.all([browser.newContext(), browser.newContext()]);
+  const guests = await Promise.all(guestContexts.map((context) => context.newPage()));
+  try {
+    await Promise.all([
+      joinGuestAndWait(guests[0], room, 'AdmitAllOne'),
+      joinGuestAndWait(guests[1], room, 'AdmitAllTwo'),
+    ]);
+
+    const toastStack = page.locator('.knock-toast-stack');
+    await expect(toastStack.locator('.knock-toast')).toHaveCount(2, { timeout: 10_000 });
+    await expect(toastStack.getByRole('button', { name: 'Admit all (2)' })).toBeVisible();
+
+    await toastStack.getByRole('button', { name: 'Admit all (2)' }).click();
+
+    await Promise.all(guests.map((guest) => expect(guest.locator('.call-panel')).toBeVisible({ timeout: 8_000 })));
+    await expect(page.locator('.knock-toast-stack')).toHaveCount(0, { timeout: 5_000 });
+  } finally {
+    await Promise.all(guestContexts.map((context) => context.close()));
+  }
+});
+
+test('fixloop B1 — non-host never sees knock toast', async ({ browser, page }) => {
+  // Set up a fresh room and admit one peer first so we can verify peer's view doesn't show the toast
   // when another guest later knocks.
   const room = await createRoomFromDashboard(page, `FixLoopGuestView ${Date.now()}`);
   await joinOwnerCall(page, room, 'host');
@@ -87,16 +113,16 @@ test('fixloop B1 — non-host never sees banner', async ({ browser, page }) => {
 
   try {
     await joinGuestAndWait(peer, room, 'AdmittedPeer');
-    await page.locator('.knock-banner').getByRole('button', { name: 'Admit' }).click();
+    await page.locator('.knock-toast-stack').getByRole('button', { name: 'Admit' }).click();
     await expect(peer.locator('.call-panel')).toBeVisible({ timeout: 8_000 });
 
     // From the admitted peer's perspective, knock a second guest in.
     await joinGuestAndWait(secondGuest, room, 'SecondGuest');
 
-    // Host should see the banner
-    await expect(page.locator('.knock-banner')).toBeVisible({ timeout: 8_000 });
-    // The non-host peer should NEVER see a banner.
-    await expect(peer.locator('.knock-banner')).toHaveCount(0);
+    // Host should see the toast
+    await expect(page.locator('.knock-toast-stack')).toBeVisible({ timeout: 8_000 });
+    // The non-host peer should NEVER see a proactive toast.
+    await expect(peer.locator('.knock-toast-stack')).toHaveCount(0);
   } finally {
     await secondGuestCtx.close();
     await peerCtx.close();

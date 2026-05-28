@@ -7,11 +7,9 @@ import {
   desktopOutline,
   ellipseOutline,
   ellipse,
-  informationCircleOutline,
   micOffOutline,
   micOutline,
   peopleOutline,
-  pulseOutline,
   settingsOutline,
   videocamOffOutline,
   videocamOutline,
@@ -37,7 +35,6 @@ export class ControlsBarComponent {
   readonly participantCount = input(0);
   readonly waitingCount = input(0);
   readonly sidebarOpen = input(false);
-  readonly diagnosticsOpen = input(false);
   readonly chatOpen = input(false);
   readonly chatUnreadCount = input(0);
   readonly audioOnly = input(false);
@@ -47,7 +44,6 @@ export class ControlsBarComponent {
   readonly record = output<void>();
   readonly sidebar = output<void>();
   readonly chat = output<void>();
-  readonly diagnostics = output<void>();
   readonly audioOnlyToggle = output<void>();
   readonly devices = output<void>();
   readonly leave = output<void>();
@@ -60,11 +56,9 @@ export class ControlsBarComponent {
       desktopOutline,
       ellipse,
       ellipseOutline,
-      informationCircleOutline,
       micOffOutline,
       micOutline,
       peopleOutline,
-      pulseOutline,
       settingsOutline,
       videocamOffOutline,
       videocamOutline,

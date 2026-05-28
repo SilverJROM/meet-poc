@@ -21,9 +21,9 @@ test('fixloop multi-peer — four peers connect without host subscribe-stuck war
   try {
     await Promise.all(guests.map((guest, index) => joinGuestWithCameraAndWait(guest, room, `Peer${index + 1}`)));
 
-    await expect(page.locator('.knock-banner-row')).toHaveCount(guestCount, { timeout: 10_000 });
+    await expect(page.locator('.knock-toast')).toHaveCount(guestCount, { timeout: 10_000 });
     for (let i = 0; i < guestCount; i += 1) {
-      await page.locator('.knock-banner').getByRole('button', { name: 'Admit' }).first().click();
+      await page.locator('.knock-toast-stack').getByRole('button', { name: 'Admit' }).first().click();
     }
 
     await Promise.all(guests.map((guest) => expect(guest.locator('.call-panel')).toBeVisible({ timeout: 12_000 })));

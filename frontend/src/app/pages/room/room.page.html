@@ -76,7 +76,6 @@
         [participantCount]="peers().length"
         [waitingCount]="knockers().length"
         [sidebarOpen]="sidebarOpen()"
-        [diagnosticsOpen]="diagnosticsOpen()"
         [chatOpen]="chatOpen()"
         [chatUnreadCount]="chatUnreadCount()"
         (mute)="toggleMic()"
@@ -85,10 +84,25 @@
         (record)="toggleRecording()"
         (sidebar)="toggleSidebar()"
         (chat)="toggleChat()"
-        (diagnostics)="toggleDiagnostics()"
         (devices)="openInCallDeviceDialog()"
         (leave)="leave()"
       />
+      @if (isHost() && knockers().length > 0) {
+        <div class="knock-toast-stack" role="region" aria-label="Waiting to join">
+          @for (knocker of knockers(); track knocker.id) {
+            <div class="knock-toast" role="alert">
+              <span class="knock-name"><strong>{{ knocker.name }}</strong> wants to join</span>
+              <div class="knock-toast-actions">
+                <button type="button" class="primary-btn" (click)="admit(knocker.id)" title="Admit">Admit</button>
+                <button type="button" class="secondary-btn" (click)="reject(knocker.id)" title="Reject">Reject</button>
+              </div>
+            </div>
+          }
+          @if (knockers().length >= 2) {
+            <button type="button" class="admit-all-btn" (click)="admitAll()">Admit all ({{ knockers().length }})</button>
+          }
+        </div>
+      }
       <app-device-dialog
         [open]="inCallDeviceDialogOpen()"
         mode="in-call"
@@ -132,19 +146,6 @@
           <button type="button" (click)="actionNotice.set(null)">Dismiss</button>
         </div>
       }
-      @if (isHost() && knockers().length > 0) {
-        <div class="knock-banner" role="alert">
-          @for (knocker of knockers(); track knocker.id) {
-            <div class="knock-banner-row">
-              <span class="knock-name"><strong>{{ knocker.name }}</strong> wants to join</span>
-              <div class="knock-banner-actions">
-                <button type="button" class="primary-btn" (click)="admit(knocker.id)">Admit</button>
-                <button type="button" class="secondary-btn" (click)="reject(knocker.id)">Reject</button>
-              </div>
-            </div>
-          }
-        </div>
-      }
       @if (remoteAudioBlocked()) {
         <div class="audio-unblock-notice" role="status">
           <span>Tap to enable audio</span>
@@ -162,35 +163,6 @@
           <p>Enable Screen Recording for Chrome in System Settings, then fully quit and reopen Chrome with Cmd+Q before trying again.</p>
           <button type="button" (click)="screenShareHelp.set(null)">Dismiss</button>
         </div>
-      }
-      @if (diagnosticsOpen()) {
-        <section class="diagnostics-panel" aria-label="Connection diagnostics">
-          <div class="diagnostics-header">
-            <h2>Connection diagnostics</h2>
-            <div class="diagnostics-controls">
-              <label class="relay-toggle">
-                <input type="checkbox" [checked]="diagnosticsLoggingEnabled()" (change)="setDiagnosticsLogging($any($event.target).checked)">
-                <span>Diagnostics logging</span>
-              </label>
-            </div>
-          </div>
-          <div class="diagnostics-list">
-            @if (sfuClient.localPublishState(); as pub) {
-              <article class="diagnostic-peer">
-                <h3>SFU publish</h3>
-                <dl>
-                  <div><dt>Status</dt><dd>{{ pub.status }}</dd></div>
-                  <div><dt>Session</dt><dd>{{ pub.cfSessionId || 'pending' }}</dd></div>
-                  @for (track of pub.tracks; track track.trackName) {
-                    <div><dt>{{ track.kind }}</dt><dd>{{ track.status }}</dd></div>
-                  }
-                </dl>
-              </article>
-            } @else {
-              <p class="diagnostics-empty">SFU not yet publishing.</p>
-            }
-          </div>
-        </section>
       }
       <app-recording-banner [recording]="hostRecording()" [startedAt]="recordingStartedAt()" />
       <p class="call-status" role="status">{{ status() }}</p>
