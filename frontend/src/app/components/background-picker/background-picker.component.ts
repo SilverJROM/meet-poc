@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, ElementRef, HostListener, ViewChild, inject, input, output, signal } from '@angular/core';
+import { Component, ElementRef, HostListener, ViewChild, computed, inject, input, output, signal } from '@angular/core';
 import { BackgroundEffectsService, type BackgroundEffectMode } from '../../services/background-effects.service';
 import { ViewportService } from '../../services/viewport.service';
 
@@ -24,6 +24,10 @@ type CustomBackground = { id: string; label: string; mode: 'image'; assetUrl: st
 
 type SelectableBackgroundOption = BackgroundOption | CustomBackground;
 type StoredSelection = { mode: BackgroundEffectMode; asset?: string; custom?: boolean };
+type OverlayPosition = { left: number; top: number };
+type DragState = { pointerId: number; offsetX: number; offsetY: number };
+
+let sessionOverlayPosition: OverlayPosition | null = null;
 
 const IMAGE_OPTIONS: ImageBackgroundOption[] = [
   {
@@ -110,6 +114,7 @@ const OPTIONS: BackgroundOption[] = [{ id: 'none', label: 'None', mode: 'none' }
 })
 export class BackgroundPickerComponent {
   @ViewChild('fileInput') private fileInput?: ElementRef<HTMLInputElement>;
+  @ViewChild('pickerPanel') private pickerPanel?: ElementRef<HTMLElement>;
 
   readonly backgroundEffects = inject(BackgroundEffectsService);
   private readonly viewport = inject(ViewportService);
@@ -122,8 +127,12 @@ export class BackgroundPickerComponent {
   readonly customs = signal<CustomBackground[]>(readCustomBackgrounds());
   readonly uploadBusy = signal(false);
   readonly uploadError = signal<string | null>(null);
+  readonly overlayPosition = signal<OverlayPosition | null>(sessionOverlayPosition);
+  readonly desktopOverlayPosition = computed(() => (this.presentation() === 'overlay' && !this.isMobile() ? this.overlayPosition() : null));
+  readonly dragging = signal(false);
 
   private restored = false;
+  private dragState: DragState | null = null;
 
   constructor() {
     void this.restoreSelection();
@@ -138,10 +147,14 @@ export class BackgroundPickerComponent {
         writeStoredSelection({ mode: 'image', asset: option.id, custom: isCustomBackground(option) || undefined });
         await this.backgroundEffects.setBackgroundImage(option.assetUrl);
         await this.backgroundEffects.setMode('image');
-        return;
+      } else {
+        writeStoredSelection({ mode: option.mode });
+        await this.backgroundEffects.setMode(option.mode);
       }
-      writeStoredSelection({ mode: option.mode });
-      await this.backgroundEffects.setMode(option.mode);
+      if (option.mode !== 'none' && this.backgroundEffects.mode() === 'none') {
+        this.selectedId.set('none');
+        writeStoredSelection({ mode: 'none' });
+      }
     } finally {
       this.busyId.set(null);
     }
@@ -223,9 +236,63 @@ export class BackgroundPickerComponent {
     this.closeRequested.emit();
   }
 
+  startDrag(event: PointerEvent): void {
+    if (this.presentation() !== 'overlay' || this.isMobile()) return;
+    if ((event.target as HTMLElement).closest('button')) return;
+
+    const panel = this.pickerPanel?.nativeElement;
+    if (!panel) return;
+
+    const rect = panel.getBoundingClientRect();
+    this.dragState = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    this.dragging.set(true);
+    event.preventDefault();
+  }
+
   @HostListener('document:keydown.escape')
   closeOnEscape(): void {
     if (this.presentation() === 'overlay') this.closeRequested.emit();
+  }
+
+  @HostListener('document:pointermove', ['$event'])
+  dragOverlay(event: PointerEvent): void {
+    if (!this.dragState || event.pointerId !== this.dragState.pointerId) return;
+    event.preventDefault();
+    this.updateOverlayPosition(event.clientX - this.dragState.offsetX, event.clientY - this.dragState.offsetY);
+  }
+
+  @HostListener('document:pointerup', ['$event'])
+  stopDrag(event: PointerEvent): void {
+    if (!this.dragState || event.pointerId !== this.dragState.pointerId) return;
+    this.dragState = null;
+    this.dragging.set(false);
+  }
+
+  @HostListener('window:resize')
+  clampOverlayOnResize(): void {
+    const current = this.overlayPosition();
+    if (!current) return;
+    this.updateOverlayPosition(current.left, current.top);
+  }
+
+  private updateOverlayPosition(left: number, top: number): void {
+    const panel = this.pickerPanel?.nativeElement;
+    if (!panel || typeof window === 'undefined') return;
+
+    const rect = panel.getBoundingClientRect();
+    const margin = 12;
+    const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+    const nextPosition = {
+      left: clamp(left, margin, maxLeft),
+      top: clamp(top, margin, maxTop),
+    };
+    sessionOverlayPosition = nextPosition;
+    this.overlayPosition.set(nextPosition);
   }
 
   private async restoreSelection(): Promise<void> {
@@ -257,6 +324,10 @@ export class BackgroundPickerComponent {
 
 function isCustomBackground(option: SelectableBackgroundOption): option is CustomBackground {
   return 'isCustom' in option && option.isCustom;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }
 
 function initialSelectedId(isMobile: boolean): string {

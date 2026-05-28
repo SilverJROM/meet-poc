@@ -78,15 +78,31 @@
       </button>
     }
 
-    <button
-      type="button"
-      class="control-btn"
-      aria-label="Device settings"
-      (click)="devices.emit()"
-      title="Device settings"
-    >
-      <ion-icon name="settings-outline"></ion-icon>
-    </button>
+    <div class="settings-control">
+      <button
+        type="button"
+        class="control-btn"
+        [class.active]="settingsPopoverOpen()"
+        [attr.aria-expanded]="settingsPopoverOpen()"
+        aria-label="Settings"
+        (click)="toggleSettingsPopover($event)"
+        title="Settings"
+      >
+        <ion-icon name="settings-outline"></ion-icon>
+      </button>
+      @if (settingsPopoverOpen()) {
+        <div class="settings-popover" role="menu" aria-label="Settings" (click)="$event.stopPropagation()">
+          <button type="button" class="settings-option" role="menuitem" (click)="chooseDeviceSettings()">
+            <ion-icon name="settings-outline" aria-hidden="true"></ion-icon>
+            <span>Device settings</span>
+          </button>
+          <button type="button" class="settings-option" role="menuitem" (click)="chooseBackgroundEffects()">
+            <ion-icon name="color-wand-outline" aria-hidden="true"></ion-icon>
+            <span>Background effects</span>
+          </button>
+        </div>
+      }
+    </div>
 
     <div class="split-control speaker-control" [class.is-muted]="remoteAudio.mutedAll()">
       <button

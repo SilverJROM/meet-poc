@@ -1,9 +1,18 @@
 @if (presentation() === 'overlay') {
-  <button type="button" class="picker-backdrop" aria-label="Close background picker" (click)="requestClose()"></button>
+  <button type="button" class="picker-backdrop" aria-label="Dismiss background picker" (click)="requestClose()"></button>
 }
 
-<section class="picker-panel" aria-label="Background picker" (click)="$event.stopPropagation()">
-  <header class="picker-header">
+<section
+  #pickerPanel
+  class="picker-panel"
+  [class.drag-positioned]="!!desktopOverlayPosition()"
+  [class.dragging]="dragging()"
+  [style.left.px]="desktopOverlayPosition()?.left ?? null"
+  [style.top.px]="desktopOverlayPosition()?.top ?? null"
+  aria-label="Background picker"
+  (click)="$event.stopPropagation()"
+>
+  <header class="picker-header" (pointerdown)="startDrag($event)">
     <h2>Background</h2>
     @if (presentation() === 'overlay') {
       <button type="button" class="close-btn" aria-label="Close background picker" (click)="requestClose()">x</button>

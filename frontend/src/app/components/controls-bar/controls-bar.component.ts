@@ -4,6 +4,7 @@ import {
   chatboxOutline,
   callOutline,
   chevronUpOutline,
+  colorWandOutline,
   desktopOutline,
   ellipseOutline,
   ellipse,
@@ -54,9 +55,11 @@ export class ControlsBarComponent {
   readonly reaction = output<ReactionKind>();
   readonly audioOnlyToggle = output<void>();
   readonly devices = output<void>();
+  readonly backgroundEffects = output<void>();
   readonly leave = output<void>();
   readonly volumePopoverOpen = signal(false);
   readonly reactionsPopoverOpen = signal(false);
+  readonly settingsPopoverOpen = signal(false);
   readonly volumeLabel = computed(() => {
     const percent = Math.round(this.remoteAudio.volume() * 100);
     return percent > 100 ? `${percent}% (amp)` : `${percent}%`;
@@ -67,6 +70,7 @@ export class ControlsBarComponent {
       chatboxOutline,
       callOutline,
       chevronUpOutline,
+      colorWandOutline,
       desktopOutline,
       ellipse,
       ellipseOutline,
@@ -86,6 +90,7 @@ export class ControlsBarComponent {
     event.stopPropagation();
     this.reactionsPopoverOpen.update((open) => !open);
     this.volumePopoverOpen.set(false);
+    this.settingsPopoverOpen.set(false);
   }
 
   chooseReaction(kind: ReactionKind): void {
@@ -100,6 +105,8 @@ export class ControlsBarComponent {
   toggleVolumePopover(event: Event): void {
     event.stopPropagation();
     this.volumePopoverOpen.update((open) => !open);
+    this.settingsPopoverOpen.set(false);
+    this.reactionsPopoverOpen.set(false);
   }
 
   setSpeakerVolume(event: Event): void {
@@ -107,17 +114,36 @@ export class ControlsBarComponent {
     this.remoteAudio.setVolume(Number.parseFloat(inputEl.value));
   }
 
+  toggleSettingsPopover(event: Event): void {
+    event.stopPropagation();
+    this.settingsPopoverOpen.update((open) => !open);
+    this.volumePopoverOpen.set(false);
+    this.reactionsPopoverOpen.set(false);
+  }
+
+  chooseDeviceSettings(): void {
+    this.settingsPopoverOpen.set(false);
+    this.devices.emit();
+  }
+
+  chooseBackgroundEffects(): void {
+    this.settingsPopoverOpen.set(false);
+    this.backgroundEffects.emit();
+  }
+
   @HostListener('document:click', ['$event'])
   closeVolumePopoverOnOutsideClick(event: MouseEvent): void {
-    if (!this.volumePopoverOpen() && !this.reactionsPopoverOpen()) return;
+    if (!this.volumePopoverOpen() && !this.reactionsPopoverOpen() && !this.settingsPopoverOpen()) return;
     if (this.elementRef.nativeElement.contains(event.target as Node)) return;
     this.volumePopoverOpen.set(false);
     this.reactionsPopoverOpen.set(false);
+    this.settingsPopoverOpen.set(false);
   }
 
   @HostListener('document:keydown.escape')
   closeVolumePopoverOnEscape(): void {
     this.volumePopoverOpen.set(false);
     this.reactionsPopoverOpen.set(false);
+    this.settingsPopoverOpen.set(false);
   }
 }

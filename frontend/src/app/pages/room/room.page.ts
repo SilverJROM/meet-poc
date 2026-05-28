@@ -623,6 +623,10 @@ export class RoomPage implements OnDestroy {
     this.backgroundPickerOpen.update((open) => !open);
   }
 
+  openBackgroundPickerFromControls(): void {
+    this.backgroundPickerOpen.set(true);
+  }
+
   cancelKnock(): void {
     this.stopWaitingRoomCountdown();
     this.ws.close();

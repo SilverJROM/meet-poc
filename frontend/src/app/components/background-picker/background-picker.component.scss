@@ -39,6 +39,11 @@
   pointer-events: auto;
 }
 
+:host.overlay .picker-panel.drag-positioned {
+  right: auto;
+  bottom: auto;
+}
+
 .picker-header {
   min-height: 30px;
   display: flex;
@@ -46,6 +51,16 @@
   justify-content: space-between;
   gap: 10px;
   margin-bottom: 8px;
+}
+
+:host.overlay .picker-header {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+:host.overlay .picker-panel.dragging .picker-header {
+  cursor: grabbing;
 }
 
 .picker-header h2 {
@@ -261,5 +276,10 @@
     bottom: calc(82px + env(safe-area-inset-bottom));
     left: 12px;
     width: auto;
+  }
+
+  :host.overlay .picker-header {
+    cursor: default;
+    touch-action: auto;
   }
 }
