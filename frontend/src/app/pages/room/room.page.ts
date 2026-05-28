@@ -2,7 +2,8 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, HostListener, OnDestroy,
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
-import { micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
+import { colorWandOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
+import { BackgroundPickerComponent } from '../../components/background-picker/background-picker.component';
 import { ControlsBarComponent } from '../../components/controls-bar/controls-bar.component';
 import { DeviceDialogComponent } from '../../components/device-dialog/device-dialog.component';
 import { LeaveDialogComponent } from '../../components/leave-dialog/leave-dialog.component';
@@ -68,6 +69,7 @@ interface PeerIdentity {
   imports: [
     FormsModule,
     RouterLink,
+    BackgroundPickerComponent,
     ControlsBarComponent,
     DeviceDialogComponent,
     LeaveDialogComponent,
@@ -121,7 +123,7 @@ export class RoomPage implements OnDestroy {
   readonly selectedVideoId = signal(readStoredDevice(DEVICE_STORAGE.videoInput));
   private readonly videoDevicePinned = signal(!!readStoredDevice(DEVICE_STORAGE.videoInput));
   readonly currentFacingMode = signal<'user' | 'environment'>('user');
-  readonly devModeBgBlur = signal(true);
+  readonly backgroundPickerOpen = signal(false);
   readonly lobbyDeviceDialogOpen = signal(true);
   readonly devicePermissionIntro = signal(true);
   readonly inCallDeviceDialogOpen = signal(false);
@@ -341,7 +343,7 @@ export class RoomPage implements OnDestroy {
   });
 
   constructor() {
-    addIcons({ micOffOutline, micOutline, videocamOffOutline, videocamOutline });
+    addIcons({ colorWandOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline });
     this.installPageLifecycleCleanup();
     this.installDeviceChangeHandler();
     void this.bootstrap();
@@ -612,7 +614,13 @@ export class RoomPage implements OnDestroy {
 
   @HostListener('document:keydown.escape')
   dismissJoinPrereqPopout(): void {
+    this.backgroundPickerOpen.set(false);
     this.joinPrereqPopout.set(null);
+  }
+
+  toggleBackgroundPicker(event: Event): void {
+    event.stopPropagation();
+    this.backgroundPickerOpen.update((open) => !open);
   }
 
   cancelKnock(): void {
@@ -718,12 +726,6 @@ export class RoomPage implements OnDestroy {
 
   async enableMicPreview(): Promise<void> {
     await this.media.activateMicPreview(this.localStream());
-  }
-
-  async togglePreviewBlur(): Promise<void> {
-    const next = this.backgroundEffects.mode() === 'blur' ? 'none' : 'blur';
-    await this.backgroundEffects.setMode(next);
-    await this.replaceEffectiveVideoTrack(this.media.cameraOn() ? this.media.localStream()?.getVideoTracks()[0] ?? null : null);
   }
 
   async flipCamera(): Promise<void> {

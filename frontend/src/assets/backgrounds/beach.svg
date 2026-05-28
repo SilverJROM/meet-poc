@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-label="Generated beach coastline background">
+  <defs>
+    <linearGradient id="beachSky" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#7ed0f2"/>
+      <stop offset="0.7" stop-color="#dff7ff"/>
+      <stop offset="1" stop-color="#fff1bc"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#1d9ac0"/>
+      <stop offset="1" stop-color="#6bc7d4"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#beachSky)"/>
+  <circle cx="1048" cy="116" r="64" fill="#ffd47d"/>
+  <path d="M0 306 C155 286 285 320 430 300 C610 276 728 332 910 302 C1055 278 1168 292 1280 260 L1280 530 L0 530 Z" fill="url(#water)"/>
+  <path d="M0 430 C168 410 300 470 470 442 C660 412 795 486 980 454 C1115 432 1190 448 1280 420 L1280 720 L0 720 Z" fill="#f5d98b"/>
+  <path d="M0 465 C150 448 305 492 500 472 C690 452 780 506 990 486 C1120 474 1210 482 1280 466" fill="none" stroke="#ffffff" stroke-width="18" opacity="0.8"/>
+  <path d="M42 610 C246 558 384 612 548 572 C742 525 922 604 1240 526" fill="none" stroke="#d3a75f" stroke-width="16" opacity="0.35"/>
+  <g fill="#ffffff" opacity="0.68">
+    <path d="M132 270 q28 -25 58 0 q-30 -12 -58 0"/>
+    <path d="M214 234 q24 -21 50 0 q-26 -10 -50 0"/>
+    <path d="M350 274 q30 -26 62 0 q-31 -12 -62 0"/>
+  </g>
+  <g transform="translate(100 410)">
+    <path d="M0 178 L72 0 L145 178 Z" fill="#8b5e34"/>
+    <path d="M72 0 C36 36 20 72 16 116 C44 86 77 67 112 60 C103 30 92 12 72 0 Z" fill="#2f8f5b"/>
+    <path d="M72 0 C98 26 120 62 130 104 C98 82 64 70 24 74 C40 34 54 12 72 0 Z" fill="#3aa66a"/>
+  </g>
+</svg>

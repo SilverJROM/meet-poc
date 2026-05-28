@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720" role="img" aria-label="Generated mountain landscape background">
+  <defs>
+    <linearGradient id="mountainSky" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#8fb7e6"/>
+      <stop offset="0.65" stop-color="#d8e8fb"/>
+      <stop offset="1" stop-color="#f6f0d8"/>
+    </linearGradient>
+    <linearGradient id="lake" x1="0" x2="0" y1="0" y2="1">
+      <stop offset="0" stop-color="#4f89a8"/>
+      <stop offset="1" stop-color="#24485f"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="720" fill="url(#mountainSky)"/>
+  <circle cx="176" cy="122" r="58" fill="#fff3bc" opacity="0.78"/>
+  <path d="M0 430 L205 168 L390 430 Z" fill="#62748c"/>
+  <path d="M188 190 L242 268 L208 250 L174 300 L128 286 Z" fill="#eef6ff"/>
+  <path d="M250 430 L590 110 L925 430 Z" fill="#4f6177"/>
+  <path d="M590 110 L688 244 L620 218 L552 284 L490 268 Z" fill="#f2f8ff"/>
+  <path d="M760 430 L1050 190 L1280 430 Z" fill="#687a8f"/>
+  <path d="M1048 190 L1116 282 L1062 260 L1015 310 L958 300 Z" fill="#edf6ff"/>
+  <path d="M0 430 C170 398 350 452 514 420 C732 378 890 452 1280 398 L1280 720 L0 720 Z" fill="url(#lake)"/>
+  <path d="M0 486 C172 470 330 512 510 490 C720 464 918 512 1280 468" fill="none" stroke="#d8edf7" stroke-width="10" opacity="0.34"/>
+  <path d="M0 598 C238 560 444 626 650 590 C870 552 1020 628 1280 574 L1280 720 L0 720 Z" fill="#1e3a2b"/>
+  <g fill="#244b35">
+    <path d="M76 620 l28 -82 l30 82 Z"/><path d="M126 616 l22 -68 l26 68 Z"/><path d="M996 604 l30 -94 l36 94 Z"/><path d="M1070 616 l25 -78 l30 78 Z"/><path d="M1132 604 l32 -96 l36 96 Z"/>
+  </g>
+</svg>

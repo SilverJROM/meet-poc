@@ -18,11 +18,7 @@
     }
   </div>
 
-  @if (devModeBgBlur()) {
-    <button type="button" class="preview-blur-toggle" (click)="previewBlurToggle.emit()">
-      {{ backgroundBlurActive() ? 'Remove blur (preview)' : 'Try blur (preview)' }}
-    </button>
-  }
+  <app-background-picker />
 
   @if (!compact()) {
     <div class="meter-row">

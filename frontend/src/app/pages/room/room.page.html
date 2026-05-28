@@ -89,6 +89,21 @@
         (devices)="openInCallDeviceDialog()"
         (leave)="leave()"
       />
+      <button
+        type="button"
+        class="icon-btn"
+        style="position: fixed; z-index: 32; right: 104px; bottom: calc(22px + env(safe-area-inset-bottom)); width: 48px; height: 48px; border-color: rgba(248, 250, 252, 0.14); border-radius: 999px; color: #f8fafc; background: #2f3338;"
+        [class.active]="backgroundPickerOpen()"
+        [attr.aria-expanded]="backgroundPickerOpen()"
+        aria-label="Background effects"
+        title="Background effects"
+        (click)="toggleBackgroundPicker($event)"
+      >
+        <ion-icon name="color-wand-outline" style="font-size: 24px;"></ion-icon>
+      </button>
+      @if (backgroundPickerOpen()) {
+        <app-background-picker presentation="overlay" (closeRequested)="backgroundPickerOpen.set(false)" />
+      }
       @if (isHost() && (knockers().length > 0 || pendingShareRequests().length > 0)) {
         <div class="knock-toast-stack" role="region" aria-label="Waiting to join">
           @for (knocker of knockers(); track knocker.id) {
@@ -351,13 +366,10 @@
             [level]="micLevel()"
             [audioContextActivated]="media.audioContextActivated()"
             [facingMode]="currentFacingMode()"
-            [devModeBgBlur]="devModeBgBlur()"
-            [backgroundBlurActive]="backgroundEffects.mode() === 'blur'"
             (audioDeviceChange)="changeAudioDevice($event)"
             (videoDeviceChange)="changeVideoDevice($event)"
             (enableMicPreview)="enableMicPreview()"
             (flipCamera)="flipCamera()"
-            (previewBlurToggle)="togglePreviewBlur()"
           />
         </div>
         <div class="prejoin-controls">

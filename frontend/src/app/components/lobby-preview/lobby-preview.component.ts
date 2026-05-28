@@ -2,12 +2,13 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, Signal, effect, inject, 
 import { addIcons } from 'ionicons';
 import { cameraReverseOutline } from 'ionicons/icons';
 import { ViewportService } from '../../services/viewport.service';
+import { BackgroundPickerComponent } from '../background-picker/background-picker.component';
 import { MicMeterComponent } from '../mic-meter/mic-meter.component';
 
 @Component({
   selector: 'app-lobby-preview',
   standalone: true,
-  imports: [MicMeterComponent],
+  imports: [BackgroundPickerComponent, MicMeterComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './lobby-preview.component.html',
   styleUrl: './lobby-preview.component.scss',
@@ -25,14 +26,11 @@ export class LobbyPreviewComponent {
   readonly level = input<Signal<number>>(signal(0).asReadonly());
   readonly audioContextActivated = input(false);
   readonly facingMode = input<'user' | 'environment'>('user');
-  readonly devModeBgBlur = input(false);
-  readonly backgroundBlurActive = input(false);
 
   readonly audioDeviceChange = output<string>();
   readonly videoDeviceChange = output<string>();
   readonly enableMicPreview = output<void>();
   readonly flipCamera = output<void>();
-  readonly previewBlurToggle = output<void>();
   readonly isMobile = this.viewport.isMobile;
 
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
