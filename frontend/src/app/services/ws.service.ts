@@ -25,6 +25,7 @@ export type SignalingMessage =
   | { type: 'peer-left'; clientId: string; participantId?: string }
   | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean; screenOn?: boolean; isMobile?: boolean }
   | { type: 'chat'; id: string; clientId: string; sender: string; text: string; sentAt: number }
+  | { type: 'chat-direct'; id: string; clientId: string; sender: string; toClientId: string; text: string; sentAt: number; mine?: boolean }
   | { type: 'recording-started'; clientId: string; sessionId: string }
   | { type: 'recording-stopped'; clientId: string; sessionId: string }
   | { type: 'meeting-ended'; reason?: string }
@@ -50,6 +51,7 @@ export type OutgoingSignalingMessage =
   | { type: 'reject'; clientId: string; reason?: string }
   | { type: 'media-state'; mic: boolean; cam: boolean; screenOn: boolean }
   | { type: 'chat'; text: string; clientMessageId?: string }
+  | { type: 'chat-direct'; toClientId: string; text: string; clientMessageId?: string }
   | { type: 'recording-state'; state: 'started' | 'stopped' }
   | { type: 'meeting-ended-by-host' }
   | { type: 'close-room' }

@@ -34,9 +34,11 @@ const LOCAL_TRACK_MUTE_DEBOUNCE_MS = 1_200;
 const DEVICE_RECOVERY_MAX_ATTEMPTS = 3;
 const DEVICE_RECOVERY_BACKOFF_MS = 650;
 const GUEST_DISPLAY_NAME_KEY = 'guestDisplayName';
+const CHAT_EVERYONE_THREAD = 'everyone';
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
-type ChatMessage = { id: string; clientId: string; sender: string; text: string; sentAt: number; mine: boolean };
+type ChatMessage = { id: string; clientId: string; sender: string; text: string; sentAt: number; mine: boolean; toClientId?: string };
+type ChatRecipientTab = { id: string; name: string; online: boolean };
 type ShareRequest = { clientId: string; name: string };
 type TransientReaction = { id: string; clientId: string; kind: Exclude<ReactionKind, 'raise-hand'>; timestamp: number };
 type LobbyError =
@@ -147,9 +149,16 @@ export class RoomPage implements OnDestroy {
   readonly isHost = computed(() => this.isOwner() || (!!this.myId() && this.hostClientId() === this.myId()));
   readonly sidebarOpen = signal(false);
   readonly chatOpen = signal(false);
-  readonly chatMessages = signal<ChatMessage[]>([]);
+  readonly chatThreads = signal<Map<string, ChatMessage[]>>(new Map([[CHAT_EVERYONE_THREAD, []]]));
+  readonly activeChatRecipient = signal<string>(CHAT_EVERYONE_THREAD);
+  readonly chatUnreadByThread = signal<Map<string, number>>(new Map());
+  readonly chatRecipientNames = signal<Map<string, string>>(new Map());
   readonly chatDraft = signal('');
-  readonly chatUnreadCount = signal(0);
+  readonly chatUnreadCount = computed(() => {
+    let total = 0;
+    for (const count of this.chatUnreadByThread().values()) total += count;
+    return Math.min(99, total);
+  });
   readonly leaveDialogOpen = signal(false);
   readonly meetingEndedToastOpen = signal(false);
   readonly diagnosticsLoggingEnabled = signal(readDiagnosticsLoggingEnabled());
@@ -217,6 +226,42 @@ export class RoomPage implements OnDestroy {
       });
     }
     return result;
+  });
+  readonly chatRecipientTabs = computed<ChatRecipientTab[]>(() => {
+    const myId = this.myId();
+    const names = this.chatRecipientNames();
+    const onlinePeers = new Map<string, PeerState>();
+    for (const peer of this.peers()) {
+      if (!peer.isLocal) onlinePeers.set(peer.id, peer);
+    }
+    const recipientIds = new Set<string>();
+    for (const id of onlinePeers.keys()) recipientIds.add(id);
+    for (const id of this.chatThreads().keys()) {
+      if (id !== CHAT_EVERYONE_THREAD && id !== myId) recipientIds.add(id);
+    }
+    const tabs: ChatRecipientTab[] = [];
+    for (const id of recipientIds) {
+      const peer = onlinePeers.get(id);
+      tabs.push({ id, name: peer?.name || names.get(id) || 'Peer', online: !!peer });
+    }
+    return tabs.sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
+  });
+  readonly activeChatMessages = computed(() => this.chatThreads().get(this.activeChatRecipient()) ?? []);
+  readonly activeChatRecipientName = computed(() => this.chatRecipientName(this.activeChatRecipient()));
+  readonly activeChatRecipientOnline = computed(() => {
+    const recipient = this.activeChatRecipient();
+    return recipient === CHAT_EVERYONE_THREAD || this.peers().some((peer) => !peer.isLocal && peer.id === recipient);
+  });
+  readonly activeChatEmptyText = computed(() => {
+    const recipient = this.activeChatRecipient();
+    if (recipient === CHAT_EVERYONE_THREAD) return 'No messages yet. Say hi to everyone.';
+    return `No messages with @${this.activeChatRecipientName()} yet.`;
+  });
+  readonly canSendChat = computed(() => {
+    const recipient = this.activeChatRecipient();
+    if (!this.chatDraft().trim()) return false;
+    if (recipient === CHAT_EVERYONE_THREAD) return true;
+    return recipient !== this.myId() && this.activeChatRecipientOnline();
   });
 
   readonly shareStripCollapsed = signal(false);
@@ -322,6 +367,9 @@ export class RoomPage implements OnDestroy {
         myShareRequestPending: this.myShareRequestPending(),
         raisedHands: [...this.raisedHands()],
         transientReactions: this.transientReactions().map((reaction) => ({ ...reaction })),
+        activeChatRecipient: this.activeChatRecipient(),
+        chatThreads: Object.fromEntries([...this.chatThreads()].map(([id, messages]) => [id, messages.map((message) => ({ ...message }))])),
+        chatUnreadByThread: Object.fromEntries(this.chatUnreadByThread()),
         isRecording: this.recorder.isRecording() || this.hostRecording(),
         screenShareAttempts: this.media.screenShareAttempts(),
         lastVideoConstraints: this.media.lastVideoConstraints(),
@@ -863,9 +911,27 @@ export class RoomPage implements OnDestroy {
     this.chatOpen.set(nextOpen);
     if (nextOpen) {
       this.sidebarOpen.set(false);
-      this.chatUnreadCount.set(0);
+      this.clearChatUnreadFor(this.activeChatRecipient());
       this.scrollChatToBottom();
     }
+  }
+
+  setActiveChatRecipient(id: string): void {
+    const myId = this.myId();
+    const recipient = id === CHAT_EVERYONE_THREAD || id !== myId ? id : CHAT_EVERYONE_THREAD;
+    if (recipient !== CHAT_EVERYONE_THREAD) this.ensureChatThread(recipient);
+    this.activeChatRecipient.set(recipient);
+    this.clearChatUnreadFor(recipient);
+    this.scrollChatToBottom();
+  }
+
+  unreadFor(id: string): number {
+    return this.chatUnreadByThread().get(id) ?? 0;
+  }
+
+  chatRecipientName(id: string): string {
+    if (id === CHAT_EVERYONE_THREAD) return 'Everyone';
+    return this.peers().find((peer) => peer.id === id)?.name || this.chatRecipientNames().get(id) || 'Peer';
   }
 
   sendChat(event?: Event): void {
@@ -875,12 +941,21 @@ export class RoomPage implements OnDestroy {
       this.chatDraft.set('');
       return;
     }
+    const recipient = this.activeChatRecipient();
+    if (recipient !== CHAT_EVERYONE_THREAD && !this.canSendChat()) return;
     const id = localMessageId();
     const clientId = this.myId() || 'local';
     const sender = this.displayName().trim() || 'Anon';
-    this.appendChatMessage({ id, clientId, sender, text, sentAt: Date.now(), mine: true });
+    const sentAt = Date.now();
+    if (recipient === CHAT_EVERYONE_THREAD) {
+      this.appendChatMessage(CHAT_EVERYONE_THREAD, { id, clientId, sender, text, sentAt, mine: true });
+      this.ws.send({ type: 'chat', text, clientMessageId: id });
+    } else {
+      this.rememberChatRecipient(recipient, this.chatRecipientName(recipient));
+      this.appendChatMessage(recipient, { id, clientId, sender, toClientId: recipient, text, sentAt, mine: true });
+      this.ws.send({ type: 'chat-direct', toClientId: recipient, text, clientMessageId: id });
+    }
     this.chatDraft.set('');
-    this.ws.send({ type: 'chat', text, clientMessageId: id });
   }
 
   chatTime(sentAt: number): string {
@@ -1005,6 +1080,7 @@ export class RoomPage implements OnDestroy {
       // Populate peer identities BEFORE setting state so the in-call view renders
       // with the correct peer list on the first frame.
       const newIdentities = new Map<string, PeerIdentity>();
+      const chatNames = new Map(this.chatRecipientNames());
       for (const peer of msg.peers) {
         newIdentities.set(peer.id, {
           name: peer.name,
@@ -1016,8 +1092,10 @@ export class RoomPage implements OnDestroy {
           screenOn: false,
           reconnecting: false,
         });
+        chatNames.set(peer.id, peer.name);
       }
       this.peerIdentities.set(newIdentities);
+      this.chatRecipientNames.set(chatNames);
       this.state.set('in-call');
       this.installMobileVisibilityPause();
       if (!this.callStartMs()) this.startClock();
@@ -1097,6 +1175,7 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-joined') {
       this.status.set(`${msg.name} joined.`);
+      this.rememberChatRecipient(msg.clientId, msg.name);
       const next = new Map(this.peerIdentities());
       next.set(msg.clientId, {
         name: msg.name,
@@ -1134,6 +1213,7 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'peer-resumed') {
       this.status.set(`${msg.name} reconnected.`);
       this.sfuClient.removePeer(msg.oldClientId);
+      this.rekeyChatThread(msg.oldClientId, msg.clientId, msg.name);
       const next = new Map(this.peerIdentities());
       next.delete(msg.oldClientId);
       next.set(msg.clientId, {
@@ -1173,8 +1253,16 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'chat') {
       if (msg.clientId === this.myId()) return;
-      this.appendChatMessage({ ...msg, mine: false });
-      if (!this.chatOpen()) this.chatUnreadCount.update((count) => Math.min(99, count + 1));
+      this.rememberChatRecipient(msg.clientId, msg.sender);
+      this.appendChatMessage(CHAT_EVERYONE_THREAD, { ...msg, mine: false });
+      if (!this.chatOpen() || this.activeChatRecipient() !== CHAT_EVERYONE_THREAD) this.incrementChatUnread(CHAT_EVERYONE_THREAD);
+      return;
+    }
+    if (msg.type === 'chat-direct') {
+      if (msg.clientId === this.myId()) return;
+      this.rememberChatRecipient(msg.clientId, msg.sender);
+      this.appendChatMessage(msg.clientId, { ...msg, mine: false });
+      if (!this.chatOpen() || this.activeChatRecipient() !== msg.clientId) this.incrementChatUnread(msg.clientId);
       return;
     }
     if (msg.type === 'reaction') {
@@ -1238,6 +1326,8 @@ export class RoomPage implements OnDestroy {
     if (msg.type === 'peer-left') {
       this.recorder.notifyParticipantLeft(msg.clientId);
       this.sfuClient.removePeer(msg.clientId);
+      const leavingName = this.peerIdentities().get(msg.clientId)?.name;
+      if (leavingName) this.rememberChatRecipient(msg.clientId, leavingName);
       const next = new Map(this.peerIdentities());
       next.delete(msg.clientId);
       this.peerIdentities.set(next);
@@ -1612,9 +1702,11 @@ export class RoomPage implements OnDestroy {
     this.currentSessionId.set(null);
     this.sidebarOpen.set(false);
     this.chatOpen.set(false);
-    this.chatMessages.set([]);
+    this.chatThreads.set(new Map([[CHAT_EVERYONE_THREAD, []]]));
+    this.activeChatRecipient.set(CHAT_EVERYONE_THREAD);
+    this.chatUnreadByThread.set(new Map());
+    this.chatRecipientNames.set(new Map());
     this.chatDraft.set('');
-    this.chatUnreadCount.set(0);
     this.pendingShareRequests.set([]);
     this.myShareRequestPending.set(false);
     this.raisedHands.set(new Set());
@@ -2044,9 +2136,77 @@ export class RoomPage implements OnDestroy {
     return payload;
   }
 
-  private appendChatMessage(message: ChatMessage): void {
-    this.chatMessages.update((messages) => [...messages, message]);
-    this.scrollChatToBottom();
+  private appendChatMessage(threadId: string, message: ChatMessage): void {
+    this.chatThreads.update((threads) => {
+      const next = new Map(threads);
+      next.set(threadId, [...(next.get(threadId) ?? []), message]);
+      return next;
+    });
+    if (this.chatOpen() && this.activeChatRecipient() === threadId) this.scrollChatToBottom();
+  }
+
+  private ensureChatThread(threadId: string): void {
+    if (this.chatThreads().has(threadId)) return;
+    this.chatThreads.update((threads) => {
+      const next = new Map(threads);
+      next.set(threadId, []);
+      return next;
+    });
+  }
+
+  private incrementChatUnread(threadId: string): void {
+    this.chatUnreadByThread.update((counts) => {
+      const next = new Map(counts);
+      next.set(threadId, Math.min(99, (next.get(threadId) ?? 0) + 1));
+      return next;
+    });
+  }
+
+  private clearChatUnreadFor(threadId: string): void {
+    if (!this.chatUnreadByThread().has(threadId)) return;
+    this.chatUnreadByThread.update((counts) => {
+      const next = new Map(counts);
+      next.delete(threadId);
+      return next;
+    });
+  }
+
+  private rememberChatRecipient(clientId: string, name: string): void {
+    if (!clientId || clientId === this.myId()) return;
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    this.chatRecipientNames.update((names) => {
+      const next = new Map(names);
+      next.set(clientId, trimmedName);
+      return next;
+    });
+  }
+
+  private rekeyChatThread(oldClientId: string, newClientId: string, name: string): void {
+    this.rememberChatRecipient(newClientId, name);
+    this.chatThreads.update((threads) => {
+      if (!threads.has(oldClientId)) return threads;
+      const next = new Map(threads);
+      const oldMessages = next.get(oldClientId) ?? [];
+      const newMessages = next.get(newClientId) ?? [];
+      next.set(newClientId, [...newMessages, ...oldMessages]);
+      next.delete(oldClientId);
+      return next;
+    });
+    this.chatUnreadByThread.update((counts) => {
+      if (!counts.has(oldClientId)) return counts;
+      const next = new Map(counts);
+      next.set(newClientId, Math.min(99, (next.get(newClientId) ?? 0) + (next.get(oldClientId) ?? 0)));
+      next.delete(oldClientId);
+      return next;
+    });
+    this.chatRecipientNames.update((names) => {
+      const next = new Map(names);
+      next.delete(oldClientId);
+      if (name.trim()) next.set(newClientId, name.trim());
+      return next;
+    });
+    if (this.activeChatRecipient() === oldClientId) this.activeChatRecipient.set(newClientId);
   }
 
   private scrollChatToBottom(): void {
@@ -2301,6 +2461,9 @@ declare global {
       myShareRequestPending?: boolean;
       raisedHands?: string[];
       transientReactions?: { id: string; clientId: string; kind: string; timestamp: number }[];
+      activeChatRecipient?: string;
+      chatThreads?: Record<string, ChatMessage[]>;
+      chatUnreadByThread?: Record<string, number>;
       screenShareAttempts: number;
       lastVideoConstraints?: MediaStreamConstraints | null;
       audioContextActivated?: boolean;

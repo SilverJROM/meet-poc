@@ -230,8 +230,37 @@
               <h2>In-call chat</h2>
               <button type="button" aria-label="Close chat" title="Close chat" (click)="chatOpen.set(false)">x</button>
             </header>
+            <div class="chat-tabs" role="tablist" aria-label="Chat recipients">
+              <button
+                type="button"
+                role="tab"
+                [class.active]="activeChatRecipient() === 'everyone'"
+                [attr.aria-selected]="activeChatRecipient() === 'everyone'"
+                (click)="setActiveChatRecipient('everyone')"
+              >
+                <span>Everyone</span>
+                @if (unreadFor('everyone') > 0) {
+                  <span class="unread-badge">{{ unreadFor('everyone') }}</span>
+                }
+              </button>
+              @for (recipient of chatRecipientTabs(); track recipient.id) {
+                <button
+                  type="button"
+                  role="tab"
+                  [class.active]="activeChatRecipient() === recipient.id"
+                  [class.offline]="!recipient.online"
+                  [attr.aria-selected]="activeChatRecipient() === recipient.id"
+                  (click)="setActiveChatRecipient(recipient.id)"
+                >
+                  <span class="chat-tab-name">{{ '@' + recipient.name }}</span>
+                  @if (unreadFor(recipient.id) > 0) {
+                    <span class="unread-badge">{{ unreadFor(recipient.id) }}</span>
+                  }
+                </button>
+              }
+            </div>
             <div #chatMessageList class="chat-message-list" role="log" aria-live="polite" aria-label="Chat messages">
-              @for (message of chatMessages(); track message.id) {
+              @for (message of activeChatMessages(); track message.id) {
                 <article class="chat-message" [class.mine]="message.mine">
                   <div class="chat-message-meta">
                     <strong>{{ message.sender }}</strong>
@@ -240,7 +269,7 @@
                   <p>{{ message.text }}</p>
                 </article>
               } @empty {
-                <p class="chat-empty">No messages yet.</p>
+                <p class="chat-empty">{{ activeChatEmptyText() }}</p>
               }
             </div>
             <form class="chat-composer" (submit)="sendChat($event)">
@@ -249,12 +278,13 @@
                 id="chat-message"
                 maxlength="2000"
                 rows="2"
-                placeholder="Send a message"
+                [placeholder]="activeChatRecipient() === 'everyone' ? 'Send a message' : 'Message @' + activeChatRecipientName()"
                 [value]="chatDraft()"
+                [disabled]="activeChatRecipient() !== 'everyone' && !activeChatRecipientOnline()"
                 (input)="chatDraft.set($any($event.target).value)"
                 (keydown.enter)="sendChat($event)"
               ></textarea>
-              <button type="submit" [disabled]="!chatDraft().trim()">Send</button>
+              <button type="submit" [disabled]="!canSendChat()">Send</button>
             </form>
           </aside>
         }

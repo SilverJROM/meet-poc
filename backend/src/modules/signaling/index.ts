@@ -106,6 +106,7 @@ type IncomingMessage = {
   text?: unknown;
   clientMessageId?: unknown;
   to?: string;
+  toClientId?: unknown;
   data?: unknown;
   clientId?: unknown;
   reason?: unknown;
@@ -966,6 +967,28 @@ export function attachSignaling(server: http.Server, database: Database.Database
         for (const [id, peer] of live.admitted) {
           if (id !== clientId) send(peer.ws, chat);
         }
+        return;
+      }
+
+      if (msg.type === 'chat-direct') {
+        if (state !== 'admitted') return;
+        const live = currentRoom ? liveRooms.get(currentRoom) : null;
+        if (!live) return;
+        const toClientId = typeof msg.toClientId === 'string' ? msg.toClientId : '';
+        if (!toClientId || toClientId === clientId) return;
+        const target = live.admitted.get(toClientId);
+        if (!target) return;
+        const text = (typeof msg.text === 'string' ? msg.text : '').trim().slice(0, MAX_CHAT_MESSAGE_CHARS);
+        if (!text) return;
+        send(target.ws, {
+          type: 'chat-direct',
+          id: crypto.randomBytes(12).toString('hex'),
+          clientId,
+          sender: myName,
+          toClientId,
+          text,
+          sentAt: Date.now(),
+        });
         return;
       }
 
