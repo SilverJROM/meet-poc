@@ -375,7 +375,14 @@ export class SfuClientService {
   }
 
   private cameraRidNow(): 'h' | 'm' | 'l' {
-    return this.isAnyScreenActive() ? 'l' : this.preferredCameraRid();
+    if (this.isAnyScreenActive() || this.viewport.isMobile()) return 'l';
+    const subscribedVideoPeers = new Set<string>();
+    for (const entry of this.midToEntry.values()) {
+      if (entry.kind === 'video') subscribedVideoPeers.add(entry.publisherClientId);
+    }
+    if (subscribedVideoPeers.size >= 5) return 'l';
+    if (subscribedVideoPeers.size >= 3) return 'm';
+    return 'h';
   }
 
   private async doUpdateCameraLayer(): Promise<void> {
@@ -448,6 +455,7 @@ export class SfuClientService {
         mids.push(mid);
         nextSubscribed.delete(mid);
         this.midToEntry.delete(mid);
+        this.pendingOntrack.delete(mid);
       }
     }
     this.subscribedTracks.set(nextSubscribed);
@@ -475,6 +483,7 @@ export class SfuClientService {
         void this.enqueue(() => this.doClose(mids, creds, cfSessionId));
       }
     }
+    void this.updateCameraLayer().catch(() => undefined);
   }
 
   private subscribeNewScreenTrack(publisher: import('./sfu-roster-utils.js').RemotePublisher): void {
@@ -909,12 +918,12 @@ export class SfuClientService {
       await this.pc.setRemoteDescription(res.sessionDescription);
 
       // Populate before the next event-loop yield; ontrack from SRD can fire before createAnswer resolves.
-      const newTransceiverMids = this.pc
-        .getTransceivers()
+      const transceivers = this.pc.getTransceivers();
+      const newTransceiverMids = transceivers
         .map((t) => t.mid)
         .filter((m): m is string => !!m && !existingMids.has(m));
 
-      const reconciled = reconcileSubscribedMids(responseTracks, newTransceiverMids, kindMap, publisher.clientId);
+      const reconciled = reconcileSubscribedMids(responseTracks, newTransceiverMids, transceivers, kindMap, publisher.clientId);
       for (const r of reconciled) {
         const entry: SubscribedTrackEntry = { publisherClientId: r.publisherClientId, trackName: r.trackName, kind: r.kind, mid: r.realMid };
         this.midToEntry.set(r.realMid, entry);
@@ -949,6 +958,7 @@ export class SfuClientService {
 
     // Set signal after mids are reconciled (not before — subscribedTracks must reflect real mids)
     this.subscribedTracks.set(nextSubscribed);
+    void this.updateCameraLayer().catch(() => undefined);
   }
 }
 
