@@ -1,5 +1,31 @@
 <main class="room-shell" [attr.data-state]="state()">
-  @if (state() === 'checking') {
+  @if (guestNameOverlayOpen()) {
+    <section class="guest-name-overlay" aria-labelledby="guest-name-title">
+      <form class="guest-name-card" novalidate (ngSubmit)="continueAsGuest()">
+        <p class="guest-eyebrow">Join as guest</p>
+        <h1 id="guest-name-title">{{ roomTitle() }}</h1>
+        <label class="field" for="guest-display-name">
+          <span>Your name</span>
+          <input
+            id="guest-display-name"
+            name="guestDisplayName"
+            type="text"
+            autocomplete="name"
+            maxlength="80"
+            required
+            [class.invalid]="!!guestNameError()"
+            [attr.aria-invalid]="!!guestNameError()"
+            [ngModel]="guestDisplayNameDraft()"
+            (ngModelChange)="guestDisplayNameDraft.set($event); guestNameError.set(null)"
+          >
+        </label>
+        @if (guestNameError()) {
+          <p class="inline-error" role="alert">{{ guestNameError() }}</p>
+        }
+        <button type="submit" class="primary-btn">Continue</button>
+      </form>
+    </section>
+  } @else if (state() === 'checking') {
     <section class="lobby-panel">
       <p class="muted">Checking room...</p>
     </section>

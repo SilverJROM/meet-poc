@@ -1,0 +1,50 @@
+<main class="join-shell">
+  <section class="join-card" aria-labelledby="join-title">
+    <div class="join-heading">
+      <p>Join a meeting</p>
+      <h1 id="join-title">Enter a room code</h1>
+    </div>
+
+    <form class="join-form" novalidate (ngSubmit)="submitJoin()">
+      <label class="field" for="room-code">
+        <span>Room code</span>
+        <input
+          id="room-code"
+          name="roomCode"
+          type="text"
+          autocomplete="off"
+          maxlength="128"
+          placeholder="abc123"
+          [ngModel]="roomCode()"
+          (ngModelChange)="roomCode.set($event)"
+          [disabled]="busy()"
+        >
+      </label>
+
+      <label class="field" for="guest-name">
+        <span>Your name</span>
+        <input
+          id="guest-name"
+          name="displayName"
+          type="text"
+          autocomplete="name"
+          maxlength="80"
+          placeholder="Jamie"
+          [ngModel]="displayName()"
+          (ngModelChange)="displayName.set($event)"
+          [disabled]="busy()"
+        >
+      </label>
+
+      @if (error()) {
+        <p class="inline-error" role="alert">{{ error() }}</p>
+      }
+
+      <button type="submit" class="primary-btn" [disabled]="busy()">
+        {{ busy() ? 'Checking...' : 'Continue' }}
+      </button>
+    </form>
+
+    <a routerLink="/login">Host sign in</a>
+  </section>
+</main>

@@ -33,6 +33,7 @@ const DIAGNOSTICS_LOGGING_STORAGE_KEY = 'meet-poc.diagnosticsLogging';
 const LOCAL_TRACK_MUTE_DEBOUNCE_MS = 1_200;
 const DEVICE_RECOVERY_MAX_ATTEMPTS = 3;
 const DEVICE_RECOVERY_BACKOFF_MS = 650;
+const GUEST_DISPLAY_NAME_KEY = 'guestDisplayName';
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
 type ChatMessage = { id: string; clientId: string; sender: string; text: string; sentAt: number; mine: boolean };
@@ -95,9 +96,13 @@ export class RoomPage implements OnDestroy {
   roomId = this.roomKey;
   readonly roomSlug = signal('');
   readonly roomOpen = signal(false);
+  private readonly joinRouteMode = this.route.snapshot.routeConfig?.path === 'join/:slug';
   readonly state = signal<RoomState>('checking');
   readonly roomTitle = signal('Checking room...');
   readonly displayName = signal('');
+  readonly guestNameOverlayOpen = signal(false);
+  readonly guestDisplayNameDraft = signal(readGuestDisplayName());
+  readonly guestNameError = signal<string | null>(null);
   readonly nameError = signal<string | null>(null);
   readonly microphoneRequested = signal(true);
   readonly cameraRequested = signal(false);
@@ -424,11 +429,35 @@ export class RoomPage implements OnDestroy {
       this.roomTitle.set(info.title ?? 'Untitled room');
       this.roomOpen.set(!!info.isOpen);
       this.state.set('lobby');
+      if (this.joinRouteMode && !user) {
+        if (!info.isOpen) {
+          this.error.set('Room is not available.');
+          this.state.set('error');
+          return;
+        }
+        this.guestDisplayNameDraft.set(readGuestDisplayName());
+        this.guestNameOverlayOpen.set(true);
+        return;
+      }
       this.prepareLobbyDeviceCheck();
     } catch {
       this.error.set('Room could not be loaded');
       this.state.set('error');
     }
+  }
+
+  continueAsGuest(): void {
+    const name = this.guestDisplayNameDraft().trim();
+    if (!name) {
+      this.guestNameError.set('Enter your name to continue.');
+      return;
+    }
+    storeGuestDisplayName(name);
+    this.displayName.set(name);
+    this.nameError.set(null);
+    this.guestNameError.set(null);
+    this.guestNameOverlayOpen.set(false);
+    this.prepareLobbyDeviceCheck();
   }
 
   async join(): Promise<void> {
@@ -2074,6 +2103,22 @@ function readStoredDevice(key: string): string {
     return window.localStorage.getItem(key) || '';
   } catch {
     return '';
+  }
+}
+
+function readGuestDisplayName(): string {
+  try {
+    return window.sessionStorage.getItem(GUEST_DISPLAY_NAME_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function storeGuestDisplayName(name: string): void {
+  try {
+    window.sessionStorage.setItem(GUEST_DISPLAY_NAME_KEY, name);
+  } catch {
+    // Best effort only.
   }
 }
 

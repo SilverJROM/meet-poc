@@ -96,6 +96,14 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
     return res.json({ ok: true, ...result });
   });
 
+  router.get('/rooms/by-slug/:slug', (req, res) => {
+    const slug = String(req.params.slug || '').trim();
+    if (!slug) return res.status(404).json({ error: 'not found' });
+    const room = getRoomBySlugOrId(slug, database);
+    if (!room) return res.status(404).json({ error: 'not found' });
+    return res.json({ room: { id: room.id, slug: room.slug, title: room.title, isOpen: room.isOpen } });
+  });
+
   router.get('/rooms/:id/exists', (req, res) => {
     const room = getRoomBySlugOrId(String(req.params.id), database);
     if (!room) return res.json({ exists: false });

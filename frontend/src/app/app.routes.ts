@@ -30,6 +30,10 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/room/room.page').then((m) => m.RoomPage),
   },
   {
+    path: 'join',
+    loadComponent: () => import('./pages/join/join.page').then((m) => m.JoinPage),
+  },
+  {
     path: 'join/:slug',
     loadComponent: () => import('./pages/room/room.page').then((m) => m.RoomPage),
   },
