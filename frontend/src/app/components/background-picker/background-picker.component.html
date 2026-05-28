@@ -102,4 +102,7 @@
   @if (uploadError()) {
     <p class="upload-error" role="alert">{{ uploadError() }}</p>
   }
+  @if (backgroundEffects.lastError(); as effectError) {
+    <p class="upload-error" role="alert">Background effects unavailable: {{ effectError }}</p>
+  }
 </section>

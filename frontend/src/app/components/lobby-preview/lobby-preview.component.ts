@@ -33,13 +33,20 @@ export class LobbyPreviewComponent {
   readonly flipCamera = output<void>();
   readonly isMobile = this.viewport.isMobile;
 
+  readonly backgroundPickerOpen = signal(false);
+
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
+
+  toggleBackgroundPicker(): void {
+    this.backgroundPickerOpen.update((open) => !open);
+  }
 
   constructor() {
     addIcons({ cameraReverseOutline });
     effect(() => {
       const video = this.video()?.nativeElement;
-      if (video) video.srcObject = this.stream();
+      const stream = this.stream();
+      if (video) video.srcObject = stream;
     });
   }
 

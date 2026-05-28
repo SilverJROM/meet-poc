@@ -21,6 +21,23 @@ function log(message) {
   console.log(`[serve.js] ${message}`);
 }
 
+const MIME_TYPES = {
+  '.html': 'text/html',
+  '.js': 'text/javascript',
+  '.mjs': 'text/javascript',
+  '.css': 'text/css',
+  '.json': 'application/json',
+  '.wasm': 'application/wasm',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
 function sendFile(res, filePath) {
   fs.readFile(filePath, (err, content) => {
     if (err) {
@@ -29,7 +46,7 @@ function sendFile(res, filePath) {
       return;
     }
     const ext = path.extname(filePath);
-    const type = ext === '.html' ? 'text/html' : ext === '.js' ? 'text/javascript' : ext === '.css' ? 'text/css' : 'application/octet-stream';
+    const type = MIME_TYPES[ext] || 'application/octet-stream';
     res.writeHead(200, { 'content-type': type });
     res.end(content);
   });

@@ -60,6 +60,35 @@
   font-weight: 800;
 }
 
+.background-section {
+  display: grid;
+  gap: 8px;
+}
+
+.background-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid #dadce0;
+  border-radius: 999px;
+  background: #fff;
+  color: #202124;
+  font-weight: 800;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.background-toggle:hover {
+  border-color: #1a73e8;
+  color: #1a73e8;
+}
+
+.background-toggle-caret {
+  font-size: 14px;
+}
+
 .meter-row {
   min-height: 42px;
   display: flex;

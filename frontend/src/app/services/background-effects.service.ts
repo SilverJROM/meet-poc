@@ -1,4 +1,4 @@
-import { Injectable, signal } from '@angular/core';
+import { Injectable, NgZone, inject, signal } from '@angular/core';
 import type { Results, SelfieSegmentation } from '@mediapipe/selfie_segmentation';
 
 export type BackgroundEffectMode = 'none' | 'blur' | 'image';
@@ -13,6 +13,8 @@ const BLUR_RADIUS_PX = 18;
 
 @Injectable({ providedIn: 'root' })
 export class BackgroundEffectsService {
+  private readonly zone = inject(NgZone);
+
   readonly mode = signal<BackgroundEffectMode>('none');
   readonly modelReady = signal(false);
   readonly lastError = signal<string | null>(null);
@@ -103,10 +105,14 @@ export class BackgroundEffectsService {
     this.outputContext = context;
     this.sourceVideo = video;
     this.outputStream = canvas.captureStream(TARGET_FPS);
-    this.model.onResults((results) => this.drawCompositeFrame(results));
-    void video.play().catch((err) => {
-      this.lastError.set(err instanceof Error ? err.message : 'Unable to start background effects preview.');
+    this.zone.runOutsideAngular(() => {
+      this.model!.onResults((results) => this.drawCompositeFrame(results));
     });
+    void video.play()
+      .then(() => undefined)
+      .catch((err) => {
+        this.lastError.set(err instanceof Error ? err.message : 'Unable to start background effects preview.');
+      });
     this.scheduleNextFrame();
     return this.outputStream;
   }
@@ -130,9 +136,8 @@ export class BackgroundEffectsService {
         default?: SelfieSegmentationModule;
       };
       const module = imported.SelfieSegmentation ? imported : imported.default ?? imported;
-      const version = module.VERSION || '0.1.1675465747';
       const model = new module.SelfieSegmentation({
-        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@${version}/${file}`,
+        locateFile: (file) => `assets/mediapipe/${file}`,
       });
       model.setOptions({ modelSelection: 1, selfieMode: false });
       await model.initialize();
@@ -149,9 +154,11 @@ export class BackgroundEffectsService {
 
   private scheduleNextFrame(): void {
     if (this.frameRequest !== null) return;
-    this.frameRequest = requestAnimationFrame((timestamp) => {
-      this.frameRequest = null;
-      this.processFrame(timestamp);
+    this.zone.runOutsideAngular(() => {
+      this.frameRequest = requestAnimationFrame((timestamp) => {
+        this.frameRequest = null;
+        this.processFrame(timestamp);
+      });
     });
   }
 
@@ -173,21 +180,25 @@ export class BackgroundEffectsService {
 
     this.syncCanvasSize();
     this.processingFrame = true;
-    this.model
-      .send({ image: this.sourceVideo })
-      .catch((err) => {
-        this.lastError.set(err instanceof Error ? err.message : 'Unable to process background effect frame.');
-      })
-      .finally(() => {
-        this.processingFrame = false;
-        this.scheduleNextFrame();
-      });
+    this.zone.runOutsideAngular(() => {
+      this.model!
+        .send({ image: this.sourceVideo! })
+        .catch((err) => {
+          this.lastError.set(err instanceof Error ? err.message : 'Unable to process background effect frame.');
+        })
+        .finally(() => {
+          this.processingFrame = false;
+          this.scheduleNextFrame();
+        });
+    });
   }
 
   private drawCompositeFrame(results: Results): void {
     const canvas = this.outputCanvas;
     const context = this.outputContext;
-    if (!canvas || !context) return;
+    if (!canvas || !context) {
+      return;
+    }
     const width = canvas.width;
     const height = canvas.height;
 

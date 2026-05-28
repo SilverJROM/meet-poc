@@ -22,6 +22,11 @@
                 "glob": "**/*",
                 "input": "public",
                 "output": "."
+              },
+              {
+                "glob": "selfie_segmentation*.{binarypb,tflite,wasm,data,js}",
+                "input": "../node_modules/@mediapipe/selfie_segmentation",
+                "output": "assets/mediapipe"
               }
             ],
             "stylePreprocessorOptions": {

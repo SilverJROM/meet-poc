@@ -18,7 +18,23 @@
     }
   </div>
 
-  <app-background-picker />
+  <div class="background-section">
+    <button
+      type="button"
+      class="background-toggle"
+      [attr.aria-expanded]="backgroundPickerOpen()"
+      aria-controls="lobby-background-picker"
+      (click)="toggleBackgroundPicker()"
+    >
+      <span>Background</span>
+      <span class="background-toggle-caret" aria-hidden="true">{{ backgroundPickerOpen() ? '▾' : '▸' }}</span>
+    </button>
+    @if (backgroundPickerOpen()) {
+      <div id="lobby-background-picker">
+        <app-background-picker />
+      </div>
+    }
+  </div>
 
   @if (!compact()) {
     <div class="meter-row">

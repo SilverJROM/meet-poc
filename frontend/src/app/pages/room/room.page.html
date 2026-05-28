@@ -427,7 +427,11 @@
                 (ngModelChange)="setLobbyMicEnabled($event)"
                 [disabled]="state() === 'connecting'"
               >
-              <ion-icon [name]="microphoneRequested() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
+              @if (microphoneRequested()) {
+                <ion-icon name="mic-outline"></ion-icon>
+              } @else {
+                <ion-icon name="mic-off-outline"></ion-icon>
+              }
               <span>{{ microphoneRequested() ? 'Mic on' : 'Mic off' }}</span>
             </label>
             <label class="toggle-row">
@@ -438,7 +442,11 @@
                 (ngModelChange)="setCameraRequested($event)"
                 [disabled]="state() === 'connecting'"
               >
-              <ion-icon [name]="cameraRequested() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
+              @if (cameraRequested()) {
+                <ion-icon name="videocam-outline"></ion-icon>
+              } @else {
+                <ion-icon name="videocam-off-outline"></ion-icon>
+              }
               <span>{{ cameraRequested() ? 'Camera on' : 'Camera off' }}</span>
             </label>
           </div>
