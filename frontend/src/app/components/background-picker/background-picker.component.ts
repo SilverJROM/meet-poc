@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, ElementRef, HostListener, ViewChild, computed, inject, input, output, signal } from '@angular/core';
+import { CUSTOM_ELEMENTS_SCHEMA, Component, ElementRef, HostListener, ViewChild, computed, inject, input, output, signal } from '@angular/core';
 import { addIcons } from 'ionicons';
 import { closeOutline } from 'ionicons/icons';
 import { BackgroundEffectsService, type BackgroundEffectMode } from '../../services/background-effects.service';
@@ -108,6 +108,7 @@ const OPTIONS: BackgroundOption[] = [{ id: 'none', label: 'None', mode: 'none' }
   selector: 'app-background-picker',
   standalone: true,
   imports: [CommonModule],
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './background-picker.component.html',
   styleUrl: './background-picker.component.scss',
   host: {
