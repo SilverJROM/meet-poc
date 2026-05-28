@@ -1031,6 +1031,9 @@ export class RoomPage implements OnDestroy {
         reconnecting: false,
       });
       this.peerIdentities.set(next);
+      if (this.state() === 'in-call') {
+        this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+      }
       this.recorder.notifyParticipantJoined({
         clientId: msg.clientId,
         displayName: msg.name,
@@ -1066,6 +1069,9 @@ export class RoomPage implements OnDestroy {
         reconnecting: false,
       });
       this.peerIdentities.set(next);
+      if (this.state() === 'in-call') {
+        this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+      }
       this.recorder.notifyParticipantJoined({
         clientId: msg.clientId,
         displayName: msg.name,

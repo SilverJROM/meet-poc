@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { createRoomFromDashboard, joinGuestAndWait, joinOwnerCall } from '../../fixtures/rooms';
+import { createRoomFromDashboard, type TestRoom } from '../../fixtures/rooms';
 
 test('fixloop multi-peer — four peers connect without host subscribe-stuck warnings', async ({ browser, page }) => {
   test.setTimeout(90_000);
@@ -12,14 +12,14 @@ test('fixloop multi-peer — four peers connect without host subscribe-stuck war
   });
 
   const room = await createRoomFromDashboard(page, `MultiPeer ${Date.now()}`);
-  await joinOwnerCall(page, room, 'host');
+  await joinOwnerCallWithCamera(page, room, 'host');
 
   const guestCount = 3;
   const guestContexts = await Promise.all(Array.from({ length: guestCount }, () => browser.newContext()));
   const guests = await Promise.all(guestContexts.map((context) => context.newPage()));
 
   try {
-    await Promise.all(guests.map((guest, index) => joinGuestAndWait(guest, room, `Peer${index + 1}`)));
+    await Promise.all(guests.map((guest, index) => joinGuestWithCameraAndWait(guest, room, `Peer${index + 1}`)));
 
     await expect(page.locator('.knock-banner-row')).toHaveCount(guestCount, { timeout: 10_000 });
     for (let i = 0; i < guestCount; i += 1) {
@@ -39,6 +39,25 @@ test('fixloop multi-peer — four peers connect without host subscribe-stuck war
   }
 });
 
+async function joinOwnerCallWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
+  await page.goto(room.url + '?sfu=0');
+  await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
+  await page.locator('#display-name').fill(name);
+  await page.locator('input[name="cameraRequested"]').check({ force: true });
+  await page.getByRole('button', { name: 'Join' }).click();
+  await expect(page.locator('.call-panel')).toBeVisible();
+  await expect(page.locator('app-tile')).toHaveCount(1);
+}
+
+async function joinGuestWithCameraAndWait(page: Page, room: TestRoom, name: string): Promise<void> {
+  await page.goto(room.url + '?sfu=0');
+  await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
+  await page.locator('#display-name').fill(name);
+  await page.locator('input[name="cameraRequested"]').check({ force: true });
+  await page.getByRole('button', { name: 'Ask to join' }).click();
+  await expect(page.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();
+}
+
 async function waitForConnectedTiles(page: Page, expectedPeers: number): Promise<void> {
   // Each page sees one LOCAL tile (data-state="local") + (expectedPeers - 1) remote tiles
   // that should reach data-state="connected" once their RTP starts flowing.
@@ -47,4 +66,6 @@ async function waitForConnectedTiles(page: Page, expectedPeers: number): Promise
   await expect
     .poll(async () => page.locator('.tile[data-state="connected"]').count(), { timeout: 20_000 })
     .toBe(expectedPeers - 1);
+  await expect(page.locator('.tile[data-state="connected"] .camera-off-avatar')).toHaveCount(0, { timeout: 10_000 });
+  await expect(page.locator('.tile[data-state="connected"] .tile-content video')).toHaveCount(expectedPeers - 1, { timeout: 10_000 });
 }
