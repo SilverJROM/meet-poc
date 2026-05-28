@@ -286,10 +286,12 @@ export type SfuSubscribeLatency = {
   latencyMs: number | null;
 };
 
+export type SfuPublishPhase = 'ice-config' | 'pc-create' | 'offer' | 'cf-session' | 'cf-tracks' | 'set-remote' | 'done' | null;
+
 export type SfuDiagnosticsSnapshot = {
   cfSessionId: string;
-  connectionState: string;
-  iceConnectionState: string;
+  connectionState: string | null;
+  iceConnectionState: string | null;
   rttMs: number | null;
   localCandidateType: string | null;
   remoteCandidateType: string | null;
@@ -297,6 +299,11 @@ export type SfuDiagnosticsSnapshot = {
   outboundTracks: SfuOutboundTrackStats[];
   inboundTracks: SfuInboundTrackStats[];
   subscribeLatencies: SfuSubscribeLatency[];
+  publishPhase?: SfuPublishPhase;
+  publishPhaseAtMs?: number | null;
+  hasPc?: boolean;
+  publishStatus?: 'publishing' | 'published' | 'error' | null;
+  publishError?: string | null;
 };
 
 export type DiagnosticsPayload = {

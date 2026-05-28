@@ -4,6 +4,7 @@ import { firstValueFrom } from 'rxjs';
 
 const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
 const ICE_CONFIG_CACHE_TTL_MS = 12 * 60 * 1000;
+const ICE_CONFIG_FETCH_TIMEOUT_MS = 5000;
 const TURN_HEALTH_TIMEOUT_MS = 5000;
 
 export type TurnHealthResult = {
@@ -121,7 +122,11 @@ export class IceConfigService {
 
   private async fetchIceServers(): Promise<RTCIceServer[]> {
     try {
-      const config = await firstValueFrom(this.http.get<{ iceServers?: RTCIceServer[] }>('/api/ice-config'));
+      const config = await withTimeout(
+        firstValueFrom(this.http.get<{ iceServers?: RTCIceServer[] }>('/api/ice-config')),
+        ICE_CONFIG_FETCH_TIMEOUT_MS,
+        '/api/ice-config',
+      );
       if (Array.isArray(config.iceServers) && config.iceServers.length > 0) {
         this.lastFetchError.set(null);
         return config.iceServers;
@@ -129,7 +134,12 @@ export class IceConfigService {
       this.lastFetchError.set('ICE configuration did not include usable servers.');
     } catch (err) {
       this.lastFetchError.set(err instanceof Error ? err.message : 'ICE configuration request failed.');
-      console.warn('[ice-config] failed to fetch /api/ice-config; using default STUN servers', err);
+      const message = err instanceof Error ? err.message : '';
+      if (message.includes('timed out')) {
+        console.warn('[ice-config] /api/ice-config timed out - using fallback STUN', err);
+      } else {
+        console.warn('[ice-config] failed to fetch /api/ice-config; using default STUN servers', err);
+      }
     }
     return DEFAULT_ICE_SERVERS;
   }
@@ -165,6 +175,20 @@ function candidateProtocolFromCandidateLine(candidate: string | undefined): stri
 
 function errorMessage(err: unknown, fallback: string): string {
   return err instanceof Error && err.message ? err.message : fallback;
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function closePeerConnection(pc: RTCPeerConnection | null): void {

@@ -5,7 +5,7 @@ import { IceConfigService } from './ice-config.service';
 import { ViewportService } from './viewport.service';
 import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster } from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
-import type { SfuDiagnosticsSnapshot, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair } from './meeting-sessions.service';
+import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair } from './meeting-sessions.service';
 export type { RemotePublisher } from './sfu-roster-utils.js';
 
 export interface SfuTrackModel {
@@ -21,6 +21,14 @@ export interface LocalPublishState {
   tracks: SfuTrackModel[];
   error?: string;
 }
+
+type SfuDiagnosticsWithPublishDebug = SfuDiagnosticsSnapshot & {
+  publishPhase: SfuPublishPhase;
+  publishPhaseAtMs: number | null;
+  hasPc: boolean;
+  publishStatus: LocalPublishState['status'] | null;
+  publishError: string | null;
+};
 
 export interface SubscribedTrackEntry {
   publisherClientId: string;
@@ -42,6 +50,7 @@ export class SfuClientService {
   private readonly viewport = inject(ViewportService);
 
   readonly localPublishState = signal<LocalPublishState | null>(null);
+  readonly localPublishPhase = signal<{ phase: SfuPublishPhase; atMs: number | null }>({ phase: null, atMs: null });
   readonly remotePublishers = signal<Map<string, import('./sfu-roster-utils.js').RemotePublisher>>(new Map());
   readonly remoteStreams = signal<Map<string, MediaStream>>(new Map());
   readonly remoteScreenStreams = signal<Map<string, MediaStream>>(new Map());
@@ -158,13 +167,40 @@ export class SfuClientService {
   async collectDiagnostics(): Promise<SfuDiagnosticsSnapshot | null> {
     const pc = this.pc;
     const publishState = this.localPublishState();
-    if (!pc || !publishState) return null;
+    const partial = this.publishDiagnosticsDebug(pc, publishState);
+    if (!pc || !publishState) {
+      return {
+        cfSessionId: publishState?.cfSessionId ?? '',
+        connectionState: null,
+        iceConnectionState: null,
+        rttMs: null,
+        localCandidateType: null,
+        remoteCandidateType: null,
+        selectedCandidatePair: null,
+        outboundTracks: [],
+        inboundTracks: [],
+        subscribeLatencies: [],
+        ...partial,
+      } as SfuDiagnosticsWithPublishDebug;
+    }
 
     let stats: RTCStatsReport;
     try {
       stats = await pc.getStats();
     } catch {
-      return null;
+      return {
+        cfSessionId: publishState.cfSessionId,
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+        rttMs: null,
+        localCandidateType: null,
+        remoteCandidateType: null,
+        selectedCandidatePair: null,
+        outboundTracks: [],
+        inboundTracks: [],
+        subscribeLatencies: [],
+        ...partial,
+      } as SfuDiagnosticsWithPublishDebug;
     }
 
     // --- Candidate pair / transport ---
@@ -262,6 +298,25 @@ export class SfuClientService {
       outboundTracks,
       inboundTracks,
       subscribeLatencies,
+      ...partial,
+    } as SfuDiagnosticsWithPublishDebug;
+  }
+
+  private setPublishPhase(phase: SfuPublishPhase): void {
+    this.localPublishPhase.set({ phase, atMs: phase ? Date.now() : null });
+  }
+
+  private publishDiagnosticsDebug(
+    pc: RTCPeerConnection | null,
+    publishState: LocalPublishState | null,
+  ): Pick<SfuDiagnosticsWithPublishDebug, 'publishPhase' | 'publishPhaseAtMs' | 'hasPc' | 'publishStatus' | 'publishError'> {
+    const phase = this.localPublishPhase();
+    return {
+      publishPhase: phase.phase,
+      publishPhaseAtMs: phase.atMs,
+      hasPc: !!pc,
+      publishStatus: publishState?.status ?? null,
+      publishError: publishState?.error ?? null,
     };
   }
 
@@ -550,6 +605,7 @@ export class SfuClientService {
     this.clearAllSubscribeStuckWatchdogs();
     this.opQueue = Promise.resolve();
     this.localPublishState.set(null);
+    this.setPublishPhase(null);
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
     this.remoteScreenStreams.set(new Map());
@@ -573,6 +629,7 @@ export class SfuClientService {
     const creds = this.callerCreds;
     this.callerCreds = null;
     this.localPublishState.set(null);
+    this.setPublishPhase(null);
     this.clearAllSubscribeStuckWatchdogs();
 
     if (!publishState || !creds || publishState.status !== 'published') return;
@@ -603,6 +660,7 @@ export class SfuClientService {
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
     this.localPublishState.set(null);
+    this.setPublishPhase(null);
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
     this.remoteScreenStreams.set(new Map());
@@ -618,8 +676,10 @@ export class SfuClientService {
 
     try {
       // ICE: CF STUN first + existing TURN creds as fallback
+      this.setPublishPhase('ice-config');
       const turnServers = await this.iceConfigService.getIceServers();
       const iceServers: RTCIceServer[] = [{ urls: 'stun:stun.cloudflare.com:3478' }, ...turnServers];
+      this.setPublishPhase('pc-create');
       this.pc = new RTCPeerConnection({ iceServers });
 
       // Set ontrack BEFORE any subscribe requests so no track event is missed
@@ -667,10 +727,13 @@ export class SfuClientService {
       this.videoSender = videoTransceiver.sender;
 
       // createOffer → setLocalDescription (mids assigned after SLD)
+      this.setPublishPhase('offer');
       const offer = await this.pc.createOffer();
+      this.setPublishPhase('offer');
       await this.pc.setLocalDescription(offer);
 
       // POST /api/sfu/session → cfSessionId
+      this.setPublishPhase('cf-session');
       const sessionRes = await firstValueFrom(
         this.http.post<{ sessionId: string }>('/api/sfu/session', { clientKey, participantId, sessionId }),
       );
@@ -687,6 +750,7 @@ export class SfuClientService {
         });
 
       // POST /api/sfu/tracks → answer SDP (must include the offer SDP for CF to produce an answer)
+      this.setPublishPhase('cf-tracks');
       const tracksRes = await firstValueFrom(
         this.http.post<{ sessionDescription: RTCSessionDescriptionInit }>('/api/sfu/tracks', {
           clientKey,
@@ -699,6 +763,7 @@ export class SfuClientService {
       );
 
       // setRemoteDescription with CF answer
+      this.setPublishPhase('set-remote');
       await this.pc.setRemoteDescription(tracksRes.sessionDescription);
 
       // Persist mid model for close/update in later batches
@@ -709,6 +774,7 @@ export class SfuClientService {
         status: 'live',
       }));
       this.localPublishState.set({ cfSessionId, status: 'published', tracks });
+      this.setPublishPhase('done');
     } catch (err) {
       this.localPublishState.set({ cfSessionId: '', status: 'error', tracks: [], error: String(err) });
       throw err;

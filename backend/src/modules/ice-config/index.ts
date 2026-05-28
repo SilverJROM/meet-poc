@@ -9,6 +9,7 @@ export type IceServerConfig = {
 const DEFAULT_STUN_SERVERS: IceServerConfig[] = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
 const CLOUDFLARE_TURN_TTL_SECONDS = 86_400;
 const CLOUDFLARE_CACHE_SKEW_MS = 5 * 60 * 1000;
+const CLOUDFLARE_TURN_MINT_TIMEOUT_MS = 4000;
 
 type CachedTurn = {
   server: IceServerConfig;
@@ -64,6 +65,8 @@ async function readCloudflareTurn(env: NodeJS.ProcessEnv): Promise<IceServerConf
 
   if (cloudflareCache && cloudflareCache.expiresAtMs > Date.now()) return cloudflareCache.server;
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), CLOUDFLARE_TURN_MINT_TIMEOUT_MS);
   try {
     const response = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate`, {
       method: 'POST',
@@ -72,6 +75,7 @@ async function readCloudflareTurn(env: NodeJS.ProcessEnv): Promise<IceServerConf
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ ttl: CLOUDFLARE_TURN_TTL_SECONDS }),
+      signal: controller.signal,
     });
     if (!response.ok) {
       console.warn(`[ice-config] Cloudflare TURN mint failed with status ${response.status}`);
@@ -93,6 +97,8 @@ async function readCloudflareTurn(env: NodeJS.ProcessEnv): Promise<IceServerConf
   } catch (err) {
     console.warn(`[ice-config] Cloudflare TURN mint request failed: ${err instanceof Error ? err.message : 'unknown error'}`);
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
