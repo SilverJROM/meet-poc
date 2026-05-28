@@ -37,6 +37,7 @@ export type SignalingMessage =
   | { type: 'share-request-incoming'; clientId: string; name: string }
   | { type: 'share-decision'; approved: boolean; reason?: string }
   | { type: 'share-request-cancelled'; clientId: string }
+  | { type: 'share-revoked' }
   | { type: 'reaction'; clientId: string; kind: ReactionKind; state?: 'on' | 'off' }
   | { type: 'signal'; from: string; data: unknown }
   | { type: 'rejected'; reason?: string }
@@ -60,6 +61,7 @@ export type OutgoingSignalingMessage =
   | { type: 'leave' }
   | { type: 'share-request' }
   | { type: 'share-decision'; clientId: string; approved: boolean; reason?: string }
+  | { type: 'share-revoke'; clientId: string }
   | { type: 'reaction'; kind: ReactionKind; state?: 'on' | 'off' }
   | { type: 'sfu-publish'; cfSessionId: string; tracks: { trackName: string; kind: string }[] };
 

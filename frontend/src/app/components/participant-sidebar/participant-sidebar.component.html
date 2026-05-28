@@ -58,6 +58,9 @@
               @if (menuFor() === peer.id) {
                 <div class="action-menu" role="menu">
                   <button type="button" role="menuitem" (click)="mutePeer(peer.id)">Mute participant</button>
+                  @if (shareGrantClientIds().has(peer.id)) {
+                    <button type="button" role="menuitem" (click)="revokeShareGrant(peer.id)">Revoke share permission</button>
+                  }
                   <button type="button" role="menuitem" class="danger" (click)="removePeer(peer.id)">Remove from meeting</button>
                 </div>
               }

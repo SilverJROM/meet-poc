@@ -14,7 +14,7 @@ import { RecordingBannerComponent } from '../../components/recording-banner/reco
 import { TileComponent } from '../../components/tile/tile.component';
 import { ActiveSpeakerService } from '../../services/active-speaker.service';
 import { AuthService } from '../../services/auth.service';
-import { MediaError, MediaService } from '../../services/media.service';
+import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
 import type { DiagnosticsPayload, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
 import { IceConfigService } from '../../services/ice-config.service';
@@ -165,6 +165,7 @@ export class RoomPage implements OnDestroy {
   readonly screenShareHelp = signal<string | null>(null);
   readonly pendingShareRequests = signal<ShareRequest[]>([]);
   readonly myShareRequestPending = signal(false);
+  readonly peersWithShareGrant = signal<Set<string>>(new Set());
   readonly warningDismissed = signal(false);
   readonly knockers = signal<Knocker[]>([]);
   readonly raisedHands = signal<Set<string>>(new Set());
@@ -365,6 +366,7 @@ export class RoomPage implements OnDestroy {
         shareCameraManualOverride: this.shareCameraManualOverride(),
         pendingShareRequests: this.pendingShareRequests().map((request) => ({ ...request })),
         myShareRequestPending: this.myShareRequestPending(),
+        peersWithShareGrant: [...this.peersWithShareGrant()],
         raisedHands: [...this.raisedHands()],
         transientReactions: this.transientReactions().map((reaction) => ({ ...reaction })),
         activeChatRecipient: this.activeChatRecipient(),
@@ -766,6 +768,12 @@ export class RoomPage implements OnDestroy {
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
       this.status.set(this.media.screenOn() ? 'Screen sharing.' : 'Screen sharing stopped.');
     } catch (err) {
+      if (err instanceof ScreenShareUnsupportedError) {
+        this.screenShareHelp.set(null);
+        this.actionNotice.set(err.message);
+        this.status.set(err.message);
+        return;
+      }
       if (isDisplayMediaPermissionError(err)) {
         this.screenShareHelp.set(
           'Enable Screen Recording for Chrome in macOS System Settings, then fully quit and reopen Chrome with Cmd+Q before sharing again.',
@@ -780,12 +788,22 @@ export class RoomPage implements OnDestroy {
 
   approveShare(clientId: string): void {
     this.pendingShareRequests.set(this.pendingShareRequests().filter((request) => request.clientId !== clientId));
+    this.peersWithShareGrant.update((ids) => new Set(ids).add(clientId));
     this.ws.send({ type: 'share-decision', clientId, approved: true });
   }
 
   denyShare(clientId: string): void {
     this.pendingShareRequests.set(this.pendingShareRequests().filter((request) => request.clientId !== clientId));
     this.ws.send({ type: 'share-decision', clientId, approved: false, reason: 'Host denied screen share.' });
+  }
+
+  revokeShareGrant(clientId: string): void {
+    this.peersWithShareGrant.update((ids) => {
+      const next = new Set(ids);
+      next.delete(clientId);
+      return next;
+    });
+    this.ws.send({ type: 'share-revoke', clientId });
   }
 
   sendReaction(kind: ReactionKind): void {
@@ -1173,6 +1191,10 @@ export class RoomPage implements OnDestroy {
       this.status.set(msg.reason || 'Screen share request denied.');
       return;
     }
+    if (msg.type === 'share-revoked') {
+      this.actionNotice.set("Host revoked your screen-share permission. Your current share continues; next time you'll need to ask again.");
+      return;
+    }
     if (msg.type === 'peer-joined') {
       this.status.set(`${msg.name} joined.`);
       this.rememberChatRecipient(msg.clientId, msg.name);
@@ -1214,6 +1236,12 @@ export class RoomPage implements OnDestroy {
       this.status.set(`${msg.name} reconnected.`);
       this.sfuClient.removePeer(msg.oldClientId);
       this.rekeyChatThread(msg.oldClientId, msg.clientId, msg.name);
+      this.peersWithShareGrant.update((ids) => {
+        const next = new Set(ids);
+        next.delete(msg.oldClientId);
+        next.delete(msg.clientId);
+        return next;
+      });
       const next = new Map(this.peerIdentities());
       next.delete(msg.oldClientId);
       next.set(msg.clientId, {
@@ -1333,6 +1361,11 @@ export class RoomPage implements OnDestroy {
       this.peerIdentities.set(next);
       this.removeKnocker(msg.clientId);
       this.pendingShareRequests.set(this.pendingShareRequests().filter((request) => request.clientId !== msg.clientId));
+      this.peersWithShareGrant.update((ids) => {
+        const nextGrants = new Set(ids);
+        nextGrants.delete(msg.clientId);
+        return nextGrants;
+      });
       this.setRaisedHand(msg.clientId, false);
       this.transientReactions.set(this.transientReactions().filter((reaction) => reaction.clientId !== msg.clientId));
       this.queueDiagnosticsLog('state-change');
@@ -1709,6 +1742,7 @@ export class RoomPage implements OnDestroy {
     this.chatDraft.set('');
     this.pendingShareRequests.set([]);
     this.myShareRequestPending.set(false);
+    this.peersWithShareGrant.set(new Set());
     this.raisedHands.set(new Set());
     this.transientReactions.set([]);
     this.shareStripCollapsed.set(false);
@@ -2459,6 +2493,7 @@ declare global {
       shareCameraManualOverride?: boolean;
       pendingShareRequests?: { clientId: string; name: string }[];
       myShareRequestPending?: boolean;
+      peersWithShareGrant?: string[];
       raisedHands?: string[];
       transientReactions?: { id: string; clientId: string; kind: string; timestamp: number }[];
       activeChatRecipient?: string;

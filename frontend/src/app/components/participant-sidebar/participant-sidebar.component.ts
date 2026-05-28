@@ -25,8 +25,10 @@ export class ParticipantSidebarComponent {
   readonly knockers = input.required<Knocker[]>();
   readonly isHost = input(false);
   readonly myClientId = input<string | null>(null);
+  readonly shareGrantClientIds = input<Set<string>>(new Set());
   readonly mute = output<string>();
   readonly remove = output<string>();
+  readonly revokeShare = output<string>();
   readonly admit = output<string>();
   readonly reject = output<string>();
   readonly close = output<void>();
@@ -66,6 +68,11 @@ export class ParticipantSidebarComponent {
   removePeer(peerId: string): void {
     this.menuFor.set(null);
     this.remove.emit(peerId);
+  }
+
+  revokeShareGrant(peerId: string): void {
+    this.menuFor.set(null);
+    this.revokeShare.emit(peerId);
   }
 
   setSection(section: 'participants' | 'waiting'): void {

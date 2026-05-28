@@ -3,6 +3,13 @@ import { ViewportService } from './viewport.service';
 
 export type MediaError = { code: 'denied' | 'no-devices' | 'unknown'; message: string };
 
+export class ScreenShareUnsupportedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ScreenShareUnsupportedError';
+  }
+}
+
 type DeviceLists = {
   audioInputs: MediaDeviceInfo[];
   audioOutputs: MediaDeviceInfo[];
@@ -273,6 +280,9 @@ export class MediaService {
     if (this.screenTrack) {
       await this.stopScreen(onVideoTrackChanged);
       return false;
+    }
+    if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') {
+      throw new ScreenShareUnsupportedError("Screen sharing isn't available in this browser. Try Chrome on Android, Safari 16+ on iPhone, or join from a desktop.");
     }
     this.screenShareAttempts.update((count) => count + 1);
     const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });

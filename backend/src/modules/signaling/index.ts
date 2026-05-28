@@ -52,6 +52,7 @@ type LiveRoom = {
   sfuPresence: Map<string, SfuPresenceEntry>;
   sfuPresenceRevision: number;
   pendingShareRequest: ShareRequestEntry | null;
+  shareGrants: Set<string>;
 };
 
 type ClientIdentity = {
@@ -159,6 +160,7 @@ function getOrCreateLiveRoom(roomId: string): LiveRoom {
       sfuPresence: new Map(),
       sfuPresenceRevision: 0,
       pendingShareRequest: null,
+      shareGrants: new Set(),
     };
     liveRooms.set(roomId, live);
   }
@@ -252,6 +254,7 @@ function cleanupReconnectState(live: LiveRoom, clientId: string): void {
   const reconnecting = live.reconnecting.get(clientId);
   if (reconnecting?.timer) clearTimeout(reconnecting.timer);
   live.reconnecting.delete(clientId);
+  live.shareGrants.delete(clientId);
   for (const [token, ticket] of live.reconnectTickets) {
     if (ticket.clientId === clientId) live.reconnectTickets.delete(token);
   }
@@ -261,6 +264,7 @@ function closeSupersededAdmittedPeer(live: LiveRoom, clientId: string): void {
   const entry = live.admitted.get(clientId);
   if (!entry) return;
   live.admitted.delete(clientId);
+  live.shareGrants.delete(clientId);
   entry.setState('idle');
   try {
     entry.ws.close();
@@ -478,6 +482,7 @@ function removeAdmittedPeer(roomId: string, clientId: string, live: LiveRoom, da
   const isHost = isOwnerOf(roomId, entry.userEmail, database);
   live.admitted.delete(clientId);
   live.sfuPresence.delete(clientId);
+  live.shareGrants.delete(clientId);
   clearPendingShareRequestForPeer(live, roomId, clientId, database);
   entry.setState('idle');
   for (const [, peer] of live.admitted) {
@@ -584,6 +589,8 @@ function closeRoomForHost(roomId: string, live: LiveRoom, database: Database.Dat
   live.reconnectTickets.clear();
   live.clientIdentities.clear();
   live.sfuPresence.clear();
+  live.shareGrants.clear();
+  live.pendingShareRequest = null;
   live.currentSessionId = null;
   liveRooms.delete(roomId);
 
@@ -1000,6 +1007,10 @@ export function attachSignaling(server: http.Server, database: Database.Database
           send(ws, { type: 'share-decision', approved: true });
           return;
         }
+        if (live.shareGrants.has(clientId)) {
+          send(ws, { type: 'share-decision', approved: true });
+          return;
+        }
         if (live.pendingShareRequest) {
           send(ws, { type: 'share-decision', approved: false, reason: 'Host is reviewing another screen share request.' });
           return;
@@ -1029,6 +1040,18 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const approved = Boolean(msg.approved);
         const reason = typeof msg.reason === 'string' ? msg.reason.slice(0, 200) : undefined;
         send(target.ws, { type: 'share-decision', approved, ...(reason ? { reason } : {}) });
+        if (approved) live.shareGrants.add(targetId);
+        return;
+      }
+
+      if (msg.type === 'share-revoke') {
+        const live = getLiveAdmittedRoom(currentRoom, state);
+        if (!live || !currentRoom) return;
+        if (!isHostCommandAllowed('share-revoke', currentRoom, userEmail, database)) return;
+        const targetId = String(msg.clientId || '');
+        live.shareGrants.delete(targetId);
+        const target = live.admitted.get(targetId);
+        if (target) send(target.ws, { type: 'share-revoked' });
         return;
       }
 
@@ -1180,6 +1203,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
         if (closingEntry) startReconnectGrace(currentRoom, clientId, closingEntry, closingPeerWasHost, live, database);
         live.admitted.delete(clientId);
         live.sfuPresence.delete(clientId);
+        live.shareGrants.delete(clientId);
         clearPendingShareRequestForPeer(live, currentRoom, clientId, database);
         console.log(`[room ${currentRoom}] RECONNECTING ${myName} (${clientId})  admitted=${live.admitted.size}`);
       } else if (state === 'pending') {
