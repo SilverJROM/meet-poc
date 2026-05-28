@@ -567,7 +567,7 @@ export class SfuClientService {
     const trackName = `${participantId}:${Date.now()}:screen:${crypto.randomUUID()}`;
 
     // Add screen as a NEW transceiver — requires renegotiation (publish-style, not replaceTrack)
-    const transceiver = this.pc.addTransceiver(displayTrack, { direction: 'sendrecv' });
+    const transceiver = this.pc.addTransceiver(displayTrack, { direction: 'sendonly' });
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
     const mid = transceiver.mid!;
@@ -764,14 +764,14 @@ export class SfuClientService {
       // Add local tracks with pre-negotiated video transceiver (DR-55/F2: always negotiate video up-front)
       const audioTrack = localStream?.getAudioTracks()[0];
       const audioTransceiver = audioTrack
-        ? this.pc.addTransceiver(audioTrack, { direction: 'sendrecv' })
-        : this.pc.addTransceiver('audio', { direction: 'sendrecv' });
+        ? this.pc.addTransceiver(audioTrack, { direction: 'sendonly' })
+        : this.pc.addTransceiver('audio', { direction: 'sendonly' });
       this.audioSender = audioTransceiver.sender;
 
       const videoTrack = localStream?.getVideoTracks()[0];
       const videoTransceiver = videoTrack
-        ? this.pc.addTransceiver(videoTrack, { direction: 'sendrecv', sendEncodings: VIDEO_SIMULCAST_ENCODINGS })
-        : this.pc.addTransceiver('video', { direction: 'sendrecv', sendEncodings: VIDEO_SIMULCAST_ENCODINGS }); // Camera off: pre-negotiate so replaceTrack works later without renegotiation; sendEncodings persists through replaceTrack
+        ? this.pc.addTransceiver(videoTrack, { direction: 'sendonly', sendEncodings: VIDEO_SIMULCAST_ENCODINGS })
+        : this.pc.addTransceiver('video', { direction: 'sendonly', sendEncodings: VIDEO_SIMULCAST_ENCODINGS }); // Camera off: pre-negotiate so replaceTrack works later without renegotiation; sendEncodings persists through replaceTrack
       this.videoSender = videoTransceiver.sender;
 
       // createOffer → setLocalDescription (mids assigned after SLD)
