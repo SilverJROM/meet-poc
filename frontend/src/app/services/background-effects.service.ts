@@ -204,10 +204,8 @@ export class BackgroundEffectsService {
 
     context.save();
     context.clearRect(0, 0, width, height);
-    context.drawImage(results.segmentationMask, 0, 0, width, height);
-    context.globalCompositeOperation = 'source-in';
-    context.drawImage(results.image, 0, 0, width, height);
-    context.globalCompositeOperation = 'destination-over';
+
+    // 1. Draw blurred or image background filling the whole canvas.
     if (this.mode() === 'image' && this.backgroundImage) {
       drawCoverImage(context, this.backgroundImage, width, height);
     } else {
@@ -215,7 +213,55 @@ export class BackgroundEffectsService {
       context.drawImage(results.image, 0, 0, width, height);
       context.filter = 'none';
     }
+
+    // 2. Cut a person-shaped hole using the segmentation mask. MediaPipe's
+    //    segmentationMask is a grayscale image with full alpha — convert its
+    //    luminance to alpha first so destination-out only erases the person area.
+    const maskCanvas = this.getMaskAlphaCanvas(results.segmentationMask, width, height);
+    if (maskCanvas) {
+      context.globalCompositeOperation = 'destination-out';
+      context.drawImage(maskCanvas, 0, 0, width, height);
+    }
+
+    // 3. Put the original (sharp) frame underneath; it shows through where the
+    //    mask erased the background, leaving the person sharp on top of bg.
+    context.globalCompositeOperation = 'destination-over';
+    context.drawImage(results.image, 0, 0, width, height);
+
     context.restore();
+  }
+
+  private maskWorkCanvas: HTMLCanvasElement | null = null;
+  private maskWorkContext: CanvasRenderingContext2D | null = null;
+
+  private getMaskAlphaCanvas(
+    mask: CanvasImageSource,
+    width: number,
+    height: number,
+  ): HTMLCanvasElement | null {
+    if (typeof document === 'undefined') return null;
+    if (!this.maskWorkCanvas) {
+      this.maskWorkCanvas = document.createElement('canvas');
+      this.maskWorkContext = this.maskWorkCanvas.getContext('2d');
+    }
+    const work = this.maskWorkCanvas;
+    const workCtx = this.maskWorkContext;
+    if (!workCtx) return null;
+    if (work.width !== width) work.width = width;
+    if (work.height !== height) work.height = height;
+    workCtx.clearRect(0, 0, width, height);
+    workCtx.drawImage(mask, 0, 0, width, height);
+    const imageData = workCtx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    for (let i = 0; i < data.length; i += 4) {
+      // luminance approx -> alpha; null out RGB so destination-out only uses alpha.
+      data[i + 3] = data[i];
+      data[i] = 0;
+      data[i + 1] = 0;
+      data[i + 2] = 0;
+    }
+    workCtx.putImageData(imageData, 0, 0);
+    return work;
   }
 
   private syncCanvasSize(): void {
