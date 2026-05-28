@@ -12,6 +12,12 @@
 
   <input #fileInput class="file-input" type="file" accept="image/*" (change)="onFileSelected($event)">
 
+  @if (isMobile()) {
+    <div class="mobile-warning" role="note">
+      Background effects may drain battery and reduce video quality on this device.
+    </div>
+  }
+
   <div class="picker-grid" role="radiogroup" aria-label="Camera background">
     @for (option of options; track option.id; let index = $index) {
       <button

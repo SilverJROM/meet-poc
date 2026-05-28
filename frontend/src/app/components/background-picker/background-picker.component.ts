@@ -1,8 +1,10 @@
 import { CommonModule } from '@angular/common';
 import { Component, ElementRef, HostListener, ViewChild, inject, input, output, signal } from '@angular/core';
 import { BackgroundEffectsService, type BackgroundEffectMode } from '../../services/background-effects.service';
+import { ViewportService } from '../../services/viewport.service';
 
 const STORAGE_KEY = 'meet-poc:bg:selected';
+const MOBILE_OPT_IN_KEY = 'meet-poc:bg:mobile-opt-in';
 const CUSTOM_INDEX_KEY = 'meet-poc:bg:custom:index';
 const CUSTOM_STORAGE_PREFIX = 'meet-poc:bg:custom:';
 const MAX_CUSTOM_BACKGROUNDS = 5;
@@ -110,10 +112,12 @@ export class BackgroundPickerComponent {
   @ViewChild('fileInput') private fileInput?: ElementRef<HTMLInputElement>;
 
   readonly backgroundEffects = inject(BackgroundEffectsService);
+  private readonly viewport = inject(ViewportService);
+  readonly isMobile = this.viewport.isMobile;
   readonly closeRequested = output<void>();
   readonly presentation = input<'inline' | 'overlay'>('inline');
   readonly options = OPTIONS;
-  readonly selectedId = signal(readStoredSelection()?.asset ?? readStoredSelection()?.mode ?? 'none');
+  readonly selectedId = signal(initialSelectedId(this.isMobile()));
   readonly busyId = signal<string | null>(null);
   readonly customs = signal<CustomBackground[]>(readCustomBackgrounds());
   readonly uploadBusy = signal(false);
@@ -126,6 +130,7 @@ export class BackgroundPickerComponent {
   }
 
   async select(option: SelectableBackgroundOption): Promise<void> {
+    if (this.isMobile() && option.mode !== 'none') writeMobileOptIn();
     this.selectedId.set(option.id);
     this.busyId.set(option.id);
     try {
@@ -226,6 +231,11 @@ export class BackgroundPickerComponent {
   private async restoreSelection(): Promise<void> {
     if (this.restored) return;
     this.restored = true;
+    if (this.isMobile() && !readMobileOptIn()) {
+      this.selectedId.set('none');
+      await this.backgroundEffects.setMode('none');
+      return;
+    }
     const stored = readStoredSelection();
     if (!stored) return;
     if (stored.mode === 'image') {
@@ -247,6 +257,22 @@ export class BackgroundPickerComponent {
 
 function isCustomBackground(option: SelectableBackgroundOption): option is CustomBackground {
   return 'isCustom' in option && option.isCustom;
+}
+
+function initialSelectedId(isMobile: boolean): string {
+  if (isMobile && !readMobileOptIn()) return 'none';
+  const stored = readStoredSelection();
+  return stored?.asset ?? stored?.mode ?? 'none';
+}
+
+function readMobileOptIn(): boolean {
+  if (typeof window === 'undefined') return false;
+  return window.localStorage.getItem(MOBILE_OPT_IN_KEY) === 'true';
+}
+
+function writeMobileOptIn(): void {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(MOBILE_OPT_IN_KEY, 'true');
 }
 
 function readStoredSelection(): StoredSelection | null {
