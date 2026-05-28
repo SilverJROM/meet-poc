@@ -281,9 +281,21 @@ export class BackgroundEffectsService {
     workCtx.drawImage(mask, 0, 0, width, height);
     const imageData = workCtx.getImageData(0, 0, width, height);
     const data = imageData.data;
+    // Threshold the segmentation probability so we get a tight edge instead
+    // of the halo from MediaPipe's soft mask. Values above the threshold
+    // become fully opaque (person), below become fully transparent (background).
+    // A narrow ramp in between (THRESHOLD_LOW..THRESHOLD_HIGH) prevents harsh
+    // pixelation without re-introducing the halo.
+    const THRESHOLD_LOW = 140;
+    const THRESHOLD_HIGH = 180;
+    const RAMP = THRESHOLD_HIGH - THRESHOLD_LOW;
     for (let i = 0; i < data.length; i += 4) {
-      // luminance approx -> alpha; null out RGB so destination-out only uses alpha.
-      data[i + 3] = data[i];
+      const m = data[i]; // luminance ~ mask probability
+      let alpha: number;
+      if (m <= THRESHOLD_LOW) alpha = 0;
+      else if (m >= THRESHOLD_HIGH) alpha = 255;
+      else alpha = Math.round(((m - THRESHOLD_LOW) / RAMP) * 255);
+      data[i + 3] = alpha;
       data[i] = 0;
       data[i + 1] = 0;
       data[i + 2] = 0;
