@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { addIcons } from 'ionicons';
-import { clipboardOutline, lockClosedOutline, lockOpenOutline, trashOutline, videocamOutline } from 'ionicons/icons';
+import { clipboardOutline, closeOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline } from 'ionicons/icons';
 import { PaginationComponent } from '../../components/pagination/pagination.component';
 import { Room, RoomsService } from '../../services/rooms.service';
 
@@ -47,7 +47,7 @@ export class RoomsPage implements OnDestroy {
   });
 
   constructor() {
-    addIcons({ clipboardOutline, lockClosedOutline, lockOpenOutline, trashOutline, videocamOutline });
+    addIcons({ clipboardOutline, closeOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline });
     this.querySub = this.route.queryParamMap.subscribe((params) => {
       this.page.set(readPositiveInt(params.get('page'), 1));
       this.pageSize.set(Math.min(readPositiveInt(params.get('pageSize'), DEFAULT_PAGE_SIZE), 100));
@@ -62,6 +62,10 @@ export class RoomsPage implements OnDestroy {
 
   shareUrl(room: Room): string {
     return `${this.origin}/room/${this.roomUrlKey(room)}`;
+  }
+
+  joinUrl(room: Room): string {
+    return `${this.origin}/join/${this.roomUrlKey(room)}`;
   }
 
   roomUrlKey(room: Room): string {
@@ -129,6 +133,29 @@ export class RoomsPage implements OnDestroy {
     } catch {
       window.prompt('Copy room link', url);
       this.copyStatus.set('Link ready to copy');
+    }
+  }
+
+  async copyJoinLink(room: Room): Promise<void> {
+    const url = this.joinUrl(room);
+    try {
+      await navigator.clipboard.writeText(url);
+      this.copyStatus.set('Copied guest link');
+    } catch {
+      window.prompt('Copy guest link', url);
+      this.copyStatus.set('Guest link ready to copy');
+    }
+  }
+
+  async copyRoomCode(room: Room, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    const code = this.roomUrlKey(room);
+    try {
+      await navigator.clipboard.writeText(code);
+      this.copyStatus.set('Copied room code');
+    } catch {
+      window.prompt('Copy room code', code);
+      this.copyStatus.set('Room code ready to copy');
     }
   }
 

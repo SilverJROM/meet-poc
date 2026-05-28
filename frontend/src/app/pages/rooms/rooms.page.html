@@ -1,49 +1,60 @@
 <section class="rooms-page">
-  <div class="panel create-panel">
-    <h2>Create a room</h2>
+  <header class="rooms-header">
+    <div class="title-block">
+      <h1>Your rooms</h1>
+      <p>{{ total() }} total</p>
+    </div>
+
     <form class="create-form" (ngSubmit)="createRoom()">
-      <div class="field">
-        <label for="room-title">Room name</label>
-        <input
-          id="room-title"
-          name="roomTitle"
-          type="text"
-          maxlength="100"
-          placeholder="Team sync"
-          [ngModel]="newTitle()"
-          (ngModelChange)="newTitle.set($event)"
-          [disabled]="busy()"
-        >
-      </div>
+      <label class="sr-only" for="room-title">Room name</label>
+      <input
+        id="room-title"
+        name="roomTitle"
+        type="text"
+        maxlength="100"
+        placeholder="New room name"
+        [ngModel]="newTitle()"
+        (ngModelChange)="newTitle.set($event)"
+        [disabled]="busy()"
+      >
       <button type="submit" class="primary-btn" [disabled]="busy()">
         <ion-icon name="videocam-outline"></ion-icon>
-        Create room
+        New room
       </button>
     </form>
-    <p class="error-text">{{ error() || '' }}</p>
-  </div>
+  </header>
 
-  <div class="panel rooms-panel">
-    <div class="section-head">
-      <h2>Your rooms</h2>
-      <span class="muted">{{ total() }} total</span>
-    </div>
-    <div class="rooms-search">
-      <label for="rooms-search">Search rooms</label>
+  <div class="rooms-toolbar">
+    <label class="rooms-search" for="rooms-search">
+      <ion-icon name="search-outline" aria-hidden="true"></ion-icon>
       <input
         id="rooms-search"
         name="roomsSearch"
         type="search"
-        placeholder="Search by room name"
+        placeholder="Search rooms"
         [ngModel]="searchQuery()"
         (ngModelChange)="updateSearchQuery($event)"
       >
-    </div>
+    </label>
+    <a class="guest-entry-link" routerLink="/join">Have a code? Join a meeting -></a>
+  </div>
 
+  @if (error()) {
+    <p class="error-text" role="alert">{{ error() }}</p>
+  }
+
+  <div class="rooms-panel">
     @if (loading()) {
-      <p class="empty">Loading rooms...</p>
+      <div class="empty-card">
+        <ion-icon name="videocam-outline" aria-hidden="true"></ion-icon>
+        <p>Loading rooms...</p>
+      </div>
     } @else if (!hasRooms()) {
-      <p class="empty">{{ searchQuery() ? 'No rooms match your search.' : 'No rooms yet. Create one above to get a shareable join link.' }}</p>
+      <div class="empty-card">
+        <ion-icon name="videocam-outline" aria-hidden="true"></ion-icon>
+        <h2>{{ searchQuery() ? 'No rooms found' : 'No rooms yet' }}</h2>
+        <p>{{ searchQuery() ? 'Try a different search.' : 'Create one above.' }}</p>
+      </div>
     } @else {
       <div class="bulk-bar" [class.active]="selectedCount() > 0">
         <label class="bulk-select-all">
@@ -57,13 +68,17 @@
         </label>
         @if (selectedCount() > 0) {
           <span class="bulk-count">{{ selectedCount() }} selected</span>
-          <button type="button" class="secondary-btn" (click)="clearSelection()" [disabled]="busy()">Clear</button>
+          <button type="button" class="secondary-btn" (click)="clearSelection()" [disabled]="busy()">
+            <ion-icon name="close-outline"></ion-icon>
+            <span class="button-label">Clear</span>
+          </button>
           <button type="button" class="danger-btn" (click)="bulkDeleteSelected()" [disabled]="busy()">
             <ion-icon name="trash-outline"></ion-icon>
-            Delete selected ({{ selectedCount() }})
+            <span class="button-label">Delete selected ({{ selectedCount() }})</span>
           </button>
         }
       </div>
+
       <ul class="room-list">
         @for (room of rooms(); track room.id) {
           <li
@@ -71,6 +86,7 @@
             role="button"
             tabindex="0"
             [class.selected]="isSelected(room.id)"
+            [class.open]="room.isOpen"
             [attr.aria-label]="'Open room ' + room.title"
             (click)="openRoom(room)"
             (keydown)="onRoomRowKeydown($event, room)"
@@ -83,13 +99,28 @@
                 [attr.aria-label]="'Select ' + room.title"
               >
             </label>
-            <div class="room-main">
-              <h3>{{ room.title }}</h3>
-              <p>Created {{ room.createdAt | date: 'medium' }}</p>
-              <p class="room-access-status">{{ room.isOpen ? 'Open for guests' : 'Closed to guests' }}</p>
-              <code>{{ shareUrl(room) }}</code>
+
+            <div class="room-card-top">
+              <h2>{{ room.title }}</h2>
+              <span class="status-chip" [class.open]="room.isOpen">{{ room.isOpen ? 'Open' : 'Closed' }}</span>
             </div>
+
+            <div class="room-meta">
+              <span>Created {{ room.createdAt | date: 'medium' }}</span>
+              <span class="room-code">
+                <code>{{ roomUrlKey(room) }}</code>
+                <button type="button" class="icon-btn" aria-label="Copy room code" title="Copy room code" (click)="copyRoomCode(room, $event)">
+                  <ion-icon name="clipboard-outline"></ion-icon>
+                </button>
+              </span>
+            </div>
+
             <div class="room-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
+              <button type="button" class="primary-btn" (click)="openRoom(room)">Start</button>
+              <button type="button" class="secondary-btn" (click)="copyJoinLink(room)">
+                <ion-icon name="clipboard-outline"></ion-icon>
+                Copy link
+              </button>
               <button
                 type="button"
                 class="secondary-btn access-toggle"
@@ -113,11 +144,6 @@
                   (click)="$event.stopPropagation()"
                 >
               </label>
-              <a class="primary-btn" [routerLink]="['/room', roomUrlKey(room)]">Join</a>
-              <button type="button" class="secondary-btn" (click)="copyLink(room)">
-                <ion-icon name="clipboard-outline"></ion-icon>
-                Copy link
-              </button>
               <button type="button" class="danger-btn" (click)="deleteRoom(room)">
                 <ion-icon name="trash-outline"></ion-icon>
                 Delete
@@ -126,6 +152,7 @@
           </li>
         }
       </ul>
+
       <app-pagination [page]="page()" [pageSize]="pageSize()" [total]="total()" (pageChange)="goToPage($event)"></app-pagination>
     }
 
