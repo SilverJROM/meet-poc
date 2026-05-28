@@ -1,5 +1,4 @@
-import { Injectable, inject, signal } from '@angular/core';
-import { PlatformService } from './platform.service';
+import { Injectable, signal } from '@angular/core';
 import { PeerState } from './peer-state';
 
 type RemoteSource = {
@@ -22,7 +21,6 @@ export type RemoteAudioDebugSnapshot = {
 export class RemoteAudioService {
   readonly contextState = signal<AudioContextState | 'none'>('none');
 
-  private readonly platform = inject(PlatformService);
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
   private destination: MediaStreamAudioDestinationNode | null = null;
@@ -30,7 +28,7 @@ export class RemoteAudioService {
   private readonly sources = new Map<string, RemoteSource>();
 
   mixerEnabled(): boolean {
-    return this.platform.isIOS();
+    return true;
   }
 
   attachOutputElement(element: HTMLAudioElement | null): void {

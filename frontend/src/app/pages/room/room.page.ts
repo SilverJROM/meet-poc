@@ -117,7 +117,7 @@ export class RoomPage implements OnDestroy {
   readonly deviceDialogError = signal<string | null>(null);
   readonly canSelectAudioOutput = signal(canSetSinkId());
   readonly canFlipCamera = computed(() => this.viewport.isMobile() && (this.state() === 'in-call' ? this.media.cameraOn() : this.cameraRequested()));
-  readonly iosRemoteAudioMixerEnabled = computed(() => this.platform.isIOS());
+  readonly remoteAudioMixerEnabled = computed(() => true);
   readonly permissionError = signal<LobbyError | null>(null);
   readonly hasBlockingLobbyError = computed(() => {
     const error = this.permissionError();

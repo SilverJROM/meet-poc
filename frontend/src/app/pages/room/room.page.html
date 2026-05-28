@@ -114,7 +114,7 @@
           </div>
         </div>
       }
-      @if (iosRemoteAudioMixerEnabled()) {
+      @if (remoteAudioMixerEnabled()) {
         <audio #remoteAudioMixer class="remote-audio-mixer" data-remote-audio-mixer autoplay playsinline></audio>
       }
       @if (screenShareHelp()) {
@@ -167,7 +167,7 @@
               [peer]="presenter"
               [displayStream]="shareStream()"
               [forceVideo]="true"
-              [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()"
+              [remoteAudioEnabled]="!remoteAudioMixerEnabled()"
               variant="share-main"
               [speaking]="activeSpeaker.activePeerId() === presenter.id"
               (remoteAudioBlocked)="handleRemoteAudioBlocked()"
@@ -185,7 +185,7 @@
             @if (!shareStripCollapsed()) {
               <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
                 @for (peer of orderedStripPeers(); track peer.participantId) {
-                  <app-tile [peer]="peer" variant="strip" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+                  <app-tile [peer]="peer" variant="strip" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
                 }
               </div>
             }
@@ -193,7 +193,7 @@
         } @else {
           <div class="tiles-grid" aria-label="Participants" [attr.data-count]="peers().length">
             @for (peer of peers(); track peer.participantId) {
-              <app-tile [peer]="peer" [remoteAudioEnabled]="!iosRemoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+              <app-tile [peer]="peer" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
             }
           </div>
         }
