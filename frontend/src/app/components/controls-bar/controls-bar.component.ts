@@ -1,4 +1,4 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, input, output } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, HostListener, computed, inject, input, output, signal } from '@angular/core';
 import { addIcons } from 'ionicons';
 import {
   chatboxOutline,
@@ -14,7 +14,9 @@ import {
   videocamOffOutline,
   videocamOutline,
   volumeHighOutline,
+  volumeMuteOutline,
 } from 'ionicons/icons';
+import { RemoteAudioService } from '../../services/remote-audio.service';
 
 @Component({
   selector: 'app-controls-bar',
@@ -24,6 +26,8 @@ import {
   styleUrl: './controls-bar.component.scss',
 })
 export class ControlsBarComponent {
+  private readonly elementRef = inject<ElementRef<HTMLElement>>(ElementRef);
+  readonly remoteAudio = inject(RemoteAudioService);
   readonly roomLabel = input.required<string>();
   readonly elapsedLabel = input('');
   readonly micOn = input.required<boolean>();
@@ -47,6 +51,11 @@ export class ControlsBarComponent {
   readonly audioOnlyToggle = output<void>();
   readonly devices = output<void>();
   readonly leave = output<void>();
+  readonly volumePopoverOpen = signal(false);
+  readonly volumeLabel = computed(() => {
+    const percent = Math.round(this.remoteAudio.volume() * 100);
+    return percent > 100 ? `${percent}% (amp)` : `${percent}%`;
+  });
 
   constructor() {
     addIcons({
@@ -63,6 +72,33 @@ export class ControlsBarComponent {
       videocamOffOutline,
       videocamOutline,
       volumeHighOutline,
+      volumeMuteOutline,
     });
+  }
+
+  toggleSpeakerMuted(): void {
+    this.remoteAudio.setMutedAll(!this.remoteAudio.mutedAll());
+  }
+
+  toggleVolumePopover(event: Event): void {
+    event.stopPropagation();
+    this.volumePopoverOpen.update((open) => !open);
+  }
+
+  setSpeakerVolume(event: Event): void {
+    const inputEl = event.target as HTMLInputElement;
+    this.remoteAudio.setVolume(Number.parseFloat(inputEl.value));
+  }
+
+  @HostListener('document:click', ['$event'])
+  closeVolumePopoverOnOutsideClick(event: MouseEvent): void {
+    if (!this.volumePopoverOpen()) return;
+    if (this.elementRef.nativeElement.contains(event.target as Node)) return;
+    this.volumePopoverOpen.set(false);
+  }
+
+  @HostListener('document:keydown.escape')
+  closeVolumePopoverOnEscape(): void {
+    this.volumePopoverOpen.set(false);
   }
 }

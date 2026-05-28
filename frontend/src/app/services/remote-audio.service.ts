@@ -13,13 +13,21 @@ export type RemoteAudioDebugSnapshot = {
   contextState: AudioContextState | 'none';
   outputAttached: boolean;
   outputPaused: boolean;
+  mutedAll: boolean;
+  volume: number;
   mixedPeerIds: string[];
   mixedTrackIds: string[];
 };
 
+const VOLUME_STORAGE_KEY = 'meet-poc:volume:value';
+const DEFAULT_VOLUME = 1;
+const MAX_VOLUME = 1.3;
+
 @Injectable({ providedIn: 'root' })
 export class RemoteAudioService {
   readonly contextState = signal<AudioContextState | 'none'>('none');
+  readonly mutedAll = signal(false);
+  readonly volume = signal(DEFAULT_VOLUME);
 
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
@@ -27,8 +35,24 @@ export class RemoteAudioService {
   private outputElement: HTMLAudioElement | null = null;
   private readonly sources = new Map<string, RemoteSource>();
 
+  constructor() {
+    this.setVolume(readStoredVolume());
+  }
+
   mixerEnabled(): boolean {
     return true;
+  }
+
+  setMutedAll(value: boolean): void {
+    this.mutedAll.set(value);
+    if (this.gain) this.gain.gain.value = value ? 0 : this.volume();
+  }
+
+  setVolume(value: number): void {
+    const clamped = Math.max(0, Math.min(MAX_VOLUME, Number.isFinite(value) ? value : DEFAULT_VOLUME));
+    this.volume.set(clamped);
+    persistVolume(clamped);
+    if (this.gain && !this.mutedAll()) this.gain.gain.value = clamped;
   }
 
   attachOutputElement(element: HTMLAudioElement | null): void {
@@ -120,6 +144,8 @@ export class RemoteAudioService {
       contextState: this.context?.state ?? 'none',
       outputAttached: !!this.outputElement,
       outputPaused: this.outputElement?.paused ?? true,
+      mutedAll: this.mutedAll(),
+      volume: this.volume(),
       mixedPeerIds: [...this.sources.keys()],
       mixedTrackIds: [...this.sources.values()].map((source) => source.track.id),
     };
@@ -134,6 +160,7 @@ export class RemoteAudioService {
     this.context = null;
     this.gain = null;
     this.destination = null;
+    this.mutedAll.set(false);
     this.contextState.set('none');
   }
 
@@ -175,7 +202,7 @@ export class RemoteAudioService {
     }
     if (!this.gain) {
       this.gain = this.context.createGain();
-      this.gain.gain.value = 1;
+      this.gain.gain.value = this.mutedAll() ? 0 : this.volume();
     }
     if (!this.destination) {
       this.destination = this.context.createMediaStreamDestination();
@@ -208,6 +235,25 @@ export class RemoteAudioService {
 function currentAudioTrack(stream: MediaStream | null): MediaStreamTrack | null {
   const tracks = stream?.getAudioTracks() ?? [];
   return tracks.find((track) => track.readyState !== 'ended') ?? tracks[0] ?? null;
+}
+
+function readStoredVolume(): number {
+  try {
+    const stored = window.localStorage.getItem(VOLUME_STORAGE_KEY);
+    if (!stored) return DEFAULT_VOLUME;
+    const parsed = Number.parseFloat(stored);
+    return Number.isFinite(parsed) ? parsed : DEFAULT_VOLUME;
+  } catch {
+    return DEFAULT_VOLUME;
+  }
+}
+
+function persistVolume(value: number): void {
+  try {
+    window.localStorage.setItem(VOLUME_STORAGE_KEY, String(value));
+  } catch {
+    // best effort
+  }
 }
 
 declare global {
