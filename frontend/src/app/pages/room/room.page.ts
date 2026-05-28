@@ -992,7 +992,10 @@ export class RoomPage implements OnDestroy {
               tracks: state.tracks.filter((t) => t.status === 'live').map((t) => ({ trackName: t.trackName, kind: t.kind })),
             });
           }
-        })().catch((err: unknown) => console.error('[sfu-client] publish failed', err));
+        })().catch((err: unknown) => {
+          console.error('[sfu-client] publish failed', err);
+          this.actionNotice.set('Unable to start your audio/video. Please refresh the page.');
+        });
       }
       this.startDiagnosticsLogger();
       this.queueDiagnosticsLog('state-change');

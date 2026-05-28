@@ -42,6 +42,7 @@ const VIDEO_SIMULCAST_ENCODINGS: RTCRtpEncodingParameters[] = [
   { rid: 'm', scaleResolutionDownBy: 2, maxBitrate: 400_000 },
   { rid: 'l', scaleResolutionDownBy: 4, maxBitrate: 120_000 },
 ];
+const SFU_HTTP_TIMEOUT_MS = 6000;
 
 @Injectable({ providedIn: 'root' })
 export class SfuClientService {
@@ -355,12 +356,16 @@ export class SfuClientService {
     const rid = this.cameraRidNow();
     const priorityOrdering = rid === 'l' ? ['l', 'm', 'h'] : ['h', 'm', 'l'];
 
-    await firstValueFrom(
-      this.http.put('/api/sfu/tracks/update', {
-        ...creds,
-        cfSessionId: publishState.cfSessionId,
-        tracks: cameraMids.map((mid) => ({ mid, preferredRid: rid, priorityOrdering, ridNotAvailable: 'degrade' })),
-      }),
+    await withTimeout(
+      firstValueFrom(
+        this.http.put('/api/sfu/tracks/update', {
+          ...creds,
+          cfSessionId: publishState.cfSessionId,
+          tracks: cameraMids.map((mid) => ({ mid, preferredRid: rid, priorityOrdering, ridNotAvailable: 'degrade' })),
+        }),
+      ),
+      SFU_HTTP_TIMEOUT_MS,
+      'PUT /api/sfu/tracks/update',
     );
   }
 
@@ -475,7 +480,11 @@ export class SfuClientService {
     type CloseResp = { requiresImmediateRenegotiation?: boolean; sessionDescription?: RTCSessionDescriptionInit };
     let resp: CloseResp | null = null;
     try {
-      resp = await firstValueFrom(this.http.put<CloseResp>('/api/sfu/tracks/close', { ...creds, cfSessionId, tracks: mids.map((mid) => ({ mid })) }));
+      resp = await withTimeout(
+        firstValueFrom(this.http.put<CloseResp>('/api/sfu/tracks/close', { ...creds, cfSessionId, tracks: mids.map((mid) => ({ mid })) })),
+        SFU_HTTP_TIMEOUT_MS,
+        'PUT /api/sfu/tracks/close',
+      );
     } catch {
       // CF may reject close of remote-subscriber tracks — safe to ignore, CF auto-cleans on session GC
     }
@@ -484,12 +493,16 @@ export class SfuClientService {
         await this.pc.setRemoteDescription(resp.sessionDescription);
         const answer = await this.pc.createAnswer();
         await this.pc.setLocalDescription(answer);
-        await firstValueFrom(
-          this.http.put('/api/sfu/renegotiate', {
-            ...creds,
-            cfSessionId,
-            sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
-          }),
+        await withTimeout(
+          firstValueFrom(
+            this.http.put('/api/sfu/renegotiate', {
+              ...creds,
+              cfSessionId,
+              sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+            }),
+          ),
+          SFU_HTTP_TIMEOUT_MS,
+          'PUT /api/sfu/renegotiate',
         );
       } catch {
         // Renegotiation on close failed — PC may be in a partially stale state; next subscribe
@@ -523,15 +536,19 @@ export class SfuClientService {
     await this.pc.setLocalDescription(offer);
     const mid = transceiver.mid!;
 
-    const tracksRes = await firstValueFrom(
-      this.http.post<{ sessionDescription: RTCSessionDescriptionInit }>('/api/sfu/tracks', {
-        clientKey,
-        participantId,
-        sessionId,
-        cfSessionId,
-        sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
-        tracks: [{ location: 'local', mid, trackName }],
-      }),
+    const tracksRes = await withTimeout(
+      firstValueFrom(
+        this.http.post<{ sessionDescription: RTCSessionDescriptionInit }>('/api/sfu/tracks', {
+          clientKey,
+          participantId,
+          sessionId,
+          cfSessionId,
+          sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+          tracks: [{ location: 'local', mid, trackName }],
+        }),
+      ),
+      SFU_HTTP_TIMEOUT_MS,
+      'POST /api/sfu/tracks',
     );
 
     await this.pc.setRemoteDescription(tracksRes.sessionDescription);
@@ -554,12 +571,16 @@ export class SfuClientService {
     type CloseResponse = { requiresImmediateRenegotiation?: boolean; sessionDescription?: RTCSessionDescriptionInit };
     let closeRes: CloseResponse | null = null;
     try {
-      closeRes = await firstValueFrom(
-        this.http.put<CloseResponse>('/api/sfu/tracks/close', {
-          ...creds,
-          cfSessionId: publishState.cfSessionId,
-          tracks: [{ mid: screenTrack.mid }],
-        }),
+      closeRes = await withTimeout(
+        firstValueFrom(
+          this.http.put<CloseResponse>('/api/sfu/tracks/close', {
+            ...creds,
+            cfSessionId: publishState.cfSessionId,
+            tracks: [{ mid: screenTrack.mid }],
+          }),
+        ),
+        SFU_HTTP_TIMEOUT_MS,
+        'PUT /api/sfu/tracks/close',
       );
     } catch (err) {
       console.warn('[sfu] tracks/close for screen failed (track may already be gone):', err);
@@ -570,12 +591,16 @@ export class SfuClientService {
       await this.pc.setRemoteDescription(closeRes.sessionDescription);
       const answer = await this.pc.createAnswer();
       await this.pc.setLocalDescription(answer);
-      await firstValueFrom(
-        this.http.put('/api/sfu/renegotiate', {
-          ...creds,
-          cfSessionId: publishState.cfSessionId,
-          sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
-        }),
+      await withTimeout(
+        firstValueFrom(
+          this.http.put('/api/sfu/renegotiate', {
+            ...creds,
+            cfSessionId: publishState.cfSessionId,
+            sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+          }),
+        ),
+        SFU_HTTP_TIMEOUT_MS,
+        'PUT /api/sfu/renegotiate',
       );
     }
 
@@ -630,6 +655,7 @@ export class SfuClientService {
     this.callerCreds = null;
     this.localPublishState.set(null);
     this.setPublishPhase(null);
+    this.opQueue = Promise.resolve();
     this.clearAllSubscribeStuckWatchdogs();
 
     if (!publishState || !creds || publishState.status !== 'published') return;
@@ -661,6 +687,7 @@ export class SfuClientService {
     this.clearAllSubscribeStuckWatchdogs();
     this.localPublishState.set(null);
     this.setPublishPhase(null);
+    this.opQueue = Promise.resolve();
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
     this.remoteScreenStreams.set(new Map());
@@ -734,8 +761,10 @@ export class SfuClientService {
 
       // POST /api/sfu/session → cfSessionId
       this.setPublishPhase('cf-session');
-      const sessionRes = await firstValueFrom(
-        this.http.post<{ sessionId: string }>('/api/sfu/session', { clientKey, participantId, sessionId }),
+      const sessionRes = await withTimeout(
+        firstValueFrom(this.http.post<{ sessionId: string }>('/api/sfu/session', { clientKey, participantId, sessionId })),
+        SFU_HTTP_TIMEOUT_MS,
+        'POST /api/sfu/session',
       );
       const cfSessionId = sessionRes.sessionId;
 
@@ -751,15 +780,19 @@ export class SfuClientService {
 
       // POST /api/sfu/tracks → answer SDP (must include the offer SDP for CF to produce an answer)
       this.setPublishPhase('cf-tracks');
-      const tracksRes = await firstValueFrom(
-        this.http.post<{ sessionDescription: RTCSessionDescriptionInit }>('/api/sfu/tracks', {
-          clientKey,
-          participantId,
-          sessionId,
-          cfSessionId,
-          sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
-          tracks: trackParams.map(({ location, mid, trackName }) => ({ location, mid, trackName })),
-        }),
+      const tracksRes = await withTimeout(
+        firstValueFrom(
+          this.http.post<{ sessionDescription: RTCSessionDescriptionInit }>('/api/sfu/tracks', {
+            clientKey,
+            participantId,
+            sessionId,
+            cfSessionId,
+            sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+            tracks: trackParams.map(({ location, mid, trackName }) => ({ location, mid, trackName })),
+          }),
+        ),
+        SFU_HTTP_TIMEOUT_MS,
+        'POST /api/sfu/tracks',
       );
 
       // setRemoteDescription with CF answer
@@ -817,18 +850,22 @@ export class SfuClientService {
     // Snapshot existing transceiver mids before POST — new ones added by CF renegotiation
     const existingMids = new Set(this.pc.getTransceivers().map((t) => t.mid).filter((m): m is string => !!m));
 
-    const res = await firstValueFrom(
-      this.http.post<CfTracksResponse>('/api/sfu/tracks', {
-        ...creds,
-        cfSessionId,
-        tracks: tracks.map((t) => {
-          const base = { location: 'remote' as const, sessionId: publisher.cfSessionId, trackName: t.trackName };
-          if (t.kind === 'video') {
-            return { ...base, preferredRid: rid, priorityOrdering, ridNotAvailable: 'degrade' };
-          }
-          return base;
+    const res = await withTimeout(
+      firstValueFrom(
+        this.http.post<CfTracksResponse>('/api/sfu/tracks', {
+          ...creds,
+          cfSessionId,
+          tracks: tracks.map((t) => {
+            const base = { location: 'remote' as const, sessionId: publisher.cfSessionId, trackName: t.trackName };
+            if (t.kind === 'video') {
+              return { ...base, preferredRid: rid, priorityOrdering, ridNotAvailable: 'degrade' };
+            }
+            return base;
+          }),
         }),
-      }),
+      ),
+      SFU_HTTP_TIMEOUT_MS,
+      'POST /api/sfu/tracks',
     );
 
     // CF returns mid:"" for ALL remote-subscribe tracks. With audio+video together that means
@@ -866,12 +903,16 @@ export class SfuClientService {
         nextSubscribed.set(r.realMid, entry);
       }
 
-      await firstValueFrom(
-        this.http.put('/api/sfu/renegotiate', {
-          ...creds,
-          cfSessionId,
-          sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
-        }),
+      await withTimeout(
+        firstValueFrom(
+          this.http.put('/api/sfu/renegotiate', {
+            ...creds,
+            cfSessionId,
+            sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+          }),
+        ),
+        SFU_HTTP_TIMEOUT_MS,
+        'PUT /api/sfu/renegotiate',
       );
     } else {
       // No renegotiation — CF mids should be valid (non-empty) in this path
@@ -885,5 +926,19 @@ export class SfuClientService {
 
     // Set signal after mids are reconciled (not before — subscribedTracks must reflect real mids)
     this.subscribedTracks.set(nextSubscribed);
+  }
+}
+
+async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
   }
 }
