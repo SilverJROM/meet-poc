@@ -308,13 +308,51 @@ h1 {
 
 .room-actions {
   align-self: end;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  display: grid;
+  gap: 10px;
 }
 
 .room-actions > * {
-  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.room-action-section {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.quick-actions {
+  grid-template-columns: minmax(112px, 1fr) auto;
+  align-items: center;
+  border-radius: 8px;
+  background: #f8fafd;
+  padding: 8px;
+}
+
+.action-section-label {
+  color: #80868b;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.access-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.danger-section {
+  border-top: 1px solid #e0e3e7;
+  margin-top: 2px;
+  padding-top: 12px;
+}
+
+.danger-label {
+  color: #d93025;
 }
 
 .secondary-btn,
@@ -340,6 +378,29 @@ h1 {
   background: #fff;
 }
 
+.room-actions .danger-btn:hover {
+  border-color: #d93025;
+  color: #fff;
+  background: #d93025;
+}
+
+.access-toggle {
+  border-radius: 999px;
+  font-weight: 800;
+}
+
+.access-toggle.open {
+  border-color: #137333;
+  color: #fff;
+  background: #137333;
+}
+
+.access-toggle.open:hover {
+  border-color: #0f5f2b;
+  color: #fff;
+  background: #0f5f2b;
+}
+
 .wait-timeout-control {
   min-height: 38px;
   display: inline-flex;
@@ -354,8 +415,15 @@ h1 {
   font-weight: 800;
 }
 
+.timeout-input-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #5f6368;
+}
+
 .wait-timeout-control input {
-  width: 60px;
+  width: 80px;
   min-height: 28px;
   border-radius: 6px;
   padding: 3px 6px;
@@ -453,7 +521,13 @@ h1 {
     white-space: nowrap;
   }
 
-  .room-actions > * {
-    flex: 1 1 auto;
+  .quick-actions,
+  .access-controls {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .access-controls {
+    display: grid;
   }
 }
