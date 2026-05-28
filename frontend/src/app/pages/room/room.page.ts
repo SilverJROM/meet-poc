@@ -942,19 +942,28 @@ export class RoomPage implements OnDestroy {
       this.status.set(wasInCall ? 'Reconnected to signaling. Syncing peers...' : `You are ${this.displayName().trim() || 'Anon'}${msg.isOwner ? ' (host)' : ''}.`);
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
       if (msg.participantId && msg.sessionId) {
-        void this.sfuClient
-          .publish({ clientKey: readClientKey(), participantId: msg.participantId, sessionId: msg.sessionId, localStream: this.media.localStream() })
-          .then(() => {
-            const state = this.sfuClient.localPublishState();
-            if (state?.status === 'published') {
-              this.ws.send({
-                type: 'sfu-publish',
-                cfSessionId: state.cfSessionId,
-                tracks: state.tracks.filter((t) => t.status === 'live').map((t) => ({ trackName: t.trackName, kind: t.kind })),
-              });
-            }
-          })
-          .catch((err: unknown) => console.error('[sfu-client] publish failed', err));
+        const participantId = msg.participantId;
+        const sessionId = msg.sessionId;
+        void (async () => {
+          const deadline = Date.now() + 5000;
+          let stream = this.media.localStream();
+          while (!stream?.getAudioTracks().some((t) => t.readyState !== 'ended') && Date.now() < deadline) {
+            await new Promise<void>((r) => setTimeout(r, 100));
+            stream = this.media.localStream();
+          }
+          if (!stream?.getAudioTracks().some((t) => t.readyState !== 'ended')) {
+            console.warn('[sfu] publish proceeding without live audio track — mic may be unavailable');
+          }
+          await this.sfuClient.publish({ clientKey: readClientKey(), participantId, sessionId, localStream: stream });
+          const state = this.sfuClient.localPublishState();
+          if (state?.status === 'published') {
+            this.ws.send({
+              type: 'sfu-publish',
+              cfSessionId: state.cfSessionId,
+              tracks: state.tracks.filter((t) => t.status === 'live').map((t) => ({ trackName: t.trackName, kind: t.kind })),
+            });
+          }
+        })().catch((err: unknown) => console.error('[sfu-client] publish failed', err));
       }
       this.startDiagnosticsLogger();
       this.queueDiagnosticsLog('state-change');
