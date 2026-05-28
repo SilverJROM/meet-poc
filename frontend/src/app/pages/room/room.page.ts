@@ -1868,10 +1868,6 @@ export class RoomPage implements OnDestroy {
     return this.shareCameraManualOverride();
   }
 
-  private effectiveCameraState(cam: boolean): boolean {
-    return cam && this.cameraVisibleDuringCurrentShare();
-  }
-
   private broadcastMediaState(mic: boolean, cam: boolean, screenOn = this.media.screenOn()): void {
     this.ws.send({ type: 'media-state', mic, cam, screenOn });
     this.queueDiagnosticsLog('state-change');
