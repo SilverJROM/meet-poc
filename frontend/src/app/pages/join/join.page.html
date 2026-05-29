@@ -2,39 +2,60 @@
   <section class="join-card" aria-labelledby="join-title">
     <div class="join-heading">
       <p>Join a meeting</p>
-      <h1 id="join-title">Enter a room code</h1>
+      <h1 id="join-title">Enter a room name</h1>
     </div>
 
     <form class="join-form" novalidate (ngSubmit)="submitJoin()">
       <label class="field" for="room-code">
-        <span>Room code</span>
+        <span>Room name or code</span>
         <input
           id="room-code"
           name="roomCode"
           type="text"
           autocomplete="off"
           maxlength="128"
-          placeholder="abc123"
+          placeholder="e.g. JROM Room"
           [ngModel]="roomCode()"
-          (ngModelChange)="roomCode.set($event)"
+          (ngModelChange)="onRoomCodeChange($event)"
           [disabled]="busy()"
         >
       </label>
 
-      <label class="field" for="guest-name">
-        <span>Your name</span>
-        <input
-          id="guest-name"
-          name="displayName"
-          type="text"
-          autocomplete="name"
-          maxlength="80"
-          placeholder="Jamie"
-          [ngModel]="displayName()"
-          (ngModelChange)="displayName.set($event)"
-          [disabled]="busy()"
-        >
-      </label>
+      @if (needsPassword()) {
+        <label class="field" for="room-password">
+          <span>Room password@if (foundRoomTitle()) { <small> — {{ foundRoomTitle() }}</small> }</span>
+          <input
+            id="room-password"
+            name="roomPassword"
+            type="password"
+            autocomplete="off"
+            maxlength="200"
+            placeholder="This room is protected"
+            [ngModel]="roomPassword()"
+            (ngModelChange)="roomPassword.set($event); error.set(null)"
+            [disabled]="busy()"
+          >
+        </label>
+      }
+
+      @if (ready() && signedIn()) {
+        <p class="join-as">Joining as <strong>{{ accountName() }}</strong></p>
+      } @else {
+        <label class="field" for="guest-name">
+          <span>Your name</span>
+          <input
+            id="guest-name"
+            name="displayName"
+            type="text"
+            autocomplete="name"
+            maxlength="80"
+            placeholder="Jamie"
+            [ngModel]="displayName()"
+            (ngModelChange)="displayName.set($event)"
+            [disabled]="busy()"
+          >
+        </label>
+      }
 
       @if (error()) {
         <p class="inline-error" role="alert">{{ error() }}</p>
@@ -45,6 +66,8 @@
       </button>
     </form>
 
-    <a routerLink="/login">Host sign in</a>
+    @if (ready() && !signedIn()) {
+      <a routerLink="/login">Host sign in</a>
+    }
   </section>
 </main>

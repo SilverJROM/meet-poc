@@ -1,7 +1,18 @@
 <header class="controls-bar" aria-label="Call controls">
   <div class="meeting-corner meeting-corner-left">
-    <span class="meeting-clock" aria-label="Meeting elapsed time">{{ elapsedLabel() }}</span>
-    <span class="room-label">{{ roomLabel() }}</span>
+    <span class="room-label" [attr.title]="roomLabel()">{{ roomLabel() }}</span>
+    <span class="meeting-aside" aria-hidden="false">
+      <span class="meeting-clock" aria-label="Meeting elapsed time">{{ elapsedLabel() }}</span>
+      @if (connectionQualityLabel()) {
+        <span
+          class="connection-quality-dot"
+          role="img"
+          [attr.data-tone]="connectionQualityTone()"
+          [attr.title]="connectionQualityTitle() || connectionQualityLabel()"
+          [attr.aria-label]="'Connection: ' + (connectionQualityTitle() || connectionQualityLabel())"
+        ></span>
+      }
+    </span>
   </div>
 
   <div class="controls" aria-label="Primary call controls">

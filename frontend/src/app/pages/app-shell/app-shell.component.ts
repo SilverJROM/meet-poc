@@ -1,4 +1,4 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, inject, signal } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, computed, inject, signal } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { addIcons } from 'ionicons';
 import {
@@ -6,6 +6,7 @@ import {
   chevronForwardOutline,
   documentTextOutline,
   logOutOutline,
+  peopleOutline,
   pulseOutline,
   radioOutline,
   recordingOutline,
@@ -39,9 +40,9 @@ export class AppShellComponent {
   readonly user = this.auth.user;
   readonly collapsed = signal(this.readInitialCollapsed());
   readonly currentUrl = signal(this.router.url);
-  readonly pageTitle = () => this.navItems.find((item) => this.currentUrl().startsWith(item.path))?.label || 'Rooms';
+  readonly pageTitle = () => this.navItems().find((item) => this.currentUrl().startsWith(item.path))?.label || 'Rooms';
 
-  readonly navItems: NavItem[] = [
+  private readonly baseNavItems: NavItem[] = [
     { label: 'Rooms', path: '/app/rooms', icon: 'videocam-outline' },
     { label: 'Ongoing meetings', path: '/app/ongoing', icon: 'radio-outline' },
     { label: 'Past meetings', path: '/app/past', icon: 'time-outline' },
@@ -51,12 +52,20 @@ export class AppShellComponent {
     { label: 'Settings', path: '/app/settings', icon: 'settings-outline' },
   ];
 
+  // Admin tab is appended only for admins (R5 — UI gated; route + API also gated).
+  readonly navItems = computed<NavItem[]>(() =>
+    this.user()?.isAdmin
+      ? [...this.baseNavItems, { label: 'User admin', path: '/app/admin', icon: 'people-outline' }]
+      : this.baseNavItems,
+  );
+
   constructor() {
     addIcons({
       chevronBackOutline,
       chevronForwardOutline,
       documentTextOutline,
       logOutOutline,
+      peopleOutline,
       pulseOutline,
       radioOutline,
       recordingOutline,

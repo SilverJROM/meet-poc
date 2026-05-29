@@ -1,0 +1,13 @@
+{
+  "workflow_id": 6,
+  "label": "VOICE App \u00b7 Phase 2a \u2014 share-approval persistence + mobile fallback",
+  "session": "lkvc",
+  "child_sessions": [
+    "lkvc-38-codex"
+  ],
+  "child_roles": [
+    "codex"
+  ],
+  "last_hash": "245acd52f8c5377abb2a8da01cacb54a5dc700bd4fa560ea5958b7bcd297edc7",
+  "last_sync_at": "2026-05-28T10:49:47+00:00"
+}

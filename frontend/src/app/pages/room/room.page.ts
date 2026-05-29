@@ -2,7 +2,7 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, HostListener, OnDestroy,
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
-import { colorWandOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
+import { arrowBackOutline, colorWandOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
 import { BackgroundPickerComponent } from '../../components/background-picker/background-picker.component';
 import { ControlsBarComponent } from '../../components/controls-bar/controls-bar.component';
 import { DeviceDialogComponent } from '../../components/device-dialog/device-dialog.component';
@@ -18,7 +18,7 @@ import { AuthService } from '../../services/auth.service';
 import { BackgroundEffectsService } from '../../services/background-effects.service';
 import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
-import type { DiagnosticsPayload, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
+import type { DiagnosticsPayload, SfuConnectionQuality, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
@@ -31,12 +31,15 @@ import { SfuClientService, type LocalPublishState } from '../../services/sfu-cli
 
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
+const CONNECTION_QUALITY_SAMPLE_INTERVAL_MS = 5_000;
+const CONNECTION_QUALITY_EPISODE_SAMPLES = 3;
 const DIAGNOSTICS_LOGGING_STORAGE_KEY = 'meet-poc.diagnosticsLogging';
 const EQUAL_SIZE_TILES_STORAGE_KEY = 'meet-poc.layout.equalSizeTiles';
 const LOCAL_TRACK_MUTE_DEBOUNCE_MS = 1_200;
 const DEVICE_RECOVERY_MAX_ATTEMPTS = 3;
 const DEVICE_RECOVERY_BACKOFF_MS = 650;
 const GUEST_DISPLAY_NAME_KEY = 'guestDisplayName';
+const ROOM_PASSWORD_PREFIX = 'meet-poc.roompw.';
 const CHAT_EVERYONE_THREAD = 'everyone';
 
 type RoomState = 'checking' | 'not-found' | 'lobby' | 'connecting' | 'waiting-room' | 'knocking' | 'in-call' | 'rejected' | 'error';
@@ -44,9 +47,11 @@ type ChatMessage = { id: string; clientId: string; sender: string; text: string;
 type ChatRecipientTab = { id: string; name: string; online: boolean };
 type ShareRequest = { clientId: string; name: string };
 type TransientReaction = { id: string; clientId: string; kind: Exclude<ReactionKind, 'raise-hand'>; timestamp: number };
+type ConnectionQualityTone = 'good' | 'fair' | 'poor' | 'relayed';
 type LobbyError =
   | { kind: 'denied' }
   | { kind: 'no-devices' }
+  | { kind: 'in-use' }
   | { kind: 'video-denied-but-audio-ok' }
   | { kind: 'unknown'; message: string };
 
@@ -112,6 +117,11 @@ export class RoomPage implements OnDestroy {
   readonly guestNameOverlayOpen = signal(false);
   readonly guestDisplayNameDraft = signal(readGuestDisplayName());
   readonly guestNameError = signal<string | null>(null);
+  readonly passwordPromptOpen = signal(false);
+  readonly passwordDraft = signal('');
+  readonly passwordError = signal<string | null>(null);
+  readonly passwordBusy = signal(false);
+  private verifiedRoomPassword: string | null = null;
   readonly nameError = signal<string | null>(null);
   readonly microphoneRequested = signal(true);
   readonly cameraRequested = signal(false);
@@ -236,6 +246,32 @@ export class RoomPage implements OnDestroy {
     return result;
   });
   readonly remotePeerCount = computed(() => this.peers().filter((peer) => !peer.isLocal).length);
+  readonly connectionQuality = computed(() => this.sfuClient.connectionQuality());
+  readonly connectionQualityLabel = computed(() => {
+    const quality = this.connectionQuality();
+    if (!quality || quality.band === 'unknown') return null;
+    if (quality.band === 'poor') return 'Poor connection';
+    if (quality.route === 'relayed') return 'Relayed';
+    if (quality.band === 'fair') return 'Fair';
+    return 'Good';
+  });
+  readonly connectionQualityTone = computed<ConnectionQualityTone | null>(() => {
+    const quality = this.connectionQuality();
+    if (!quality || quality.band === 'unknown') return null;
+    if (quality.band === 'poor') return 'poor';
+    if (quality.route === 'relayed') return 'relayed';
+    return quality.band;
+  });
+  readonly connectionQualityTitle = computed(() => {
+    const quality = this.connectionQuality();
+    if (!quality || quality.band === 'unknown') return null;
+    return [
+      `Route: ${quality.route}`,
+      `RTT: ${formatMetric(quality.rttMs, 'ms')}`,
+      `Loss: ${formatMetric(quality.packetLossPct, '%')}`,
+      `Jitter: ${formatMetric(quality.jitterMs, 'ms')}`,
+    ].join(' | ');
+  });
   readonly remoteEmphasisActive = computed(() => this.remotePeerCount() > 0 && !this.equalSizeTiles());
   readonly chatRecipientTabs = computed<ChatRecipientTab[]>(() => {
     const myId = this.myId();
@@ -316,8 +352,14 @@ export class RoomPage implements OnDestroy {
   private preflightTimer: ReturnType<typeof setTimeout> | null = null;
   private waitingRoomTimer: ReturnType<typeof setInterval> | null = null;
   private diagnosticsLogTimer: ReturnType<typeof setInterval> | null = null;
+  private connectionQualityTimer: ReturnType<typeof setInterval> | null = null;
   private lastDiagnosticsEventAt = 0;
   private diagnosticsLogInFlight = false;
+  private connectionQualityInFlight = false;
+  private relayedConnectionSamples = 0;
+  private poorConnectionSamples = 0;
+  private relayEpisodeNotified = false;
+  private poorEpisodeNotified = false;
   private shareCameraActive = false;
   private shareCameraPreShareOn: boolean | null = null;
   private readonly shareCameraManualOverride = signal(false);
@@ -347,7 +389,7 @@ export class RoomPage implements OnDestroy {
   });
 
   constructor() {
-    addIcons({ colorWandOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline });
+    addIcons({ arrowBackOutline, colorWandOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline });
     this.installPageLifecycleCleanup();
     this.installDeviceChangeHandler();
     void this.bootstrap();
@@ -419,6 +461,7 @@ export class RoomPage implements OnDestroy {
         activeSpeakerContextState: this.activeSpeaker.contextState(),
         remoteAudioMixer: this.remoteAudio.debugSnapshot(),
         sfuPublishState: this.sfuClient.localPublishState(),
+        sfuConnectionQuality: this.sfuClient.connectionQuality(),
         sfuRemoteStreams: this.sfuClient.remoteStreams(),
         sfuRemoteScreenStreams: this.sfuClient.remoteScreenStreams(),
         closeSignalingForTest: () => this.ws.debugDropForReconnect(),
@@ -507,10 +550,11 @@ export class RoomPage implements OnDestroy {
     await this.auth.checkSession();
     const user = this.auth.user();
     const storedName = readGuestDisplayName();
-    if (storedName && !this.displayName()) {
+    if (user && !this.displayName()) {
+      // Authenticated users default to their account username (R1).
+      this.displayName.set(user.displayName || user.email.split('@')[0] || user.email);
+    } else if (storedName && !this.displayName()) {
       this.displayName.set(storedName);
-    } else if (user && !this.displayName()) {
-      this.displayName.set(user.email.split('@')[0] || user.email);
     }
     try {
       const info = await this.rooms.exists(this.roomKey);
@@ -524,6 +568,16 @@ export class RoomPage implements OnDestroy {
       this.roomTitle.set(info.title ?? 'Untitled room');
       this.roomOpen.set(!!info.isOpen);
       this.state.set('lobby');
+      // A password verified on the /join page is stashed by slug — pick it up
+      // so we join without re-prompting (works for both guest + signed-in paths).
+      if (info.passwordRequired && !info.isOwner) {
+        const stashed = readStoredRoomPassword(this.roomSlug()) ?? readStoredRoomPassword(this.roomKey);
+        if (stashed) {
+          this.verifiedRoomPassword = stashed;
+          clearStoredRoomPassword(this.roomSlug());
+          clearStoredRoomPassword(this.roomKey);
+        }
+      }
       if (this.joinRouteMode && !user) {
         if (!info.isOpen) {
           this.error.set('Room is not available.');
@@ -532,6 +586,12 @@ export class RoomPage implements OnDestroy {
         }
         this.guestDisplayNameDraft.set(readGuestDisplayName());
         this.guestNameOverlayOpen.set(true);
+        return;
+      }
+      if (info.passwordRequired && !info.isOwner && !this.verifiedRoomPassword) {
+        this.passwordDraft.set('');
+        this.passwordError.set(null);
+        this.passwordPromptOpen.set(true);
         return;
       }
       this.prepareLobbyDeviceCheck();
@@ -553,6 +613,32 @@ export class RoomPage implements OnDestroy {
     this.guestNameError.set(null);
     this.guestNameOverlayOpen.set(false);
     this.prepareLobbyDeviceCheck();
+  }
+
+  async submitRoomPassword(): Promise<void> {
+    if (this.passwordBusy()) return;
+    const candidate = this.passwordDraft();
+    if (!candidate) {
+      this.passwordError.set('Enter the password.');
+      return;
+    }
+    this.passwordBusy.set(true);
+    this.passwordError.set(null);
+    try {
+      const ok = await this.rooms.verifyPassword(this.roomSlug() || this.roomId, candidate);
+      if (!ok) {
+        this.passwordError.set('Incorrect password.');
+        return;
+      }
+      this.verifiedRoomPassword = candidate;
+      this.passwordPromptOpen.set(false);
+      this.passwordDraft.set('');
+      this.prepareLobbyDeviceCheck();
+    } catch {
+      this.passwordError.set('Unable to verify password. Try again.');
+    } finally {
+      this.passwordBusy.set(false);
+    }
   }
 
   async join(): Promise<void> {
@@ -1152,7 +1238,7 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'waiting-timeout') {
       this.stopWaitingRoomCountdown();
-      this.ws.close();
+      this.cleanupCall();
       this.error.set(msg.message);
       this.state.set('error');
       return;
@@ -1161,6 +1247,15 @@ export class RoomPage implements OnDestroy {
       this.cleanupCall();
       this.error.set(msg.reason ? `Host: ${msg.reason}` : 'The host rejected your request.');
       this.state.set('rejected');
+      return;
+    }
+    if (msg.type === 'displaced') {
+      // This room was resumed by another tab/device with the same identity.
+      // cleanupCall closes the socket intentionally, so we do NOT auto-reconnect
+      // (which would ping-pong with the other session).
+      this.cleanupCall();
+      this.error.set('This room was opened in another tab or device. Close this one, or rejoin to take over here.');
+      this.state.set('error');
       return;
     }
     if (msg.type === 'admitted') {
@@ -1227,6 +1322,7 @@ export class RoomPage implements OnDestroy {
         });
       }
       this.startDiagnosticsLogger();
+      this.startConnectionQualitySampler();
       this.queueDiagnosticsLog('state-change');
       if (wasInCall) this.status.set('Reconnected.');
       return;
@@ -1823,6 +1919,7 @@ export class RoomPage implements OnDestroy {
   private cleanupCall(sendLeaveMessage = false): void {
     if (this.state() === 'in-call') this.flushDiagnosticsLog('call-end', { useBeacon: true });
     this.stopDiagnosticsLogger();
+    this.stopConnectionQualitySampler();
     this.clearLocalTrackRecoveryTimers();
     this.clearPreflightTimer();
     this.stopWaitingRoomCountdown();
@@ -1996,15 +2093,26 @@ export class RoomPage implements OnDestroy {
   private installPageLifecycleCleanup(): void {
     window.addEventListener('pagehide', this.handlePageLifecycleLeave);
     window.addEventListener('beforeunload', this.handlePageLifecycleLeave);
+    document.addEventListener('visibilitychange', this.handleLobbyVisibilityRelease);
   }
 
   private uninstallPageLifecycleCleanup(): void {
     window.removeEventListener('pagehide', this.handlePageLifecycleLeave);
     window.removeEventListener('beforeunload', this.handlePageLifecycleLeave);
+    document.removeEventListener('visibilitychange', this.handleLobbyVisibilityRelease);
   }
 
   private readonly handlePageLifecycleLeave = (): void => {
     this.cleanupCall();
+  };
+
+  // While in lobby (not yet in the call), release camera/mic if the tab is
+  // hidden so other tabs/apps can use the device. Don't touch the stream
+  // during an active call — that would drop the feed for everyone else.
+  private readonly handleLobbyVisibilityRelease = (): void => {
+    if (document.visibilityState !== 'hidden') return;
+    if (this.state() === 'in-call') return;
+    if (this.media.localStream()) this.media.stopLocal();
   };
 
   private attachLocalTrackFailureHandlers(stream: MediaStream): void {
@@ -2222,6 +2330,68 @@ export class RoomPage implements OnDestroy {
     this.diagnosticsLogInFlight = false;
   }
 
+  private startConnectionQualitySampler(): void {
+    if (this.connectionQualityTimer || this.state() !== 'in-call') return;
+    void this.sampleConnectionQuality();
+    this.connectionQualityTimer = window.setInterval(() => {
+      void this.sampleConnectionQuality();
+    }, CONNECTION_QUALITY_SAMPLE_INTERVAL_MS);
+  }
+
+  private stopConnectionQualitySampler(): void {
+    if (this.connectionQualityTimer) clearInterval(this.connectionQualityTimer);
+    this.connectionQualityTimer = null;
+    this.connectionQualityInFlight = false;
+    this.relayedConnectionSamples = 0;
+    this.poorConnectionSamples = 0;
+    this.relayEpisodeNotified = false;
+    this.poorEpisodeNotified = false;
+    this.sfuClient.resetConnectionQuality();
+  }
+
+  private async sampleConnectionQuality(): Promise<void> {
+    if (this.connectionQualityInFlight || this.state() !== 'in-call') return;
+    this.connectionQualityInFlight = true;
+    try {
+      const quality = await this.sfuClient.collectConnectionQuality();
+      this.trackConnectionQualityEpisode(quality);
+    } catch (err) {
+      console.debug('[sfu] connection quality sample failed', err);
+    } finally {
+      this.connectionQualityInFlight = false;
+    }
+  }
+
+  private trackConnectionQualityEpisode(quality: SfuConnectionQuality | null): void {
+    if (quality?.route === 'relayed') {
+      this.relayedConnectionSamples += 1;
+    } else {
+      this.relayedConnectionSamples = 0;
+      this.relayEpisodeNotified = false;
+    }
+
+    if (quality?.band === 'poor') {
+      this.poorConnectionSamples += 1;
+    } else {
+      this.poorConnectionSamples = 0;
+      this.poorEpisodeNotified = false;
+    }
+
+    if (quality && this.relayedConnectionSamples >= CONNECTION_QUALITY_EPISODE_SAMPLES && !this.relayEpisodeNotified) {
+      this.relayEpisodeNotified = true;
+      console.warn('[sfu] local connection stuck on TURN relay', quality);
+      this.actionNotice.set('Your connection is using relay. Call quality may be reduced.');
+      this.queueDiagnosticsLog('state-change');
+    }
+
+    if (quality && this.poorConnectionSamples >= CONNECTION_QUALITY_EPISODE_SAMPLES && !this.poorEpisodeNotified) {
+      this.poorEpisodeNotified = true;
+      console.warn('[sfu] sustained poor local connection quality', quality);
+      this.actionNotice.set('Poor connection detected. Audio or video may lag.');
+      this.queueDiagnosticsLog('state-change');
+    }
+  }
+
   private queueDiagnosticsLog(kind: DiagnosticsPayload['kind'], error?: string): void {
     if (this.state() !== 'in-call' || !this.currentSessionId() || !this.diagnosticsLoggingEnabled()) return;
     this.startDiagnosticsLogger();
@@ -2416,6 +2586,7 @@ export class RoomPage implements OnDestroy {
       supportsReconnect: true,
       reconnectToken: this.reconnectToken() || undefined,
       clientKey: readClientKey(),
+      password: this.verifiedRoomPassword ?? undefined,
     });
   }
 
@@ -2445,6 +2616,7 @@ function localMessageId(): string {
 function toLobbyError(error: MediaError): LobbyError {
   if (error.code === 'denied') return { kind: 'denied' };
   if (error.code === 'no-devices') return { kind: 'no-devices' };
+  if (error.code === 'in-use') return { kind: 'in-use' };
   return { kind: 'unknown', message: error.message || 'Media access failed' };
 }
 
@@ -2476,14 +2648,18 @@ function reconnectTokenKey(roomKey: string): string {
 
 function readClientKey(): string {
   const storageKey = 'meet-poc.clientKey';
+  // Per-TAB identity (sessionStorage), not per-browser (localStorage). Two tabs
+  // of the same room get distinct identities, so they no longer supersede each
+  // other in an endless reconnect loop. Reload within a tab still resumes
+  // (sessionStorage survives reload); closing the tab ends the session.
   try {
-    const existing = window.localStorage.getItem(storageKey);
+    const existing = window.sessionStorage.getItem(storageKey);
     if (existing) return existing;
     const generated =
       typeof window.crypto?.randomUUID === 'function'
         ? window.crypto.randomUUID()
         : `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    window.localStorage.setItem(storageKey, generated);
+    window.sessionStorage.setItem(storageKey, generated);
     return generated;
   } catch {
     return `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -2554,6 +2730,22 @@ function readGuestDisplayName(): string {
   }
 }
 
+function readStoredRoomPassword(slug: string): string | null {
+  try {
+    return window.sessionStorage.getItem(ROOM_PASSWORD_PREFIX + slug);
+  } catch {
+    return null;
+  }
+}
+
+function clearStoredRoomPassword(slug: string): void {
+  try {
+    window.sessionStorage.removeItem(ROOM_PASSWORD_PREFIX + slug);
+  } catch {
+    // Best effort only.
+  }
+}
+
 function storeGuestDisplayName(name: string): void {
   try {
     window.localStorage.setItem(GUEST_DISPLAY_NAME_KEY, name);
@@ -2580,6 +2772,11 @@ function preferredDeviceId(key: string, devices: MediaDeviceInfo[], current: str
 
 function audioTrackDeviceId(track: MediaStreamTrack | null | undefined): string {
   return mediaTrackDeviceId(track);
+}
+
+function formatMetric(value: number | null, unit: 'ms' | '%'): string {
+  if (value === null) return 'n/a';
+  return unit === '%' ? `${value.toFixed(1)}%` : `${Math.round(value)} ms`;
 }
 
 function mediaTrackDeviceId(track: MediaStreamTrack | null | undefined): string {
@@ -2667,6 +2864,7 @@ declare global {
         mixedTrackIds: string[];
       };
       sfuPublishState?: LocalPublishState | null;
+      sfuConnectionQuality?: SfuConnectionQuality | null;
       sfuRemoteStreams?: Map<string, MediaStream>;
       sfuRemoteScreenStreams?: Map<string, MediaStream>;
       sfuGetStats?: () => Promise<RTCStatsReport | null>;

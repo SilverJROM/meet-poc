@@ -42,7 +42,12 @@ export function authRouter(database: Database.Database = getDb()): Router {
     const token = createSession(user.email, database);
     res.setHeader('Set-Cookie', serializeSessionCookie(req, token, Math.floor(SESSION_TTL_MS / 1000)));
     console.log(`[login] OK from ${ip}: "${user.email}"`);
-    return res.json({ email: user.email });
+    const sessionUser = getSessionUser(token, database);
+    return res.json({
+      email: user.email,
+      displayName: sessionUser?.displayName ?? user.email.split('@')[0] ?? user.email,
+      isAdmin: sessionUser?.isAdmin ?? false,
+    });
   });
 
   router.post('/logout', (req, res) => {
@@ -56,7 +61,7 @@ export function authRouter(database: Database.Database = getDb()): Router {
     const cookies = parseCookies(req.headers.cookie);
     const user = getSessionUser(cookies.session, database);
     if (!user) return res.json({ user: null });
-    return res.json({ user: { email: user.email } });
+    return res.json({ user: { email: user.email, displayName: user.displayName, isAdmin: user.isAdmin } });
   });
 
   return router;

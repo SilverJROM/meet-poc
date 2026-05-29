@@ -4,7 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { addIcons } from 'ionicons';
-import { clipboardOutline, closeOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline } from 'ionicons/icons';
+import { checkmarkOutline, chevronDownOutline, chevronUpOutline, clipboardOutline, closeOutline, createOutline, keyOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline } from 'ionicons/icons';
 import { PaginationComponent } from '../../components/pagination/pagination.component';
 import { Room, RoomsService } from '../../services/rooms.service';
 
@@ -37,6 +37,12 @@ export class RoomsPage implements OnDestroy {
   readonly searchQuery = signal('');
   readonly origin = window.location.origin;
   readonly hasRooms = computed(() => this.rooms().length > 0);
+  readonly editingTitleId = signal<string | null>(null);
+  readonly editingPasswordId = signal<string | null>(null);
+  readonly passwordExpandedId = signal<string | null>(null);
+  readonly titleDraft = signal('');
+  readonly passwordDraft = signal('');
+  readonly editBusyId = signal<string | null>(null);
   readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   readonly selectedCount = computed(() => this.selectedIds().size);
   readonly allOnPageSelected = computed(() => {
@@ -47,7 +53,7 @@ export class RoomsPage implements OnDestroy {
   });
 
   constructor() {
-    addIcons({ clipboardOutline, closeOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline });
+    addIcons({ checkmarkOutline, chevronDownOutline, chevronUpOutline, clipboardOutline, closeOutline, createOutline, keyOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline });
     this.querySub = this.route.queryParamMap.subscribe((params) => {
       this.page.set(readPositiveInt(params.get('page'), 1));
       this.pageSize.set(Math.min(readPositiveInt(params.get('pageSize'), DEFAULT_PAGE_SIZE), 100));
@@ -70,16 +76,6 @@ export class RoomsPage implements OnDestroy {
 
   roomUrlKey(room: Room): string {
     return room.slug || room.id;
-  }
-
-  async openRoom(room: Room): Promise<void> {
-    await this.router.navigate(['/room', this.roomUrlKey(room)]);
-  }
-
-  async onRoomRowKeydown(event: KeyboardEvent, room: Room): Promise<void> {
-    if (event.key !== 'Enter' && event.key !== ' ') return;
-    event.preventDefault();
-    await this.openRoom(room);
   }
 
   async refreshRooms(): Promise<void> {
@@ -147,20 +143,102 @@ export class RoomsPage implements OnDestroy {
     }
   }
 
-  async copyRoomCode(room: Room, event?: Event): Promise<void> {
+  startEditTitle(room: Room, event?: Event): void {
     event?.stopPropagation();
-    const code = this.roomUrlKey(room);
+    this.titleDraft.set(room.title);
+    this.editingTitleId.set(room.id);
+  }
+
+  cancelEditTitle(event?: Event): void {
+    event?.stopPropagation();
+    this.editingTitleId.set(null);
+    this.titleDraft.set('');
+  }
+
+  async saveEditTitle(room: Room, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    const value = this.titleDraft().trim();
+    if (!value || value === room.title) {
+      this.cancelEditTitle();
+      return;
+    }
+    this.editBusyId.set(room.id);
+    this.error.set(null);
     try {
-      await navigator.clipboard.writeText(code);
-      this.copyStatus.set('Copied room code');
+      const updated = await this.roomsService.setTitle(room.id, value);
+      this.rooms.update((rooms) => rooms.map((item) => (item.id === updated.id ? updated : item)));
+      this.copyStatus.set('Room renamed');
+      this.editingTitleId.set(null);
+      this.titleDraft.set('');
     } catch {
-      window.prompt('Copy room code', code);
-      this.copyStatus.set('Room code ready to copy');
+      this.error.set('Room name could not be saved');
+    } finally {
+      this.editBusyId.set(null);
     }
   }
 
-  async deleteRoom(room: Room): Promise<void> {
-    if (!window.confirm(`Delete "${room.title}"?`)) return;
+  togglePasswordExpanded(room: Room, event?: Event): void {
+    event?.stopPropagation();
+    const next = this.passwordExpandedId() === room.id ? null : room.id;
+    this.passwordExpandedId.set(next);
+    if (next === null) this.editingPasswordId.set(null);
+  }
+
+  startEditPassword(room: Room, event?: Event): void {
+    event?.stopPropagation();
+    this.editingTitleId.set(null);
+    this.passwordDraft.set('');
+    this.passwordExpandedId.set(room.id);
+    this.editingPasswordId.set(room.id);
+  }
+
+  cancelEditPassword(event?: Event): void {
+    event?.stopPropagation();
+    this.editingPasswordId.set(null);
+    this.passwordDraft.set('');
+  }
+
+  async saveEditPassword(room: Room, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    const value = this.passwordDraft();
+    if (value.length > 200) {
+      this.error.set('Password too long');
+      return;
+    }
+    this.editBusyId.set(room.id);
+    this.error.set(null);
+    try {
+      const updated = await this.roomsService.setPassword(room.id, value);
+      this.rooms.update((rooms) => rooms.map((item) => (item.id === updated.id ? updated : item)));
+      this.copyStatus.set(value ? 'Password set' : 'Password removed');
+      this.editingPasswordId.set(null);
+      this.passwordDraft.set('');
+    } catch {
+      this.error.set('Password could not be saved');
+    } finally {
+      this.editBusyId.set(null);
+    }
+  }
+
+  async clearPassword(room: Room, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    if (!window.confirm(`Remove password from "${room.title}"?`)) return;
+    this.editBusyId.set(room.id);
+    this.error.set(null);
+    try {
+      const updated = await this.roomsService.setPassword(room.id, '');
+      this.rooms.update((rooms) => rooms.map((item) => (item.id === updated.id ? updated : item)));
+      this.copyStatus.set('Password removed');
+    } catch {
+      this.error.set('Password could not be removed');
+    } finally {
+      this.editBusyId.set(null);
+    }
+  }
+
+  async deleteRoom(room: Room, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    if (!window.confirm(`Delete "${room.title}"? This cannot be undone.`)) return;
     await this.roomsService.delete(room.id);
     await this.refreshRooms();
   }

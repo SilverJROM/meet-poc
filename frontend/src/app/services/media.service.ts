@@ -1,7 +1,7 @@
 import { Injectable, Signal, inject, signal } from '@angular/core';
 import { ViewportService } from './viewport.service';
 
-export type MediaError = { code: 'denied' | 'no-devices' | 'unknown'; message: string };
+export type MediaError = { code: 'denied' | 'no-devices' | 'in-use' | 'unknown'; message: string };
 
 export class ScreenShareUnsupportedError extends Error {
   constructor(message: string) {
@@ -390,6 +390,13 @@ function normalizeMediaError(err: unknown): MediaError {
   }
   if (value?.name === 'NotFoundError' || value?.name === 'DevicesNotFoundError') {
     return { code: 'no-devices', message: 'No devices found' };
+  }
+  if (
+    value?.name === 'NotReadableError'
+    || value?.name === 'TrackStartError'
+    || /in use|busy|could not start/i.test(String(value?.message || ''))
+  ) {
+    return { code: 'in-use', message: 'Camera or microphone is in use by another app or tab' };
   }
   return { code: 'unknown', message: String(value?.message || err) };
 }

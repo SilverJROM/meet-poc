@@ -10,6 +10,7 @@ export type Room = {
   isOpen: boolean;
   waitTimeoutMinutes: number;
   createdAt: number;
+  passwordRequired: boolean;
 };
 
 export type PaginatedRooms = {
@@ -53,17 +54,38 @@ export class RoomsService {
     return { deleted: res.deleted, requested: res.requested };
   }
 
-  async exists(id: string): Promise<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number }> {
+  async exists(id: string): Promise<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number; passwordRequired?: boolean; isOwner?: boolean }> {
     return firstValueFrom(
-      this.http.get<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number }>(
+      this.http.get<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number; passwordRequired?: boolean; isOwner?: boolean }>(
         `/api/rooms/${encodeURIComponent(id)}/exists`,
       ),
     );
   }
 
+  async setTitle(id: string, title: string): Promise<Room> {
+    const res = await firstValueFrom(this.http.put<{ room: Room }>(`/api/rooms/${encodeURIComponent(id)}/title`, { title }));
+    return res.room;
+  }
+
   async setSlug(id: string, slug: string): Promise<Room> {
     const res = await firstValueFrom(this.http.put<{ room: Room }>(`/api/rooms/${encodeURIComponent(id)}/slug`, { slug }));
     return res.room;
+  }
+
+  async setPassword(id: string, password: string): Promise<Room> {
+    const res = await firstValueFrom(this.http.put<{ room: Room }>(`/api/rooms/${encodeURIComponent(id)}/password`, { password }));
+    return res.room;
+  }
+
+  async verifyPassword(slugOrId: string, password: string): Promise<boolean> {
+    try {
+      await firstValueFrom(
+        this.http.post<{ ok: true }>(`/api/rooms/by-slug/${encodeURIComponent(slugOrId)}/verify-password`, { password }),
+      );
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async setAccess(id: string, isOpen: boolean, waitTimeoutMinutes: number): Promise<Room> {

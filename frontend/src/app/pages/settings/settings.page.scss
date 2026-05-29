@@ -5,6 +5,34 @@
   gap: 16px;
 }
 
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.settings-tab {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  padding: 10px 16px;
+  margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  color: var(--text-soft, #5f6368);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--text-strong, #202124);
+  }
+
+  &.active {
+    color: var(--accent, #2563eb);
+    border-bottom-color: var(--accent, #2563eb);
+  }
+}
+
 .panel-section,
 .empty {
   border: 1px solid var(--line-soft);

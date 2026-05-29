@@ -286,6 +286,26 @@ export type SfuSubscribeLatency = {
   latencyMs: number | null;
 };
 
+export type SfuConnectionQuality = {
+  route: 'direct' | 'relayed' | 'unknown';
+  band: 'good' | 'fair' | 'poor' | 'unknown';
+  relayUsed: boolean;
+  rttMs: number | null;
+  packetLossPct: number | null;
+  jitterMs: number | null;
+  localCandidateType: string | null;
+  remoteCandidateType: string | null;
+  sampledAt: number;
+  thresholds: {
+    goodRttMs: number;
+    fairRttMs: number;
+    goodPacketLossPct: number;
+    fairPacketLossPct: number;
+    goodJitterMs: number;
+    fairJitterMs: number;
+  };
+};
+
 export type SfuPublishPhase = 'ice-config' | 'pc-create' | 'offer' | 'cf-session' | 'cf-tracks' | 'set-remote' | 'done' | null;
 
 export type SfuDiagnosticsSnapshot = {
@@ -299,6 +319,7 @@ export type SfuDiagnosticsSnapshot = {
   outboundTracks: SfuOutboundTrackStats[];
   inboundTracks: SfuInboundTrackStats[];
   subscribeLatencies: SfuSubscribeLatency[];
+  connectionQuality?: SfuConnectionQuality | null;
   publishPhase?: SfuPublishPhase;
   publishPhaseAtMs?: number | null;
   hasPc?: boolean;

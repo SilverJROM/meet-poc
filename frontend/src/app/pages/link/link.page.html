@@ -1,0 +1,7 @@
+<section class="link-page">
+  <h1>Telegram link</h1>
+  <p [class]="status()">{{ message() }}</p>
+  @if (status() === 'success') {
+    <a routerLink="/app/rooms">Open VoiceLokal →</a>
+  }
+</section>

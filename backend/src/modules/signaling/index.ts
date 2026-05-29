@@ -5,8 +5,9 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { getDb } from '../../db.js';
 import { parseCookies } from '../../lib/cookies.js';
 import { getSessionUser } from '../auth/sessions.js';
-import { closeRoomBySystem, getRoom, getRoomBySlugOrId, isOwnerOf, openRoomBySystem } from '../rooms/store.js';
+import { closeRoomBySystem, getRoom, getRoomBySlugOrId, isOwnerOf, openRoomBySystem, verifyRoomPassword } from '../rooms/store.js';
 import { bumpPeak, closeSession, openSession } from '../sessions/store.js';
+import { notifyOwnerLobbyPending } from '../telegram/index.js';
 
 type PeerState = 'idle' | 'admitted' | 'pending' | 'waiting';
 
@@ -117,6 +118,7 @@ type IncomingMessage = {
   supportsReconnect?: unknown;
   reconnectToken?: unknown;
   clientKey?: unknown;
+  password?: unknown;
   cfSessionId?: unknown;
   tracks?: unknown;
   approved?: unknown;
@@ -342,6 +344,11 @@ function closeSupersededAdmittedPeer(live: LiveRoom, clientId: string): void {
   live.shareGrants.delete(clientId);
   entry.setState('idle');
   try {
+    // Tell the displaced socket it was opened elsewhere so the client stops
+    // instead of auto-reconnecting (which otherwise ping-pongs ~1/sec between
+    // two live tabs/devices sharing the same identity). The client's
+    // socket-mismatch guard ignores this on a stale single-tab reconnect.
+    send(entry.ws, { type: 'displaced', reason: 'opened-elsewhere' });
     entry.ws.close();
   } catch {
     // Best effort close for a superseded reconnect race socket.
@@ -864,6 +871,14 @@ export function attachSignaling(server: http.Server, database: Database.Database
         ensureLiveSession(roomId, room.ownerEmail, live, database);
         const owner = isOwnerOf(roomId, userEmail, database);
         currentRoomOwner = owner;
+        if (!owner && room.passwordRequired) {
+          const provided = typeof msg.password === 'string' ? msg.password as string : '';
+          if (!verifyRoomPassword(roomId, provided, database)) {
+            send(ws, { type: 'error', error: 'invalid password' });
+            ws.close();
+            return;
+          }
+        }
         const now = Date.now();
         const reconnectTicket = reconnectToken ? live.reconnectTickets.get(reconnectToken) : null;
         const tokenAdmitted = reconnectTicket ? live.admitted.get(reconnectTicket.clientId) : null;
@@ -991,6 +1006,9 @@ export function attachSignaling(server: http.Server, database: Database.Database
           send(ws, { type: 'knocking', clientId, roomTitle: room.title });
           broadcastToOwners(live, roomId, { type: 'knock', clientId, name: myName }, database);
           broadcastPendingListToOwners(live, roomId, database);
+          void notifyOwnerLobbyPending(room.ownerEmail, room.title, myName, database).catch((err) =>
+            console.warn('[telegram] notify failed', err),
+          );
           console.log(`[room ${roomId}] KNOCK ${myName} (${clientId})  pending=${live.pending.size}`);
         }
         return;

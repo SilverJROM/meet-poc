@@ -1,12 +1,12 @@
 <main class="app-shell" [class.is-collapsed]="collapsed()">
   <aside class="sidebar" aria-label="Primary navigation">
-    <a class="brand" routerLink="/app/rooms" title="meet-poc">
-      <span class="brand-mark">m</span>
-      <span class="brand-label">meet-poc</span>
+    <a class="brand" routerLink="/app/rooms" title="VoiceLokal">
+      <span class="brand-mark">V</span>
+      <span class="brand-label">VoiceLokal</span>
     </a>
 
     <nav class="nav-list">
-      @for (item of navItems; track item.path) {
+      @for (item of navItems(); track item.path) {
         <a
           class="nav-link"
           [routerLink]="item.path"
@@ -39,7 +39,7 @@
   <section class="app-main">
     <header class="app-topbar">
       <div class="topbar-title">
-        <span>meet-poc</span>
+        <span>VoiceLokal</span>
         <h1>{{ pageTitle() }}</h1>
       </div>
       <span class="topbar-spacer"></span>

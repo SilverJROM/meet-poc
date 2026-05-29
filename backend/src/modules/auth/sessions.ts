@@ -6,6 +6,8 @@ export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 export type SessionUser = {
   email: string;
+  displayName: string;
+  isAdmin: boolean;
 };
 
 export function createSession(email: string, database: Database.Database = getDb()): string {
@@ -26,10 +28,15 @@ export function getSessionUser(token: string | undefined, database: Database.Dat
     database.prepare('DELETE FROM sessions WHERE token = ?').run(token);
     return null;
   }
-  const user = database
-    .prepare('SELECT email FROM users WHERE email = ?')
-    .get(session.email) as SessionUser | undefined;
-  return user ?? null;
+  const row = database
+    .prepare('SELECT email, display_name, is_admin FROM users WHERE email = ?')
+    .get(session.email) as { email: string; display_name: string | null; is_admin: number } | undefined;
+  if (!row) return null;
+  return {
+    email: row.email,
+    displayName: row.display_name || row.email.split('@')[0] || row.email,
+    isAdmin: row.is_admin === 1,
+  };
 }
 
 export function destroySession(token: string | undefined, database: Database.Database = getDb()): void {

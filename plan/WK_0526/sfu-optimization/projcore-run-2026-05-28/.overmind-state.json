@@ -1,0 +1,14 @@
+{
+  "session": "lkvc",
+  "expected_session": "lkvc",
+  "workflow_id": 6,
+  "label": "sfu-optimization",
+  "child_sessions": [
+    "lkvc-codex"
+  ],
+  "child_roles": [
+    "implementer"
+  ],
+  "last_hash": "4d1a2d8e979d33230985d31128d559fc094b57294d92c31b1984f646404cd291",
+  "last_sync_at": "2026-05-29T02:34:46+00:00"
+}

@@ -83,13 +83,8 @@
         @for (room of rooms(); track room.id) {
           <li
             class="room-row"
-            role="button"
-            tabindex="0"
             [class.selected]="isSelected(room.id)"
             [class.open]="room.isOpen"
-            [attr.aria-label]="'Open room ' + room.title"
-            (click)="openRoom(room)"
-            (keydown)="onRoomRowKeydown($event, room)"
           >
             <label class="room-select" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
               <input
@@ -101,27 +96,112 @@
             </label>
 
             <div class="room-card-top">
-              <h2>{{ room.title }}</h2>
-              <span class="status-chip" [class.open]="room.isOpen">{{ room.isOpen ? 'Open for guests' : 'Closed' }}</span>
-            </div>
-
-            <div class="room-meta">
-              <span>Created {{ room.createdAt | date: 'medium' }}</span>
-              <span class="room-code">
-                <code>{{ roomUrlKey(room) }}</code>
-                <button type="button" class="icon-btn" aria-label="Copy room code" title="Copy room code" (click)="copyRoomCode(room, $event)">
-                  <ion-icon name="clipboard-outline"></ion-icon>
-                </button>
-              </span>
+              <div class="title-row">
+                @if (editingTitleId() === room.id) {
+                  <form class="inline-edit" (submit)="$event.preventDefault(); saveEditTitle(room, $event)">
+                    <input
+                      type="text"
+                      maxlength="100"
+                      [ngModel]="titleDraft()"
+                      (ngModelChange)="titleDraft.set($event)"
+                      name="titleDraft"
+                      [disabled]="editBusyId() === room.id"
+                      autofocus
+                    >
+                    <button type="submit" class="icon-btn save" aria-label="Save room name" [disabled]="editBusyId() === room.id">
+                      <ion-icon name="checkmark-outline"></ion-icon>
+                    </button>
+                    <button type="button" class="icon-btn cancel" aria-label="Cancel" (click)="cancelEditTitle($event)">
+                      <ion-icon name="close-outline"></ion-icon>
+                    </button>
+                  </form>
+                } @else {
+                  <h2>{{ room.title }}</h2>
+                }
+              </div>
+              <div class="status-row">
+                <span class="status-chip" [class.open]="room.isOpen">{{ room.isOpen ? 'Open for guests' : 'Closed' }}</span>
+                @if (editingTitleId() !== room.id) {
+                  <span class="card-actions">
+                    <button type="button" class="icon-btn edit" aria-label="Edit room name" title="Edit name" (click)="startEditTitle(room, $event)">
+                      <ion-icon name="create-outline"></ion-icon>
+                    </button>
+                    <button type="button" class="icon-btn delete-quick" aria-label="Delete room" title="Delete room" (click)="deleteRoom(room, $event)">
+                      <ion-icon name="trash-outline"></ion-icon>
+                    </button>
+                  </span>
+                }
+              </div>
             </div>
 
             <div class="room-actions" (click)="$event.stopPropagation()" (keydown)="$event.stopPropagation()">
               <div class="room-action-section quick-actions" aria-label="Quick actions">
-                <a class="primary-btn" [routerLink]="['/room', roomUrlKey(room)]">Join</a>
-                <button type="button" class="secondary-btn" (click)="copyJoinLink(room)">
+                <a class="primary-btn join-btn" [routerLink]="['/room', roomUrlKey(room)]">Join</a>
+                <button type="button" class="secondary-btn copy-link-btn" (click)="copyJoinLink(room)">
                   <ion-icon name="clipboard-outline"></ion-icon>
                   Copy link
                 </button>
+              </div>
+
+              <div class="room-action-section password-section" aria-label="Password">
+                <button
+                  type="button"
+                  class="collapsible-header"
+                  [attr.aria-expanded]="passwordExpandedId() === room.id"
+                  (click)="togglePasswordExpanded(room, $event)"
+                >
+                  <span class="action-section-label">Password</span>
+                  @if (room.passwordRequired) {
+                    <span class="password-chip locked"><ion-icon name="lock-closed-outline"></ion-icon> Set</span>
+                  } @else {
+                    <span class="password-chip">None</span>
+                  }
+                  <ion-icon class="collapsible-chevron" [name]="passwordExpandedId() === room.id ? 'chevron-up-outline' : 'chevron-down-outline'"></ion-icon>
+                </button>
+                @if (passwordExpandedId() === room.id) {
+                <div class="collapsible-body">
+                @if (editingPasswordId() === room.id) {
+                  <form class="inline-edit password-edit" (submit)="$event.preventDefault(); saveEditPassword(room, $event)">
+                    <input
+                      type="text"
+                      maxlength="200"
+                      placeholder="Leave blank for no password"
+                      [ngModel]="passwordDraft()"
+                      (ngModelChange)="passwordDraft.set($event)"
+                      name="passwordDraft"
+                      [disabled]="editBusyId() === room.id"
+                      autofocus
+                    >
+                    <button type="submit" class="icon-btn save" aria-label="Save password" [disabled]="editBusyId() === room.id">
+                      <ion-icon name="checkmark-outline"></ion-icon>
+                    </button>
+                    <button type="button" class="icon-btn cancel" aria-label="Cancel" (click)="cancelEditPassword($event)">
+                      <ion-icon name="close-outline"></ion-icon>
+                    </button>
+                  </form>
+                } @else {
+                  <div class="password-status">
+                    @if (room.passwordRequired) {
+                      <span class="password-chip locked"><ion-icon name="lock-closed-outline"></ion-icon> Password set</span>
+                      <button type="button" class="secondary-btn" (click)="startEditPassword(room, $event)" [disabled]="editBusyId() === room.id">
+                        <ion-icon name="key-outline"></ion-icon>
+                        Change
+                      </button>
+                      <button type="button" class="secondary-btn" (click)="clearPassword(room, $event)" [disabled]="editBusyId() === room.id">
+                        <ion-icon name="close-outline"></ion-icon>
+                        Remove
+                      </button>
+                    } @else {
+                      <span class="password-chip">No password</span>
+                      <button type="button" class="secondary-btn" (click)="startEditPassword(room, $event)" [disabled]="editBusyId() === room.id">
+                        <ion-icon name="key-outline"></ion-icon>
+                        Set password
+                      </button>
+                    }
+                  </div>
+                }
+                </div>
+                }
               </div>
 
               <div class="room-action-section access-section" aria-label="Access settings">
@@ -157,13 +237,6 @@
                 </div>
               </div>
 
-              <div class="room-action-section danger-section" aria-label="Danger zone">
-                <span class="action-section-label danger-label">Danger</span>
-                <button type="button" class="danger-btn" (click)="deleteRoom(room)">
-                  <ion-icon name="trash-outline"></ion-icon>
-                  Delete
-                </button>
-              </div>
             </div>
           </li>
         }

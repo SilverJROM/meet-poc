@@ -1,0 +1,140 @@
+@if (user(); as account) {
+  <section class="account-card" aria-label="Account">
+    <div class="account-head">
+      <h3>Account</h3>
+      <p>{{ account.email }}</p>
+    </div>
+
+    <form class="account-field" (ngSubmit)="saveDisplayName()">
+      <label for="account-username">Username on calls</label>
+      <p class="field-hint">This name is shown to others when you join a call.</p>
+      <div class="field-row">
+        <input
+          id="account-username"
+          name="displayName"
+          type="text"
+          maxlength="64"
+          [ngModel]="displayNameDraft()"
+          (ngModelChange)="displayNameDraft.set($event)"
+          [disabled]="savingName()"
+        >
+        <button type="submit" class="primary-btn" [disabled]="savingName() || !displayNameDraft().trim()">
+          <ion-icon name="save-outline"></ion-icon>
+          Save
+        </button>
+      </div>
+    </form>
+
+    @if (error()) {
+      <p class="account-error" role="alert">{{ error() }}</p>
+    }
+    <div class="account-status" role="status">{{ status() || '' }}</div>
+
+    <hr class="account-divider">
+
+    <form class="account-field" (ngSubmit)="savePassword()">
+      <label>Change password</label>
+      <p class="field-hint">At least 8 characters.</p>
+      <input
+        class="stacked-input"
+        name="currentPassword"
+        type="password"
+        autocomplete="current-password"
+        placeholder="Current password"
+        [ngModel]="currentPassword()"
+        (ngModelChange)="currentPassword.set($event)"
+        [disabled]="savingPassword()"
+      >
+      <input
+        class="stacked-input"
+        name="newPassword"
+        type="password"
+        autocomplete="new-password"
+        placeholder="New password"
+        [ngModel]="newPassword()"
+        (ngModelChange)="newPassword.set($event)"
+        [disabled]="savingPassword()"
+      >
+      <input
+        class="stacked-input"
+        name="confirmPassword"
+        type="password"
+        autocomplete="new-password"
+        placeholder="Confirm new password"
+        [ngModel]="confirmPassword()"
+        (ngModelChange)="confirmPassword.set($event)"
+        [disabled]="savingPassword()"
+      >
+      <button type="submit" class="primary-btn" [disabled]="savingPassword()">
+        <ion-icon name="key-outline"></ion-icon>
+        Update password
+      </button>
+    </form>
+
+    @if (passwordError()) {
+      <p class="account-error" role="alert">{{ passwordError() }}</p>
+    }
+    <div class="account-status" role="status">{{ passwordStatus() || '' }}</div>
+
+    <hr class="account-divider">
+
+    <form class="account-field" (ngSubmit)="saveEmail()">
+      <label>Change email</label>
+      <p class="field-hint">Your rooms and Telegram link move with your account. Requires your current password.</p>
+      <input
+        class="stacked-input"
+        name="newEmail"
+        type="email"
+        autocomplete="email"
+        placeholder="New email"
+        [ngModel]="newEmail()"
+        (ngModelChange)="newEmail.set($event)"
+        [disabled]="savingEmail()"
+      >
+      <input
+        class="stacked-input"
+        name="emailPassword"
+        type="password"
+        autocomplete="current-password"
+        placeholder="Current password"
+        [ngModel]="emailPassword()"
+        (ngModelChange)="emailPassword.set($event)"
+        [disabled]="savingEmail()"
+      >
+      <button type="submit" class="primary-btn" [disabled]="savingEmail()">
+        <ion-icon name="mail-outline"></ion-icon>
+        Change email
+      </button>
+    </form>
+
+    @if (emailError()) {
+      <p class="account-error" role="alert">{{ emailError() }}</p>
+    }
+    <div class="account-status" role="status">{{ emailStatus() || '' }}</div>
+
+    <hr class="account-divider">
+
+    <div class="account-field">
+      <label>Telegram</label>
+      @if (tgLoading()) {
+        <p class="field-hint">Checking link status…</p>
+      } @else if (tgLinked()) {
+        <p class="tg-status linked">
+          <ion-icon name="link-outline"></ion-icon>
+          Linked@if (tgUsername()) { <strong>&nbsp;{{ tgUsername() }}</strong> }
+        </p>
+        <button type="button" class="secondary-btn danger" (click)="unlinkTelegram()" [disabled]="tgBusy()">
+          <ion-icon name="unlink-outline"></ion-icon>
+          Unlink Telegram
+        </button>
+      } @else {
+        <p class="field-hint">Not linked. Open the VoiceLokal bot in Telegram and send <code>/link</code> to connect — then you get lobby notifications and auto-login from the mini-app.</p>
+      }
+    </div>
+
+    @if (tgError()) {
+      <p class="account-error" role="alert">{{ tgError() }}</p>
+    }
+    <div class="account-status" role="status">{{ tgStatus() || '' }}</div>
+  </section>
+}

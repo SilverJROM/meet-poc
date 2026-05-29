@@ -5,7 +5,7 @@ import { IceConfigService } from './ice-config.service';
 import { ViewportService } from './viewport.service';
 import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster } from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
-import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair } from './meeting-sessions.service';
+import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair, SfuConnectionQuality } from './meeting-sessions.service';
 export type { RemotePublisher } from './sfu-roster-utils.js';
 
 export interface SfuTrackModel {
@@ -43,6 +43,18 @@ const VIDEO_SIMULCAST_ENCODINGS: RTCRtpEncodingParameters[] = [
   { rid: 'l', scaleResolutionDownBy: 4, maxBitrate: 120_000 },
 ];
 const SFU_HTTP_TIMEOUT_MS = 6000;
+const CONNECTION_QUALITY_THRESHOLDS: SfuConnectionQuality['thresholds'] = {
+  goodRttMs: 150,
+  fairRttMs: 300,
+  goodPacketLossPct: 2,
+  fairPacketLossPct: 5,
+  goodJitterMs: 30,
+  fairJitterMs: 60,
+};
+type SfuCameraRid = 'h' | 'm' | 'l';
+type AdaptiveCameraRidCap = SfuCameraRid | null;
+const ADAPTIVE_CAMERA_RID_HYSTERESIS_SAMPLES = 3;
+const CAMERA_RID_RANK: Record<SfuCameraRid, number> = { l: 0, m: 1, h: 2 };
 
 @Injectable({ providedIn: 'root' })
 export class SfuClientService {
@@ -56,6 +68,7 @@ export class SfuClientService {
   readonly remoteStreams = signal<Map<string, MediaStream>>(new Map());
   readonly remoteScreenStreams = signal<Map<string, MediaStream>>(new Map());
   readonly subscribedTracks = signal<Map<string, SubscribedTrackEntry>>(new Map());
+  readonly connectionQuality = signal<SfuConnectionQuality | null>(null);
   // Bumped on doSubscribe failure so the subscription effect re-fires for a retry
   readonly subscribeRetryVersion = signal(0);
 
@@ -77,6 +90,10 @@ export class SfuClientService {
   private subscribeFirstFrameAt = new Map<string, number>();
   private subscribeStuckTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly SUBSCRIBE_STUCK_THRESHOLD_MS = 10_000;
+  private previousConnectionQualityPackets: { packetsReceived: number; packetsLost: number } | null = null;
+  private adaptiveCameraRidCandidate: AdaptiveCameraRidCap = null;
+  private adaptiveCameraRidCandidateSamples = 0;
+  private adaptiveCameraRidCap: AdaptiveCameraRidCap = null;
 
   enqueue<T>(op: () => Promise<T>): Promise<T> {
     const result = this.opQueue.then(() => op());
@@ -166,6 +183,105 @@ export class SfuClientService {
     return this.pc ? this.pc.getStats() : Promise.resolve(null);
   }
 
+  async collectConnectionQuality(): Promise<SfuConnectionQuality | null> {
+    const pc = this.pc;
+    if (!pc) {
+      this.resetConnectionQuality();
+      return null;
+    }
+
+    let stats: RTCStatsReport;
+    try {
+      stats = await pc.getStats();
+    } catch {
+      return this.connectionQuality();
+    }
+
+    const transport = this.extractSelectedTransport(stats);
+    const relayUsed = transport.localCandidateType === 'relay' || transport.remoteCandidateType === 'relay';
+    const route: SfuConnectionQuality['route'] = relayUsed
+      ? 'relayed'
+      : transport.localCandidateType || transport.remoteCandidateType
+        ? 'direct'
+        : 'unknown';
+
+    let packetsReceived = 0;
+    let packetsLost = 0;
+    let jitterMs: number | null = null;
+    let fallbackJitterMs: number | null = null;
+
+    for (const stat of stats.values()) {
+      if (stat.type !== 'inbound-rtp') continue;
+      packetsReceived += typeof stat.packetsReceived === 'number' ? stat.packetsReceived : 0;
+      packetsLost += typeof stat.packetsLost === 'number' ? stat.packetsLost : 0;
+      const rtpJitterMs = typeof stat.jitter === 'number' ? stat.jitter * 1000 : null;
+      if (rtpJitterMs !== null) jitterMs = jitterMs === null ? rtpJitterMs : Math.max(jitterMs, rtpJitterMs);
+      if (typeof stat.jitterBufferDelay === 'number' && typeof stat.jitterBufferEmittedCount === 'number' && stat.jitterBufferEmittedCount > 0) {
+        const averageBufferDelayMs = (stat.jitterBufferDelay / stat.jitterBufferEmittedCount) * 1000;
+        fallbackJitterMs = fallbackJitterMs === null ? averageBufferDelayMs : Math.max(fallbackJitterMs, averageBufferDelayMs);
+      }
+    }
+
+    if (jitterMs === null) jitterMs = fallbackJitterMs;
+
+    const previous = this.previousConnectionQualityPackets;
+    let lossReceived = packetsReceived;
+    let lossLost = packetsLost;
+    if (previous) {
+      const receivedDelta = packetsReceived - previous.packetsReceived;
+      const lostDelta = packetsLost - previous.packetsLost;
+      if (receivedDelta >= 0 && lostDelta >= 0 && receivedDelta + lostDelta > 0) {
+        lossReceived = receivedDelta;
+        lossLost = lostDelta;
+      }
+    }
+    this.previousConnectionQualityPackets = { packetsReceived, packetsLost };
+
+    const packetLossPct = lossReceived + lossLost > 0 ? Number(((lossLost / (lossReceived + lossLost)) * 100).toFixed(1)) : null;
+    const roundedJitterMs = jitterMs !== null ? Math.round(jitterMs) : null;
+    const band = classifyConnectionQuality(transport.rttMs, packetLossPct, roundedJitterMs, route);
+    const quality: SfuConnectionQuality = {
+      route,
+      band,
+      relayUsed,
+      rttMs: transport.rttMs,
+      packetLossPct,
+      jitterMs: roundedJitterMs,
+      localCandidateType: transport.localCandidateType,
+      remoteCandidateType: transport.remoteCandidateType,
+      sampledAt: Date.now(),
+      thresholds: CONNECTION_QUALITY_THRESHOLDS,
+    };
+    this.connectionQuality.set(quality);
+    this.updateAdaptiveCameraRidCap(quality);
+    return quality;
+  }
+
+  resetConnectionQuality(): void {
+    this.previousConnectionQualityPackets = null;
+    this.resetAdaptiveCameraRidCap();
+    this.connectionQuality.set(null);
+  }
+
+  private extractSelectedTransport(stats: RTCStatsReport): {
+    rttMs: number | null;
+    localCandidateType: string | null;
+    remoteCandidateType: string | null;
+  } {
+    for (const stat of stats.values()) {
+      if (stat.type !== 'candidate-pair') continue;
+      if (stat.selected !== true && stat.nominated !== true && stat.state !== 'succeeded') continue;
+      const localCand = stat.localCandidateId ? stats.get(stat.localCandidateId) : null;
+      const remoteCand = stat.remoteCandidateId ? stats.get(stat.remoteCandidateId) : null;
+      return {
+        rttMs: typeof stat.currentRoundTripTime === 'number' ? Math.round(stat.currentRoundTripTime * 1000) : null,
+        localCandidateType: localCand?.candidateType ?? null,
+        remoteCandidateType: remoteCand?.candidateType ?? null,
+      };
+    }
+    return { rttMs: null, localCandidateType: null, remoteCandidateType: null };
+  }
+
   async collectDiagnostics(): Promise<SfuDiagnosticsSnapshot | null> {
     const pc = this.pc;
     const publishState = this.localPublishState();
@@ -182,6 +298,7 @@ export class SfuClientService {
         outboundTracks: [],
         inboundTracks: [],
         subscribeLatencies: [],
+        connectionQuality: this.connectionQuality(),
         ...partial,
       } as SfuDiagnosticsWithPublishDebug;
     }
@@ -201,6 +318,7 @@ export class SfuClientService {
         outboundTracks: [],
         inboundTracks: [],
         subscribeLatencies: [],
+        connectionQuality: this.connectionQuality(),
         ...partial,
       } as SfuDiagnosticsWithPublishDebug;
     }
@@ -300,6 +418,7 @@ export class SfuClientService {
       outboundTracks,
       inboundTracks,
       subscribeLatencies,
+      connectionQuality: this.connectionQuality(),
       ...partial,
     } as SfuDiagnosticsWithPublishDebug;
   }
@@ -365,7 +484,7 @@ export class SfuClientService {
     return this.enqueue(() => this.doUpdateCameraLayer());
   }
 
-  private preferredCameraRid(): 'h' | 'm' | 'l' {
+  private preferredCameraRid(): SfuCameraRid {
     return this.viewport.isMobile() ? 'l' : 'h';
   }
 
@@ -374,7 +493,7 @@ export class SfuClientService {
     return this.localPublishState()?.tracks.some((t) => t.kind === 'screen' && t.status === 'live') ?? false;
   }
 
-  private cameraRidNow(): 'h' | 'm' | 'l' {
+  private baseCameraRidNow(): SfuCameraRid {
     if (this.isAnyScreenActive() || this.viewport.isMobile()) return 'l';
     const subscribedVideoPeers = new Set<string>();
     for (const entry of this.midToEntry.values()) {
@@ -383,6 +502,34 @@ export class SfuClientService {
     if (subscribedVideoPeers.size >= 5) return 'l';
     if (subscribedVideoPeers.size >= 3) return 'm';
     return 'h';
+  }
+
+  private cameraRidNow(): SfuCameraRid {
+    return applyAdaptiveCameraRidCap(this.baseCameraRidNow(), this.adaptiveCameraRidCap);
+  }
+
+  private updateAdaptiveCameraRidCap(quality: SfuConnectionQuality): void {
+    const previousRid = this.cameraRidNow();
+    const nextCandidate = adaptiveCameraRidCapForQuality(quality);
+    if (this.adaptiveCameraRidCandidate === nextCandidate) {
+      this.adaptiveCameraRidCandidateSamples += 1;
+    } else {
+      this.adaptiveCameraRidCandidate = nextCandidate;
+      this.adaptiveCameraRidCandidateSamples = 1;
+    }
+
+    if (this.adaptiveCameraRidCandidateSamples < ADAPTIVE_CAMERA_RID_HYSTERESIS_SAMPLES || this.adaptiveCameraRidCap === nextCandidate) return;
+
+    this.adaptiveCameraRidCap = nextCandidate;
+    if (this.cameraRidNow() !== previousRid) {
+      void this.updateCameraLayer().catch(() => undefined);
+    }
+  }
+
+  private resetAdaptiveCameraRidCap(): void {
+    this.adaptiveCameraRidCandidate = null;
+    this.adaptiveCameraRidCandidateSamples = 0;
+    this.adaptiveCameraRidCap = null;
   }
 
   private async doUpdateCameraLayer(): Promise<void> {
@@ -674,6 +821,7 @@ export class SfuClientService {
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
+    this.resetConnectionQuality();
     this.opQueue = Promise.resolve();
     this.localPublishState.set(null);
     this.setPublishPhase(null);
@@ -704,6 +852,7 @@ export class SfuClientService {
     this.opQueue = Promise.resolve();
     this.pendingOntrack.clear();
     this.clearAllSubscribeStuckWatchdogs();
+    this.resetConnectionQuality();
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
     this.subscribeRetryAttempts.clear();
@@ -745,6 +894,7 @@ export class SfuClientService {
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
+    this.resetConnectionQuality();
     this.localPublishState.set(null);
     this.setPublishPhase(null);
     this.opQueue = Promise.resolve();
@@ -986,4 +1136,40 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function applyAdaptiveCameraRidCap(baseRid: SfuCameraRid, cap: AdaptiveCameraRidCap): SfuCameraRid {
+  if (!cap) return baseRid;
+  return CAMERA_RID_RANK[baseRid] <= CAMERA_RID_RANK[cap] ? baseRid : cap;
+}
+
+function adaptiveCameraRidCapForQuality(quality: SfuConnectionQuality): AdaptiveCameraRidCap {
+  if (quality.band === 'poor') return 'l';
+  if (quality.route === 'relayed' && quality.band === 'fair') return 'l';
+  if (quality.band === 'fair') return 'm';
+  return null;
+}
+
+function classifyConnectionQuality(
+  rttMs: number | null,
+  packetLossPct: number | null,
+  jitterMs: number | null,
+  route: SfuConnectionQuality['route'],
+): SfuConnectionQuality['band'] {
+  if (route === 'unknown' && rttMs === null && packetLossPct === null && jitterMs === null) return 'unknown';
+  if (
+    (rttMs !== null && rttMs > CONNECTION_QUALITY_THRESHOLDS.fairRttMs) ||
+    (packetLossPct !== null && packetLossPct > CONNECTION_QUALITY_THRESHOLDS.fairPacketLossPct) ||
+    (jitterMs !== null && jitterMs > CONNECTION_QUALITY_THRESHOLDS.fairJitterMs)
+  ) {
+    return 'poor';
+  }
+  if (
+    (rttMs !== null && rttMs > CONNECTION_QUALITY_THRESHOLDS.goodRttMs) ||
+    (packetLossPct !== null && packetLossPct > CONNECTION_QUALITY_THRESHOLDS.goodPacketLossPct) ||
+    (jitterMs !== null && jitterMs > CONNECTION_QUALITY_THRESHOLDS.goodJitterMs)
+  ) {
+    return 'fair';
+  }
+  return 'good';
 }

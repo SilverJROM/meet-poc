@@ -18,3 +18,14 @@ export function requireAuth(database: Database.Database = getDb()) {
     return next();
   };
 }
+
+export function requireAdmin(database: Database.Database = getDb()) {
+  const auth = requireAuth(database);
+  return (req: Request, res: Response, next: NextFunction) => {
+    auth(req, res, () => {
+      const { user } = req as AuthenticatedRequest;
+      if (!user.isAdmin) return res.status(403).json({ error: 'forbidden' });
+      return next();
+    });
+  };
+}

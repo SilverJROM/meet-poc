@@ -32,6 +32,7 @@ export type SignalingMessage =
   | { type: 'meeting-ended'; reason?: string }
   | { type: 'room-opened' }
   | { type: 'room-closed'; reason?: string }
+  | { type: 'displaced'; reason?: string }
   | { type: 'mute-request'; from: string }
   | { type: 'peer-removed'; reason?: string }
   | { type: 'knock-cancelled'; clientId: string }
@@ -47,7 +48,7 @@ export type SignalingMessage =
   | { type: 'sfu-roster'; publishers: { clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }[] };
 
 export type OutgoingSignalingMessage =
-  | { type: 'join'; room: string; name: string; mobile?: boolean; supportsReconnect?: boolean; reconnectToken?: string; clientKey?: string }
+  | { type: 'join'; room: string; name: string; mobile?: boolean; supportsReconnect?: boolean; reconnectToken?: string; clientKey?: string; password?: string }
   | { type: 'signal'; to: string; data: unknown }
   | { type: 'admit'; clientId: string }
   | { type: 'reject'; clientId: string; reason?: string }

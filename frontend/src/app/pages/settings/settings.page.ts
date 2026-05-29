@@ -3,8 +3,11 @@ import { FormsModule } from '@angular/forms';
 import { addIcons } from 'ionicons';
 import { closeOutline, createOutline, saveOutline, star, starOutline, trashOutline } from 'ionicons/icons';
 import { LlmProviderId, Question, QuestionPayload, QuestionsService, TranscriberModel } from '../../services/questions.service';
+import { AccountSettingsComponent } from '../../components/account-settings/account-settings.component';
+import { BackgroundLibraryComponent } from '../../components/background-library/background-library.component';
 
 type QuestionForm = QuestionPayload & { id: string | null };
+type SettingsTab = 'account' | 'backgrounds' | 'llm' | 'transcribe';
 
 const EMPTY_FORM: QuestionForm = {
   id: null,
@@ -17,7 +20,7 @@ const EMPTY_FORM: QuestionForm = {
 @Component({
   selector: 'app-settings-page',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, AccountSettingsComponent, BackgroundLibraryComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './settings.page.html',
   styleUrl: './settings.page.scss',
@@ -45,6 +48,13 @@ export class SettingsPage {
   readonly status = signal<string | null>(null);
   readonly form = signal<QuestionForm>({ ...EMPTY_FORM });
   readonly editing = computed(() => this.form().id != null);
+  readonly tab = signal<SettingsTab>('account');
+  readonly tabs: { id: SettingsTab; label: string }[] = [
+    { id: 'account', label: 'Account' },
+    { id: 'backgrounds', label: 'Backgrounds' },
+    { id: 'llm', label: 'LLM' },
+    { id: 'transcribe', label: 'Transcribe' },
+  ];
 
   constructor() {
     addIcons({ closeOutline, createOutline, saveOutline, star, starOutline, trashOutline });

@@ -1,0 +1,10 @@
+{
+  "session": "lkvc",
+  "expected_session": "lkvc",
+  "workflow_id": 6,
+  "label": "user-maintenance",
+  "child_sessions": [],
+  "child_roles": [],
+  "last_hash": "a34192d664bef13fa596b85ed35bedb1eb4db1133461ede8864d37cfa4288a4c",
+  "last_sync_at": "2026-05-29T01:55:01+00:00"
+}

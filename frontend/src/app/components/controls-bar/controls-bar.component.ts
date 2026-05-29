@@ -21,6 +21,8 @@ import {
 import { RemoteAudioService } from '../../services/remote-audio.service';
 import { ReactionKind } from '../../services/ws.service';
 
+type ConnectionQualityTone = 'good' | 'fair' | 'poor' | 'relayed';
+
 @Component({
   selector: 'app-controls-bar',
   standalone: true,
@@ -40,6 +42,9 @@ export class ControlsBarComponent {
   readonly uploading = input(false);
   readonly isHost = input(false);
   readonly participantCount = input(0);
+  readonly connectionQualityLabel = input<string | null>(null);
+  readonly connectionQualityTone = input<ConnectionQualityTone | null>(null);
+  readonly connectionQualityTitle = input<string | null>(null);
   readonly waitingCount = input(0);
   readonly sidebarOpen = input(false);
   readonly chatOpen = input(false);

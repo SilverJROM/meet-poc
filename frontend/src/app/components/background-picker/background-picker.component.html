@@ -63,46 +63,65 @@
       </button>
     }
 
-    @for (custom of customs(); track custom.id; let customIndex = $index) {
-      <span class="custom-tile">
+    @if (signedIn()) {
+      @for (bg of accountBackgrounds(); track bg.id; let acctIndex = $index) {
         <button
           type="button"
-          class="background-tile custom-background-tile"
+          class="background-tile"
           role="radio"
-          [class.selected]="selectedId() === custom.id"
-          [class.loading]="busyId() === custom.id"
-          [attr.aria-checked]="selectedId() === custom.id"
-          (click)="select(custom)"
-          (keydown)="onTileKeydown($event, options.length + customIndex)"
+          [class.selected]="selectedId() === bg.id"
+          [class.loading]="busyId() === bg.id"
+          [attr.aria-checked]="selectedId() === bg.id"
+          (click)="select(bg)"
+          (keydown)="onTileKeydown($event, options.length + acctIndex)"
         >
-          <span class="thumbnail" aria-hidden="true">
-            <img [src]="custom.assetUrl" alt="">
-          </span>
-          <span class="tile-label">{{ custom.label }}</span>
+          <span class="thumbnail" aria-hidden="true"><img [src]="bg.assetUrl" alt=""></span>
+          <span class="tile-label">{{ bg.label }}</span>
         </button>
-        <button
-          type="button"
-          class="delete-custom"
-          [attr.aria-label]="'Delete ' + custom.label"
-          (click)="deleteCustom($event, custom)"
-        >
-          x
-        </button>
-      </span>
+      }
+    } @else {
+      @for (custom of customs(); track custom.id; let customIndex = $index) {
+        <span class="custom-tile">
+          <button
+            type="button"
+            class="background-tile custom-background-tile"
+            role="radio"
+            [class.selected]="selectedId() === custom.id"
+            [class.loading]="busyId() === custom.id"
+            [attr.aria-checked]="selectedId() === custom.id"
+            (click)="select(custom)"
+            (keydown)="onTileKeydown($event, options.length + customIndex)"
+          >
+            <span class="thumbnail" aria-hidden="true">
+              <img [src]="custom.assetUrl" alt="">
+            </span>
+            <span class="tile-label">{{ custom.label }}</span>
+          </button>
+          <button
+            type="button"
+            class="delete-custom"
+            [attr.aria-label]="'Delete ' + custom.label"
+            (click)="deleteCustom($event, custom)"
+          >
+            x
+          </button>
+        </span>
+      }
     }
 
+    <!-- Upload tile: signed-in uploads to the account (cross-device); guests upload locally -->
     <button
       type="button"
       class="background-tile upload-tile"
       [class.loading]="uploadBusy()"
       [disabled]="uploadBusy()"
       (click)="requestUpload()"
-      (keydown)="onTileKeydown($event, options.length + customs().length)"
+      (keydown)="onTileKeydown($event, options.length + (signedIn() ? accountBackgrounds().length : customs().length))"
     >
       <span class="thumbnail upload-thumb" aria-hidden="true">
         <span class="upload-plus">+</span>
       </span>
-      <span class="tile-label">Upload custom</span>
+      <span class="tile-label">{{ signedIn() ? 'Upload background' : 'Upload custom' }}</span>
     </button>
   </div>
 

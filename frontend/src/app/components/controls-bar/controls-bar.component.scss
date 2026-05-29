@@ -40,7 +40,18 @@
 
 .meeting-corner-left {
   justify-self: start;
+  width: 100%;
   padding-bottom: 6px;
+  // Name claims the corner; clock + status dot are compressed to the side.
+  flex-wrap: nowrap;
+}
+
+.meeting-aside {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .meeting-corner-right {
@@ -49,16 +60,21 @@
 }
 
 .meeting-clock {
+  flex: 0 0 auto;
   color: #f8fafc;
-  font-size: 18px;
+  font-size: 15px;
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
   line-height: 1;
   white-space: nowrap;
+  opacity: 0.85;
 }
 
 .room-label {
+  flex: 1 1 auto;
   min-width: 0;
-  max-width: 260px;
+  // Name owns the corner; the clock + status dot are pinned compact to the side.
+  max-width: 80%;
   overflow: hidden;
   color: #f8fafc;
   font-size: 18px;
@@ -67,15 +83,20 @@
   white-space: nowrap;
 }
 
-.meeting-clock::after {
-  content: '';
-  display: inline-block;
-  width: 1px;
-  height: 28px;
-  margin-left: 12px;
-  vertical-align: middle;
-  background: rgba(248, 250, 252, 0.55);
+// Compact status dot (label is in the tooltip).
+.connection-quality-dot {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid rgba(248, 250, 252, 0.35);
+  background: rgba(148, 163, 184, 0.9);
 }
+
+.connection-quality-dot[data-tone='good'] { background: #22c55e; border-color: rgba(34, 197, 94, 0.6); }
+.connection-quality-dot[data-tone='fair'],
+.connection-quality-dot[data-tone='relayed'] { background: #eab308; border-color: rgba(234, 179, 8, 0.65); }
+.connection-quality-dot[data-tone='poor'] { background: #f87171; border-color: rgba(248, 113, 113, 0.7); }
 
 .controls {
   min-width: 0;
@@ -547,6 +568,16 @@
   }
 
   .meeting-corner-left {
+    position: fixed;
+    z-index: 25;
+    top: max(8px, env(safe-area-inset-top));
+    left: 10px;
+    min-height: 32px;
+    padding: 0;
+  }
+
+  .meeting-corner-left .meeting-clock,
+  .meeting-corner-left .room-label {
     display: none;
   }
 
@@ -572,12 +603,24 @@
     backdrop-filter: blur(14px);
   }
 
-  .settings-popover {
+  // Lift popovers out of the horizontally-scrollable .controls strip so they
+  // aren't clipped/unclickable on mobile (was: only settings-popover was fixed,
+  // so reactions + volume got clipped and couldn't be tapped).
+  .settings-popover,
+  .reactions-popover,
+  .volume-popover {
     position: fixed;
     z-index: 40;
     left: 50%;
     bottom: calc(82px + env(safe-area-inset-bottom));
     transform: translateX(-50%);
+  }
+
+  // The little arrow pointers don't align once popovers are centered — hide them.
+  .settings-popover::after,
+  .reactions-popover::after,
+  .volume-popover::after {
+    display: none;
   }
 }
 

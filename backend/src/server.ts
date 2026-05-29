@@ -13,6 +13,10 @@ import { iceConfigRouter } from './modules/ice-config/index.js';
 import { realtimeSfuRouter } from './modules/realtime-sfu/index.js';
 import { LlmService, llmRouter, logBootAvailability } from './modules/llm/index.js';
 import { questionsRouter } from './modules/questions/index.js';
+import { telegramRouter } from './modules/telegram/index.js';
+import { accountRouter } from './modules/account/index.js';
+import { adminRouter } from './modules/admin/index.js';
+import { backgroundsRouter } from './modules/backgrounds/index.js';
 import { migrateFromJson } from '../scripts/migrate-from-json.js';
 
 interface CreateAppOptions {
@@ -22,6 +26,10 @@ interface CreateAppOptions {
 export function createApp(database = getDb(), options: CreateAppOptions = {}): express.Express {
   const app = express();
   app.set('trust proxy', true);
+  // Background uploads carry a (resized) image data URL — needs a larger body
+  // limit than the global default. This path-scoped parser runs first; the
+  // global 1mb parser then skips (req._body already set) for this route only.
+  app.use('/api/account/backgrounds', express.json({ limit: '30mb' }));
   app.use(express.json({ limit: '1mb' }));
   app.use('/api', authRouter(database));
   app.use('/api', iceConfigRouter());
@@ -34,6 +42,10 @@ export function createApp(database = getDb(), options: CreateAppOptions = {}): e
       ? (options.llmService as Pick<LlmService, 'get'>)
       : undefined;
   app.use('/api', questionsRouter(database, analysisService));
+  app.use('/api', telegramRouter(database));
+  app.use('/api', accountRouter(database));
+  app.use('/api', adminRouter(database));
+  app.use('/api', backgroundsRouter(database));
   app.use('/', recordingRouter(database));
   app.get('/health', (_req, res) => res.json({ ok: true }));
   return app;

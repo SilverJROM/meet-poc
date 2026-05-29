@@ -12,7 +12,7 @@ const CLOUDFLARE_CACHE_SKEW_MS = 5 * 60 * 1000;
 const CLOUDFLARE_TURN_MINT_TIMEOUT_MS = 4000;
 
 type CachedTurn = {
-  server: IceServerConfig;
+  servers: IceServerConfig[];
   expiresAtMs: number;
 };
 
@@ -35,7 +35,7 @@ export async function getIceServersFromEnv(env: NodeJS.ProcessEnv = process.env)
   if (staticTurn) servers.push(staticTurn);
 
   const cloudflareTurn = await readCloudflareTurn(env);
-  if (cloudflareTurn) servers.push(cloudflareTurn);
+  if (cloudflareTurn.length > 0) servers.push(...cloudflareTurn);
 
   return servers;
 }
@@ -54,16 +54,16 @@ function readStaticTurn(env: NodeJS.ProcessEnv): IceServerConfig | null {
   return { urls: urls.length === 1 ? urls[0] : urls, username, credential };
 }
 
-async function readCloudflareTurn(env: NodeJS.ProcessEnv): Promise<IceServerConfig | null> {
+async function readCloudflareTurn(env: NodeJS.ProcessEnv): Promise<IceServerConfig[]> {
   const keyId = firstPresent(env.TURN_ID, env.MEET_CLOUDFLARE_TURN_SERVICE_ID, env.CLOUDFLARE_TURN_SERVICE_ID);
   const token = firstPresent(env.TURN_API_Key, env.MEET_CLOUDFLARE_TURN_TOKEN, env.CLOUDFLARE_TURN_TOKEN);
-  if (!keyId && !token) return null;
+  if (!keyId && !token) return [];
   if (!keyId || !token) {
     console.warn('[ice-config] ignoring incomplete Cloudflare TURN env; require TURN_ID and TURN_API_Key');
-    return null;
+    return [];
   }
 
-  if (cloudflareCache && cloudflareCache.expiresAtMs > Date.now()) return cloudflareCache.server;
+  if (cloudflareCache && cloudflareCache.expiresAtMs > Date.now()) return cloudflareCache.servers;
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), CLOUDFLARE_TURN_MINT_TIMEOUT_MS);
@@ -79,24 +79,24 @@ async function readCloudflareTurn(env: NodeJS.ProcessEnv): Promise<IceServerConf
     });
     if (!response.ok) {
       console.warn(`[ice-config] Cloudflare TURN mint failed with status ${response.status}`);
-      return null;
+      return [];
     }
 
     const json = (await response.json()) as { iceServers?: unknown };
-    const server = normalizeCloudflareIceServer(json.iceServers);
-    if (!server) {
+    const servers = normalizeCloudflareIceServers(json.iceServers);
+    if (servers.length === 0) {
       console.warn('[ice-config] Cloudflare TURN mint returned malformed iceServers');
-      return null;
+      return [];
     }
 
     cloudflareCache = {
-      server,
+      servers,
       expiresAtMs: Date.now() + CLOUDFLARE_TURN_TTL_SECONDS * 1000 - CLOUDFLARE_CACHE_SKEW_MS,
     };
-    return server;
+    return servers;
   } catch (err) {
     console.warn(`[ice-config] Cloudflare TURN mint request failed: ${err instanceof Error ? err.message : 'unknown error'}`);
-    return null;
+    return [];
   } finally {
     clearTimeout(timeoutId);
   }
@@ -106,13 +106,27 @@ export function clearIceConfigCacheForTests(): void {
   cloudflareCache = null;
 }
 
-function normalizeCloudflareIceServer(raw: unknown): IceServerConfig | null {
+function normalizeCloudflareIceServers(raw: unknown): IceServerConfig[] {
+  const entries = Array.isArray(raw) ? raw : [raw];
+  return entries.flatMap(normalizeCloudflareIceServer);
+}
+
+function normalizeCloudflareIceServer(raw: unknown): IceServerConfig[] {
   const value = raw as { urls?: unknown; username?: unknown; credential?: unknown };
   const urls = Array.isArray(value?.urls) ? value.urls.filter((url): url is string => typeof url === 'string' && !!url.trim()) : [];
   const username = typeof value?.username === 'string' ? value.username : '';
   const credential = typeof value?.credential === 'string' ? value.credential : '';
-  if (urls.length === 0 || !username || !credential) return null;
-  return { urls: withTurnTls443Fallback(urls), username, credential };
+  const stunUrls = urls.filter((url) => url.toLowerCase().startsWith('stun:'));
+  const turnUrls = urls.filter((url) => url.toLowerCase().startsWith('turn:') || url.toLowerCase().startsWith('turns:'));
+  const servers: IceServerConfig[] = [];
+
+  if (stunUrls.length > 0) servers.push({ urls: stunUrls.length === 1 ? stunUrls[0] : stunUrls });
+  if (turnUrls.length > 0 && username && credential) {
+    const normalizedTurnUrls = withTurnTls443Fallback(turnUrls);
+    servers.push({ urls: normalizedTurnUrls.length === 1 ? normalizedTurnUrls[0] : normalizedTurnUrls, username, credential });
+  }
+
+  return servers;
 }
 
 function parseUrlList(raw: string | undefined): string[] {

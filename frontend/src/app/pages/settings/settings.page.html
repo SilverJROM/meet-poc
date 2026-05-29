@@ -3,13 +3,34 @@
     <h2>Settings</h2>
   </div>
 
-  @if (error()) {
-    <p class="error-text">{{ error() }}</p>
+  <nav class="settings-tabs" role="tablist" aria-label="Settings sections">
+    @for (t of tabs; track t.id) {
+      <button
+        type="button"
+        role="tab"
+        class="settings-tab"
+        [class.active]="tab() === t.id"
+        [attr.aria-selected]="tab() === t.id"
+        (click)="tab.set(t.id)"
+      >{{ t.label }}</button>
+    }
+  </nav>
+
+  @if (tab() === 'account') {
+    <app-account-settings />
   }
 
-  @if (loading()) {
-    <p class="empty">Loading settings...</p>
-  } @else {
+  @if (tab() === 'backgrounds') {
+    <app-background-library />
+  }
+
+  @if (tab() === 'llm') {
+    @if (error()) {
+      <p class="error-text">{{ error() }}</p>
+    }
+    @if (loading()) {
+      <p class="empty">Loading settings...</p>
+    } @else {
     <section class="panel-section" aria-label="LLM provider default">
       <div class="section-head compact">
         <div>
@@ -103,7 +124,13 @@
         }
       </div>
     </section>
+    }
+  }
 
+  @if (tab() === 'transcribe') {
+    @if (loading()) {
+      <p class="empty">Loading settings...</p>
+    } @else {
     <section class="panel-section" aria-label="Transcriber model">
       <div class="section-head compact">
         <div>
@@ -130,6 +157,7 @@
         </div>
       </div>
     </section>
+    }
   }
 
   <div class="settings-status" role="status">{{ status() || '' }}</div>

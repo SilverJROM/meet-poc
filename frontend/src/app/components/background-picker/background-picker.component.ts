@@ -1,16 +1,20 @@
 import { CommonModule } from '@angular/common';
+import { HttpErrorResponse } from '@angular/common/http';
 import { CUSTOM_ELEMENTS_SCHEMA, Component, ElementRef, HostListener, ViewChild, computed, inject, input, output, signal } from '@angular/core';
 import { addIcons } from 'ionicons';
 import { closeOutline } from 'ionicons/icons';
 import { BackgroundEffectsService, type BackgroundEffectMode } from '../../services/background-effects.service';
 import { ViewportService } from '../../services/viewport.service';
+import { AuthService } from '../../services/auth.service';
+import { BackgroundLibraryService } from '../../services/background-library.service';
+import { resizeImageToDataUrl } from '../../utils/image-resize';
 
 const STORAGE_KEY = 'meet-poc:bg:selected';
 const MOBILE_OPT_IN_KEY = 'meet-poc:bg:mobile-opt-in';
 const CUSTOM_INDEX_KEY = 'meet-poc:bg:custom:index';
 const CUSTOM_STORAGE_PREFIX = 'meet-poc:bg:custom:';
 const MAX_CUSTOM_BACKGROUNDS = 5;
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const MAX_PROCESSED_BYTES = 1_000_000;
 const MAX_CUSTOM_WIDTH = 1280;
 const MAX_CUSTOM_HEIGHT = 720;
@@ -121,7 +125,11 @@ export class BackgroundPickerComponent {
 
   readonly backgroundEffects = inject(BackgroundEffectsService);
   private readonly viewport = inject(ViewportService);
+  private readonly auth = inject(AuthService);
+  private readonly library = inject(BackgroundLibraryService);
   readonly isMobile = this.viewport.isMobile;
+  readonly signedIn = computed(() => !!this.auth.user());
+  readonly accountBackgrounds = signal<ImageBackgroundOption[]>([]);
   readonly closeRequested = output<void>();
   readonly presentation = input<'inline' | 'overlay'>('inline');
   readonly options = OPTIONS;
@@ -139,7 +147,24 @@ export class BackgroundPickerComponent {
 
   constructor() {
     addIcons({ closeOutline });
-    void this.restoreSelection();
+    void this.loadAccountBackgrounds().then(() => this.restoreSelection());
+  }
+
+  private async loadAccountBackgrounds(): Promise<void> {
+    if (!this.signedIn()) return;
+    try {
+      const res = await this.library.list();
+      this.accountBackgrounds.set(
+        res.backgrounds.map((bg) => ({
+          id: `acct:${bg.id}`,
+          label: bg.label,
+          mode: 'image' as const,
+          assetUrl: this.library.imageUrl(bg.id),
+        })),
+      );
+    } catch {
+      // Non-fatal: built-in options still work if account backgrounds fail to load.
+    }
   }
 
   async select(option: SelectableBackgroundOption): Promise<void> {
@@ -195,7 +220,7 @@ export class BackgroundPickerComponent {
     }
 
     if (file.size > MAX_UPLOAD_BYTES) {
-      this.uploadError.set('Image must be 10MB or smaller.');
+      this.uploadError.set('Image must be 20MB or smaller.');
       return;
     }
 
@@ -204,14 +229,28 @@ export class BackgroundPickerComponent {
     this.uploadError.set(null);
 
     try {
-      const sourceDataUrl = await readFileAsDataUrl(file);
-      const sourceImage = await loadImage(sourceDataUrl);
-      const processedDataUrl = resizeAndEncode(sourceImage);
-      const addedCustom = saveCustomBackground(processedDataUrl);
-      this.customs.set(readCustomBackgrounds());
-      await this.select(addedCustom);
+      if (this.signedIn()) {
+        // Signed-in: upload to the account (cross-device). Resize to 720p JPEG
+        // (iOS-safe, small) first, then POST and refresh the account list.
+        const dataUrl = await resizeImageToDataUrl(file, 1280, 720, 'image/jpeg', 0.85);
+        const label = file.name.replace(/\.[^.]+$/, '').slice(0, 64) || 'Background';
+        const res = await this.library.upload(label, dataUrl);
+        await this.loadAccountBackgrounds();
+        const added = this.accountBackgrounds().find((b) => b.id === `acct:${res.background.id}`);
+        if (added) await this.select(added);
+      } else {
+        const sourceDataUrl = await readFileAsDataUrl(file);
+        const sourceImage = await loadImage(sourceDataUrl);
+        const processedDataUrl = resizeAndEncode(sourceImage);
+        const addedCustom = saveCustomBackground(processedDataUrl);
+        this.customs.set(readCustomBackgrounds());
+        await this.select(addedCustom);
+      }
     } catch (error) {
-      this.uploadError.set(error instanceof Error ? error.message : 'Could not upload image.');
+      const message = error instanceof HttpErrorResponse && error.status === 413
+        ? 'Storage quota exceeded. Manage backgrounds in Settings → Backgrounds.'
+        : error instanceof Error ? error.message : 'Could not upload image.';
+      this.uploadError.set(message);
     } finally {
       this.uploadBusy.set(false);
       if (this.busyId() === 'upload-custom') this.busyId.set(null);
@@ -313,7 +352,9 @@ export class BackgroundPickerComponent {
     const stored = readStoredSelection();
     if (!stored) return;
     if (stored.mode === 'image') {
-      const option = IMAGE_OPTIONS.find((item) => item.id === stored.asset) ?? this.customs().find((item) => item.id === stored.asset);
+      const option = IMAGE_OPTIONS.find((item) => item.id === stored.asset)
+        ?? this.accountBackgrounds().find((item) => item.id === stored.asset)
+        ?? this.customs().find((item) => item.id === stored.asset);
       if (!option) {
         this.selectedId.set('none');
         writeStoredSelection({ mode: 'none' });

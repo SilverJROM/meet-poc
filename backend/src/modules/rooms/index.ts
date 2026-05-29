@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
+import { parseCookies } from '../../lib/cookies.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
+import { getSessionUser } from '../auth/sessions.js';
 import {
   bulkDeleteOwnedRooms,
   createRoom,
@@ -12,7 +14,10 @@ import {
   listOwnedRooms,
   listOwnedRoomsPage,
   setRoomAccess,
+  setRoomPassword,
   setRoomSlug,
+  setRoomTitle,
+  verifyRoomPassword,
 } from './store.js';
 import { notifyRoomAccessChanged } from '../signaling/index.js';
 
@@ -67,11 +72,34 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
     return res.json({ ok: true });
   });
 
+  router.put('/rooms/:id/title', auth, (req, res) => {
+    const authed = req as AuthenticatedRequest;
+    const result = setRoomTitle(String(req.params.id), req.body?.title, authed.user.email, database);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json({ room: result.room });
+  });
+
   router.put('/rooms/:id/slug', auth, (req, res) => {
     const authed = req as AuthenticatedRequest;
     const result = setRoomSlug(String(req.params.id), req.body?.slug, authed.user.email, database);
     if (!result.ok) return res.status(result.status).json({ error: result.error });
     return res.json({ room: result.room });
+  });
+
+  router.put('/rooms/:id/password', auth, (req, res) => {
+    const authed = req as AuthenticatedRequest;
+    const result = setRoomPassword(String(req.params.id), req.body?.password, authed.user.email, database);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    return res.json({ room: result.room });
+  });
+
+  router.post('/rooms/by-slug/:slug/verify-password', (req, res) => {
+    const slug = String(req.params.slug || '').trim();
+    const room = getRoomBySlugOrId(slug, database);
+    if (!room) return res.status(404).json({ error: 'not found' });
+    const ok = verifyRoomPassword(room.id, req.body?.password, database);
+    if (!ok) return res.status(401).json({ error: 'invalid password' });
+    return res.json({ ok: true });
   });
 
   router.put('/rooms/:id/access', auth, (req, res) => {
@@ -101,13 +129,25 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
     if (!slug) return res.status(404).json({ error: 'not found' });
     const room = getRoomBySlugOrId(slug, database);
     if (!room) return res.status(404).json({ error: 'not found' });
-    return res.json({ room: { id: room.id, slug: room.slug, title: room.title, isOpen: room.isOpen } });
+    return res.json({ room: { id: room.id, slug: room.slug, title: room.title, isOpen: room.isOpen, passwordRequired: room.passwordRequired } });
   });
 
   router.get('/rooms/:id/exists', (req, res) => {
     const room = getRoomBySlugOrId(String(req.params.id), database);
     if (!room) return res.json({ exists: false });
-    return res.json({ exists: true, id: room.id, title: room.title, slug: room.slug, isOpen: room.isOpen, waitTimeoutMinutes: room.waitTimeoutMinutes });
+    const cookies = parseCookies(req.headers.cookie);
+    const user = getSessionUser(cookies.session, database);
+    const isOwner = !!user && user.email === room.ownerEmail;
+    return res.json({
+      exists: true,
+      id: room.id,
+      title: room.title,
+      slug: room.slug,
+      isOpen: room.isOpen,
+      waitTimeoutMinutes: room.waitTimeoutMinutes,
+      passwordRequired: room.passwordRequired && !isOwner,
+      isOwner,
+    });
   });
 
   return router;

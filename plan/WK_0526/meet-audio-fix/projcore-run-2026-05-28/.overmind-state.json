@@ -1,0 +1,14 @@
+{
+  "session": "lkvc-38-audio-fix",
+  "expected_session": "lkvc-38",
+  "workflow_id": 6,
+  "label": "VOICE App \u00b7 audio silence fix (R1-R4)",
+  "child_sessions": [
+    "voice-codex"
+  ],
+  "child_roles": [
+    "codex"
+  ],
+  "last_hash": "765744d2c51ed984bf4ee4e5105eefaf9216ba0b12b3b4bd8d64a6562b144de9",
+  "last_sync_at": "2026-05-28T02:10:29+00:00"
+}

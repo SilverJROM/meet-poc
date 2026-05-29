@@ -1,0 +1,13 @@
+{
+  "workflow_id": 6,
+  "label": "VOICE App \u00b7 Phase 2b \u2014 background effects (blur + 5 generic + custom upload)",
+  "session": "lkvc",
+  "child_sessions": [
+    "lkvc-codex"
+  ],
+  "child_roles": [
+    "implementer"
+  ],
+  "last_hash": "e5f80bc5ee0d1a9ae7473462a0ec149c7150b97ba32b591a724756aaf9f65462",
+  "last_sync_at": "2026-05-28T12:04:24+00:00"
+}

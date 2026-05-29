@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
+import { hashPassword, verifyPassword } from '../../lib/passwords.js';
 
 export type Room = {
   id: string;
@@ -10,6 +11,7 @@ export type Room = {
   isOpen: boolean;
   waitTimeoutMinutes: number;
   createdAt: number;
+  passwordRequired: boolean;
 };
 
 type RoomRow = {
@@ -20,6 +22,7 @@ type RoomRow = {
   is_open: number;
   wait_timeout_minutes: number;
   created_at: number;
+  password_hash: string | null;
 };
 
 type SlugValidationResult =
@@ -55,12 +58,13 @@ function toRoom(row: RoomRow): Room {
     isOpen: row.is_open === 1,
     waitTimeoutMinutes: Number(row.wait_timeout_minutes || 15),
     createdAt: row.created_at,
+    passwordRequired: !!row.password_hash,
   };
 }
 
 export function getRoom(id: string, database: Database.Database = getDb()): Room | null {
   const row = database
-    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE id = ?')
+    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash FROM rooms WHERE id = ?')
     .get(id) as RoomRow | undefined;
   return row ? toRoom(row) : null;
 }
@@ -68,7 +72,7 @@ export function getRoom(id: string, database: Database.Database = getDb()): Room
 export function getRoomBySlugOrId(key: string, database: Database.Database = getDb()): Room | null {
   const roomKey = String(key || '').slice(0, MAX_SLUG_LENGTH);
   const bySlug = database
-    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE slug = ?')
+    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash FROM rooms WHERE slug = ?')
     .get(roomKey) as RoomRow | undefined;
   if (bySlug) return toRoom(bySlug);
   return getRoom(roomKey, database);
@@ -86,7 +90,7 @@ export function listOwnedRooms(email: string, database: Database.Database = getD
   const search = normalizeRoomSearch(searchQuery);
   const filter = titleSearchFilter(search);
   return database
-    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC`)
+    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC`)
     .all(email, ...filter.params)
     .map((row) => toRoom(row as RoomRow));
 }
@@ -105,7 +109,7 @@ export function listOwnedRoomsPage(
     .prepare(`SELECT COUNT(*) AS total FROM rooms WHERE owner_email = ?${filter.sql}`)
     .get(email, ...filter.params) as { total: number };
   const rooms = database
-    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
     .all(email, ...filter.params, pageSize, offset)
     .map((row) => toRoom(row as RoomRow));
   return { rooms, total: totalRow.total };
@@ -114,16 +118,35 @@ export function listOwnedRoomsPage(
 export function createRoom(titleInput: unknown, email: string, database: Database.Database = getDb()): Room {
   const title =
     String(titleInput || '').slice(0, 100).trim() || `Room ${new Date().toISOString().slice(0, 10)}`;
+  const slug = generateAvailableSlug(slugBase(title), database);
   for (let i = 0; i < 10; i += 1) {
     const id = crypto.randomBytes(6).toString('hex');
-    const slug = createAutoSlug(title);
     const createdAt = Date.now();
     const result = database
       .prepare('INSERT OR IGNORE INTO rooms (id, title, slug, owner_email, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(id, title, slug, email, createdAt);
-    if (result.changes === 1) return { id, title, slug, ownerEmail: email, isOpen: false, waitTimeoutMinutes: 15, createdAt };
+    if (result.changes === 1) return { id, title, slug, ownerEmail: email, isOpen: false, waitTimeoutMinutes: 15, createdAt, passwordRequired: false };
   }
-  throw new Error('failed to create unique room id and slug');
+  throw new Error('failed to create unique room id');
+}
+
+// Derive a clean URL slug from the room name; only append a short random
+// suffix when the clean slug is already taken or reserved.
+function generateAvailableSlug(base: string, database: Database.Database, excludeRoomId?: string): string {
+  const clean = base || 'room';
+  const taken = (slug: string): boolean => {
+    if (RESERVED_SLUGS.has(slug) || /^[a-f0-9]{12}$/.test(slug)) return true;
+    const row = excludeRoomId
+      ? database.prepare('SELECT 1 FROM rooms WHERE (slug = ? OR id = ?) AND id <> ?').get(slug, slug, excludeRoomId)
+      : database.prepare('SELECT 1 FROM rooms WHERE slug = ? OR id = ?').get(slug, slug);
+    return !!row;
+  };
+  if (!taken(clean)) return clean;
+  for (let i = 0; i < 20; i += 1) {
+    const candidate = `${clean}-${crypto.randomBytes(2).toString('hex')}`;
+    if (!taken(candidate)) return candidate;
+  }
+  return `${clean}-${crypto.randomBytes(4).toString('hex')}`;
 }
 
 export function setRoomAccess(
@@ -152,6 +175,53 @@ export function openRoomBySystem(roomId: string, database: Database.Database = g
 
 export function closeRoomBySystem(roomId: string, database: Database.Database = getDb()): Room | null {
   return setRoomOpenBySystem(roomId, false, database);
+}
+
+export function setRoomTitle(
+  roomId: string,
+  titleInput: unknown,
+  email: string,
+  database: Database.Database = getDb(),
+): { ok: true; room: Room } | { ok: false; status: 400 | 403 | 404; error: string } {
+  const room = getRoom(roomId, database);
+  if (!room) return { ok: false, status: 404, error: 'not found' };
+  if (!isOwnerOf(room.id, email, database)) return { ok: false, status: 403, error: 'forbidden' };
+  const title = String(titleInput || '').trim().slice(0, 100);
+  if (!title) return { ok: false, status: 400, error: 'title required' };
+  // Keep the URL slug in sync with the name (clean derive; suffix only if taken).
+  const slug = generateAvailableSlug(slugBase(title), database, room.id);
+  database.prepare('UPDATE rooms SET title = ?, slug = ? WHERE id = ?').run(title, slug, room.id);
+  return { ok: true, room: getRoom(room.id, database)! };
+}
+
+export function setRoomPassword(
+  roomId: string,
+  passwordInput: unknown,
+  email: string,
+  database: Database.Database = getDb(),
+): { ok: true; room: Room } | { ok: false; status: 400 | 403 | 404; error: string } {
+  const room = getRoom(roomId, database);
+  if (!room) return { ok: false, status: 404, error: 'not found' };
+  if (!isOwnerOf(room.id, email, database)) return { ok: false, status: 403, error: 'forbidden' };
+  const raw = passwordInput == null ? '' : String(passwordInput);
+  if (raw.length > 200) return { ok: false, status: 400, error: 'password too long' };
+  const hash = raw.length === 0 ? null : hashPassword(raw);
+  database.prepare('UPDATE rooms SET password_hash = ? WHERE id = ?').run(hash, room.id);
+  return { ok: true, room: getRoom(room.id, database)! };
+}
+
+export function verifyRoomPassword(
+  roomId: string,
+  passwordInput: unknown,
+  database: Database.Database = getDb(),
+): boolean {
+  const row = database
+    .prepare('SELECT password_hash FROM rooms WHERE id = ?')
+    .get(roomId) as { password_hash: string | null } | undefined;
+  if (!row) return false;
+  if (!row.password_hash) return true;
+  const candidate = passwordInput == null ? '' : String(passwordInput);
+  return verifyPassword(candidate, row.password_hash);
 }
 
 export function setRoomSlug(
@@ -198,11 +268,6 @@ export function bulkDeleteOwnedRooms(
       .run(email, ...unique).changes;
   });
   return { deleted: tx(), requested: unique.length };
-}
-
-function createAutoSlug(title: string): string {
-  const suffix = crypto.randomBytes(3).toString('hex');
-  return `${slugBase(title)}-${suffix}`;
 }
 
 function slugBase(value: string): string {

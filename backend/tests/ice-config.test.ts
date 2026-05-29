@@ -61,7 +61,7 @@ describe('ice config API', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('ignoring incomplete static TURN env'));
   });
 
-  it('DR-36 mints Cloudflare TURN credentials and adds a same-entry TLS 443 fallback', async () => {
+  it('DR-36 mints Cloudflare TURN credentials from an object response and keeps credentials on TURN only', async () => {
     const fetchMock = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -84,22 +84,74 @@ describe('ice config API', () => {
 
     const res = await request(createApp(createTestDb())).get('/api/ice-config').expect(200);
 
-    expect(fetchMock).toHaveBeenCalledWith('https://rtc.live.cloudflare.com/v1/turn/keys/cloudflare-key-id/credentials/generate', {
-      method: 'POST',
-      headers: {
-        Authorization: 'Bearer cloudflare-token',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ ttl: 86400 }),
-    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://rtc.live.cloudflare.com/v1/turn/keys/cloudflare-key-id/credentials/generate',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer cloudflare-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ttl: 86400 }),
+      }),
+    );
     expect(res.body.iceServers).toEqual([
       { urls: 'stun:stun.l.google.com:19302' },
       { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun.cloudflare.com:3478' },
       {
         urls: [
-          'stun:stun.cloudflare.com:3478',
           'turn:turn.cloudflare.com:3478?transport=udp',
           'turn:turn.cloudflare.com:3478?transport=tcp',
+          'turns:turn.cloudflare.com:5349?transport=tcp',
+          'turns:turn.cloudflare.com:443?transport=tcp',
+        ],
+        username: 'minted-user',
+        credential: 'minted-secret',
+      },
+    ]);
+  });
+
+  it('DR-36 mints Cloudflare TURN credentials from an array response and preserves every returned TURN url', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        iceServers: [
+          {
+            urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53'],
+          },
+          {
+            urls: [
+              'turn:turn.cloudflare.com:3478?transport=udp',
+              'turn:turn.cloudflare.com:53?transport=udp',
+              'turn:turn.cloudflare.com:3478?transport=tcp',
+              'turn:turn.cloudflare.com:80?transport=tcp',
+              'turns:turn.cloudflare.com:5349?transport=tcp',
+              'turns:turn.cloudflare.com:443?transport=tcp',
+            ],
+            username: 'minted-user',
+            credential: 'minted-secret',
+          },
+        ],
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.TURN_ID = 'cloudflare-key-id';
+    process.env.TURN_API_Key = 'cloudflare-token';
+
+    const res = await request(createApp(createTestDb())).get('/api/ice-config').expect(200);
+
+    expect(res.body.iceServers).toEqual([
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: ['stun:stun.cloudflare.com:3478', 'stun:stun.cloudflare.com:53'] },
+      {
+        urls: [
+          'turn:turn.cloudflare.com:3478?transport=udp',
+          'turn:turn.cloudflare.com:53?transport=udp',
+          'turn:turn.cloudflare.com:3478?transport=tcp',
+          'turn:turn.cloudflare.com:80?transport=tcp',
           'turns:turn.cloudflare.com:5349?transport=tcp',
           'turns:turn.cloudflare.com:443?transport=tcp',
         ],

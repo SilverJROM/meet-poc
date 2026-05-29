@@ -76,6 +76,11 @@ const server = http.createServer((req, res) => {
   }
 
   const parsed = new URL(url, 'http://localhost');
+  if (parsed.pathname === '/tg' || parsed.pathname === '/tg/') {
+    res.writeHead(302, { Location: '/app/rooms' });
+    res.end();
+    return;
+  }
   const requested = path.normalize(parsed.pathname).replace(/^(\.\.[/\\])+/, '');
   const filePath = path.join(distDir, requested === '/' ? 'index.html' : requested);
   if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {

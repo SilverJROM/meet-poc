@@ -1,0 +1,45 @@
+<section class="bg-library">
+  <div class="bg-head">
+    <div>
+      <h3>My backgrounds</h3>
+      <p>Uploaded backgrounds are saved to your account and available on any device you sign in to.</p>
+    </div>
+    <label class="upload-btn" [class.disabled]="busy()">
+      <ion-icon name="cloud-upload-outline"></ion-icon>
+      {{ busy() ? 'Working…' : 'Upload image' }}
+      <input type="file" accept="image/*" (change)="onFileSelected($event)" [disabled]="busy()" hidden>
+    </label>
+  </div>
+
+  <div class="quota-line">
+    @if (quota() === null) {
+      <span>Storage: <strong>{{ usedLabel() }}</strong> used · Unlimited</span>
+    } @else {
+      <span>Storage: <strong>{{ usedLabel() }}</strong> of {{ quotaLabel() }}</span>
+      <span class="quota-bar"><span class="quota-fill" [style.width.%]="usedPct()"></span></span>
+    }
+  </div>
+
+  @if (error()) {
+    <p class="bg-error" role="alert">{{ error() }}</p>
+  }
+  <div class="bg-status" role="status">{{ status() || '' }}</div>
+
+  @if (loading()) {
+    <p class="muted">Loading backgrounds…</p>
+  } @else if (backgrounds().length === 0) {
+    <p class="muted">No backgrounds yet. Upload one above — it'll be available in the in-call background picker on any device.</p>
+  } @else {
+    <div class="bg-grid">
+      @for (bg of backgrounds(); track bg.id) {
+        <figure class="bg-tile">
+          <img [src]="imageUrl(bg.id)" [alt]="bg.label" loading="lazy">
+          <figcaption>{{ bg.label }}</figcaption>
+          <button type="button" class="bg-delete" [disabled]="busy()" [attr.aria-label]="'Delete ' + bg.label" (click)="remove(bg)">
+            <ion-icon name="trash-outline"></ion-icon>
+          </button>
+        </figure>
+      }
+    </div>
+  }
+</section>

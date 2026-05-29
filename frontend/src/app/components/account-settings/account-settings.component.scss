@@ -1,0 +1,166 @@
+.account-card {
+  border: 1px solid #e0e3e7;
+  border-radius: 10px;
+  background: #fff;
+  padding: 16px;
+  margin-bottom: 18px;
+}
+
+.account-head {
+  margin-bottom: 14px;
+
+  h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 800;
+    color: #202124;
+  }
+
+  p {
+    margin: 2px 0 0;
+    color: #5f6368;
+    font-size: 13px;
+  }
+}
+
+.account-field {
+  display: block;
+  margin-bottom: 12px;
+
+  label {
+    display: block;
+    font-size: 13px;
+    font-weight: 700;
+    color: #202124;
+  }
+}
+
+.field-hint {
+  margin: 2px 0 8px;
+  color: #5f6368;
+  font-size: 12px;
+}
+
+.field-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+
+  input {
+    flex: 1 1 220px;
+    min-width: 0;
+    height: 38px;
+    padding: 6px 10px;
+    border: 1px solid #dadce0;
+    border-radius: 8px;
+    font: inherit;
+  }
+
+  input:focus {
+    outline: 2px solid rgba(26, 115, 232, 0.4);
+    outline-offset: 1px;
+    border-color: rgba(26, 115, 232, 0.6);
+  }
+}
+
+.primary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.account-error {
+  margin: 6px 0 0;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account-status {
+  margin-top: 6px;
+  min-height: 18px;
+  color: #047857;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.account-divider {
+  margin: 16px 0;
+  border: 0;
+  border-top: 1px solid #eceff1;
+}
+
+.stacked-input {
+  display: block;
+  width: 100%;
+  max-width: 360px;
+  height: 38px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  font: inherit;
+
+  &:focus {
+    outline: 2px solid rgba(26, 115, 232, 0.4);
+    outline-offset: 1px;
+    border-color: rgba(26, 115, 232, 0.6);
+  }
+}
+
+.tg-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0 10px;
+  font-size: 14px;
+
+  &.linked { color: #047857; }
+
+  ion-icon { font-size: 18px; }
+}
+
+.secondary-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #fff;
+  font-weight: 700;
+  color: #202124;
+  cursor: pointer;
+
+  &.danger {
+    color: #b91c1c;
+    border-color: rgba(185, 28, 28, 0.4);
+  }
+
+  &.danger:hover { background: #fef2f2; }
+
+  &:disabled { opacity: 0.6; cursor: not-allowed; }
+}
+
+code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: #f1f3f4;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}

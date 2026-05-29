@@ -7,6 +7,19 @@
   padding: 24px;
 }
 
+.join-as {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #eef4ff;
+  color: #1e3a8a;
+  font-size: 14px;
+
+  strong {
+    font-weight: 800;
+  }
+}
+
 .join-card {
   width: min(440px, 100%);
   display: grid;

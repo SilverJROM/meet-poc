@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { authGuard } from './guards/auth.guard';
 import { noAuthGuard } from './guards/no-auth.guard';
+import { adminGuard } from './guards/admin.guard';
 
 export const routes: Routes = [
   { path: '', pathMatch: 'full', redirectTo: 'app/rooms' },
@@ -23,6 +24,8 @@ export const routes: Routes = [
       { path: 'recordings', loadComponent: () => import('./pages/recordings/recordings.page').then((m) => m.RecordingsPage) },
       { path: 'transcripts', loadComponent: () => import('./pages/transcripts/transcripts.page').then((m) => m.TranscriptsPage) },
       { path: 'settings', loadComponent: () => import('./pages/settings/settings.page').then((m) => m.SettingsPage) },
+      { path: 'admin', loadComponent: () => import('./pages/admin/admin.page').then((m) => m.AdminPage), canActivate: [adminGuard] },
+      { path: 'link', loadComponent: () => import('./pages/link/link.page').then((m) => m.LinkPage) },
     ],
   },
   {

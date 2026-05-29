@@ -1,0 +1,78 @@
+<section class="admin-page">
+  <div class="section-head">
+    <h2>User administration</h2>
+    <p>Create and review accounts. Admin-only.</p>
+  </div>
+
+  <section class="panel" aria-label="Create user">
+    <h3><ion-icon name="person-add-outline"></ion-icon> Create user</h3>
+    <form class="create-form" (ngSubmit)="createUser()">
+      <div class="field">
+        <label for="new-email">Email</label>
+        <input id="new-email" name="email" type="email" autocomplete="off" [ngModel]="email()" (ngModelChange)="email.set($event)" [disabled]="creating()">
+      </div>
+      <div class="field">
+        <label for="new-username">Username (optional)</label>
+        <input id="new-username" name="displayName" type="text" maxlength="64" placeholder="Defaults to email name" [ngModel]="displayName()" (ngModelChange)="displayName.set($event)" [disabled]="creating()">
+      </div>
+      <div class="field">
+        <label for="new-password">Initial password</label>
+        <input id="new-password" name="password" type="text" autocomplete="off" placeholder="Shown once — relay to the user" [ngModel]="password()" (ngModelChange)="password.set($event)" [disabled]="creating()">
+      </div>
+      <label class="toggle-row">
+        <input type="checkbox" name="makeAdmin" [ngModel]="makeAdmin()" (ngModelChange)="makeAdmin.set($event)" [disabled]="creating()">
+        <span><ion-icon name="shield-checkmark-outline"></ion-icon> Grant admin access</span>
+      </label>
+      <button type="submit" class="primary-btn" [disabled]="creating() || !email().trim() || !password()">
+        <ion-icon name="person-add-outline"></ion-icon>
+        Create user
+      </button>
+    </form>
+    @if (createError()) {
+      <p class="admin-error" role="alert">{{ createError() }}</p>
+    }
+    @if (createdNotice()) {
+      <p class="admin-notice" role="status">{{ createdNotice() }}</p>
+    }
+  </section>
+
+  <section class="panel" aria-label="Users">
+    <h3>Users ({{ users().length }})</h3>
+    @if (loading()) {
+      <p class="muted">Loading users…</p>
+    } @else if (error()) {
+      <p class="admin-error" role="alert">{{ error() }}</p>
+    } @else {
+      <div class="user-table" role="table">
+        <div class="user-row head" role="row">
+          <span>Email</span>
+          <span>Username</span>
+          <span>Telegram</span>
+          <span>Role</span>
+          <span>Created</span>
+        </div>
+        @for (u of users(); track u.email) {
+          <div class="user-row" role="row">
+            <span class="email">{{ u.email }}</span>
+            <span>{{ u.displayName }}</span>
+            <span>
+              @if (u.telegramUsername) {
+                <span class="tg-chip">{{ '@' + u.telegramUsername }}</span>
+              } @else {
+                <span class="muted-cell">—</span>
+              }
+            </span>
+            <span>
+              @if (u.isAdmin) {
+                <span class="role-chip admin"><ion-icon name="shield-checkmark-outline"></ion-icon> Admin</span>
+              } @else {
+                <span class="role-chip">User</span>
+              }
+            </span>
+            <span>{{ u.createdAt | date: 'medium' }}</span>
+          </div>
+        }
+      </div>
+    }
+  </section>
+</section>

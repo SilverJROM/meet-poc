@@ -3,6 +3,7 @@
 **Repo:** `/home/agjrom/websites/meet-poc`
 **Live URL:** `https://voice.silverjrom.app` (CF Tunnel → consolidated local port)
 **Status:** v2 Run 1 in progress — locked at 2026-05-19. See `plan/WK_0519/meet-v2/og-requirements.md` for the v2 contract.
+**projcore_session:** lkvc
 
 > Purpose: this file is the source of architectural truth for the rebuilt app. It is updated as decisions are locked. Anything in `og-requirements.md` is the contract; this file is the surrounding context (stack, conventions, tooling, deploy/rollback).
 

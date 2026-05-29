@@ -199,19 +199,12 @@ h1 {
   background: #fff;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
   padding: 14px;
-  cursor: pointer;
-  transition:
-    border-color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
 }
 
-.room-row:hover,
-.room-row:focus-visible {
-  border-color: rgba(26, 115, 232, 0.48);
-  box-shadow: 0 8px 20px rgba(60, 64, 67, 0.12);
-  outline: none;
-  transform: translateY(-1px);
+.room-row:hover {
+  border-color: rgba(26, 115, 232, 0.28);
+  box-shadow: 0 4px 12px rgba(60, 64, 67, 0.08);
 }
 
 .room-row.selected {
@@ -229,11 +222,76 @@ h1 {
 
 .room-card-top {
   min-width: 0;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
   padding-left: 30px;
+}
+
+.title-row {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.title-row h2 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* status + actions share the second row; actions pinned to the right
+   so the name gets the full top row to itself */
+.status-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.status-row .card-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+  display: inline-flex;
+  gap: 2px;
+}
+
+.status-row .icon-btn {
+  flex: 0 0 auto;
+}
+
+.icon-btn.delete-quick {
+  width: 28px;
+  height: 28px;
+  border-color: transparent;
+  color: #9aa0a6;
+  background: transparent;
+}
+
+.icon-btn.delete-quick:hover {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.35);
+  background: #fef2f2;
+}
+
+.icon-btn.edit {
+  width: 28px;
+  height: 28px;
+  border-color: transparent;
+  color: #9aa0a6;
+  background: transparent;
+}
+
+.icon-btn.edit:hover {
+  color: #1a73e8;
+  border-color: rgba(26, 115, 232, 0.35);
+  background: #eef4ff;
 }
 
 .room-card-top h2 {
@@ -306,6 +364,83 @@ h1 {
   border-color: rgba(26, 115, 232, 0.4);
 }
 
+.icon-btn.save {
+  color: #047857;
+  border-color: rgba(4, 120, 87, 0.45);
+}
+
+.icon-btn.save:hover {
+  background: #ecfdf5;
+}
+
+.icon-btn.cancel {
+  color: #b91c1c;
+  border-color: rgba(185, 28, 28, 0.4);
+}
+
+.icon-btn.cancel:hover {
+  background: #fef2f2;
+}
+
+.inline-edit {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.inline-edit input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 32px;
+  padding: 4px 8px;
+  border: 1px solid rgba(26, 115, 232, 0.55);
+  border-radius: 6px;
+  font: inherit;
+  background: #fff;
+}
+
+.inline-edit input:focus {
+  outline: 2px solid rgba(26, 115, 232, 0.4);
+  outline-offset: 1px;
+}
+
+.slug-edit .slug-prefix {
+  color: #5f6368;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.password-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.password-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: #f1f3f4;
+  color: #5f6368;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.password-chip.locked {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.password-chip ion-icon {
+  font-size: 14px;
+}
+
 .room-actions {
   align-self: end;
   display: grid;
@@ -323,11 +458,65 @@ h1 {
 }
 
 .quick-actions {
-  grid-template-columns: minmax(112px, 1fr) auto;
-  align-items: center;
+  grid-template-columns: 1fr;
+  gap: 6px;
   border-radius: 8px;
   background: #f8fafd;
   padding: 8px;
+}
+
+/* Join: full-width primary row */
+.quick-actions .join-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Copy link: its own row, half the height of Join, sub-button look */
+.quick-actions .copy-link-btn {
+  width: 100%;
+  min-height: 24px;
+  padding: 2px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 700;
+  background: transparent;
+  border-color: transparent;
+  color: #5f6368;
+}
+
+.quick-actions .copy-link-btn ion-icon { font-size: 14px; }
+
+.quick-actions .copy-link-btn:hover {
+  background: #eef4ff;
+  border-color: rgba(26, 115, 232, 0.28);
+  color: #1a73e8;
+}
+
+/* Collapsible section header (Password) — compact when closed */
+.collapsible-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.collapsible-header .collapsible-chevron {
+  margin-left: auto;
+  font-size: 16px;
+  color: #80868b;
+}
+
+.collapsible-body {
+  padding: 4px 0 2px;
 }
 
 .action-section-label {

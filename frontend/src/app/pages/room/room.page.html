@@ -1,5 +1,33 @@
 <main class="room-shell" [attr.data-state]="state()">
-  @if (guestNameOverlayOpen()) {
+  @if (passwordPromptOpen()) {
+    <section class="guest-name-overlay" aria-labelledby="room-password-title">
+      <form class="guest-name-card" novalidate (ngSubmit)="submitRoomPassword()">
+        <p class="guest-eyebrow">Protected room</p>
+        <h1 id="room-password-title">{{ roomTitle() }}</h1>
+        <label class="field" for="room-password">
+          <span>Room password</span>
+          <input
+            id="room-password"
+            name="roomPassword"
+            type="password"
+            autocomplete="off"
+            maxlength="200"
+            required
+            [class.invalid]="!!passwordError()"
+            [attr.aria-invalid]="!!passwordError()"
+            [ngModel]="passwordDraft()"
+            (ngModelChange)="passwordDraft.set($event); passwordError.set(null)"
+          >
+        </label>
+        @if (passwordError()) {
+          <p class="inline-error" role="alert">{{ passwordError() }}</p>
+        }
+        <button type="submit" class="primary-btn" [disabled]="passwordBusy()">
+          {{ passwordBusy() ? 'Checking...' : 'Continue' }}
+        </button>
+      </form>
+    </section>
+  } @else if (guestNameOverlayOpen()) {
     <section class="guest-name-overlay" aria-labelledby="guest-name-title">
       <form class="guest-name-card" novalidate (ngSubmit)="continueAsGuest()">
         <p class="guest-eyebrow">Join as guest</p>
@@ -74,6 +102,9 @@
         [uploading]="recorder.isUploading()"
         [isHost]="isHost()"
         [participantCount]="peers().length"
+        [connectionQualityLabel]="connectionQualityLabel()"
+        [connectionQualityTone]="connectionQualityTone()"
+        [connectionQualityTitle]="connectionQualityTitle()"
         [waitingCount]="knockers().length"
         [sidebarOpen]="sidebarOpen()"
         [chatOpen]="chatOpen()"
@@ -349,6 +380,12 @@
             <h2>No microphone detected</h2>
             <p>Please connect a microphone and refresh the page.</p>
           </div>
+        } @else if (lobbyError.kind === 'in-use') {
+          <div class="lobby-error" role="alert">
+            <h2>Camera or microphone is busy</h2>
+            <p>Another app or browser tab is using the device. Close other meet-poc tabs, OBS (or any virtual-camera software), and other video apps — then tap Retry.</p>
+            <button type="button" class="secondary-btn" (click)="retryPreflight()">Retry</button>
+          </div>
         } @else if (lobbyError.kind === 'video-denied-but-audio-ok') {
           <div class="lobby-warning" role="status">
             <p>Camera unavailable — joining audio-only. You can enable video later if browser permissions change.</p>
@@ -460,6 +497,10 @@
           <button type="button" class="configure-toggle" [attr.aria-expanded]="lobbyDeviceDialogOpen()" (click)="toggleLobbyDeviceDialog()">
             {{ lobbyDeviceDialogOpen() ? 'Hide device test' : 'Test / configure devices' }}
           </button>
+          <a class="lobby-back-link" [routerLink]="auth.user() ? '/app/rooms' : '/'">
+            <ion-icon name="arrow-back-outline" aria-hidden="true"></ion-icon>
+            {{ auth.user() ? 'Back to rooms' : 'Back to home' }}
+          </a>
         </div>
       </div>
       @if (lobbyDeviceDialogOpen()) {
