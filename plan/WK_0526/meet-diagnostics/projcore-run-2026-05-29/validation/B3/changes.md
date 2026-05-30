@@ -105,3 +105,125 @@ Smoke walk (structural / unit; live network gate is the S-16 manual NS5 note, he
 - **Cross-tab/navigation freshness:** the Settings signal and the room signal are each seeded from localStorage at construction. A change made in Settings is picked up by the room page when the room (re)mounts and re-seeds its signal from the reader (Settings and the call are separate routes). If a future flow keeps the in-call page mounted while editing Settings in the same tab, a live re-read would be needed — out of scope for B3a (R4 says "Persisted", which localStorage satisfies). Noted as adjacent, not a defect of this batch.
 - **Persistence is per-device (localStorage), by design** — backend persistence / `/api/me` field / admin surface / migrations are explicitly B3b and out of scope here.
 - Pre-existing frontend build warnings (DatePipe unused in RoomsPage, stencil empty-glob, mediapipe non-ESM) are unrelated to this change.
+
+---
+
+## B3b (R5)
+
+### Branch
+
+`feat/meet-diagnostics-audio-20260529` (continued; B3b committed on top of `477d9a4` / B3a). No new branch, no merge.
+
+### User Report (verbatim)
+
+> "R5 — Global/admin diagnostics kill-switch. A master switch (admin/global) so diagnostics can be turned off globally. When OFF: backend stops accepting/persisting diagnostics AND clients learn to stop collecting (via the existing config/me surface). Reuses existing admin auth — NO new auth/RBAC boundary."
+
+NS8 (verbatim): reuse the EXISTING admin module + auth — feature toggle, NOT a new RBAC boundary.
+
+JROM (verbatim):
+
+> "just add an on/off switch to these diagnostics so that when we are at a certain point we can just off these"
+
+### Root Cause (feature — what + where)
+
+This is a feature, not a bug. B3a gave each client a per-device user toggle (localStorage) but there was no *global* off-switch. The owner/admin had no way to stop diagnostics fleet-wide, and the backend always persisted any admitted poster's payload. B3b adds a DB-backed master switch (admin-flippable at runtime, no redeploy) that (a) makes the backend POST a no-op when OFF and (b) is surfaced on `/api/me` so clients stop collecting. It ANDs with the B3a user toggle on the client: diagnostics flow only when BOTH are ON.
+
+DB-vs-env decision recorded in `decisions/2026-05-30-b3b-db-vs-env-killswitch.md` (chose DB `app_settings` over an env var because the switch must flip AT RUNTIME with no `pm2 restart`; reuses the existing better-sqlite3 + migration runner; absent-row ⇒ ON default; fail-open).
+
+### Code Changes (per file — WHAT + WHY)
+
+**NEW `backend/migrations/0012_app_settings.sql`**
+- Idempotent generic KV table: `app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)`. Matches the `0011_user_backgrounds.sql` format (`CREATE TABLE IF NOT EXISTS`). No seed row — absent ⇒ global ON (A-1, A-2).
+
+**NEW `backend/src/modules/app-settings/store.ts`** — single source of truth for the flag.
+- `DIAGNOSTICS_GLOBALLY_ENABLED_KEY = 'diagnostics_globally_enabled'`.
+- `getDiagnosticsGloballyEnabled(db): boolean` — reads `app_settings`; absent ⇒ `true`; value `'0'` ⇒ `false`; else ⇒ `true`. FAIL-OPEN: try/catch returns `true` on ANY error (A-2, A-8e).
+- `setDiagnosticsGloballyEnabled(enabled, db): void` — UPSERT (`INSERT ... ON CONFLICT(key) DO UPDATE`) storing `'1'`/`'0'` + `updated_at = Date.now()`; keeps exactly one row (A-3).
+
+**`backend/src/modules/admin/index.ts`** — admin routes scoped to the diagnostics flag ONLY (no general settings editor).
+- Added `GET /admin/settings/diagnostics` (`admin` = existing `requireAdmin`) ⇒ `200 { enabled }`.
+- Added `PUT /admin/settings/diagnostics` (`admin`) ⇒ coerces `body.enabled` to boolean, calls the store setter ⇒ `200 { enabled }`. WHY: reuses the SAME `requireAdmin` already on `/admin/users` — NO new middleware, NO new RBAC boundary (NS8) (A-4).
+
+**`backend/src/modules/sessions/index.ts`** — diagnostics POST gate.
+- After the `isAdmittedDiagnosticPoster` 403 and BEFORE `appendDiagnosticsEntry`: `if (!getDiagnosticsGloballyEnabled(database)) return res.json({ ok: true, persisted: false });`. WHY: admit-check still precedes the global gate (A-7); global OFF ⇒ no row, authoritative immediate kill (A-6); global ON ⇒ unchanged `{ ok, entry }` + insert (A-5).
+
+**`backend/src/modules/auth/index.ts`** — `/api/me` carries the flag so clients learn it.
+- Guest path: `{ user: null, diagnosticsGloballyEnabled: getDiagnosticsGloballyEnabled(database) }`.
+- Signed-in path: added top-level `diagnosticsGloballyEnabled` (NOT nested under `user`). Store helper is itself fail-open ⇒ A-8e holds (A-8a..A-8e).
+
+**`frontend/src/app/services/diagnostics-prefs.ts`** — added the pure AND helper (B3a exports untouched).
+- `export function computeEffectiveDiagnosticsEnabled(userEnabled, globalEnabled): boolean { return userEnabled && globalEnabled; }` (B-1).
+
+**`frontend/src/app/services/auth.service.ts`**
+- `MeResponse` gains `diagnosticsGloballyEnabled?: boolean`.
+- New public signal `readonly diagnosticsGloballyEnabled = signal(true)` (default true, fail-open).
+- In `checkSession` success `.then`: `this.diagnosticsGloballyEnabled.set(res.diagnosticsGloballyEnabled ?? true)` — set BEFORE the user-present/user-null branch so BOTH guests and signed-in users learn the flag. The `.catch` path leaves the signal at its default `true` (fail-open) (B-2).
+
+**`frontend/src/app/pages/room/room.page.ts`**
+- Import widened to `{ computeEffectiveDiagnosticsEnabled, readDiagnosticsLoggingEnabled }`.
+- Added `readonly effectiveDiagnosticsEnabled = computed(() => computeEffectiveDiagnosticsEnabled(this.diagnosticsLoggingEnabled(), this.auth.diagnosticsGloballyEnabled()))` (`computed` and `auth` already present).
+- Replaced the THREE gate guards (`startDiagnosticsLogger`, `queueDiagnosticsLog`, `flushDiagnosticsLog`) from `!this.diagnosticsLoggingEnabled()` to `!this.effectiveDiagnosticsEnabled()`. The payload-builder line that records the USER pref (`diagnosticsLoggingEnabled: this.diagnosticsLoggingEnabled()`) is left as-is per brief (B-3).
+
+**`frontend/src/app/services/admin.service.ts`** — the endpoint URL literal lives ONLY here.
+- `getDiagnosticsEnabled(): Promise<boolean>` (GET) + `setDiagnosticsEnabled(enabled): Promise<boolean>` (PUT) against `/api/admin/settings/diagnostics` (B-4b).
+
+**`frontend/src/app/pages/admin/admin.page.ts` + `.html`** — single labeled toggle (not a KV editor).
+- Component: `diagnosticsEnabled` + `diagnosticsError` signals, `loadDiagnosticsSetting()` (called in `ngOnInit`), `setDiagnosticsEnabled($event)` change handler — delegates to `AdminService`, no inline `HttpClient` for this toggle.
+- Template: a "Diagnostics logging" `toggle-row` checkbox panel bound to `diagnosticsEnabled()` / `setDiagnosticsEnabled($event)`. Reuses the existing admin-page `.toggle-row` SCSS (B-4c, B-4d).
+- Admin route already uses `adminGuard` (`app.routes.ts:27`) — reused, no new guard (B-4a).
+
+### Commits
+
+- `[batch-3b] diagnostics global kill-switch: app_settings migration + store + admin get/set (requireAdmin) + POST gate + /api/me field | scenarios: A-1..A-8`
+- `[batch-3b] client global precedence: effective AND-gate + AuthService signal + minimal admin toggle | scenarios: B-1..B-4`
+
+### Standing Rules
+
+- The global-flag store key `'diagnostics_globally_enabled'` and its read/write live ONLY in `backend/src/modules/app-settings/store.ts`. Admin routes, the POST gate, and `/api/me` all call the helper — do not read `app_settings` inline elsewhere.
+- The admin diagnostics endpoint URL `/api/admin/settings/diagnostics` lives ONLY in `frontend/src/app/services/admin.service.ts`.
+
+### Verification
+
+Lifecycle = **pre-live** (default) ⇒ deferral OFF: no TODO/FIXME, no dead code, no env-var shim. The `/api/me` contract change was propagated into the existing `auth-me-logout.test.ts` in the same batch (no stale assertion left behind).
+
+| Check | Command | Result |
+|---|---|---|
+| New backend kill-switch test (A-1..A-8) | `cd backend && npx vitest run tests/admin-diagnostics-killswitch.test.ts` | **PASS** — 10 tests, exit 0 |
+| /api/me regression (contract updated) | `cd backend && npx vitest run tests/auth-me-logout.test.ts` | **PASS** — 2 tests (was failing pre-fix; assertions updated for the new field) |
+| Diagnostics POST path unbroken (A-5 ON path) | `cd backend && npx vitest run tests/session-diagnostics.test.ts` | **PASS** — 3 tests |
+| New frontend truth-table unit (B-1) | `cd frontend && npx tsx src/app/services/diagnostics-global-flag.spec.ts` | **PASS** — `diagnostics-global-flag: all assertions passed`, exit 0 |
+| B3a prefs unit (regression) | `cd frontend && npx tsx src/app/services/diagnostics-prefs.spec.ts` | **PASS** — exit 0 |
+| Backend build | `cd backend && npm run build` | **PASS** — exit 0 |
+| Frontend build | `cd frontend && npm run build` | **PASS** — exit 0 (same pre-existing warnings as B3a) |
+| Full backend suite | `cd backend && npx vitest run` | 142 passed; remaining failures are PRE-EXISTING (see Caveats), not B3b |
+
+Structural grep evidence:
+
+```
+# B-2 — AuthService (3 matches: MeResponse field, signal(true), ?? true)
+grep -n diagnosticsGloballyEnabled auth.service.ts  => :13 type, :32 signal(true), :44 ?? true
+
+# B-3 — room.page (3 effective gates, 0 bare guards)
+grep -c "effectiveDiagnosticsEnabled()"        room.page.ts => 3
+grep -c "!this.diagnosticsLoggingEnabled()"    room.page.ts => 0
+
+# B-4 — admin.service URL only here; admin page delegates (0 inline URL); adminGuard reused
+grep -c "admin/settings/diagnostics" admin.service.ts        => 2
+grep -c "admin/settings/diagnostics" admin.page.ts           => 0
+grep -rc adminGuard frontend/src/app/                        => 3 (definition + import + route)
+
+# C-2 — no live-push: flag never enters signaling/
+grep -rc "diagnosticsGlobal|diagnostics_globally|killswitch|kill-switch" backend/src/modules/signaling/ => 0
+grep -rl getDiagnosticsGloballyEnabled backend/src/modules/  => app-settings, auth, admin, sessions (NOT signaling)
+```
+
+Smoke walk (structural / unit; live two-party call is the C-1 manual NS5 note):
+- Default (no `app_settings` row) ⇒ store reads `true` ⇒ `/api/me` reports `true` ⇒ client `effectiveDiagnosticsEnabled = userToggle && true` ⇒ diagnostics flow; POST inserts (A-5).
+- Admin PUT `{enabled:false}` ⇒ store row `value='0'` ⇒ POST returns `{ok:true,persisted:false}` with no row (A-6, backend-authoritative) AND next `/api/me` reports `false` ⇒ client effective gate false on next room entry ⇒ no collection.
+- Admin PUT `{enabled:true}` ⇒ back to ON.
+
+### Caveats
+
+- **C-1 (admin UI end-to-end) — manual NS5 only.** Headless cannot drive a live two-party WebRTC call to watch `/api/meeting-sessions/:id/diagnostics` POSTs start/stop around the admin toggle. The backend gate + `/api/me` field are deterministically proven by A-5/A-6/A-8; manual localhost steps are in scenarios.md C-1. PRE-EXISTING constraint, not a regression.
+- **C-2 (mid-session flip) — INTENDED behavior, not a defect.** A client already in-call keeps POSTing until its next `/api/me` (next room entry). The backend gate is the authoritative kill immediately on the next POST (no row persisted). No WS/SSE/polling push was added (NS8). Proven by the C-2 grep (0 hits in `signaling/`).
+- **PRE-EXISTING full-suite failures (NOT introduced by B3b).** At the clean baseline `477d9a4` (B3a HEAD, before any B3b change), the following already fail deterministically because their assertions hard-code an exact response body that predates the earlier `displayName`/`isAdmin` additions to `/api/login` and `/api/me`: `auth-login.test.ts S1.1`, `migrate-from-json.test.ts S1.7`, `rooms.test.ts S2.1 / S2.5 / DR-15`, `sessions-ttl.test.ts S1.6`. These are unrelated to R5 (B3b never touches `/api/login`, rooms, sessions-ttl, or the JSON migration) — fixing them would be scope creep into earlier batches. `auth-me-logout.test.ts` was the ONE existing /api/me test my change broke; it is fixed in this batch (assertions updated for the new field + the pre-existing `displayName`/`isAdmin` drift). `signaling-waiting-room` / `signaling-reconnect` flake intermittently on the 1s WS-message timeout under parallel load (pass in isolation) — pre-existing environment flake, not a B3b code defect.

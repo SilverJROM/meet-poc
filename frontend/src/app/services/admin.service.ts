@@ -30,4 +30,17 @@ export class AdminService {
     const res = await firstValueFrom(this.http.post<{ user: AdminUser }>('/api/admin/users', payload));
     return res.user;
   }
+
+  // R5 (B3b): global diagnostics kill-switch. The endpoint URL lives ONLY here.
+  async getDiagnosticsEnabled(): Promise<boolean> {
+    const res = await firstValueFrom(this.http.get<{ enabled: boolean }>('/api/admin/settings/diagnostics'));
+    return res.enabled;
+  }
+
+  async setDiagnosticsEnabled(enabled: boolean): Promise<boolean> {
+    const res = await firstValueFrom(
+      this.http.put<{ enabled: boolean }>('/api/admin/settings/diagnostics', { enabled }),
+    );
+    return res.enabled;
+  }
 }

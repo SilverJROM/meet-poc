@@ -40,3 +40,13 @@ export function writeDiagnosticsLoggingEnabled(enabled: boolean): void {
     // simply not persisted this session. No throw to callers.
   }
 }
+
+/**
+ * Effective diagnostics gate (R5 / B3b): diagnostics collect+upload only when
+ * BOTH the per-device user toggle AND the global (admin) kill-switch are ON.
+ * The global flag dominates — admin OFF stops collection regardless of the
+ * user's local preference.
+ */
+export function computeEffectiveDiagnosticsEnabled(userEnabled: boolean, globalEnabled: boolean): boolean {
+  return userEnabled && globalEnabled;
+}

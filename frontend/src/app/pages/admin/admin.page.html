@@ -36,6 +36,18 @@
     }
   </section>
 
+  <section class="panel" aria-label="Diagnostics">
+    <h3>Diagnostics logging</h3>
+    <p class="muted">Master switch. When OFF, the backend stops persisting call diagnostics and clients stop collecting. Applies globally to all users.</p>
+    <label class="toggle-row">
+      <input type="checkbox" name="diagnosticsEnabled" [ngModel]="diagnosticsEnabled()" (ngModelChange)="setDiagnosticsEnabled($event)">
+      <span>Diagnostics logging {{ diagnosticsEnabled() ? 'ON' : 'OFF' }}</span>
+    </label>
+    @if (diagnosticsError()) {
+      <p class="admin-error" role="alert">{{ diagnosticsError() }}</p>
+    }
+  </section>
+
   <section class="panel" aria-label="Users">
     <h3>Users ({{ users().length }})</h3>
     @if (loading()) {

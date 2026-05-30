@@ -10,6 +10,7 @@ export type User = {
 
 type MeResponse = {
   user: User | null;
+  diagnosticsGloballyEnabled?: boolean;
 };
 
 type LoginResponse = {
@@ -25,6 +26,10 @@ export class AuthService {
 
   readonly user = signal<User | null | undefined>(undefined);
   readonly isAuthenticated = computed(() => !!this.user());
+  // R5 (B3b): global diagnostics kill-switch surfaced via /api/me. Defaults true
+  // (fail-open) so a missing field or a /api/me error never silently kills
+  // diagnostics on the client.
+  readonly diagnosticsGloballyEnabled = signal(true);
 
   async ensureSession(): Promise<User | null> {
     if (this.user() !== undefined) return this.user() ?? null;
@@ -36,6 +41,7 @@ export class AuthService {
     if (existing) return existing;
     const promise = firstValueFrom(this.http.get<MeResponse>('/api/me'))
       .then(async (res) => {
+        this.diagnosticsGloballyEnabled.set(res.diagnosticsGloballyEnabled ?? true);
         if (res.user) {
           this.user.set(res.user);
           return res.user;

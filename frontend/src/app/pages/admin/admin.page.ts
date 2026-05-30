@@ -29,12 +29,37 @@ export class AdminPage implements OnInit {
   readonly createError = signal<string | null>(null);
   readonly createdNotice = signal<string | null>(null);
 
+  // R5 (B3b): global diagnostics kill-switch toggle.
+  readonly diagnosticsEnabled = signal(true);
+  readonly diagnosticsError = signal<string | null>(null);
+
   constructor() {
     addIcons({ personAddOutline, shieldCheckmarkOutline });
   }
 
   ngOnInit(): void {
     void this.load();
+    void this.loadDiagnosticsSetting();
+  }
+
+  async loadDiagnosticsSetting(): Promise<void> {
+    this.diagnosticsError.set(null);
+    try {
+      this.diagnosticsEnabled.set(await this.admin.getDiagnosticsEnabled());
+    } catch {
+      this.diagnosticsError.set('Diagnostics setting could not be loaded.');
+    }
+  }
+
+  async setDiagnosticsEnabled(enabled: boolean): Promise<void> {
+    this.diagnosticsError.set(null);
+    this.diagnosticsEnabled.set(enabled);
+    try {
+      this.diagnosticsEnabled.set(await this.admin.setDiagnosticsEnabled(enabled));
+    } catch {
+      this.diagnosticsError.set('Diagnostics setting could not be saved.');
+      void this.loadDiagnosticsSetting();
+    }
   }
 
   async load(): Promise<void> {

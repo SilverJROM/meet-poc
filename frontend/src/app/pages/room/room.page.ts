@@ -29,7 +29,7 @@ import {
   type EnergySample,
   type SweepHooks,
 } from '../../services/mic-energy';
-import { readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
+import { computeEffectiveDiagnosticsEnabled, readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
@@ -223,6 +223,11 @@ export class RoomPage implements OnDestroy {
   readonly leaveDialogOpen = signal(false);
   readonly meetingEndedToastOpen = signal(false);
   readonly diagnosticsLoggingEnabled = signal(readDiagnosticsLoggingEnabled());
+  // R5 (B3b): diagnostics collect+upload requires BOTH the per-device user
+  // toggle AND the global admin kill-switch (surfaced via AuthService /api/me).
+  readonly effectiveDiagnosticsEnabled = computed(() =>
+    computeEffectiveDiagnosticsEnabled(this.diagnosticsLoggingEnabled(), this.auth.diagnosticsGloballyEnabled()),
+  );
   readonly screenShareHelp = signal<string | null>(null);
   readonly pendingShareRequests = signal<ShareRequest[]>([]);
   readonly myShareRequestPending = signal(false);
@@ -2552,7 +2557,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private startDiagnosticsLogger(): void {
-    if (this.diagnosticsLogTimer || !this.currentSessionId() || !this.diagnosticsLoggingEnabled()) return;
+    if (this.diagnosticsLogTimer || !this.currentSessionId() || !this.effectiveDiagnosticsEnabled()) return;
     this.diagnosticsLogTimer = window.setInterval(() => {
       void this.flushDiagnosticsLog('sample');
     }, DIAGNOSTICS_LOG_INTERVAL_MS);
@@ -2729,7 +2734,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private queueDiagnosticsLog(kind: DiagnosticsPayload['kind'], error?: string): void {
-    if (this.state() !== 'in-call' || !this.currentSessionId() || !this.diagnosticsLoggingEnabled()) return;
+    if (this.state() !== 'in-call' || !this.currentSessionId() || !this.effectiveDiagnosticsEnabled()) return;
     this.startDiagnosticsLogger();
     if (kind === 'sample') {
       void this.flushDiagnosticsLog(kind, { error });
@@ -2746,7 +2751,7 @@ export class RoomPage implements OnDestroy {
     options: { error?: string; useBeacon?: boolean } = {},
   ): Promise<void> {
     const sessionId = this.currentSessionId();
-    if (!sessionId || !this.diagnosticsLoggingEnabled()) return;
+    if (!sessionId || !this.effectiveDiagnosticsEnabled()) return;
     const sfuDiagnostics = (await this.sfuClient.collectDiagnostics()) ?? undefined;
     const payload = this.buildDiagnosticsPayload(kind, options.error, sfuDiagnostics);
     if (options.useBeacon && this.meetingSessions.sendDiagnosticsBeacon(sessionId, payload)) return;
