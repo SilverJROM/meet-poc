@@ -133,7 +133,11 @@ function statsOf(...entries: Record<string, unknown>[]): { values(): IterableIte
 }
 
 // ===========================================================================
-// AC4 + AC5 — Bounded NON-DESTRUCTIVE recovery decision (U-12..U-17)
+// B2c — AMENDED recovery STEP fn (R10). decideMicRecovery now walks an ORDERED
+// candidate list (current-first). The AC5 same-device lock is LIFTED: the second
+// silent step tries the NEXT (other) candidate, not 'keep-and-warn'. Behavior is
+// asserted against the real exported signature (candidateDeviceIds /
+// attemptedDeviceIds), covering scenarios.md U-1..U-3, U-8..U-11.
 // ===========================================================================
 
 const eligibleSilent: RecoveryInput = {
@@ -141,54 +145,62 @@ const eligibleSilent: RecoveryInput = {
   micEnabled: true,
   micUnmuted: true,
   hasLiveAudioTrack: true,
-  alreadyAttempted: false,
-  selectedDeviceId: 'mic-abc-123',
+  candidateDeviceIds: ['mic-A', 'mic-B', 'mic-C'], // current-first
+  attemptedDeviceIds: [],
 };
 
-// U-12 — Silent + eligible + not-attempted ⇒ reacquire SAME device (AC5)
+// scenarios U-1 — Silent + eligible + nothing-attempted ⇒ try the FIRST candidate
+// (= current device; re-acquiring it is the protocol's step 1).
 {
-  assert.deepStrictEqual(
-    decideMicRecovery({ ...eligibleSilent }),
-    { action: 'reacquire-same-device', deviceId: 'mic-abc-123' },
+  assert.deepStrictEqual(decideMicRecovery({ ...eligibleSilent }), { action: 'try-device', deviceId: 'mic-A' });
+}
+
+// scenarios U-2 — Current attempted, others remain ⇒ try the NEXT (other) candidate,
+// NOT terminal keep-and-warn. THIS is the AC5 amendment (lock lifted).
+{
+  const d = decideMicRecovery({ ...eligibleSilent, attemptedDeviceIds: ['mic-A'] });
+  assert.strictEqual(d.action, 'try-device', 'second silent step sweeps the next other device');
+  assert.strictEqual(d.deviceId, 'mic-B', 'picks the first UNattempted candidate');
+  // Concrete rejection of the OLD (B2a) same-device-then-terminate behavior.
+  assert.notStrictEqual(d.action, 'keep-and-warn', 'must NOT terminate after current re-acquire');
+}
+
+// scenarios U-3 — Every candidate attempted, still silent ⇒ terminal keep-and-warn.
+{
+  assert.strictEqual(
+    decideMicRecovery({ ...eligibleSilent, attemptedDeviceIds: ['mic-A', 'mic-B', 'mic-C'] }).action,
+    'keep-and-warn',
   );
 }
 
-// U-13 — Already attempted ⇒ NO second reacquire (one-shot bound)
-{
-  const d = decideMicRecovery({ ...eligibleSilent, alreadyAttempted: true });
-  assert.notStrictEqual(d.action, 'reacquire-same-device', 'no second reacquire');
-}
-
-// U-14 — working or indeterminate classification ⇒ action 'none'
+// scenarios U-8/U-9 — working or indeterminate classification ⇒ 'none' (quiet-but-working
+// mic is NEVER swept; a thin/null window never sweeps).
 {
   assert.strictEqual(decideMicRecovery({ ...eligibleSilent, classification: 'working' }).action, 'none');
   assert.strictEqual(decideMicRecovery({ ...eligibleSilent, classification: 'indeterminate' }).action, 'none');
 }
 
-// U-15 — Gating: disabled OR muted OR no-live-track ⇒ NO recovery
+// scenarios U-10 — Gating: disabled OR muted OR no-live-track ⇒ 'none' even when SILENT
+// with candidates remaining (a muted/disabled user must never trigger a sweep).
 {
   for (const over of [{ micEnabled: false }, { micUnmuted: false }, { hasLiveAudioTrack: false }]) {
-    const d = decideMicRecovery({ ...eligibleSilent, ...over });
+    const d = decideMicRecovery({ ...eligibleSilent, attemptedDeviceIds: ['mic-A'], ...over });
     assert.strictEqual(d.action, 'none', JSON.stringify(over));
   }
 }
 
-// U-16 — Still-silent after one attempt ⇒ KEEP-AND-WARN, never a destructive action
+// scenarios U-11 (step half) — No candidates at all ⇒ keep-and-warn (single dead mic
+// goes straight to the terminal prompt). Non-destructive: action union has no stop/remove.
 {
-  const d = decideMicRecovery({ ...eligibleSilent, alreadyAttempted: true });
-  assert.strictEqual(d.action, 'keep-and-warn', 'still silent -> keep-and-warn');
-  // Non-destructive invariant: the action union contains NO stop/remove value.
-  assert.ok(['reacquire-same-device', 'keep-and-warn', 'none'].includes(d.action), 'no destructive action');
+  const d = decideMicRecovery({ ...eligibleSilent, candidateDeviceIds: [], attemptedDeviceIds: [] });
+  assert.strictEqual(d.action, 'keep-and-warn', 'no candidates -> terminal warn');
+  assert.ok(['try-device', 'keep-and-warn', 'none'].includes(d.action), 'no destructive action value');
 }
 
-// U-17 — Re-acquire always targets the selected device id (AC5, parametrized)
+// Empty-string candidate ids are skipped by the step fn (caller excludes them too).
 {
-  for (const id of ['mic-abc-123', 'usb-scarlett-2', undefined]) {
-    const d = decideMicRecovery({ ...eligibleSilent, selectedDeviceId: id });
-    if (d.action === 'reacquire-same-device') {
-      assert.strictEqual(d.deviceId, id, `reacquire targets the same id (${String(id)})`);
-    }
-  }
+  const d = decideMicRecovery({ ...eligibleSilent, candidateDeviceIds: ['', 'mic-B'], attemptedDeviceIds: [] });
+  assert.deepStrictEqual(d, { action: 'try-device', deviceId: 'mic-B' }, 'empty id skipped');
 }
 
 // Threshold constant sanity (shared with the discriminator)

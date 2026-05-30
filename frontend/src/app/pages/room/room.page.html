@@ -193,7 +193,7 @@
       }
       @if (micSilentWarning()) {
         <div class="device-notice" role="status">
-          <span>We can't detect sound from your microphone</span>
+          <span>{{ micSilentWarningMessage() }}</span>
           <button type="button" (click)="openInCallDeviceDialog()">Switch microphone</button>
         </div>
       }

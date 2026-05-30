@@ -19,7 +19,16 @@ import { BackgroundEffectsService } from '../../services/background-effects.serv
 import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
 import type { DiagnosticsPayload, SfuConnectionQuality, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
-import { classifyMicCapture, decideMicRecovery, deriveOutboundAudioFields, nextMicWarningState, type EnergySample } from '../../services/mic-energy';
+import {
+  classifyMicCapture,
+  deriveOutboundAudioFields,
+  nextMicWarningState,
+  nextSweepGate,
+  orderedMicCandidates,
+  runMicSweep,
+  type EnergySample,
+  type SweepHooks,
+} from '../../services/mic-energy';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
@@ -170,6 +179,10 @@ export class RoomPage implements OnDestroy {
   // in-call watchdog and B2a's post-publish one-shot fallback; auto-clears when
   // audio energy returns.
   readonly micSilentWarning = signal(false);
+  // B2c — the message rendered in the single micSilentWarning surface. Default is
+  // the B2b copy; the multi-device sweep swaps in the terminal "no working
+  // microphone" copy when NO available mic produces energy (R10).
+  readonly micSilentWarningMessage = signal("We can't detect sound from your microphone");
   readonly remoteAudioBlocked = signal(false);
   readonly equalSizeTiles = signal(readEqualSizeTiles());
   readonly setupWarning = signal<string | null>(null);
@@ -395,6 +408,11 @@ export class RoomPage implements OnDestroy {
   // B2a one-shot guard: the post-publish capture-energy gate runs at most once
   // per call. Reset in cleanupCall() so a fresh join re-arms it.
   private initialCaptureEnergyChecked = false;
+  // B2c multi-device sweep guards: re-entrancy lock + one-sweep-per-episode bound.
+  // Both reset in cleanupCall(); micSweepDoneForEpisode re-arms on energy-return /
+  // mute via the watchdog so a fresh silence episode gets exactly one sweep.
+  private micSweepInProgress = false;
+  private micSweepDoneForEpisode = false;
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
   private readonly chatMessageList = viewChild<ElementRef<HTMLElement>>('chatMessageList');
   private readonly remoteAudioMixer = viewChild<ElementRef<HTMLAudioElement>>('remoteAudioMixer');
@@ -1956,6 +1974,8 @@ export class RoomPage implements OnDestroy {
     this.backgroundEffects.dispose();
     this.lastSfuVideoTrack = null;
     this.initialCaptureEnergyChecked = false;
+    this.micSweepInProgress = false;
+    this.micSweepDoneForEpisode = false;
     this.media.stopLocal();
     this.peerIdentities.set(new Map());
     this.knockers.set([]);
@@ -1984,6 +2004,7 @@ export class RoomPage implements OnDestroy {
     this.meetingEndedToastOpen.set(false);
     this.deviceFailureNotice.set(null);
     this.micSilentWarning.set(false);
+    this.micSilentWarningMessage.set("We can't detect sound from your microphone");
     this.actionNotice.set(null);
     this.screenShareHelp.set(null);
     this.shareCameraActive = false;
@@ -2267,48 +2288,107 @@ export class RoomPage implements OnDestroy {
     const samples = await this.sampleCaptureEnergy(CAPTURE_ENERGY_GATE_SAMPLES, CAPTURE_ENERGY_GATE_INTERVAL_MS);
     const classification = classifyMicCapture(samples);
 
-    const decision = decideMicRecovery({
-      classification,
-      micEnabled: this.captureTrackEnabled(),
-      micUnmuted: this.captureTrackUnmuted(),
-      hasLiveAudioTrack: this.captureTrackLive(),
-      alreadyAttempted: false,
-      selectedDeviceId: this.selectedAudioId() || undefined,
-    });
-    if (decision.action !== 'reacquire-same-device') return;
+    // Quiet-but-working / indeterminate ⇒ no sweep (B2a U-8 preserved). Only a
+    // confirmed 'silent' window is sweep-eligible.
+    if (classification !== 'silent') return;
 
-    // Confirmed silent: ONE non-destructive relaxed re-acquire of the SAME device.
-    // replaceAudioTrack keeps the old track until the new one is live; a throw
-    // leaves the old track in place. Do NOT switch devices, do NOT call the
-    // destructive recoverLocalAudioTrack() path.
-    let reacquired: MediaStreamTrack | null = null;
+    // Confirmed silent: run the bounded multi-device recovery sweep. It re-acquires
+    // the CURRENT device once, then tries each OTHER mic, adopting the first that
+    // produces energy; only when NONE works does it surface the terminal warn (R10).
+    this.micSweepDoneForEpisode = true;
+    await this.runMicRecoverySweep();
+  }
+
+  // B2c — the thin ADAPTER over the pure runMicSweep orchestrator (R10). It owns
+  // ALL the framework I/O (enumerate, replaceAudioTrack, re-sample, signals) and
+  // delegates the never-zero-audio decision walk to the pure orchestrator, which
+  // in turn drives the pure decideMicRecovery step fn. Bounded by micSweepInProgress
+  // (re-entrancy) + the caller's micSweepDoneForEpisode (one sweep per episode).
+  private async runMicRecoverySweep(): Promise<void> {
+    if (this.micSweepInProgress) return;
+    this.micSweepInProgress = true;
+    this.actionNotice.set('Checking your microphones for sound…');
     try {
-      reacquired = await this.media.replaceAudioTrack(decision.deviceId, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
-    } catch (err) {
-      console.debug('[capture-gate] relaxed re-acquire failed', err);
-    }
+      const originalDeviceId = this.selectedAudioId() || '';
+      const devices = await this.media.enumerateDevices();
+      this.audioInputs.set(devices.audioInputs);
+      const candidates = orderedMicCandidates(originalDeviceId, devices.audioInputs);
+      if (candidates.length === 0) {
+        // No enumerable mic at all ⇒ straight to the terminal warn.
+        this.micSilentWarningMessage.set('No working microphone detected — check your mic/permissions');
+        this.micSilentWarning.set(true);
+        this.queueDiagnosticsLog('error', 'mic sweep found no candidate microphones; warned user');
+        return;
+      }
 
-    if (reacquired) {
-      // Re-wire failure handlers + mic level as the existing replace paths do.
-      this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([reacquired]));
-      this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([reacquired])));
-      this.broadcastMediaState(reacquired.enabled, this.media.cameraOn());
+      const hooks: SweepHooks = {
+        candidates: candidates.map((c) => ({ deviceId: c.deviceId, label: c.label })),
+        gates: () => ({
+          micEnabled: this.captureTrackEnabled(),
+          micUnmuted: this.captureTrackUnmuted(),
+          hasLiveAudioTrack: this.captureTrackLive(),
+        }),
+        acquire: async (deviceId) => {
+          const track = await this.media.replaceAudioTrack(deviceId || undefined, (nextTrack) =>
+            this.sfuClient.replaceAudioTrack(nextTrack),
+          );
+          if (!track) return null;
+          // Mirror verifyInitialCaptureEnergy's re-acquire re-wiring.
+          this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
+          this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([track])));
+          this.broadcastMediaState(track.enabled, this.media.cameraOn());
+          return { deviceId: audioTrackDeviceId(track) || deviceId, label: track.label };
+        },
+        classifyCurrent: async () =>
+          classifyMicCapture(await this.sampleCaptureEnergy(CAPTURE_ENERGY_GATE_RESAMPLES, CAPTURE_ENERGY_GATE_INTERVAL_MS)),
+        currentLiveDeviceId: () => audioTrackDeviceId(this.captureAudioTrack()),
+      };
 
-      // Re-sample ~1.5-2s and re-classify.
-      const reSamples = await this.sampleCaptureEnergy(CAPTURE_ENERGY_GATE_RESAMPLES, CAPTURE_ENERGY_GATE_INTERVAL_MS);
-      if (classifyMicCapture(reSamples) === 'working') {
+      const result = await runMicSweep(originalDeviceId, hooks);
+
+      if (result.outcome === 'adopted') {
+        this.syncSelectedAudioIdToTrack(this.captureAudioTrack());
+        this.micSilentWarning.set(false);
+        this.micSilentWarningMessage.set("We can't detect sound from your microphone");
+        if (result.deviceId !== originalDeviceId) {
+          // A DIFFERENT mic produced energy — switch + tell the user WHICH device.
+          this.actionNotice.set(
+            `Switched to ${result.label || 'another microphone'} — your previous microphone had no sound`,
+          );
+          this.queueDiagnosticsLog('state-change', `mic auto-switched to ${result.deviceId} after silence`);
+          return;
+        }
+        // Re-acquired the SAME current device (relaxed re-acquire fixed it) — NOT a
+        // switch, so no "Switched to" notice; just clear the banner.
+        this.actionNotice.set(null);
         this.queueDiagnosticsLog('state-change', 'audio recovered via relaxed re-acquire');
         return;
       }
-    }
 
-    // Re-acquire unavailable, threw, or the new track is also silent (decision
-    // would now be keep-and-warn). KEEP the best existing audio track — NEVER
-    // remove it, NEVER end with zero tracks — and surface the warn. B2b: drive
-    // the SAME micSilentWarning surface the in-call watchdog uses (one silent-mic
-    // banner; the watchdog's auto-clear then also clears this one-shot case).
-    this.micSilentWarning.set(true);
-    this.queueDiagnosticsLog('error', 'initial capture silent; kept track, warned user');
+      if (result.outcome === 'none-working') {
+        // No candidate produced energy. The orchestrator restored the original
+        // device; surface the single terminal warn (kept a live track throughout).
+        this.actionNotice.set(null);
+        this.micSilentWarningMessage.set('No working microphone detected — check your mic/permissions');
+        this.micSilentWarning.set(true);
+        this.queueDiagnosticsLog('error', 'mic sweep found no working microphone; kept track, warned user');
+        return;
+      }
+
+      // 'aborted' — muted/disabled mid-sweep; the next watchdog poll clears via the
+      // reducer. Drop the transient notice; leave the banner untouched.
+      this.actionNotice.set('Checking your microphones for sound…');
+    } catch (err) {
+      // Unexpected failure: never leave the user un-warned. Fall back to the
+      // terminal warn (the existing track is untouched — non-destructive).
+      console.debug('[mic-sweep] unexpected sweep failure', err);
+      this.micSilentWarningMessage.set('No working microphone detected — check your mic/permissions');
+      this.micSilentWarning.set(true);
+      this.queueDiagnosticsLog('error', 'mic sweep errored; kept track, warned user');
+    } finally {
+      this.micSweepInProgress = false;
+      if (this.actionNotice() === 'Checking your microphones for sound…') this.actionNotice.set(null);
+    }
   }
 
   private async sampleCaptureEnergy(count: number, intervalMs: number): Promise<EnergySample[]> {
@@ -2486,14 +2566,19 @@ export class RoomPage implements OnDestroy {
     }
 
     // micActive = local audio track is live AND enabled AND unmuted. A muted /
-    // disabled user is intentionally silent — clear the buffer and the banner;
-    // never poll stats for silence the user caused.
+    // disabled user is intentionally silent — clear the buffer and the banner,
+    // and RE-ARM the one-sweep-per-episode bound (mute is a pause, not a permanent
+    // consume); never poll stats for silence the user caused.
     const micActive = this.captureTrackLive() && this.captureTrackEnabled() && this.captureTrackUnmuted();
     if (!micActive) {
       this.micSilenceWindow = [];
+      this.micSweepDoneForEpisode = false;
       this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', false));
       return;
     }
+
+    // A sweep already owns the device while it runs — never poll/sweep concurrently.
+    if (this.micSweepInProgress) return;
 
     const src = await this.sfuClient.getOutboundAudioSource();
     this.micSilenceWindow.push({
@@ -2503,7 +2588,21 @@ export class RoomPage implements OnDestroy {
     if (this.micSilenceWindow.length > MIC_SILENCE_WATCHDOG_WINDOW) this.micSilenceWindow.shift();
 
     const classification = classifyMicCapture(this.micSilenceWindow);
-    this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), classification, true));
+
+    // Drive the one-sweep-per-episode bound (re-arms on energy-return).
+    const gate = nextSweepGate(this.micSweepDoneForEpisode, classification, true);
+    this.micSweepDoneForEpisode = gate.swept;
+
+    // Drive the banner. 'silent' is owned by the sweep (it sets the terminal warn
+    // when no mic works); only 'working'/'indeterminate' are reduced here.
+    if (classification === 'working') {
+      this.micSilentWarning.set(false);
+      this.micSilentWarningMessage.set("We can't detect sound from your microphone");
+    } else if (classification === 'indeterminate') {
+      this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', true));
+    }
+
+    if (gate.shouldSweep) await this.runMicRecoverySweep();
   }
 
   private startConnectionQualitySampler(): void {

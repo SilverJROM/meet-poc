@@ -162,47 +162,206 @@ export function nextMicWarningState(
   return current; // 'indeterminate' — no change, no flicker.
 }
 
+// ---------------------------------------------------------------------------
+// B2c — multi-device microphone fallback (R10; AMENDS B2a's AC5).
+//
+// AC5 LOCKED recovery to the SAME device only. R10 LIFTS that lock: on confirmed
+// sustained silence the protocol walks an ORDERED candidate list (current device
+// FIRST, then every OTHER available mic), adopting the first that produces audio
+// energy; only when NONE works does it surface the error prompt. The pure pieces
+// below carry the deterministic proof (NS5) — all framework-free, no DOM, no
+// timers, no AudioContext (the meter stays classifyMicCapture + getOutboundAudioSource).
+// ---------------------------------------------------------------------------
+
 export type RecoveryInput = {
   classification: MicCaptureClass;
   micEnabled: boolean; // track.enabled
   micUnmuted: boolean; // !track.muted
   hasLiveAudioTrack: boolean; // track exists AND readyState === 'live'
-  alreadyAttempted: boolean; // one-shot guard
-  selectedDeviceId: string | undefined;
+  candidateDeviceIds: string[]; // ordered, deduped, CURRENT-FIRST; empty strings excluded by caller
+  attemptedDeviceIds: string[]; // already tried this episode
 };
 
-export type RecoveryAction = 'reacquire-same-device' | 'keep-and-warn' | 'none';
+export type RecoveryAction = 'try-device' | 'keep-and-warn' | 'none';
 
 export type RecoveryDecision = {
   action: RecoveryAction;
-  deviceId: string | undefined; // when reacquiring, ALWAYS equals selectedDeviceId
+  deviceId?: string; // the candidate to try when action === 'try-device'
 };
 
 /**
- * Bounded NON-DESTRUCTIVE recovery decision (AC4 + AC5, LOCKED by JROM).
+ * Bounded NON-DESTRUCTIVE recovery STEP decision (AC4 + amended AC5, R10).
  *
  * Pure predicate — no I/O. The action union contains NO destructive value
  * (nothing that stops/removes the track), so the wiring can never end with zero
- * audio tracks. Rules:
+ * audio tracks. Walks an ordered candidate list one step at a time:
  *  - Only a 'silent' classification is ever actionable; 'working'/'indeterminate'
- *    → 'none' (a quiet-but-working mic never triggers recovery).
+ *    → 'none' (a quiet-but-working mic is NEVER swept — B2a U-8 preserved).
  *  - Gated on enabled + unmuted + live track; any gate false → 'none' (a muted
- *    user is intentionally silent).
- *  - First silent pass (not-yet-attempted) → reacquire the SAME selectedDeviceId
- *    (AC5 — never switches to a different concrete device).
- *  - Still silent after the one attempt (alreadyAttempted) → 'keep-and-warn'
- *    (keep the existing track, surface a warn). NEVER a second reacquire.
+ *    user is intentionally silent and must never trigger a sweep).
+ *  - The FIRST unattempted candidate → 'try-device'. Because candidateDeviceIds
+ *    is CURRENT-FIRST, the first step re-acquires the current device once; the
+ *    subsequent steps try each OTHER mic (the AC5 lock is lifted here).
+ *  - Every candidate attempted, still silent → 'keep-and-warn' (terminal: keep
+ *    the existing track, surface the single warn). NEVER destructive.
  */
 export function decideMicRecovery(input: RecoveryInput): RecoveryDecision {
-  const none: RecoveryDecision = { action: 'none', deviceId: input.selectedDeviceId };
+  if (input.classification !== 'silent') return { action: 'none' };
+  if (!input.micEnabled || !input.micUnmuted || !input.hasLiveAudioTrack) return { action: 'none' };
 
-  if (input.classification !== 'silent') return none;
-  if (!input.micEnabled || !input.micUnmuted || !input.hasLiveAudioTrack) return none;
+  const attempted = new Set(input.attemptedDeviceIds);
+  const next = input.candidateDeviceIds.find((id) => id && !attempted.has(id));
+  if (next) return { action: 'try-device', deviceId: next };
+  return { action: 'keep-and-warn' };
+}
 
-  if (input.alreadyAttempted) {
-    return { action: 'keep-and-warn', deviceId: input.selectedDeviceId };
+/** A device candidate for the recovery sweep. MediaDeviceInfo is structurally assignable. */
+export type DeviceCandidate = { deviceId: string; groupId?: string; label?: string };
+
+/**
+ * PURE candidate builder (R10 candidate hygiene).
+ *
+ * Builds the CURRENT-FIRST ordered candidate list the sweep walks:
+ *  - the currently-selected device is placed FIRST (re-acquiring it is the
+ *    protocol's step 1 — it is NOT excluded);
+ *  - every other enumerated mic follows in enumeration order;
+ *  - deduped by BOTH deviceId AND groupId, so the 'default'/'communications'
+ *    aliases collapse to their physical twin (only the first occurrence of a
+ *    groupId survives);
+ *  - empty deviceIds and already-failed devices are dropped.
+ */
+export function orderedMicCandidates(
+  selectedDeviceId: string,
+  devices: DeviceCandidate[],
+  failed: Set<string> = new Set(),
+): DeviceCandidate[] {
+  const ordered: DeviceCandidate[] = [];
+  const selected = selectedDeviceId ? devices.find((d) => d.deviceId === selectedDeviceId) : undefined;
+  if (selected) ordered.push(selected);
+  for (const d of devices) if (d !== selected) ordered.push(d);
+
+  const seenIds = new Set<string>();
+  const seenGroups = new Set<string>();
+  const out: DeviceCandidate[] = [];
+  for (const d of ordered) {
+    if (!d.deviceId || failed.has(d.deviceId)) continue;
+    if (seenIds.has(d.deviceId)) continue;
+    if (d.groupId && seenGroups.has(d.groupId)) continue;
+    seenIds.add(d.deviceId);
+    if (d.groupId) seenGroups.add(d.groupId);
+    out.push(d);
   }
-  return { action: 'reacquire-same-device', deviceId: input.selectedDeviceId };
+  return out;
+}
+
+/**
+ * PURE sweep-GATE reducer (R10 bounded-to-one-sweep-per-episode).
+ *
+ * Single `swept` model — `shouldSweep` is true on exactly the FIRST silent poll
+ * of an episode. Mute is a PAUSE, not a permanent consume: a muted/disabled poll
+ * RE-ARMS (swept:false) so a post-unmute silent episode still gets one sweep.
+ *  - micActive=false (muted/disabled) → re-arm, never sweep.
+ *  - 'working' (energy present/returned) → re-arm (new episode may sweep again).
+ *  - 'silent' + not-yet-swept → consume the ONE sweep (swept:true, shouldSweep:true).
+ *  - 'silent' + already-swept → no re-sweep (no thrash).
+ *  - 'indeterminate' → unchanged, no flicker.
+ */
+export function nextSweepGate(
+  swept: boolean,
+  classification: MicCaptureClass,
+  micActive: boolean,
+): { swept: boolean; shouldSweep: boolean } {
+  if (!micActive) return { swept: false, shouldSweep: false };
+  if (classification === 'working') return { swept: false, shouldSweep: false };
+  if (classification === 'silent') {
+    if (!swept) return { swept: true, shouldSweep: true };
+    return { swept: true, shouldSweep: false };
+  }
+  return { swept, shouldSweep: false };
+}
+
+/** Acquired-track shape the sweep orchestrator works with (framework-free). */
+export type SweepCandidate = { deviceId: string; label?: string };
+
+export type SweepHooks = {
+  /** Ordered, current-first candidate list (from orderedMicCandidates). */
+  candidates: SweepCandidate[];
+  /** Re-read each iteration so a mute mid-sweep aborts. */
+  gates(): { micEnabled: boolean; micUnmuted: boolean; hasLiveAudioTrack: boolean };
+  /** = media.replaceAudioTrack; may throw; null = failed (old track kept, NON-DESTRUCTIVE). */
+  acquire(deviceId: string): Promise<{ deviceId: string; label?: string } | null>;
+  /** Re-sample + classify the NOW-published track. */
+  classifyCurrent(): Promise<MicCaptureClass>;
+  /** deviceId of the currently-live published track (used to decide if a restore is needed). */
+  currentLiveDeviceId(): string;
+};
+
+export type SweepResult =
+  | { outcome: 'adopted'; deviceId: string; label?: string }
+  | { outcome: 'none-working'; restoredDeviceId: string | null }
+  | { outcome: 'aborted' };
+
+/**
+ * PURE ASYNC sweep orchestrator (R10 — the never-zero-audio wiring proof).
+ *
+ * Framework-free: no DOM, no timers — all I/O via injected hooks. It CALLS
+ * decideMicRecovery internally so the step fn is exercised by the wiring. The
+ * acquire hook models the NON-DESTRUCTIVE replaceAudioTrack contract (adds the
+ * new track before removing the old; null/throw keeps the old track live), so
+ * the protocol never holds zero tracks. Adopts the first candidate that
+ * classifies 'working'; on total failure restores the ORIGINAL device so the
+ * user is not stranded on a random silent mic; aborts if the mic is muted/
+ * disabled mid-sweep.
+ */
+export async function runMicSweep(originalDeviceId: string, hooks: SweepHooks): Promise<SweepResult> {
+  const attempted: string[] = [];
+  let classification: MicCaptureClass = 'silent'; // entered ONLY on confirmed silence
+
+  for (;;) {
+    const g = hooks.gates();
+    const decision = decideMicRecovery({
+      classification,
+      micEnabled: g.micEnabled,
+      micUnmuted: g.micUnmuted,
+      hasLiveAudioTrack: g.hasLiveAudioTrack,
+      candidateDeviceIds: hooks.candidates.map((c) => c.deviceId),
+      attemptedDeviceIds: attempted,
+    });
+
+    if (decision.action === 'none') return { outcome: 'aborted' }; // muted/disabled mid-sweep
+
+    if (decision.action === 'keep-and-warn') {
+      // Restore the ORIGINAL device so the user isn't stranded on a random silent mic.
+      let restoredDeviceId: string | null = null;
+      if (originalDeviceId && hooks.currentLiveDeviceId() !== originalDeviceId) {
+        try {
+          const r = await hooks.acquire(originalDeviceId);
+          if (r) restoredDeviceId = r.deviceId;
+        } catch {
+          /* non-destructive: the old track stays live */
+        }
+      } else if (originalDeviceId) {
+        restoredDeviceId = originalDeviceId;
+      }
+      return { outcome: 'none-working', restoredDeviceId };
+    }
+
+    const deviceId = decision.deviceId!; // try-device
+    attempted.push(deviceId);
+    let track: { deviceId: string; label?: string } | null = null;
+    try {
+      track = await hooks.acquire(deviceId);
+    } catch {
+      track = null; // throw = skip (non-fatal); old track kept
+    }
+    if (!track) {
+      classification = 'silent'; // null = skip; do NOT classify a null track
+      continue;
+    }
+    classification = await hooks.classifyCurrent();
+    if (classification === 'working') return { outcome: 'adopted', deviceId: track.deviceId, label: track.label };
+    // still silent → loop; decideMicRecovery picks the next unattempted candidate
+  }
 }
 
 export function deriveOutboundAudioFields(input: DeriveOutboundAudioInput): OutboundAudioFields {
