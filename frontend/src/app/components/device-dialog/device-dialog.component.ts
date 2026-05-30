@@ -32,6 +32,10 @@ export class DeviceDialogComponent {
   readonly facingMode = input<'user' | 'environment'>('user');
   readonly busy = input(false);
   readonly error = input<string | null>(null);
+  // B5 — pre-call lobby self-test (R8): non-blocking flag + device name for the copy
+  // (rendered only in mode==='lobby'; the in-call dialog keeps the B2 surfaces).
+  readonly micTestFlagged = input(false);
+  readonly micTestDeviceLabel = input('this microphone');
 
   readonly continuePermission = output<void>();
   readonly close = output<void>();

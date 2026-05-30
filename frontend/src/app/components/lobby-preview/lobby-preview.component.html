@@ -46,6 +46,10 @@
       }
     </div>
 
+    @if (micTestFlagged()) {
+      <div class="mic-test-flag" role="status">No sound detected from {{ micTestDeviceLabel() }} — pick another</div>
+    }
+
     <div class="device-grid">
       <label>
         <span>Microphone</span>

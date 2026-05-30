@@ -85,6 +85,33 @@ export type EnergySample = {
 export type MicCaptureClass = 'silent' | 'working' | 'indeterminate';
 
 /**
+ * B5 — PURE per-frame energy accumulator for the pre-call lobby self-test (R8).
+ *
+ * Framework-free: no Angular, DOM, AudioContext, or timers — so it is
+ * node/tsx unit-testable AND it lets the lobby self-test feed the EXISTING single
+ * AnalyserNode's per-frame energy into the SAME classifyMicCapture the in-call
+ * watchdog uses (NO new meter, NO new verdict logic).
+ *
+ * Maps the prior cumulative total + this frame's mean-square (sum of
+ * centered-sample^2 / N — the SAME quantity startMicLevel already computes before
+ * its sqrt×3 display scale) into the next EnergySample:
+ *  - totalAudioEnergy is the running cumulative (monotone non-decreasing over a
+ *    frame stream) — so classifyMicCapture's last-first delta proves capture
+ *    identically to the in-call media-source totalAudioEnergy window.
+ *  - audioLevel is the RAW RMS (sqrt of mean-square) — SAME units as the in-call
+ *    media-source audioLevel for the 0.01 corroboration. The ×3 stays display-only
+ *    on micLevel.
+ * Guards NaN/negative input: a frameMeanSquare < 0 (or NaN) is treated as 0.
+ */
+export function accumulateEnergyFrame(prevTotal: number, frameMeanSquare: number): EnergySample {
+  const safe = typeof frameMeanSquare === 'number' && frameMeanSquare > 0 ? frameMeanSquare : 0;
+  return {
+    totalAudioEnergy: prevTotal + safe,
+    audioLevel: Math.sqrt(safe),
+  };
+}
+
+/**
  * Default flat-energy tolerance. totalAudioEnergy is a monotonically increasing
  * cumulative value; a working mic accrues energy every sample, so even a tiny
  * positive last-first delta proves capture. EPSILON is small enough to catch a

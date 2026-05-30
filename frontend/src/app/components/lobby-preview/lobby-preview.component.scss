@@ -111,6 +111,19 @@
   font-weight: 900;
 }
 
+// B5 — non-blocking pre-call self-test flag (R8).
+.mic-test-flag {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid rgba(217, 48, 37, 0.42);
+  border-radius: 8px;
+  background: rgba(217, 48, 37, 0.08);
+  color: #b3261e;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
 .device-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

@@ -58,6 +58,10 @@ const CAPTURE_ENERGY_GATE_RESAMPLES = 3;
 // logger is too coarse to fill a sustained window). 6 samples ≈ a ~5-6s window.
 const MIC_SILENCE_WATCHDOG_POLL_MS = 1_000;
 const MIC_SILENCE_WATCHDOG_WINDOW = 6;
+// B5 — lobby self-test poller (R8): mirrors the in-call watchdog ~1s cadence on a
+// SEPARATE lobbySelfTestFlag, reading the SAME classifyMicCapture verdict off the
+// lobby capture window so a mic that publishes silence cannot show a false pass.
+const LOBBY_SELF_TEST_POLL_MS = 1_000;
 const GUEST_DISPLAY_NAME_KEY = 'guestDisplayName';
 const ROOM_PASSWORD_PREFIX = 'meet-poc.roompw.';
 const CHAT_EVERYONE_THREAD = 'everyone';
@@ -183,6 +187,18 @@ export class RoomPage implements OnDestroy {
   // the B2b copy; the multi-device sweep swaps in the terminal "no working
   // microphone" copy when NO available mic produces energy (R10).
   readonly micSilentWarningMessage = signal("We can't detect sound from your microphone");
+  // B5 — pre-call lobby self-test flag (R8). Driven by the lobby self-test poller
+  // via the SAME classifyMicCapture + nextMicWarningState the in-call watchdog uses;
+  // surfaces a NON-blocking "No sound detected" flag in both lobby surfaces.
+  readonly lobbySelfTestFlag = signal(false);
+  // The human device name for the flag copy: the selected mic's MediaDeviceInfo
+  // label, falling back to a generic phrase when the label is empty/blank (labels
+  // are empty before the user grants mic permission).
+  readonly selectedAudioLabel = computed(() => {
+    const id = this.selectedAudioId();
+    const label = this.audioInputs().find((device) => device.deviceId === id)?.label;
+    return label && label.trim() ? label : 'this microphone';
+  });
   readonly remoteAudioBlocked = signal(false);
   readonly equalSizeTiles = signal(readEqualSizeTiles());
   readonly setupWarning = signal<string | null>(null);
@@ -384,6 +400,8 @@ export class RoomPage implements OnDestroy {
   // B2b — in-call silent-mic watchdog: its own ~1s interval + rolling window.
   private micSilenceWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   private micSilenceWindow: { audioLevel: number | null; totalAudioEnergy: number | null }[] = [];
+  // B5 — lobby self-test poller: its own ~1s interval, gated on lobby + mic-on.
+  private lobbySelfTestTimer: ReturnType<typeof setInterval> | null = null;
   private lastDiagnosticsEventAt = 0;
   private diagnosticsLogInFlight = false;
   private connectionQualityInFlight = false;
@@ -806,6 +824,9 @@ export class RoomPage implements OnDestroy {
       await this.replaceInCallAudio(deviceId);
       return;
     }
+    // B5 — clear the prior device's self-test verdict so it can't bleed onto the
+    // newly selected mic; reacquireLobbyStream re-arms the poller on a fresh window.
+    this.lobbySelfTestFlag.set(false);
     await this.reacquireLobbyStream();
   }
 
@@ -860,6 +881,9 @@ export class RoomPage implements OnDestroy {
 
   async enableMicPreview(): Promise<void> {
     await this.media.activateMicPreview(this.localStream());
+    // B5 — the meter (and its capture window) only starts once the AudioContext is
+    // activated; start the lobby self-test poller alongside it.
+    if (this.state() === 'lobby') this.startLobbySelfTest();
   }
 
   async flipCamera(): Promise<void> {
@@ -1758,6 +1782,7 @@ export class RoomPage implements OnDestroy {
       this.attachLocalTrackFailureHandlers(stream);
       this.applyLobbyMicPreference(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
+      this.startLobbySelfTest();
       await this.refreshDevices();
       await this.ensureSelectedAudioDevice('lobby-preflight');
     } catch (err) {
@@ -1787,6 +1812,7 @@ export class RoomPage implements OnDestroy {
       this.attachLocalTrackFailureHandlers(stream);
       this.applyLobbyMicPreference(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
+      this.startLobbySelfTest();
       await this.refreshDevices();
       await this.ensureSelectedAudioDevice('lobby-reacquire');
     } catch (err) {
@@ -1963,6 +1989,7 @@ export class RoomPage implements OnDestroy {
     if (this.state() === 'in-call') this.flushDiagnosticsLog('call-end', { useBeacon: true });
     this.stopDiagnosticsLogger();
     this.stopMicSilenceWatchdog();
+    this.stopLobbySelfTest();
     this.stopConnectionQualitySampler();
     this.clearLocalTrackRecoveryTimers();
     this.clearPreflightTimer();
@@ -2603,6 +2630,40 @@ export class RoomPage implements OnDestroy {
     }
 
     if (gate.shouldSweep) await this.runMicRecoverySweep();
+  }
+
+  // B5 — pre-call lobby self-test poller (R8). Mirrors the in-call watchdog shape
+  // on a SEPARATE lobbySelfTestFlag: a ~1s tick reads the SAME classifyMicCapture
+  // verdict off the lobby capture window and drives the flag via the SAME
+  // nextMicWarningState reducer, so a mic that will publish silence on the call
+  // can NOT show as 'working' in the pre-call test. NON-blocking: it only sets a
+  // flag (the Join button is never disabled by it).
+  private startLobbySelfTest(): void {
+    if (this.lobbySelfTestTimer || this.state() !== 'lobby') return;
+    this.lobbySelfTestTimer = window.setInterval(() => {
+      this.pollLobbySelfTest();
+    }, LOBBY_SELF_TEST_POLL_MS);
+  }
+
+  private stopLobbySelfTest(): void {
+    if (this.lobbySelfTestTimer) clearInterval(this.lobbySelfTestTimer);
+    this.lobbySelfTestTimer = null;
+    this.lobbySelfTestFlag.set(false);
+  }
+
+  private pollLobbySelfTest(): void {
+    // A stale tick must never flag once we leave the lobby (join/leave).
+    if (this.state() !== 'lobby' || !this.media.audioContextActivated()) {
+      this.stopLobbySelfTest();
+      return;
+    }
+    // micActive = lobby mic requested AND a live, enabled local audio track. A user
+    // who turned the mic off in the lobby is intentionally silent — the SAME reducer
+    // gate the in-call watchdog uses clears the flag.
+    const track = this.media.localStream()?.getAudioTracks()[0] ?? null;
+    const micActive = this.microphoneRequested() && !!track && track.readyState === 'live' && track.enabled === true;
+    const cls = classifyMicCapture(this.media.getMicCaptureWindow());
+    this.lobbySelfTestFlag.set(nextMicWarningState(this.lobbySelfTestFlag(), cls, micActive));
   }
 
   private startConnectionQualitySampler(): void {

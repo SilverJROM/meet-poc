@@ -51,6 +51,9 @@
                 <span class="vu-fill" [style.width]="levelPercent()"></span>
               </div>
               <app-mic-meter [level]="level()" />
+              @if (micTestFlagged() && mode() === 'lobby') {
+                <div class="mic-test-flag" role="status">No sound detected from {{ micTestDeviceLabel() }} — pick another</div>
+              }
             </div>
 
             <label>

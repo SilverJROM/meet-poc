@@ -26,6 +26,9 @@ export class LobbyPreviewComponent {
   readonly level = input<Signal<number>>(signal(0).asReadonly());
   readonly audioContextActivated = input(false);
   readonly facingMode = input<'user' | 'environment'>('user');
+  // B5 — pre-call lobby self-test (R8): non-blocking flag + the device name for the copy.
+  readonly micTestFlagged = input(false);
+  readonly micTestDeviceLabel = input('this microphone');
 
   readonly audioDeviceChange = output<string>();
   readonly videoDeviceChange = output<string>();

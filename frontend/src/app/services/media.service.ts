@@ -1,6 +1,11 @@
 import { Injectable, Signal, inject, signal } from '@angular/core';
 import { ViewportService } from './viewport.service';
-import { audioCaptureConstraints } from './mic-energy';
+import { accumulateEnergyFrame, audioCaptureConstraints, type EnergySample } from './mic-energy';
+
+// B5 — bounded ~3s rolling capture window for the lobby self-test. ~24 samples
+// at the 125ms startMicLevel interval ≈ 3s — long enough for classifyMicCapture
+// to prove flat-vs-rising energy off the SAME single AnalyserNode.
+const MIC_CAPTURE_WINDOW_CAP = 24;
 
 export type MediaError = { code: 'denied' | 'no-devices' | 'in-use' | 'unknown'; message: string };
 
@@ -50,6 +55,11 @@ export class MediaService {
   private micInterval: ReturnType<typeof setInterval> | null = null;
   private micSource: MediaStreamAudioSourceNode | null = null;
   private micLevel = signal(0);
+  // B5 — cumulative capture energy + bounded rolling EnergySample window for the
+  // lobby self-test, accumulated off the SAME single AnalyserNode as micLevel.
+  // Reset on stopMicLevel so a device change / leave clears stale energy.
+  private micEnergyCumulative = 0;
+  private micCaptureWindow: EnergySample[] = [];
 
   async getLocalStream(cameraOn: boolean): Promise<MediaStream> {
     const current = this.localStream();
@@ -199,8 +209,22 @@ export class MediaService {
         const centered = (sample - 128) / 128;
         sum += centered * centered;
       }
-      this.micLevel.set(Math.min(1, Math.sqrt(sum / buffer.length) * 3));
+      const meanSquare = sum / buffer.length;
+      // B5 — accumulate the SAME per-frame mean-square (raw RMS, NOT the ×3 display
+      // value) into the cumulative running total + bounded rolling window, off this
+      // SAME single analyser, so the lobby self-test classifies capture exactly like
+      // the in-call watchdog. The ×3 stays display-only on micLevel below.
+      const sample = accumulateEnergyFrame(this.micEnergyCumulative, meanSquare);
+      this.micEnergyCumulative = sample.totalAudioEnergy as number;
+      this.micCaptureWindow.push(sample);
+      if (this.micCaptureWindow.length > MIC_CAPTURE_WINDOW_CAP) this.micCaptureWindow.shift();
+      this.micLevel.set(Math.min(1, Math.sqrt(meanSquare) * 3));
     }, 125);
+  }
+
+  /** B5 — a COPY of the bounded rolling capture window for the lobby self-test poller. */
+  getMicCaptureWindow(): EnergySample[] {
+    return this.micCaptureWindow.slice();
   }
 
   toggleMic(): boolean {
@@ -328,6 +352,10 @@ export class MediaService {
     this.micSource?.disconnect();
     this.micSource = null;
     this.micLevel.set(0);
+    // B5 — reset cumulative energy + window so a device change / leave never bleeds
+    // a stale verdict into the next device's lobby self-test.
+    this.micEnergyCumulative = 0;
+    this.micCaptureWindow = [];
   }
 
   private stopCurrentMedia(options: { closeAudioContext: boolean }): void {
