@@ -5,6 +5,7 @@ import { IceConfigService } from './ice-config.service';
 import { ViewportService } from './viewport.service';
 import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster } from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
+import { extractOutboundAudioSource, type OutboundAudioSourceStat } from './mic-energy';
 import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair, SfuConnectionQuality } from './meeting-sessions.service';
 export type { RemotePublisher } from './sfu-roster-utils.js';
 
@@ -183,6 +184,24 @@ export class SfuClientService {
     return this.pc ? this.pc.getStats() : Promise.resolve(null);
   }
 
+  /**
+   * Public reader for the post-publish energy gate (B2a). Fetches one getStats()
+   * pass and runs the SAME shared extractor collectDiagnostics() uses, so the gate
+   * and diagnostics read one source of truth. Returns null when there is no
+   * peer-connection or no audio media-source stat.
+   */
+  async getOutboundAudioSource(): Promise<OutboundAudioSourceStat | null> {
+    const pc = this.pc;
+    if (!pc) return null;
+    let stats: RTCStatsReport;
+    try {
+      stats = await pc.getStats();
+    } catch {
+      return null;
+    }
+    return extractOutboundAudioSource(stats);
+  }
+
   async collectConnectionQuality(): Promise<SfuConnectionQuality | null> {
     const pc = this.pc;
     if (!pc) {
@@ -331,22 +350,10 @@ export class SfuClientService {
     let remoteCandidateType: string | null = null;
     let selectedCandidatePair: DiagnosticsCandidatePair | null = null;
     // --- Local mic-energy source (RTCAudioSourceStats) ---
-    let outboundAudioSource: { audioLevel: number | null; totalAudioEnergy: number | null } | null = null;
-
-    // Local mic-energy source lives in its own dedicated loop: the candidate-pair
-    // loop below `break`s on the first nominated/succeeded pair, and RTCStatsReport
-    // iteration order is NOT spec-guaranteed — folding the media-source capture into
-    // that loop would silently skip it when the candidate-pair is iterated first.
-    for (const stat of stats.values()) {
-      if (stat.type === 'media-source' && (stat as any).kind === 'audio') {
-        const s = stat as any;
-        outboundAudioSource = {
-          audioLevel: typeof s.audioLevel === 'number' ? s.audioLevel : null,
-          totalAudioEnergy: typeof s.totalAudioEnergy === 'number' ? s.totalAudioEnergy : null,
-        };
-        break; // first audio media-source is the local mic source; fine to stop here
-      }
-    }
+    // ONE source of truth: the SAME shared extractor the post-publish energy gate
+    // reads (getOutboundAudioSource). Runs over this single already-fetched stats
+    // report — no second getStats(), no duplicate media-source loop.
+    const outboundAudioSource: OutboundAudioSourceStat | null = extractOutboundAudioSource(stats);
 
     for (const stat of stats.values()) {
       if (stat.type === 'candidate-pair' && (stat.nominated === true || stat.state === 'succeeded')) {

@@ -19,7 +19,7 @@ import { BackgroundEffectsService } from '../../services/background-effects.serv
 import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
 import type { DiagnosticsPayload, SfuConnectionQuality, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
-import { deriveOutboundAudioFields } from '../../services/mic-energy';
+import { classifyMicCapture, decideMicRecovery, deriveOutboundAudioFields, type EnergySample } from '../../services/mic-energy';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
@@ -39,6 +39,12 @@ const EQUAL_SIZE_TILES_STORAGE_KEY = 'meet-poc.layout.equalSizeTiles';
 const LOCAL_TRACK_MUTE_DEBOUNCE_MS = 1_200;
 const DEVICE_RECOVERY_MAX_ATTEMPTS = 3;
 const DEVICE_RECOVERY_BACKOFF_MS = 650;
+// B2a post-publish capture-energy gate: ~500ms warm-up, then ~5 samples @700ms
+// (≈3s window); ~3 re-samples @700ms (≈1.5-2s) after a relaxed re-acquire.
+const CAPTURE_ENERGY_GATE_INITIAL_DELAY_MS = 500;
+const CAPTURE_ENERGY_GATE_INTERVAL_MS = 700;
+const CAPTURE_ENERGY_GATE_SAMPLES = 5;
+const CAPTURE_ENERGY_GATE_RESAMPLES = 3;
 const GUEST_DISPLAY_NAME_KEY = 'guestDisplayName';
 const ROOM_PASSWORD_PREFIX = 'meet-poc.roompw.';
 const CHAT_EVERYONE_THREAD = 'everyone';
@@ -375,6 +381,9 @@ export class RoomPage implements OnDestroy {
   private audioRecoveryInFlight = false;
   private videoRecoveryInFlight = false;
   private lastSfuVideoTrack: MediaStreamTrack | null = null;
+  // B2a one-shot guard: the post-publish capture-energy gate runs at most once
+  // per call. Reset in cleanupCall() so a fresh join re-arms it.
+  private initialCaptureEnergyChecked = false;
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
   private readonly chatMessageList = viewChild<ElementRef<HTMLElement>>('chatMessageList');
   private readonly remoteAudioMixer = viewChild<ElementRef<HTMLAudioElement>>('remoteAudioMixer');
@@ -1316,6 +1325,9 @@ export class RoomPage implements OnDestroy {
               cfSessionId: state.cfSessionId,
               tracks: state.tracks.filter((t) => t.status === 'live').map((t) => ({ trackName: t.trackName, kind: t.kind })),
             });
+            // B2a: one-shot capture-energy gate — proves the published audio
+            // track actually carries energy; recovers once on a silent-but-live mic.
+            void this.verifyInitialCaptureEnergy();
           }
         })().catch((err: unknown) => {
           console.error('[sfu-client] publish failed', err);
@@ -1930,6 +1942,7 @@ export class RoomPage implements OnDestroy {
     this.recorder.discard();
     this.backgroundEffects.dispose();
     this.lastSfuVideoTrack = null;
+    this.initialCaptureEnergyChecked = false;
     this.media.stopLocal();
     this.peerIdentities.set(new Map());
     this.knockers.set([]);
@@ -2217,6 +2230,104 @@ export class RoomPage implements OnDestroy {
     this.actionNotice.set(null);
     this.deviceFailureNotice.set('No microphone available. Connect a microphone, then choose it from devices.');
     this.queueDiagnosticsLog('error', 'local audio recovery failed; no microphone available');
+  }
+
+  /**
+   * B2a — post-INITIAL-publish ONE-SHOT capture-energy gate (R3).
+   *
+   * A getUserMedia resolve does NOT prove the mic carries energy (wrong channel /
+   * OS-mixer-muted / dead external that still enumerates), and a silent-but-LIVE
+   * track never fires onended/onmute — so the existing recovery net never trips.
+   * This gate samples the SAME outbound-audio source the diagnostics read,
+   * classifies it over a sustained window, and on confirmed silence attempts ONE
+   * non-destructive relaxed re-acquire of the SAME device; if still silent it
+   * KEEPS the existing track and surfaces a non-blocking warn.
+   */
+  private async verifyInitialCaptureEnergy(): Promise<void> {
+    if (this.initialCaptureEnergyChecked) return;
+    this.initialCaptureEnergyChecked = true;
+    if (!this.captureGatePasses()) return;
+
+    // Sample a ~3s window starting ~500ms after publish (≈4-5 samples @700ms).
+    await delay(CAPTURE_ENERGY_GATE_INITIAL_DELAY_MS);
+    const samples = await this.sampleCaptureEnergy(CAPTURE_ENERGY_GATE_SAMPLES, CAPTURE_ENERGY_GATE_INTERVAL_MS);
+    const classification = classifyMicCapture(samples);
+
+    const decision = decideMicRecovery({
+      classification,
+      micEnabled: this.captureTrackEnabled(),
+      micUnmuted: this.captureTrackUnmuted(),
+      hasLiveAudioTrack: this.captureTrackLive(),
+      alreadyAttempted: false,
+      selectedDeviceId: this.selectedAudioId() || undefined,
+    });
+    if (decision.action !== 'reacquire-same-device') return;
+
+    // Confirmed silent: ONE non-destructive relaxed re-acquire of the SAME device.
+    // replaceAudioTrack keeps the old track until the new one is live; a throw
+    // leaves the old track in place. Do NOT switch devices, do NOT call the
+    // destructive recoverLocalAudioTrack() path.
+    let reacquired: MediaStreamTrack | null = null;
+    try {
+      reacquired = await this.media.replaceAudioTrack(decision.deviceId, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
+    } catch (err) {
+      console.debug('[capture-gate] relaxed re-acquire failed', err);
+    }
+
+    if (reacquired) {
+      // Re-wire failure handlers + mic level as the existing replace paths do.
+      this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([reacquired]));
+      this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([reacquired])));
+      this.broadcastMediaState(reacquired.enabled, this.media.cameraOn());
+
+      // Re-sample ~1.5-2s and re-classify.
+      const reSamples = await this.sampleCaptureEnergy(CAPTURE_ENERGY_GATE_RESAMPLES, CAPTURE_ENERGY_GATE_INTERVAL_MS);
+      if (classifyMicCapture(reSamples) === 'working') {
+        this.queueDiagnosticsLog('state-change', 'audio recovered via relaxed re-acquire');
+        return;
+      }
+    }
+
+    // Re-acquire unavailable, threw, or the new track is also silent (decision
+    // would now be keep-and-warn). KEEP the best existing audio track — NEVER
+    // remove it, NEVER end with zero tracks — and surface a one-shot warn.
+    this.deviceFailureNotice.set("We can't detect sound from your microphone. Open devices to pick another.");
+    this.queueDiagnosticsLog('error', 'initial capture silent; kept track, warned user');
+  }
+
+  private async sampleCaptureEnergy(count: number, intervalMs: number): Promise<EnergySample[]> {
+    const samples: EnergySample[] = [];
+    for (let i = 0; i < count; i += 1) {
+      if (i > 0) await delay(intervalMs);
+      const source = await this.sfuClient.getOutboundAudioSource();
+      samples.push({
+        totalAudioEnergy: source?.totalAudioEnergy ?? null,
+        audioLevel: source?.audioLevel ?? null,
+      });
+    }
+    return samples;
+  }
+
+  private captureGatePasses(): boolean {
+    return this.captureTrackLive() && this.captureTrackEnabled() && this.captureTrackUnmuted();
+  }
+
+  private captureAudioTrack(): MediaStreamTrack | null {
+    return this.media.localStream()?.getAudioTracks()[0] ?? null;
+  }
+
+  private captureTrackLive(): boolean {
+    const track = this.captureAudioTrack();
+    return this.state() === 'in-call' && !!track && track.readyState === 'live';
+  }
+
+  private captureTrackEnabled(): boolean {
+    return this.captureAudioTrack()?.enabled === true;
+  }
+
+  private captureTrackUnmuted(): boolean {
+    const track = this.captureAudioTrack();
+    return !!track && track.muted === false;
   }
 
   private async recoverLocalVideoTrack(): Promise<void> {
@@ -2774,6 +2885,9 @@ function preferredDeviceId(key: string, devices: MediaDeviceInfo[], current: str
   const stored = readStoredDevice(key);
   if (stored && devices.some((device) => device.deviceId === stored)) return stored;
   if (current && devices.some((device) => device.deviceId === current)) return current;
+  // First-run (nothing stored/current): prefer the OS-tracked 'default' input the
+  // user actually configured before falling back to the first enumerated device.
+  if (devices.some((device) => device.deviceId === 'default')) return 'default';
   return devices[0]?.deviceId || '';
 }
 

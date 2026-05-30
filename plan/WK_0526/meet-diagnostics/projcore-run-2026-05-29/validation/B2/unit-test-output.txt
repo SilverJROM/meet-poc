@@ -1,0 +1,21 @@
+==============================================================
+B2a — mic-capture-health.spec.ts (run 2026-05-30)
+Command: cd frontend && npx tsx src/app/services/mic-capture-health.spec.ts
+Covers: AC1 (U-1..U-3), AC2 (U-4..U-6), AC3 (U-7..U-11), AC4/AC5 (U-12..U-17)
+==============================================================
+mic-capture-health: all assertions passed
+EXIT=0
+
+--- Regression: B1 mic-energy.spec.ts still green ---
+Command: cd frontend && npx tsx src/app/services/mic-energy.spec.ts
+mic-energy: all assertions passed
+EXIT=0
+
+--- AC2 static (U-5): single 'media-source' EXTRACTION definition site ---
+$ grep -n "stat.type === 'media-source'" frontend/src/app/services/{mic-energy.ts,sfu-client.service.ts}
+src/app/services/mic-energy.ts:69:    if (stat && stat.type === 'media-source' && stat.kind === 'audio') {
+(executable media-source match exists ONLY in mic-energy.ts shared extractor; sfu-client.service.ts has comments only)
+
+--- U-18 static: no NEW AudioContext/AnalyserNode/createMediaStreamSource added vs 3c1ebff ---
+$ git diff 3c1ebff -- frontend/src/app | grep -nE "^\+.*(new AudioContext|AnalyserNode|createMediaStreamSource)"
+(no added matches — energy gate reuses getStats only)

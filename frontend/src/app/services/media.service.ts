@@ -1,5 +1,6 @@
 import { Injectable, Signal, inject, signal } from '@angular/core';
 import { ViewportService } from './viewport.service';
+import { audioCaptureConstraints } from './mic-energy';
 
 export type MediaError = { code: 'denied' | 'no-devices' | 'in-use' | 'unknown'; message: string };
 
@@ -29,12 +30,6 @@ type PreflightOptions = {
   audioDeviceId?: string;
   videoDeviceId?: string;
   facingMode?: 'user' | 'environment';
-};
-
-const AUDIO_PROCESSING_CONSTRAINTS: MediaTrackConstraints = {
-  echoCancellation: true,
-  noiseSuppression: true,
-  autoGainControl: true,
 };
 
 @Injectable({ providedIn: 'root' })
@@ -355,11 +350,9 @@ export class MediaService {
   }
 
   private audioConstraints(audio: boolean, deviceId?: string): boolean | MediaTrackConstraints {
-    if (!audio) return false;
-    return {
-      ...AUDIO_PROCESSING_CONSTRAINTS,
-      ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
-    };
+    // Delegates to the framework-free pure builder (AC1): EC/NS/AGC are
+    // applied-when-supported ({ideal:true}), deviceId:{exact} set only when chosen.
+    return audioCaptureConstraints(audio, deviceId);
   }
 
   private videoConstraints(
