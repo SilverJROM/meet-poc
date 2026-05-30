@@ -325,6 +325,7 @@ export type SfuDiagnosticsSnapshot = {
   hasPc?: boolean;
   publishStatus?: 'publishing' | 'published' | 'error' | null;
   publishError?: string | null;
+  outboundAudioSource?: { audioLevel: number | null; totalAudioEnergy: number | null } | null;
 };
 
 export type DiagnosticsPayload = {

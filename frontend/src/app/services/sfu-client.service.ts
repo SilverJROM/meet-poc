@@ -298,6 +298,7 @@ export class SfuClientService {
         outboundTracks: [],
         inboundTracks: [],
         subscribeLatencies: [],
+        outboundAudioSource: null,
         connectionQuality: this.connectionQuality(),
         ...partial,
       } as SfuDiagnosticsWithPublishDebug;
@@ -318,6 +319,7 @@ export class SfuClientService {
         outboundTracks: [],
         inboundTracks: [],
         subscribeLatencies: [],
+        outboundAudioSource: null,
         connectionQuality: this.connectionQuality(),
         ...partial,
       } as SfuDiagnosticsWithPublishDebug;
@@ -328,8 +330,17 @@ export class SfuClientService {
     let localCandidateType: string | null = null;
     let remoteCandidateType: string | null = null;
     let selectedCandidatePair: DiagnosticsCandidatePair | null = null;
+    // --- Local mic-energy source (RTCAudioSourceStats) ---
+    let outboundAudioSource: { audioLevel: number | null; totalAudioEnergy: number | null } | null = null;
 
     for (const stat of stats.values()) {
+      if (stat.type === 'media-source' && (stat as any).kind === 'audio') {
+        const s = stat as any;
+        outboundAudioSource = {
+          audioLevel: typeof s.audioLevel === 'number' ? s.audioLevel : null,
+          totalAudioEnergy: typeof s.totalAudioEnergy === 'number' ? s.totalAudioEnergy : null,
+        };
+      }
       if (stat.type === 'candidate-pair' && (stat.nominated === true || stat.state === 'succeeded')) {
         rttMs = typeof stat.currentRoundTripTime === 'number' ? Math.round(stat.currentRoundTripTime * 1000) : null;
         const localCand = stat.localCandidateId ? stats.get(stat.localCandidateId) : null;
@@ -418,6 +429,7 @@ export class SfuClientService {
       outboundTracks,
       inboundTracks,
       subscribeLatencies,
+      outboundAudioSource,
       connectionQuality: this.connectionQuality(),
       ...partial,
     } as SfuDiagnosticsWithPublishDebug;

@@ -19,6 +19,7 @@ import { BackgroundEffectsService } from '../../services/background-effects.serv
 import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
 import type { DiagnosticsPayload, SfuConnectionQuality, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
+import { deriveOutboundAudioFields } from '../../services/mic-energy';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
@@ -2426,6 +2427,12 @@ export class RoomPage implements OnDestroy {
   }
 
   private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string, sfuDiagnostics?: SfuDiagnosticsSnapshot): DiagnosticsPayload {
+    const audioTrack = this.media.localStream()?.getAudioTracks()[0] ?? null;
+    const micFields = deriveOutboundAudioFields({
+      audioSource: sfuDiagnostics?.outboundAudioSource ?? null,
+      hasLiveAudioTrack: !!audioTrack && audioTrack.readyState === 'live',
+      micEnabled: audioTrack?.enabled ?? false,
+    });
     const payload: DiagnosticsPayload = {
       kind,
       roomId: this.roomId,
@@ -2440,9 +2447,9 @@ export class RoomPage implements OnDestroy {
       wsHealth: this.ws.diagnosticsSnapshot(),
       forceRelay: false,
       manualAudioOnly: false,
-      outboundAudioLevel: null,
-      outboundAudioEnergy: null,
-      micSilent: null,
+      outboundAudioLevel: micFields.outboundAudioLevel,
+      outboundAudioEnergy: micFields.outboundAudioEnergy,
+      micSilent: micFields.micSilent,
       peers: [],
     };
     if (sfuDiagnostics) payload.sfuDiagnostics = sfuDiagnostics;
