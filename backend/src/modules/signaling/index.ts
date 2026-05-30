@@ -512,10 +512,19 @@ export function isAdmittedDiagnosticPoster(poster: DiagnosticPoster): boolean {
     if (
       identity?.wasAdmitted === true &&
       identity.revoked !== true &&
-      identity.participantId === poster.participantId &&
-      !poster.clientId
+      identity.participantId === poster.participantId
     ) {
-      return true;
+      // JROM-approved 2026-05-30: a durable admitted identity (clientKey is the
+      // unforgeable, post-admission-only anchor) survives reconnect even when the
+      // client re-posts with a STALE clientId — fixes diagnostics dropping across
+      // longer reconnects. Safety: this durable branch only governs the EXPIRED
+      // case. If the supplied clientId is still owned by ANY live admitted peer,
+      // do NOT short-circuit here — the live-admitted loop above (path-1, via
+      // peerMatchesDiagnosticPoster, which also enforces userEmail) is the sole
+      // authority for live clientIds. That keeps the owner-impersonation guard
+      // intact and rejects a stale clientId that collides with a live peer.
+      if (!poster.clientId) return true;
+      if (!live.admitted.has(poster.clientId)) return true;
     }
   }
   return false;

@@ -1,6 +1,6 @@
 import request from 'supertest';
 import type Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
 import { createRoom, setRoomAccess } from '../src/modules/rooms/store.js';
@@ -98,6 +98,10 @@ function samplePayload(overrides: Record<string, unknown> = {}): Record<string, 
 }
 
 describe('meeting session diagnostics API', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('DR-28 persists owner-gated diagnostics with active sender track evidence', async () => {
     const db = createTestDb();
     seedUser(db);
@@ -485,6 +489,136 @@ describe('meeting session diagnostics API', () => {
 
     // Non-owner still 404.
     await request(server).get(`/api/meeting-sessions/${sessionId}/diagnostics`).set('Cookie', nonOwnerCookie).expect(404);
+
+    closeWs(guest);
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('G-1 accepts a durable admitted guest re-posting with a STALE clientId after reconnect grace expiry', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Gate reconnect G-1', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+
+    const owner = await connectWs(url, ownerCookie);
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    const sessionId = String(ownerAdmitted.sessionId);
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'durable-gate-key-g1' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock');
+    owner.send(JSON.stringify({ type: 'admit', clientId: String(knocking.clientId) }));
+    const guestAdmitted = await nextMessage(guest, (msg) => msg.type === 'admitted');
+
+    // Expire the guest peer: terminate + advance past DISCONNECT_GRACE_MS (120_000ms).
+    vi.useFakeTimers();
+    const peerReconnectingPromise = nextMessage(owner, (msg) => msg.type === 'peer-reconnecting' && msg.clientId === knocking.clientId);
+    guest.terminate();
+    await peerReconnectingPromise;
+    await vi.advanceTimersByTimeAsync(120_001);
+    vi.useRealTimers();
+    // Guest is now absent from live.admitted + live.reconnecting; durable clientIdentities entry survives.
+
+    const res = await request(server)
+      .post(`/api/meeting-sessions/${sessionId}/diagnostics`)
+      .send(samplePayload({
+        clientId: guestAdmitted.clientId,
+        participantId: guestAdmitted.participantId,
+        clientKey: 'durable-gate-key-g1',
+        clientName: 'Guest',
+      }))
+      .expect(200);
+    expect(res.body.entry).not.toBeNull();
+
+    const detail = await request(server)
+      .get(`/api/meeting-sessions/${sessionId}/diagnostics`)
+      .set('Cookie', ownerCookie)
+      .expect(200);
+    expect(detail.body.entries.length).toBeGreaterThanOrEqual(1);
+    expect(detail.body.entries[0].payload.clientName).toBe('Guest');
+    expect(detail.body.entries[0].payload.clientKey).toBe('durable-gate-key-g1');
+
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('G-2 still accepts a durable admitted guest re-posting with clientId OMITTED after grace expiry', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Gate reconnect G-2', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+
+    const owner = await connectWs(url, ownerCookie);
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    const sessionId = String(ownerAdmitted.sessionId);
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'durable-gate-key-g2' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock');
+    owner.send(JSON.stringify({ type: 'admit', clientId: String(knocking.clientId) }));
+    const guestAdmitted = await nextMessage(guest, (msg) => msg.type === 'admitted');
+
+    vi.useFakeTimers();
+    const peerReconnectingPromise = nextMessage(owner, (msg) => msg.type === 'peer-reconnecting' && msg.clientId === knocking.clientId);
+    guest.terminate();
+    await peerReconnectingPromise;
+    await vi.advanceTimersByTimeAsync(120_001);
+    vi.useRealTimers();
+
+    const res = await request(server)
+      .post(`/api/meeting-sessions/${sessionId}/diagnostics`)
+      .send(samplePayload({
+        clientId: undefined,
+        participantId: guestAdmitted.participantId,
+        clientKey: 'durable-gate-key-g2',
+        clientName: 'Guest',
+      }))
+      .expect(200);
+    expect(res.body.entry).not.toBeNull();
+
+    closeWs(owner);
+    await closeServer(server);
+  });
+
+  it('G-3 rejects a never-admitted clientKey even with a plausible clientId (security preserved)', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Gate reconnect G-3', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+
+    const owner = await connectWs(url, ownerCookie);
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner', supportsReconnect: true }));
+    const ownerAdmitted = await nextMessage(owner, (msg) => msg.type === 'admitted');
+    const sessionId = String(ownerAdmitted.sessionId);
+
+    const guest = await connectWs(url);
+    guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest', supportsReconnect: true, clientKey: 'real-guest-key-g3' }));
+    const knocking = await nextMessage(guest, (msg) => msg.type === 'knocking');
+    await nextMessage(owner, (msg) => msg.type === 'knock');
+    owner.send(JSON.stringify({ type: 'admit', clientId: String(knocking.clientId) }));
+    const guestAdmitted = await nextMessage(guest, (msg) => msg.type === 'admitted');
+
+    // Unknown clientKey has no durable identity entry → durable path returns false → 403.
+    await request(server)
+      .post(`/api/meeting-sessions/${sessionId}/diagnostics`)
+      .send(samplePayload({
+        clientId: guestAdmitted.clientId,
+        participantId: guestAdmitted.participantId,
+        clientKey: 'never-admitted-key-g3',
+        clientName: 'Guest',
+      }))
+      .expect(403);
 
     closeWs(guest);
     closeWs(owner);
