@@ -110,3 +110,24 @@ a {
 a:hover {
   text-decoration: underline;
 }
+
+// Copied verbatim from room.page.scss:296 (.lobby-back-link). Component styles are
+// scoped in this repo, so visual reuse = copy the rule. Mirrors the in-call lobby
+// back link (gray text + arrow icon). The class selector out-specs the bare `a`
+// rule above, so the back link renders gray (#5f6368) — NOT the blue Host-sign-in
+// style — and the icon shows at 16px. `justify-self: start` (inherited from the
+// bare `a` in this grid card) keeps it left-aligned, matching the lobby intent.
+.lobby-back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  color: #5f6368;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+
+  ion-icon { font-size: 16px; }
+
+  &:hover { color: #1a73e8; }
+}

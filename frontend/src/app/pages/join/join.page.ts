@@ -1,5 +1,5 @@
 import { HttpClient } from '@angular/common/http';
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -25,6 +25,7 @@ const ROOM_PASSWORD_PREFIX = 'meet-poc.roompw.';
   imports: [FormsModule, RouterLink],
   templateUrl: './join.page.html',
   styleUrl: './join.page.scss',
+  schemas: [CUSTOM_ELEMENTS_SCHEMA],
 })
 export class JoinPage implements OnInit {
   private readonly http = inject(HttpClient);

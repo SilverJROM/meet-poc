@@ -1,5 +1,12 @@
 <main class="join-shell">
   <section class="join-card" aria-labelledby="join-title">
+    @if (ready()) {
+      <a class="lobby-back-link" data-testid="join-back-link" [routerLink]="signedIn() ? '/app/rooms' : '/'">
+        <ion-icon name="arrow-back-outline" aria-hidden="true"></ion-icon>
+        {{ signedIn() ? 'Back to rooms' : 'Back to home' }}
+      </a>
+    }
+
     <div class="join-heading">
       <p>Join a meeting</p>
       <h1 id="join-title">Enter a room name</h1>
