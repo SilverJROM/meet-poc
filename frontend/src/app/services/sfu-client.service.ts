@@ -333,6 +333,10 @@ export class SfuClientService {
     // --- Local mic-energy source (RTCAudioSourceStats) ---
     let outboundAudioSource: { audioLevel: number | null; totalAudioEnergy: number | null } | null = null;
 
+    // Local mic-energy source lives in its own dedicated loop: the candidate-pair
+    // loop below `break`s on the first nominated/succeeded pair, and RTCStatsReport
+    // iteration order is NOT spec-guaranteed — folding the media-source capture into
+    // that loop would silently skip it when the candidate-pair is iterated first.
     for (const stat of stats.values()) {
       if (stat.type === 'media-source' && (stat as any).kind === 'audio') {
         const s = stat as any;
@@ -340,7 +344,11 @@ export class SfuClientService {
           audioLevel: typeof s.audioLevel === 'number' ? s.audioLevel : null,
           totalAudioEnergy: typeof s.totalAudioEnergy === 'number' ? s.totalAudioEnergy : null,
         };
+        break; // first audio media-source is the local mic source; fine to stop here
       }
+    }
+
+    for (const stat of stats.values()) {
       if (stat.type === 'candidate-pair' && (stat.nominated === true || stat.state === 'succeeded')) {
         rttMs = typeof stat.currentRoundTripTime === 'number' ? Math.round(stat.currentRoundTripTime * 1000) : null;
         const localCand = stat.localCandidateId ? stats.get(stat.localCandidateId) : null;
