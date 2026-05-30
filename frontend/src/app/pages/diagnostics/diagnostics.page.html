@@ -94,6 +94,27 @@
                 <strong>{{ trackSummary(latest, 'video') }}</strong>
               </div>
             </div>
+
+            @if (remoteAudioRows(latest).length) {
+              <div class="remote-audio-health" aria-label="Remote audio health">
+                <span class="label">Remote audio health</span>
+                @for (row of remoteAudioRows(latest); track row.name + row.bytes) {
+                  <div class="remote-audio-row">
+                    <span class="peer-name">{{ row.name }}</span>
+                    <span>{{ row.bytes }}</span>
+                    <span>{{ row.packets }}</span>
+                    <span>{{ row.concealment }}</span>
+                    @if (row.badge) {
+                      <span [class]="row.class">{{ row.badge }}</span>
+                    } @else if (row.health === 'ok') {
+                      <span [class]="row.class">audio ok</span>
+                    } @else {
+                      <span [class]="row.class">audio health unknown</span>
+                    }
+                  </div>
+                }
+              </div>
+            }
           }
 
           <div class="entry-list" aria-label="Diagnostics timeline">
@@ -138,7 +159,13 @@
                     @if (sfu.inboundTracks.length) {
                       <span class="label">Subscribe (inbound)</span>
                       @for (track of sfu.inboundTracks; track track.trackName) {
-                        <span>{{ sfuInboundSummary(track) }}</span>
+                        @if (track.kind === 'audio') {
+                          <span [class]="remoteAudioHealthClass(track)">
+                            {{ publisherName(track.publisherClientId) }} audio · {{ track.bytesReceived === null ? 'bytes n/a' : 'bytes ' + track.bytesReceived }} · {{ concealmentPctLabel(track) }}@if (remoteAudioBadge(track)) {<span> · {{ remoteAudioBadge(track) }}</span>}
+                          </span>
+                        } @else {
+                          <span>{{ sfuInboundSummary(track) }}</span>
+                        }
                       }
                     }
                     @if (sfu.subscribeLatencies.length) {

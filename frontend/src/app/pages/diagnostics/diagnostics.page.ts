@@ -15,6 +15,12 @@ import {
   SfuSubscribeLatency,
 } from '../../services/meeting-sessions.service';
 import { IceConfigService, TurnHealthResult } from '../../services/ice-config.service';
+import {
+  classifyRemoteAudioHealth,
+  concealmentRatio,
+  remoteAudioBadgeLabel,
+  RemoteAudioHealth,
+} from '../../services/remote-audio-health';
 
 @Component({
   selector: 'app-diagnostics-page',
@@ -304,6 +310,88 @@ export class DiagnosticsPage {
     const client = lat.publisherClientId.slice(0, 8);
     const latency = lat.latencyMs !== null ? `${lat.latencyMs}ms` : 'pending';
     return `${client} · ${latency}`;
+  }
+
+  // --- R7: per-remote-publisher inbound AUDIO health ---
+
+  // Map publisherClientId -> latest participant name from the diagnostics
+  // payloads (R6 attribution link: payload.clientId / payload.clientName).
+  private publisherNameMap(): Map<string, string> {
+    const map = new Map<string, string>();
+    for (const entry of this.detail()?.entries ?? []) {
+      const clientId = entry.payload.clientId;
+      const name = entry.payload.clientName;
+      if (clientId && name) map.set(clientId, name);
+    }
+    return map;
+  }
+
+  // Map publisherClientId -> latest source micSilent from the payloads.
+  private publisherMicSilentMap(): Map<string, boolean> {
+    const map = new Map<string, boolean>();
+    for (const entry of this.detail()?.entries ?? []) {
+      const clientId = entry.payload.clientId;
+      if (clientId && typeof entry.payload.micSilent === 'boolean') {
+        map.set(clientId, entry.payload.micSilent);
+      }
+    }
+    return map;
+  }
+
+  publisherName(publisherClientId: string): string {
+    return this.publisherNameMap().get(publisherClientId) ?? publisherClientId.slice(0, 8);
+  }
+
+  sourceMicSilentFor(publisherClientId: string): boolean | null {
+    const value = this.publisherMicSilentMap().get(publisherClientId);
+    return value === undefined ? null : value;
+  }
+
+  remoteAudioHealthFor(track: SfuInboundTrackStats): RemoteAudioHealth {
+    return classifyRemoteAudioHealth(track, this.sourceMicSilentFor(track.publisherClientId));
+  }
+
+  remoteAudioHealthClass(track: SfuInboundTrackStats): 'audio-recv-ok' | 'audio-recv-bad' | 'audio-recv-neutral' {
+    const health = this.remoteAudioHealthFor(track);
+    if (health === 'silent') return 'audio-recv-bad';
+    if (health === 'ok') return 'audio-recv-ok';
+    return 'audio-recv-neutral';
+  }
+
+  // Empty string for 'ok' / 'unknown' ⇒ NO badge rendered (badge only for 'silent').
+  remoteAudioBadge(track: SfuInboundTrackStats): string {
+    return remoteAudioBadgeLabel(this.remoteAudioHealthFor(track), this.sourceMicSilentFor(track.publisherClientId));
+  }
+
+  // D1 display corroboration only — concealmentRatio is NOT the badge driver here,
+  // it is the same value the classifier uses, surfaced for human reading.
+  concealmentPctLabel(track: SfuInboundTrackStats): string {
+    const ratio = concealmentRatio(track);
+    return ratio === null ? 'concealment n/a' : `${(ratio * 100).toFixed(1)}% concealed`;
+  }
+
+  // At-a-glance audio rows for the latest entry: one row per inbound AUDIO track.
+  remoteAudioRows(entry: DiagnosticEntry): Array<{
+    name: string;
+    bytes: string;
+    packets: string;
+    concealment: string;
+    health: RemoteAudioHealth;
+    class: 'audio-recv-ok' | 'audio-recv-bad' | 'audio-recv-neutral';
+    badge: string;
+  }> {
+    const tracks = entry.payload.sfuDiagnostics?.inboundTracks ?? [];
+    return tracks
+      .filter((track) => track.kind === 'audio')
+      .map((track) => ({
+        name: this.publisherName(track.publisherClientId),
+        bytes: track.bytesReceived === null ? 'bytes n/a' : `bytes ${track.bytesReceived}`,
+        packets: track.packetsReceived === null ? 'pkts n/a' : `pkts ${track.packetsReceived}`,
+        concealment: this.concealmentPctLabel(track),
+        health: this.remoteAudioHealthFor(track),
+        class: this.remoteAudioHealthClass(track),
+        badge: this.remoteAudioBadge(track),
+      }));
   }
 
   private booleanSetting(value: boolean | null | undefined): string {
