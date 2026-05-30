@@ -19,3 +19,23 @@ src/app/services/mic-energy.ts:69:    if (stat && stat.type === 'media-source' &
 --- U-18 static: no NEW AudioContext/AnalyserNode/createMediaStreamSource added vs 3c1ebff ---
 $ git diff 3c1ebff -- frontend/src/app | grep -nE "^\+.*(new AudioContext|AnalyserNode|createMediaStreamSource)"
 (no added matches — energy gate reuses getStats only)
+
+===================================================================
+## Batch 2b — in-call silent-mic watchdog reducer + classification half
+Run: 2026-05-30 (B2b commits on top of b8fa5f7, branch feat/meet-diagnostics-audio-20260529)
+===================================================================
+
+$ cd frontend && npx tsx src/app/services/mic-capture-health.spec.ts
+mic-capture-health: all assertions passed
+EXIT=0
+
+B2a recovery suite (mic-capture-health) + new B2b reducer/window assertions all pass:
+  - AC-B1 (U-20..U-23): nextMicWarningState core transitions + exhaustive 3x2x2 truth table
+  - AC-B2 (U-24, U-25): classifyMicCapture flat ~5s window -> silent -> banner; energy-rose -> working -> no banner
+  - AC-B3 (U-23, U-26): auto-clear shown->working without user action; indeterminate keeps current (no flicker)
+  - AC-B4 (U-21, U-27): micActive=false always clears (mute gating + mute-while-shown)
+
+B1/B2a regression — mic-energy.spec.ts still green:
+$ cd frontend && npx tsx src/app/services/mic-energy.spec.ts
+mic-energy: all assertions passed
+EXIT=0

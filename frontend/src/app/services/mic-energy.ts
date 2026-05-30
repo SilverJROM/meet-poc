@@ -132,6 +132,36 @@ export function classifyMicCapture(
   return 'working';
 }
 
+/**
+ * B2b — in-call silent-mic warn-state reducer (AC-B1, the headline).
+ *
+ * Pure, framework-free: no Angular, DOM, or timers. Maps the current banner
+ * state + this poll's capture classification + the live mic gate to the NEXT
+ * banner-shown boolean. The continuous in-call watchdog applies it each ~1s tick;
+ * the post-publish one-shot fallback reuses the same signal so there is ONE
+ * silent-mic warn surface (AC-B8).
+ *
+ * Locked truth table:
+ *  - micActive === false ⇒ false — muted/disabled never warns (and muting WHILE
+ *    shown clears it); never warn about silence the user caused.
+ *  - 'silent'        ⇒ true  — sustained published silence ⇒ show.
+ *  - 'working'       ⇒ false — energy returned ⇒ auto-clear (no user action).
+ *  - 'indeterminate' ⇒ current — unchanged, prevents flicker on a thin window.
+ *
+ * Note: classifyMicCapture returns the literal 'indeterminate' (NOT 'unknown');
+ * the reducer treats 'indeterminate' as "keep current".
+ */
+export function nextMicWarningState(
+  current: boolean,
+  classification: MicCaptureClass,
+  micActive: boolean,
+): boolean {
+  if (!micActive) return false;
+  if (classification === 'silent') return true;
+  if (classification === 'working') return false;
+  return current; // 'indeterminate' — no change, no flicker.
+}
+
 export type RecoveryInput = {
   classification: MicCaptureClass;
   micEnabled: boolean; // track.enabled

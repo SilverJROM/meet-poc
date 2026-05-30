@@ -191,6 +191,12 @@
           <button type="button" (click)="deviceFailureNotice.set(null)">Dismiss</button>
         </div>
       }
+      @if (micSilentWarning()) {
+        <div class="device-notice" role="status">
+          <span>We can't detect sound from your microphone</span>
+          <button type="button" (click)="openInCallDeviceDialog()">Switch microphone</button>
+        </div>
+      }
       @if (actionNotice()) {
         <div class="device-notice" role="status">
           <span>{{ actionNotice() }}</span>

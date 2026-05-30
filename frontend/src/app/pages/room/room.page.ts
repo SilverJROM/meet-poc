@@ -19,7 +19,7 @@ import { BackgroundEffectsService } from '../../services/background-effects.serv
 import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
 import type { DiagnosticsPayload, SfuConnectionQuality, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
-import { classifyMicCapture, decideMicRecovery, deriveOutboundAudioFields, type EnergySample } from '../../services/mic-energy';
+import { classifyMicCapture, decideMicRecovery, deriveOutboundAudioFields, nextMicWarningState, type EnergySample } from '../../services/mic-energy';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
@@ -45,6 +45,10 @@ const CAPTURE_ENERGY_GATE_INITIAL_DELAY_MS = 500;
 const CAPTURE_ENERGY_GATE_INTERVAL_MS = 700;
 const CAPTURE_ENERGY_GATE_SAMPLES = 5;
 const CAPTURE_ENERGY_GATE_RESAMPLES = 3;
+// B2b in-call silent-mic watchdog: its OWN ~1s interval (the 7.5s diagnostics
+// logger is too coarse to fill a sustained window). 6 samples ≈ a ~5-6s window.
+const MIC_SILENCE_WATCHDOG_POLL_MS = 1_000;
+const MIC_SILENCE_WATCHDOG_WINDOW = 6;
 const GUEST_DISPLAY_NAME_KEY = 'guestDisplayName';
 const ROOM_PASSWORD_PREFIX = 'meet-poc.roompw.';
 const CHAT_EVERYONE_THREAD = 'everyone';
@@ -162,6 +166,10 @@ export class RoomPage implements OnDestroy {
   readonly waitExpiresAt = signal<number | null>(null);
   readonly waitRemainingSeconds = signal(0);
   readonly deviceFailureNotice = signal<string | null>(null);
+  // B2b — the single silent-mic warn surface (R2). Driven by both the continuous
+  // in-call watchdog and B2a's post-publish one-shot fallback; auto-clears when
+  // audio energy returns.
+  readonly micSilentWarning = signal(false);
   readonly remoteAudioBlocked = signal(false);
   readonly equalSizeTiles = signal(readEqualSizeTiles());
   readonly setupWarning = signal<string | null>(null);
@@ -360,6 +368,9 @@ export class RoomPage implements OnDestroy {
   private waitingRoomTimer: ReturnType<typeof setInterval> | null = null;
   private diagnosticsLogTimer: ReturnType<typeof setInterval> | null = null;
   private connectionQualityTimer: ReturnType<typeof setInterval> | null = null;
+  // B2b — in-call silent-mic watchdog: its own ~1s interval + rolling window.
+  private micSilenceWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private micSilenceWindow: { audioLevel: number | null; totalAudioEnergy: number | null }[] = [];
   private lastDiagnosticsEventAt = 0;
   private diagnosticsLogInFlight = false;
   private connectionQualityInFlight = false;
@@ -1335,6 +1346,7 @@ export class RoomPage implements OnDestroy {
         });
       }
       this.startDiagnosticsLogger();
+      this.startMicSilenceWatchdog();
       this.startConnectionQualitySampler();
       this.queueDiagnosticsLog('state-change');
       if (wasInCall) this.status.set('Reconnected.');
@@ -1932,6 +1944,7 @@ export class RoomPage implements OnDestroy {
   private cleanupCall(sendLeaveMessage = false): void {
     if (this.state() === 'in-call') this.flushDiagnosticsLog('call-end', { useBeacon: true });
     this.stopDiagnosticsLogger();
+    this.stopMicSilenceWatchdog();
     this.stopConnectionQualitySampler();
     this.clearLocalTrackRecoveryTimers();
     this.clearPreflightTimer();
@@ -1970,6 +1983,7 @@ export class RoomPage implements OnDestroy {
     this.leaveDialogOpen.set(false);
     this.meetingEndedToastOpen.set(false);
     this.deviceFailureNotice.set(null);
+    this.micSilentWarning.set(false);
     this.actionNotice.set(null);
     this.screenShareHelp.set(null);
     this.shareCameraActive = false;
@@ -2290,8 +2304,10 @@ export class RoomPage implements OnDestroy {
 
     // Re-acquire unavailable, threw, or the new track is also silent (decision
     // would now be keep-and-warn). KEEP the best existing audio track — NEVER
-    // remove it, NEVER end with zero tracks — and surface a one-shot warn.
-    this.deviceFailureNotice.set("We can't detect sound from your microphone. Open devices to pick another.");
+    // remove it, NEVER end with zero tracks — and surface the warn. B2b: drive
+    // the SAME micSilentWarning surface the in-call watchdog uses (one silent-mic
+    // banner; the watchdog's auto-clear then also clears this one-shot case).
+    this.micSilentWarning.set(true);
     this.queueDiagnosticsLog('error', 'initial capture silent; kept track, warned user');
   }
 
@@ -2440,6 +2456,54 @@ export class RoomPage implements OnDestroy {
     this.diagnosticsLogTimer = null;
     this.lastDiagnosticsEventAt = 0;
     this.diagnosticsLogInFlight = false;
+  }
+
+  // B2b — continuous in-call silent-mic watchdog (R2, the safety net on top of
+  // B2a's join-time capture fix). Polls the SAME getStats outbound-audio source
+  // every ~1s, keeps a rolling ~5-6s window, classifies it with the EXISTING pure
+  // classifyMicCapture, and drives the micSilentWarning banner via the pure
+  // nextMicWarningState reducer. WARN-ONLY: it NEVER re-acquires or switches the
+  // device (no mid-call auto-thrash) — that is the B2b-vs-B2a distinction.
+  private startMicSilenceWatchdog(): void {
+    if (this.micSilenceWatchdogTimer || this.state() !== 'in-call') return;
+    this.micSilenceWindow = [];
+    this.micSilenceWatchdogTimer = window.setInterval(() => {
+      void this.pollMicSilenceWatchdog();
+    }, MIC_SILENCE_WATCHDOG_POLL_MS);
+  }
+
+  private stopMicSilenceWatchdog(): void {
+    if (this.micSilenceWatchdogTimer) clearInterval(this.micSilenceWatchdogTimer);
+    this.micSilenceWatchdogTimer = null;
+    this.micSilenceWindow = [];
+  }
+
+  private async pollMicSilenceWatchdog(): Promise<void> {
+    // A stale tick must never warn after leaving the call.
+    if (this.state() !== 'in-call') {
+      this.stopMicSilenceWatchdog();
+      return;
+    }
+
+    // micActive = local audio track is live AND enabled AND unmuted. A muted /
+    // disabled user is intentionally silent — clear the buffer and the banner;
+    // never poll stats for silence the user caused.
+    const micActive = this.captureTrackLive() && this.captureTrackEnabled() && this.captureTrackUnmuted();
+    if (!micActive) {
+      this.micSilenceWindow = [];
+      this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', false));
+      return;
+    }
+
+    const src = await this.sfuClient.getOutboundAudioSource();
+    this.micSilenceWindow.push({
+      audioLevel: src?.audioLevel ?? null,
+      totalAudioEnergy: src?.totalAudioEnergy ?? null,
+    });
+    if (this.micSilenceWindow.length > MIC_SILENCE_WATCHDOG_WINDOW) this.micSilenceWindow.shift();
+
+    const classification = classifyMicCapture(this.micSilenceWindow);
+    this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), classification, true));
   }
 
   private startConnectionQualitySampler(): void {
