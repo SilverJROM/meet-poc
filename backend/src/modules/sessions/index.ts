@@ -10,6 +10,7 @@ import { getDiagnosticsGloballyEnabled } from '../app-settings/store.js';
 import {
   appendDiagnosticsEntry,
   getDiagnosticsForSession,
+  getSessionParticipants,
   listActiveForOwner,
   listDiagnosticsSessionsForOwner,
   listEndedForOwner,
@@ -63,6 +64,8 @@ function mapDiagnosticEntry(entry: DiagnosticEntry): Record<string, unknown> {
     relayUsed: entry.relayUsed,
     candidateTypes: entry.candidateTypes,
     peerCount: entry.peerCount,
+    participantId: entry.participantId,
+    participantName: entry.participantName,
     payload: entry.payload,
   };
 }
@@ -125,11 +128,15 @@ export function sessionsRouter(database: Database.Database = getDb()): Router {
 
   router.get('/meeting-sessions/:sessionId/diagnostics', auth, (req, res) => {
     const authed = req as AuthenticatedRequest;
-    const result = getDiagnosticsForSession(authed.user.email, String(req.params.sessionId || ''), database);
+    const sessionId = String(req.params.sessionId || '');
+    const participantIdFilter = stringOrNull(req.query.participantId);
+    const result = getDiagnosticsForSession(authed.user.email, sessionId, database, participantIdFilter);
     if (!result) return res.status(404).json({ error: 'not found' });
+    const participants = getSessionParticipants(authed.user.email, sessionId, database) || [];
     return res.json({
       session: mapSession(result.session, true),
       entries: result.entries.map((entry) => mapDiagnosticEntry(entry)),
+      participants,
     });
   });
 

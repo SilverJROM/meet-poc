@@ -48,7 +48,15 @@ export type DiagnosticEntry = {
   relayUsed: boolean;
   candidateTypes: string[];
   peerCount: number;
+  participantId: string | null;
+  participantName: string | null;
   payload: DiagnosticsPayload;
+};
+
+export type ParticipantSummary = {
+  participantId: string;
+  participantName: string | null;
+  sampleCount: number;
 };
 
 export type DiagnosticSessionSummary = MeetingSession & {
@@ -70,6 +78,9 @@ type DiagnosticEntryRow = {
   relay_used: number;
   candidate_types: string | null;
   peer_count: number;
+  participant_id: string | null;
+  participant_name: string | null;
+  participant_client_key: string | null;
 };
 
 type DiagnosticSummaryRow = SessionRow & {
@@ -104,6 +115,8 @@ function toDiagnosticEntry(row: DiagnosticEntryRow): DiagnosticEntry {
     relayUsed: row.relay_used === 1,
     candidateTypes: splitCandidateTypes(row.candidate_types),
     peerCount: row.peer_count,
+    participantId: row.participant_id ?? null,
+    participantName: row.participant_name ?? null,
     payload: parsePayload(row.payload_json),
   };
 }
@@ -270,6 +283,9 @@ export function appendDiagnosticsEntry(
     relayUsed: summary.relayUsed ? 1 : 0,
     candidateTypes: summary.candidateTypes.join(','),
     peerCount: summary.peerCount,
+    participantId: coerceIdentity(payload.participantId),
+    participantName: coerceIdentity(payload.clientName),
+    participantClientKey: coerceIdentity(payload.clientKey),
   };
 
   const insert = database.transaction(() => {
@@ -277,8 +293,8 @@ export function appendDiagnosticsEntry(
       .prepare(
         `
           INSERT INTO meeting_session_diagnostics
-            (id, session_id, room_id, owner_email, kind, created_at, payload_json, relay_used, candidate_types, peer_count)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, session_id, room_id, owner_email, kind, created_at, payload_json, relay_used, candidate_types, peer_count, participant_id, participant_name, participant_client_key)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .run(
@@ -292,6 +308,9 @@ export function appendDiagnosticsEntry(
         entry.relayUsed,
         entry.candidateTypes,
         entry.peerCount,
+        entry.participantId,
+        entry.participantName,
+        entry.participantClientKey,
       );
     database
       .prepare(
@@ -370,6 +389,7 @@ export function getDiagnosticsForSession(
   ownerEmail: string,
   sessionId: string,
   database: Database.Database = getDb(),
+  participantId?: string | null,
 ): { session: MeetingSession; entries: DiagnosticEntry[] } | null {
   const sessionRow = database
     .prepare(
@@ -383,26 +403,71 @@ export function getDiagnosticsForSession(
     )
     .get(sessionId, ownerEmail) as SessionRow | undefined;
   if (!sessionRow) return null;
+  const participantFilter = participantId ? 'AND d.participant_id = ?' : '';
+  const params = participantId ? [sessionId, ownerEmail, participantId] : [sessionId, ownerEmail];
   const entries = database
     .prepare(
       `
-        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count
+        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name, d.participant_client_key
         FROM meeting_session_diagnostics d
         JOIN rooms r ON r.id = d.room_id
         WHERE d.session_id = ? AND d.owner_email = ?
+          ${participantFilter}
         ORDER BY d.created_at ASC
       `,
     )
-    .all(sessionId, ownerEmail)
+    .all(...params)
     .map((row) => toDiagnosticEntry(row as DiagnosticEntryRow));
   return { session: toSession(sessionRow), entries };
+}
+
+export function getSessionParticipants(
+  ownerEmail: string,
+  sessionId: string,
+  database: Database.Database = getDb(),
+): ParticipantSummary[] | null {
+  const sessionRow = database
+    .prepare(
+      `
+        SELECT s.id
+        FROM meeting_sessions s
+        JOIN rooms r ON r.id = s.room_id
+        WHERE s.id = ? AND r.owner_email = ?
+        LIMIT 1
+      `,
+    )
+    .get(sessionId, ownerEmail) as { id: string } | undefined;
+  if (!sessionRow) return null;
+  const rows = database
+    .prepare(
+      `
+        SELECT
+          d.participant_id AS participant_id,
+          MAX(d.participant_name) AS participant_name,
+          COUNT(d.id) AS sample_count
+        FROM meeting_session_diagnostics d
+        WHERE d.session_id = ? AND d.owner_email = ? AND d.participant_id IS NOT NULL
+        GROUP BY d.participant_id
+        ORDER BY sample_count DESC, d.participant_id ASC
+      `,
+    )
+    .all(sessionId, ownerEmail) as Array<{
+      participant_id: string;
+      participant_name: string | null;
+      sample_count: number;
+    }>;
+  return rows.map((row) => ({
+    participantId: row.participant_id,
+    participantName: row.participant_name ?? null,
+    sampleCount: row.sample_count,
+  }));
 }
 
 function getDiagnosticsEntry(ownerEmail: string, id: string, database: Database.Database): DiagnosticEntry | null {
   const row = database
     .prepare(
       `
-        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count
+        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name, d.participant_client_key
         FROM meeting_session_diagnostics d
         JOIN rooms r ON r.id = d.room_id
         WHERE d.id = ? AND d.owner_email = ?
@@ -459,6 +524,12 @@ function summarizeDiagnosticsPayload(payload: DiagnosticsPayload): { kind: strin
     candidateTypes: [...candidateTypes].sort(),
     peerCount: Math.max(peers.length, sfuPeerCount),
   };
+}
+
+function coerceIdentity(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
 }
 
 function splitCandidateTypes(value: string | null | undefined): string[] {
