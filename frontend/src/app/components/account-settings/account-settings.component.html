@@ -136,5 +136,21 @@
       <p class="account-error" role="alert">{{ tgError() }}</p>
     }
     <div class="account-status" role="status">{{ tgStatus() || '' }}</div>
+
+    <hr class="account-divider">
+
+    <div class="account-field">
+      <label>Diagnostics</label>
+      <p class="field-hint">When off, this device stops collecting and uploading call diagnostics. Stored on this device only.</p>
+      <label class="toggle-row">
+        <input
+          type="checkbox"
+          name="diagnosticsLogging"
+          [ngModel]="diagnosticsLogging()"
+          (ngModelChange)="setDiagnosticsLogging($event)"
+        >
+        Diagnostics logging
+      </label>
+    </div>
   </section>
 }

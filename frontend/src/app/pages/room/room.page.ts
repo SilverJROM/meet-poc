@@ -29,6 +29,7 @@ import {
   type EnergySample,
   type SweepHooks,
 } from '../../services/mic-energy';
+import { readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
@@ -43,7 +44,6 @@ const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
 const CONNECTION_QUALITY_SAMPLE_INTERVAL_MS = 5_000;
 const CONNECTION_QUALITY_EPISODE_SAMPLES = 3;
-const DIAGNOSTICS_LOGGING_STORAGE_KEY = 'meet-poc.diagnosticsLogging';
 const EQUAL_SIZE_TILES_STORAGE_KEY = 'meet-poc.layout.equalSizeTiles';
 const LOCAL_TRACK_MUTE_DEBOUNCE_MS = 1_200;
 const DEVICE_RECOVERY_MAX_ATTEMPTS = 3;
@@ -3005,14 +3005,6 @@ function readClientKey(): string {
     return generated;
   } catch {
     return `client-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-  }
-}
-
-function readDiagnosticsLoggingEnabled(): boolean {
-  try {
-    return window.localStorage.getItem(DIAGNOSTICS_LOGGING_STORAGE_KEY) !== '0';
-  } catch {
-    return true;
   }
 }
 

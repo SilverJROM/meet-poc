@@ -5,6 +5,7 @@ import { addIcons } from 'ionicons';
 import { keyOutline, linkOutline, mailOutline, personOutline, saveOutline, unlinkOutline } from 'ionicons/icons';
 import { AccountService } from '../../services/account.service';
 import { AuthService } from '../../services/auth.service';
+import { readDiagnosticsLoggingEnabled, writeDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
 
 @Component({
   selector: 'app-account-settings',
@@ -45,6 +46,10 @@ export class AccountSettingsComponent implements OnInit {
   readonly tgBusy = signal(false);
   readonly tgStatus = signal<string | null>(null);
   readonly tgError = signal<string | null>(null);
+
+  // R4 (B3a): diagnostics-logging on/off, seeded from the shared prefs reader
+  // (absent key -> ON). Persists locally on change; no backend.
+  readonly diagnosticsLogging = signal(readDiagnosticsLoggingEnabled());
 
   constructor() {
     addIcons({ keyOutline, linkOutline, mailOutline, personOutline, saveOutline, unlinkOutline });
@@ -141,6 +146,11 @@ export class AccountSettingsComponent implements OnInit {
     } finally {
       this.savingPassword.set(false);
     }
+  }
+
+  setDiagnosticsLogging(enabled: boolean): void {
+    this.diagnosticsLogging.set(enabled);
+    writeDiagnosticsLoggingEnabled(enabled);
   }
 
   async saveEmail(): Promise<void> {

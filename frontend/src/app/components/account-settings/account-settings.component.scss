@@ -157,6 +157,23 @@
   &:disabled { opacity: 0.6; cursor: not-allowed; }
 }
 
+.toggle-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #202124;
+  cursor: pointer;
+
+  input {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+    accent-color: #2563eb;
+  }
+}
+
 code {
   padding: 1px 5px;
   border-radius: 4px;
