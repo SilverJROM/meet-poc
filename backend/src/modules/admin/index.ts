@@ -3,6 +3,7 @@ import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
 import { requireAdmin } from '../auth/middleware.js';
 import { hashPassword } from '../../lib/passwords.js';
+import { getDiagnosticsGloballyEnabled, setDiagnosticsGloballyEnabled } from '../app-settings/store.js';
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const MIN_PASSWORD = 8;
@@ -65,6 +66,20 @@ export function adminRouter(database: Database.Database = getDb()): Router {
       .run(email, hashPassword(password), now, now, displayName, isAdmin ? 1 : 0);
     console.log(`[admin] user created: "${email}" (admin=${isAdmin})`);
     return res.json({ user: { email, displayName, isAdmin, createdAt: now } });
+  });
+
+  // R5 — global diagnostics kill-switch (admin only). Scoped to the single
+  // diagnostics flag — NOT a general settings editor. Reuses requireAdmin; no
+  // new auth/RBAC boundary.
+  router.get('/admin/settings/diagnostics', admin, (_req, res) => {
+    return res.json({ enabled: getDiagnosticsGloballyEnabled(database) });
+  });
+
+  router.put('/admin/settings/diagnostics', admin, (req, res) => {
+    const enabled = req.body?.enabled === true || req.body?.enabled === 'true' || req.body?.enabled === 1;
+    setDiagnosticsGloballyEnabled(enabled, database);
+    console.log(`[admin] diagnostics globally ${enabled ? 'ENABLED' : 'DISABLED'}`);
+    return res.json({ enabled });
   });
 
   return router;

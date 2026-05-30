@@ -10,16 +10,18 @@ describe('/api/me and logout', () => {
     seedUser(db);
     const app = createApp(db);
 
-    await request(app).get('/api/me').expect(200, { user: null });
+    const guest = await request(app).get('/api/me').expect(200);
+    expect(guest.body.user).toBe(null);
+    expect(guest.body.diagnosticsGloballyEnabled).toBe(true);
     const login = await request(app)
       .post('/api/login')
       .send({ email: 'jrom@silverjrom.app', password: initialPassword() })
       .expect(200);
     const cookie = login.headers['set-cookie'];
 
-    await request(app).get('/api/me').set('Cookie', cookie).expect(200, {
-      user: { email: 'jrom@silverjrom.app' },
-    });
+    const me = await request(app).get('/api/me').set('Cookie', cookie).expect(200);
+    expect(me.body.user.email).toBe('jrom@silverjrom.app');
+    expect(me.body.diagnosticsGloballyEnabled).toBe(true);
   });
 
   it('S1.4 logout invalidates the session', async () => {
@@ -33,6 +35,7 @@ describe('/api/me and logout', () => {
     const cookie = login.headers['set-cookie'];
 
     await request(app).post('/api/logout').set('Cookie', cookie).expect(200, { ok: true });
-    await request(app).get('/api/me').set('Cookie', cookie).expect(200, { user: null });
+    const me = await request(app).get('/api/me').set('Cookie', cookie).expect(200);
+    expect(me.body.user).toBe(null);
   });
 });

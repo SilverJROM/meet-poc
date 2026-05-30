@@ -4,6 +4,7 @@ import { getDb } from '../../db.js';
 import { parseCookies, serializeSessionCookie } from '../../lib/cookies.js';
 import { verifyPassword } from '../../lib/passwords.js';
 import { SESSION_TTL_MS, createSession, destroySession, getSessionUser } from './sessions.js';
+import { getDiagnosticsGloballyEnabled } from '../app-settings/store.js';
 
 type UserRow = {
   email: string;
@@ -60,8 +61,11 @@ export function authRouter(database: Database.Database = getDb()): Router {
   router.get('/me', (req, res) => {
     const cookies = parseCookies(req.headers.cookie);
     const user = getSessionUser(cookies.session, database);
-    if (!user) return res.json({ user: null });
-    return res.json({ user: { email: user.email, displayName: user.displayName, isAdmin: user.isAdmin } });
+    if (!user) return res.json({ user: null, diagnosticsGloballyEnabled: getDiagnosticsGloballyEnabled(database) });
+    return res.json({
+      user: { email: user.email, displayName: user.displayName, isAdmin: user.isAdmin },
+      diagnosticsGloballyEnabled: getDiagnosticsGloballyEnabled(database),
+    });
   });
 
   return router;

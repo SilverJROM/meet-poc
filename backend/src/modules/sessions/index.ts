@@ -6,6 +6,7 @@ import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
 import { getSessionUser } from '../auth/sessions.js';
 import { countRecordingsBySessionForUser } from '../recording/index.js';
 import { isAdmittedDiagnosticPoster } from '../signaling/index.js';
+import { getDiagnosticsGloballyEnabled } from '../app-settings/store.js';
 import {
   appendDiagnosticsEntry,
   getDiagnosticsForSession,
@@ -156,6 +157,7 @@ export function sessionsRouter(database: Database.Database = getDb()): Router {
       userEmail,
     });
     if (!admitted) return res.status(403).json({ error: 'forbidden' });
+    if (!getDiagnosticsGloballyEnabled(database)) return res.json({ ok: true, persisted: false });
     const entry = appendDiagnosticsEntry(sessionId, null, req.body, database);
     if (!entry) return res.status(404).json({ error: 'not found' });
     return res.json({ ok: true, entry: mapDiagnosticEntry(entry) });
