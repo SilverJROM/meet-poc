@@ -1,0 +1,68 @@
+
+ RUN  v2.1.9 /home/agjrom/websites/meet-poc/backend
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-28 persists owner-gated diagnostics with active sender track evidence
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-28 persists owner-gated diagnostics with active sender track evidence
+[room 0d11a09c9dcb] + OWNER Owner (47c522b703b5d76d)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-28 persists owner-gated diagnostics with active sender track evidence
+[room 0d11a09c9dcb] - Owner (47c522b703b5d76d)  admitted=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-41 accepts diagnostics from admitted guests and rejects never-admitted clients
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-41 accepts diagnostics from admitted guests and rejects never-admitted clients
+[room b4d6bfb264b3] + OWNER Owner (9c51317ca3b08eb7)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-41 accepts diagnostics from admitted guests and rejects never-admitted clients
+[room b4d6bfb264b3] KNOCK Guest (c72ce150833dfec3)  pending=1
+[room b4d6bfb264b3] ADMITTED Guest (c72ce150833dfec3)  admitted=2 pending=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-41 accepts diagnostics from admitted guests and rejects never-admitted clients
+[room b4d6bfb264b3] - Guest (c72ce150833dfec3)  admitted=1
+[room b4d6bfb264b3] - Owner (9c51317ca3b08eb7)  admitted=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-28 retains a bounded number of diagnostics entries per session
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-2 appendDiagnosticsEntry populates attribution columns from payload
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-3 missing identity fields insert NULL; no error
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-4 getDiagnosticsForSession exposes participantId + participantName
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-5 getDiagnosticsForSession optional participantId filter
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-6 getSessionParticipants returns distinct participants with sample counts
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow)
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow)
+[room 53d6715f3d5e] + OWNER Owner (af144202ad63c3af)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow)
+[room 53d6715f3d5e] KNOCK Guest (fa95cc319e0b90f7)  pending=1
+[room 53d6715f3d5e] ADMITTED Guest (fa95cc319e0b90f7)  admitted=2 pending=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow)
+[room 53d6715f3d5e] - Guest (fa95cc319e0b90f7)  admitted=1
+[room 53d6715f3d5e] - Owner (af144202ad63c3af)  admitted=0
+
+ ✓ tests/session-diagnostics.test.ts (10 tests) 9354ms
+   ✓ meeting session diagnostics API > DR-28 persists owner-gated diagnostics with active sender track evidence 326ms
+   ✓ meeting session diagnostics API > DR-28 retains a bounded number of diagnostics entries per session 7262ms
+   ✓ meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow) 306ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  04:22:08
+   Duration  9.77s (transform 171ms, setup 0ms, collect 283ms, tests 9.35s, environment 0ms, prepare 32ms)
+

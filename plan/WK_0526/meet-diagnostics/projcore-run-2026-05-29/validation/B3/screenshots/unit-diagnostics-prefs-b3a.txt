@@ -1,0 +1,2 @@
+diagnostics-prefs: all assertions passed
+EXIT:0

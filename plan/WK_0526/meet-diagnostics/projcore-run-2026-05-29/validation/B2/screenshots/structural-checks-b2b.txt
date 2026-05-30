@@ -1,0 +1,70 @@
+==============================================================
+B2b STRUCTURAL / STATIC CHECKS  (run 2026-05-30T01:24:43Z)
+HEAD=1ba17b5  base B2a=b8fa5f7
+==============================================================
+
+### S-1 (U-28, WARN-ONLY) — pollMicSilenceWatchdog body has NO device-mutation calls
+$ awk '/private async pollMicSilenceWatchdog/,/^  }$/' room.page.ts | grep -nE 'replaceAudioTrack|recoverLocalAudioTrack|removeAudioTrack|getUserMedia|changeAudioDevice'
+<no matches>
+RESULT: PASS — warn-only, zero device-mutation calls in poll body
+
+### S-2 (U-30/U-31, AC-B7) — own 1s interval (=1000), start adjacent to startDiagnosticsLogger, clear+null in cleanupCall
+$ grep -nE 'MIC_SILENCE_WATCHDOG_POLL_MS|micSilenceWatchdogTimer|startMicSilenceWatchdog|stopMicSilenceWatchdog' room.page.ts
+50:const MIC_SILENCE_WATCHDOG_POLL_MS = 1_000;
+372:  private micSilenceWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+1349:      this.startMicSilenceWatchdog();
+1947:    this.stopMicSilenceWatchdog();
+2467:  private startMicSilenceWatchdog(): void {
+2468:    if (this.micSilenceWatchdogTimer || this.state() !== 'in-call') return;
+2470:    this.micSilenceWatchdogTimer = window.setInterval(() => {
+2472:    }, MIC_SILENCE_WATCHDOG_POLL_MS);
+2475:  private stopMicSilenceWatchdog(): void {
+2476:    if (this.micSilenceWatchdogTimer) clearInterval(this.micSilenceWatchdogTimer);
+2477:    this.micSilenceWatchdogTimer = null;
+2484:      this.stopMicSilenceWatchdog();
+--- start adjacency (publish completion, near startDiagnosticsLogger) ---
+1348:      this.startDiagnosticsLogger();
+1349:      this.startMicSilenceWatchdog();
+2573:    this.startDiagnosticsLogger();
+--- cleanupCall stop + reset ---
+1947:    this.stopMicSilenceWatchdog();
+1986:    this.micSilentWarning.set(false);
+2484:      this.stopMicSilenceWatchdog();
+
+### S-3 (U-28/U-29, AC-B5/B6) — banner exact text + Switch microphone->openInCallDeviceDialog + role=status non-modal
+$ grep -nE "We can't detect sound...|Switch microphone|openInCallDeviceDialog|role=status|micSilentWarning|device-notice" room.page.html
+121:        (devices)="openInCallDeviceDialog()"
+155:        <div class="share-request-status" role="status">Requesting permission to share...</div>
+183:        <div class="peer-warning" role="status">
+189:        <div class="device-notice" role="status">
+194:      @if (micSilentWarning()) {
+195:        <div class="device-notice" role="status">
+196:          <span>We can't detect sound from your microphone</span>
+197:          <button type="button" (click)="openInCallDeviceDialog()">Switch microphone</button>
+201:        <div class="device-notice" role="status">
+207:        <div class="audio-unblock-notice" role="status">
+225:      <p class="call-status" role="status">{{ status() }}</p>
+396:          <div class="lobby-warning" role="status">
+485:            <div class="lobby-warning" role="status">
+
+### S-4 (U-32, AC-B8 UNIFY) — old deviceFailureNotice silent-mic copy GONE; silent-mic copy in HTML only
+$ grep -nE "deviceFailureNotice.set\(.We can.t detect sound|Open devices to pick another" room.page.ts
+<no matches>
+RESULT: PASS — old deviceFailureNotice silent-mic fallback copy removed
+Count of silent-mic copy in room.page.ts = 0
+  PASS — copy ONLY in HTML banner, driven by micSilentWarning
+
+### S-5 (AC-B8) — micSilentWarning single surface; reset in cleanupCall
+$ grep -nE 'micSilentWarning' room.page.ts
+172:  readonly micSilentWarning = signal(false);
+1986:    this.micSilentWarning.set(false);
+2308:    // the SAME micSilentWarning surface the in-call watchdog uses (one silent-mic
+2310:    this.micSilentWarning.set(true);
+2464:  // classifyMicCapture, and drives the micSilentWarning banner via the pure
+2494:      this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', false));
+2506:    this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), classification, true));
+
+### S-6 (no new meter) — git diff b8fa5f7..1ba17b5 adds NO AudioContext/AnalyserNode/createMediaStreamSource
+$ git diff b8fa5f7..1ba17b5 -- frontend/src | grep -nE '^\+.*(new AudioContext|AnalyserNode|createMediaStreamSource)'
+<no added matches>
+RESULT: PASS — reuses getStats source, zero new Web-Audio meter

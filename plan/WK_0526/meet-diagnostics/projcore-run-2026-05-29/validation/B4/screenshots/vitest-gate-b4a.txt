@@ -1,0 +1,334 @@
+
+ RUN  v2.1.9 /home/agjrom/websites/meet-poc/backend
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a previously admitted guest with an opt-in reconnect token
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a previously admitted guest with an opt-in reconnect token
+[room ed835d4d9bfe] + OWNER Owner (ca486ea958fce8ab)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a previously admitted guest with an opt-in reconnect token
+[room ed835d4d9bfe] KNOCK Guest (72186ac96fbebd62)  pending=1
+[room ed835d4d9bfe] ADMITTED Guest (72186ac96fbebd62)  admitted=2 pending=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a previously admitted guest with an opt-in reconnect token
+[room ed835d4d9bfe] RECONNECTING Guest (72186ac96fbebd62)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a previously admitted guest with an opt-in reconnect token
+[room ed835d4d9bfe] + RESUME Guest (846fa5f14627858e)  admitted=2
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a previously admitted guest with an opt-in reconnect token
+[room ed835d4d9bfe] - Guest (846fa5f14627858e)  admitted=1
+[room ed835d4d9bfe] - Owner (ca486ea958fce8ab)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a reconnecting guest by persistent clientKey without a reconnect token
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a reconnecting guest by persistent clientKey without a reconnect token
+[room bf322a4445f6] + OWNER Owner (9d39d0485d40acdb)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a reconnecting guest by persistent clientKey without a reconnect token
+[room bf322a4445f6] KNOCK Guest (f924f0f9234d5ec9)  pending=1
+[room bf322a4445f6] ADMITTED Guest (f924f0f9234d5ec9)  admitted=2 pending=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a reconnecting guest by persistent clientKey without a reconnect token
+[room bf322a4445f6] RECONNECTING Guest (f924f0f9234d5ec9)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a reconnecting guest by persistent clientKey without a reconnect token
+[room bf322a4445f6] + RESUME Guest (c1efcc6a72ba0904)  admitted=2
+[room bf322a4445f6] - Guest (c1efcc6a72ba0904)  admitted=1
+[room bf322a4445f6] - Owner (9d39d0485d40acdb)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > auto-admits a durable admitted clientKey after reconnect grace removes the old peer
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > auto-admits a durable admitted clientKey after reconnect grace removes the old peer
+[room 218bbfe2de85] + OWNER Owner (b55548579846d5d3)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > auto-admits a durable admitted clientKey after reconnect grace removes the old peer
+[room 218bbfe2de85] KNOCK Guest (d5a740c18c9e4418)  pending=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > auto-admits a durable admitted clientKey after reconnect grace removes the old peer
+[room 218bbfe2de85] ADMITTED Guest (d5a740c18c9e4418)  admitted=2 pending=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > auto-admits a durable admitted clientKey after reconnect grace removes the old peer
+[room 218bbfe2de85] RECONNECTING Guest (d5a740c18c9e4418)  admitted=1
+[room 218bbfe2de85] EXPIRED Guest (d5a740c18c9e4418)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > auto-admits a durable admitted clientKey after reconnect grace removes the old peer
+[room 218bbfe2de85] + RESUME Guest (4e6df338af9d881c)  admitted=2
+[room 218bbfe2de85] - Guest (4e6df338af9d881c)  admitted=1
+[room 218bbfe2de85] - Owner (b55548579846d5d3)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > requires re-admit after an explicit leave message, then clears the revoke on owner admit
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > requires re-admit after an explicit leave message, then clears the revoke on owner admit
+[room 1e7dbd3db0dd] + OWNER Owner (ed90faeaad613b33)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > requires re-admit after an explicit leave message, then clears the revoke on owner admit
+[room 1e7dbd3db0dd] KNOCK Guest (510032cab31f99bf)  pending=1
+[room 1e7dbd3db0dd] ADMITTED Guest (510032cab31f99bf)  admitted=2 pending=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > requires re-admit after an explicit leave message, then clears the revoke on owner admit
+[room 1e7dbd3db0dd] - Guest (510032cab31f99bf)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > requires re-admit after an explicit leave message, then clears the revoke on owner admit
+[room 1e7dbd3db0dd] KNOCK Guest (256886d0d44fa113)  pending=1
+[room 1e7dbd3db0dd] ADMITTED Guest (256886d0d44fa113)  admitted=2 pending=0
+[room 1e7dbd3db0dd] RECONNECTING Guest (256886d0d44fa113)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > requires re-admit after an explicit leave message, then clears the revoke on owner admit
+[room 1e7dbd3db0dd] + RESUME Guest (c11551205dc6dce7)  admitted=2
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > requires re-admit after an explicit leave message, then clears the revoke on owner admit
+[room 1e7dbd3db0dd] - Guest (c11551205dc6dce7)  admitted=1
+[room 1e7dbd3db0dd] - Owner (ed90faeaad613b33)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > treats any bare socket close code or reason as a drop, not an explicit leave
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > treats any bare socket close code or reason as a drop, not an explicit leave
+[room 8bd2276c29da] + OWNER Owner (92f4ee095d359178)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > treats any bare socket close code or reason as a drop, not an explicit leave
+[room 8bd2276c29da] KNOCK Guest (ace51a3e28397395)  pending=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > treats any bare socket close code or reason as a drop, not an explicit leave
+[room 8bd2276c29da] ADMITTED Guest (ace51a3e28397395)  admitted=2 pending=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > treats any bare socket close code or reason as a drop, not an explicit leave
+[room 8bd2276c29da] RECONNECTING Guest (ace51a3e28397395)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > treats any bare socket close code or reason as a drop, not an explicit leave
+[room 8bd2276c29da] + RESUME Guest (e98b7c2618969cfa)  admitted=2
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > treats any bare socket close code or reason as a drop, not an explicit leave
+[room 8bd2276c29da] - Guest (e98b7c2618969cfa)  admitted=1
+[room 8bd2276c29da] - Owner (92f4ee095d359178)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey
+[room 31905b228bbb] + OWNER Owner (c4d277810688aef0)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey
+[room 31905b228bbb] KNOCK Guest (9a69e71e8073ee0e)  pending=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey
+[room 31905b228bbb] ADMITTED Guest (9a69e71e8073ee0e)  admitted=2 pending=0
+
+stderr | tests/signaling-reconnect.test.ts > signaling reconnect > terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey
+[signaling-heartbeat] terminating stale websocket missed=2 lastPongAgoMs=60
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey
+[room 31905b228bbb] RECONNECTING Guest (9a69e71e8073ee0e)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey
+[room 31905b228bbb] + RESUME Guest (90cd460c5cc672a0)  admitted=2
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey
+[room 31905b228bbb] - Guest (90cd460c5cc672a0)  admitted=1
+[room 31905b228bbb] - Owner (c4d277810688aef0)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > creates a new participantId for an unknown persistent clientKey
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > creates a new participantId for an unknown persistent clientKey
+[room e3358b598a27] + OWNER Owner (5f34de6286d3c24c)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > creates a new participantId for an unknown persistent clientKey
+[room e3358b598a27] KNOCK Guest One (136d1d829c46bf2a)  pending=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > creates a new participantId for an unknown persistent clientKey
+[room e3358b598a27] ADMITTED Guest One (136d1d829c46bf2a)  admitted=2 pending=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > creates a new participantId for an unknown persistent clientKey
+[room e3358b598a27] KNOCK Guest Two (bcf20cd8850bd72c)  pending=1
+[room e3358b598a27] ADMITTED Guest Two (bcf20cd8850bd72c)  admitted=3 pending=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > creates a new participantId for an unknown persistent clientKey
+[room e3358b598a27] - Guest Two (bcf20cd8850bd72c)  admitted=2
+[room e3358b598a27] - Guest One (136d1d829c46bf2a)  admitted=1
+[room e3358b598a27] - Owner (5f34de6286d3c24c)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > does not let an unadmitted guest bypass knocking with a bogus token
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > does not let an unadmitted guest bypass knocking with a bogus token
+[room 6c392c9ff289] + OWNER Owner (65572aad86c32189)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > does not let an unadmitted guest bypass knocking with a bogus token
+[room 6c392c9ff289] KNOCK Guest (1b8d8406b47146ee)  pending=1
+[room 6c392c9ff289] - Owner (65572aad86c32189)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a tokened guest before the old socket close handler runs
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a tokened guest before the old socket close handler runs
+[room 6dbabb1ae431] + OWNER Owner (7453e7a521581e66)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a tokened guest before the old socket close handler runs
+[room 6dbabb1ae431] KNOCK Guest (1c2775253948ec0e)  pending=1
+[room 6dbabb1ae431] ADMITTED Guest (1c2775253948ec0e)  admitted=2 pending=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a tokened guest before the old socket close handler runs
+[room 6dbabb1ae431] + RESUME Guest (ecad39c741608fc2)  admitted=2
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes a tokened guest before the old socket close handler runs
+[room 6dbabb1ae431] - Guest (ecad39c741608fc2)  admitted=1
+[room 6dbabb1ae431] - Owner (7453e7a521581e66)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > auto-resumes a disconnected owner by ownership without knocking
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > auto-resumes a disconnected owner by ownership without knocking
+[room 7e5c2a53b58f] + OWNER Owner (aa1bfe8b99e1883d)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > auto-resumes a disconnected owner by ownership without knocking
+[room 7e5c2a53b58f] RECONNECTING Owner (aa1bfe8b99e1883d)  admitted=0
+[room 7e5c2a53b58f] + OWNER Owner (be08c8827d4e4937)  admitted=1
+[room 7e5c2a53b58f] - Owner (be08c8827d4e4937)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes an owner by stable ownership before the old socket close handler runs
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes an owner by stable ownership before the old socket close handler runs
+[room 4e92306ac6e8] + OWNER Owner (4594c4fff8920757)  admitted=1
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > resumes an owner by stable ownership before the old socket close handler runs
+[room 4e92306ac6e8] KNOCK Guest (a614cd724b7bf31a)  pending=1
+[room 4e92306ac6e8] ADMITTED Guest (a614cd724b7bf31a)  admitted=2 pending=0
+[room 4e92306ac6e8] + OWNER Owner (b7354ba7b44db981)  admitted=2
+[room 4e92306ac6e8] - Guest (a614cd724b7bf31a)  admitted=1
+[room 4e92306ac6e8] - Owner (b7354ba7b44db981)  admitted=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > does not let a different user claim a reconnecting guest slot with a stolen token
+Created new user: jrom@silverjrom.app
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > does not let a different user claim a reconnecting guest slot with a stolen token
+[room 4faecdddc8b0] + OWNER Owner (a5df9f7df7855c5c)  admitted=1
+[room 4faecdddc8b0] KNOCK Guest (616bd536b58a1409)  pending=1
+[room 4faecdddc8b0] ADMITTED Guest (616bd536b58a1409)  admitted=2 pending=0
+
+stdout | tests/signaling-reconnect.test.ts > signaling reconnect > does not let a different user claim a reconnecting guest slot with a stolen token
+[room 4faecdddc8b0] RECONNECTING Guest (616bd536b58a1409)  admitted=1
+[room 4faecdddc8b0] KNOCK Hijacker (f07de768ad7775fc)  pending=1
+[room 4faecdddc8b0] - Owner (a5df9f7df7855c5c)  admitted=0
+
+ ✓ tests/signaling-reconnect.test.ts (12 tests) 3294ms
+   ✓ signaling reconnect > terminates a heartbeat-stale admitted socket as a drop that can resume by clientKey 351ms
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-28 persists owner-gated diagnostics with active sender track evidence
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-28 persists owner-gated diagnostics with active sender track evidence
+[room 491e1bc30d2d] + OWNER Owner (e4ebc241a58e86b6)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-28 persists owner-gated diagnostics with active sender track evidence
+[room 491e1bc30d2d] - Owner (e4ebc241a58e86b6)  admitted=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-41 accepts diagnostics from admitted guests and rejects never-admitted clients
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-41 accepts diagnostics from admitted guests and rejects never-admitted clients
+[room ef95a5f3e20c] + OWNER Owner (fad22dd32a8a49d9)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-41 accepts diagnostics from admitted guests and rejects never-admitted clients
+[room ef95a5f3e20c] KNOCK Guest (cffdb8b9f297f478)  pending=1
+[room ef95a5f3e20c] ADMITTED Guest (cffdb8b9f297f478)  admitted=2 pending=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-41 accepts diagnostics from admitted guests and rejects never-admitted clients
+[room ef95a5f3e20c] - Guest (cffdb8b9f297f478)  admitted=1
+[room ef95a5f3e20c] - Owner (fad22dd32a8a49d9)  admitted=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > DR-28 retains a bounded number of diagnostics entries per session
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-2 appendDiagnosticsEntry populates attribution columns from payload
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-3 missing identity fields insert NULL; no error
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-4 getDiagnosticsForSession exposes participantId + participantName
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-5 getDiagnosticsForSession optional participantId filter
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-6 getSessionParticipants returns distinct participants with sample counts
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow)
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow)
+[room 3489e7fa77ff] + OWNER Owner (a27448d7d5379608)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow)
+[room 3489e7fa77ff] KNOCK Guest (e6f07ee48e04f83a)  pending=1
+[room 3489e7fa77ff] ADMITTED Guest (e6f07ee48e04f83a)  admitted=2 pending=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow)
+[room 3489e7fa77ff] - Guest (e6f07ee48e04f83a)  admitted=1
+[room 3489e7fa77ff] - Owner (a27448d7d5379608)  admitted=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-1 accepts a durable admitted guest re-posting with a STALE clientId after reconnect grace expiry
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-1 accepts a durable admitted guest re-posting with a STALE clientId after reconnect grace expiry
+[room 88c675d69bff] + OWNER Owner (157e23b76f907595)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-1 accepts a durable admitted guest re-posting with a STALE clientId after reconnect grace expiry
+[room 88c675d69bff] KNOCK Guest (1aa48584456ed3e6)  pending=1
+[room 88c675d69bff] ADMITTED Guest (1aa48584456ed3e6)  admitted=2 pending=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-1 accepts a durable admitted guest re-posting with a STALE clientId after reconnect grace expiry
+[room 88c675d69bff] RECONNECTING Guest (1aa48584456ed3e6)  admitted=1
+[room 88c675d69bff] EXPIRED Guest (1aa48584456ed3e6)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-1 accepts a durable admitted guest re-posting with a STALE clientId after reconnect grace expiry
+[room 88c675d69bff] - Owner (157e23b76f907595)  admitted=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-2 still accepts a durable admitted guest re-posting with clientId OMITTED after grace expiry
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-2 still accepts a durable admitted guest re-posting with clientId OMITTED after grace expiry
+[room e6e91485ef11] + OWNER Owner (5c1941d1ed68686c)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-2 still accepts a durable admitted guest re-posting with clientId OMITTED after grace expiry
+[room e6e91485ef11] KNOCK Guest (9a9e28a766a00507)  pending=1
+[room e6e91485ef11] ADMITTED Guest (9a9e28a766a00507)  admitted=2 pending=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-2 still accepts a durable admitted guest re-posting with clientId OMITTED after grace expiry
+[room e6e91485ef11] RECONNECTING Guest (9a9e28a766a00507)  admitted=1
+[room e6e91485ef11] EXPIRED Guest (9a9e28a766a00507)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-2 still accepts a durable admitted guest re-posting with clientId OMITTED after grace expiry
+[room e6e91485ef11] - Owner (5c1941d1ed68686c)  admitted=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-3 rejects a never-admitted clientKey even with a plausible clientId (security preserved)
+Created new user: jrom@silverjrom.app
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-3 rejects a never-admitted clientKey even with a plausible clientId (security preserved)
+[room 408ce0bb8b76] + OWNER Owner (a86a2b04ba79b282)  admitted=1
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-3 rejects a never-admitted clientKey even with a plausible clientId (security preserved)
+[room 408ce0bb8b76] KNOCK Guest (5e3b83d6f51ef218)  pending=1
+[room 408ce0bb8b76] ADMITTED Guest (5e3b83d6f51ef218)  admitted=2 pending=0
+
+stdout | tests/session-diagnostics.test.ts > meeting session diagnostics API > G-3 rejects a never-admitted clientKey even with a plausible clientId (security preserved)
+[room 408ce0bb8b76] - Guest (5e3b83d6f51ef218)  admitted=1
+[room 408ce0bb8b76] - Owner (a86a2b04ba79b282)  admitted=0
+
+ ✓ tests/session-diagnostics.test.ts (13 tests) 10139ms
+   ✓ meeting session diagnostics API > DR-28 persists owner-gated diagnostics with active sender track evidence 319ms
+   ✓ meeting session diagnostics API > DR-28 retains a bounded number of diagnostics entries per session 7224ms
+   ✓ meeting session diagnostics API > P-7/P-8 GET diagnostics surfaces participants[] + ?participantId filter, two-participant end-to-end (DR-41 admit flow) 306ms
+
+ Test Files  2 passed (2)
+      Tests  25 passed (25)
+   Start at  05:54:48
+   Duration  14.02s (transform 181ms, setup 0ms, collect 364ms, tests 13.43s, environment 0ms, prepare 58ms)
+

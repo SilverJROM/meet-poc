@@ -1,0 +1,61 @@
+
+ RUN  v2.1.9 /home/agjrom/websites/meet-poc/backend
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-3 admin PUT sets the flag and persists exactly one row with updated_at
+Created new user: jrom@silverjrom.app
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-3 admin PUT sets the flag and persists exactly one row with updated_at
+[admin] diagnostics globally DISABLED
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-3 admin PUT sets the flag and persists exactly one row with updated_at
+[admin] diagnostics globally ENABLED
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-4 enforces requireAdmin on GET and PUT (401 no cookie, 403 non-admin, 200 admin)
+Created new user: jrom@silverjrom.app
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-4 enforces requireAdmin on GET and PUT (401 no cookie, 403 non-admin, 200 admin)
+[admin] diagnostics globally DISABLED
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-5 global ON: admitted poster gets 200 + entry and the row is persisted
+Created new user: jrom@silverjrom.app
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-5 global ON: admitted poster gets 200 + entry and the row is persisted
+[room ddc41d642c4e] + OWNER Owner (354b96a1a58cbade)  admitted=1
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-5 global ON: admitted poster gets 200 + entry and the row is persisted
+[room ddc41d642c4e] - Owner (354b96a1a58cbade)  admitted=0
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-6 global OFF: admitted poster gets {ok:true,persisted:false} and no row is inserted
+Created new user: jrom@silverjrom.app
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-6 global OFF: admitted poster gets {ok:true,persisted:false} and no row is inserted
+[room 1344468bca66] + OWNER Owner (56469679f021dbd0)  admitted=1
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-6 global OFF: admitted poster gets {ok:true,persisted:false} and no row is inserted
+[room 1344468bca66] - Owner (56469679f021dbd0)  admitted=0
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-7 global OFF: a non-admitted poster is still 403 (admit check runs first)
+Created new user: jrom@silverjrom.app
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-7 global OFF: a non-admitted poster is still 403 (admit check runs first)
+[room c120e38c9881] + OWNER Owner (4aa6bbd7cef20266)  admitted=1
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-7 global OFF: a non-admitted poster is still 403 (admit check runs first)
+[room c120e38c9881] - Owner (4aa6bbd7cef20266)  admitted=0
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-8a/A-8b guest path carries diagnosticsGloballyEnabled (true default, false when OFF)
+Created new user: jrom@silverjrom.app
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-8c/A-8d signed-in path carries diagnosticsGloballyEnabled as a top-level field
+Created new user: jrom@silverjrom.app
+
+stdout | tests/admin-diagnostics-killswitch.test.ts > admin diagnostics global kill-switch (R5 / B3b) > A-8e fail-open: a store read error yields diagnosticsGloballyEnabled true
+Created new user: jrom@silverjrom.app
+
+ ✓ tests/admin-diagnostics-killswitch.test.ts (10 tests) 1970ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  03:53:23
+   Duration  2.38s (transform 166ms, setup 0ms, collect 272ms, tests 1.97s, environment 0ms, prepare 31ms)
+

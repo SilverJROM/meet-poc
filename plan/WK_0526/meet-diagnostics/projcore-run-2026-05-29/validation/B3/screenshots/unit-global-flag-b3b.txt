@@ -1,0 +1,7 @@
+=== diagnostics-global-flag.spec.ts ===
+diagnostics-global-flag: all assertions passed
+Exit: 0
+
+=== diagnostics-prefs.spec.ts (B3a regression) ===
+diagnostics-prefs: all assertions passed
+Exit: 0

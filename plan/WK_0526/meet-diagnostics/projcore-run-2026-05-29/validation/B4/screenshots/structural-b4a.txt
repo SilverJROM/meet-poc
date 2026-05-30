@@ -1,0 +1,36 @@
+=== git diff --stat 2c36c86..92d52fc ===
+ .../0013_diagnostics_participant_attribution.sql   |   6 +
+ backend/src/modules/sessions/index.ts              |   9 +-
+ backend/src/modules/sessions/store.ts              |  81 +++++-
+ backend/tests/session-diagnostics.test.ts          | 276 ++++++++++++++++++++-
+ .../validation/B4/changes.md                       |  74 ++++++
+ 5 files changed, 438 insertions(+), 8 deletions(-)
+
+=== signaling untouched (line count of diff must be 0) ===
+signaling diff line count: 0
+
+=== migration 0013 file ===
+backend/migrations/0013_diagnostics_participant_attribution.sql
+
+ALTER TABLE meeting_session_diagnostics ADD COLUMN participant_id TEXT;
+ALTER TABLE meeting_session_diagnostics ADD COLUMN participant_name TEXT;
+ALTER TABLE meeting_session_diagnostics ADD COLUMN participant_client_key TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_meeting_session_diagnostics_session_participant
+  ON meeting_session_diagnostics(session_id, participant_id);
+
+=== getSessionParticipants in store.ts (export check) ===
+424:export function getSessionParticipants(
+=== getSessionParticipants used in index.ts ===
+13:  getSessionParticipants,
+135:    const participants = getSessionParticipants(authed.user.email, sessionId, database) || [];
+
+=== GET diagnostics handler 'participants' key in index.ts ===
+135:    const participants = getSessionParticipants(authed.user.email, sessionId, database) || [];
+139:      participants,
+
+=== 'participantId' references in index.ts ===
+67:    participantId: entry.participantId,
+132:    const participantIdFilter = stringOrNull(req.query.participantId);
+133:    const result = getDiagnosticsForSession(authed.user.email, sessionId, database, participantIdFilter);
+162:      participantId: stringOrNull(body.participantId),

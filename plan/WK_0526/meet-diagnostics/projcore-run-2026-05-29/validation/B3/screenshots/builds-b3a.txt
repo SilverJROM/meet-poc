@@ -1,0 +1,29 @@
+=== FRONTEND BUILD ===
+    src/app/pages/rooms/rooms.page.ts:16:12:
+[37m      16 │   imports: [[32mDatePipe[37m, FormsModule, RouterLink, PaginationComponent],
+         ╵             [32m~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mThe glob pattern import("./**/*.entry.js*") did not match any files[0m [empty-glob]
+
+    ../node_modules/@stencil/core/internal/client/index.js:160:2:
+[37m      160 │   [32m`./${bundleId}.entry.js${BUILD5.hotModuleReplacement && hmrVers[37m...
+          ╵   [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mModule '@mediapipe/selfie_segmentation' used by 'src/app/services/background-effects.service.ts' is not ESM[0m
+
+  CommonJS or AMD dependencies can cause optimization bailouts.
+  For more information see: [4mhttps://angular.dev/tools/cli/build#configuring-commonjs-dependencies[0m
+
+
+Output location: /home/agjrom/websites/meet-poc/frontend/dist/meet-poc-frontend
+
+FRONTEND EXIT:0
+
+=== BACKEND BUILD ===
+
+> @meet-poc/backend@0.1.0 build
+> tsc -p tsconfig.json
+
+BACKEND EXIT:0

@@ -1,0 +1,14 @@
+==============================================================
+B2b QA execution — unit suite (run 2026-05-30T01:22:46Z)
+Repo HEAD: 1ba17b5ade3c400afa8a9c393e5cfadb35d9ad55  (1ba17b5 = B2b)
+==============================================================
+
+### 1. PRIMARY: mic-capture-health.spec.ts (AC-B1 truth table + AC-B2/B3/B4 windows)
+$ cd frontend && npx tsx src/app/services/mic-capture-health.spec.ts
+mic-capture-health: all assertions passed
+MIC_CAPTURE_HEALTH_EXIT=0
+
+### 2. REGRESSION: mic-energy.spec.ts (B1/B2a)
+$ cd frontend && npx tsx src/app/services/mic-energy.spec.ts
+mic-energy: all assertions passed
+MIC_ENERGY_EXIT=0

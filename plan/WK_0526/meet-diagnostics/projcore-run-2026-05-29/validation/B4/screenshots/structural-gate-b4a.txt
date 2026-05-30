@@ -1,0 +1,96 @@
+=== git diff 92d52fc..c3ad403 --stat ===
+ backend/src/modules/signaling/index.ts             |  15 ++-
+ backend/tests/session-diagnostics.test.ts          | 136 ++++++++++++++++++++-
+ .../validation/B4/changes-gate.md                  | 128 +++++++++++++++++++
+ 3 files changed, 275 insertions(+), 4 deletions(-)
+
+=== git diff 92d52fc..c3ad403 -- backend/src/modules/signaling/index.ts ===
+diff --git a/backend/src/modules/signaling/index.ts b/backend/src/modules/signaling/index.ts
+index 01694fd..40f9d00 100644
+--- a/backend/src/modules/signaling/index.ts
++++ b/backend/src/modules/signaling/index.ts
+@@ -512,10 +512,19 @@ export function isAdmittedDiagnosticPoster(poster: DiagnosticPoster): boolean {
+     if (
+       identity?.wasAdmitted === true &&
+       identity.revoked !== true &&
+-      identity.participantId === poster.participantId &&
+-      !poster.clientId
++      identity.participantId === poster.participantId
+     ) {
+-      return true;
++      // JROM-approved 2026-05-30: a durable admitted identity (clientKey is the
++      // unforgeable, post-admission-only anchor) survives reconnect even when the
++      // client re-posts with a STALE clientId — fixes diagnostics dropping across
++      // longer reconnects. Safety: this durable branch only governs the EXPIRED
++      // case. If the supplied clientId is still owned by ANY live admitted peer,
++      // do NOT short-circuit here — the live-admitted loop above (path-1, via
++      // peerMatchesDiagnosticPoster, which also enforces userEmail) is the sole
++      // authority for live clientIds. That keeps the owner-impersonation guard
++      // intact and rejects a stale clientId that collides with a live peer.
++      if (!poster.clientId) return true;
++      if (!live.admitted.has(poster.clientId)) return true;
+     }
+   }
+   return false;
+
+=== grep: isAdmittedDiagnosticPoster durable block ===
+17:  participantId: string;
+33:  clientId: string;
+34:  participantId: string;
+41:  clientId: string;
+51:  clientIdentities: Map<string, ClientIdentity>;
+62:  participantId: string;
+64:  wasAdmitted: boolean;
+65:  revoked: boolean;
+70:  clientId?: string | null;
+71:  participantId?: string | null;
+77:  clientId: string;
+78:  participantId: string;
+89:  participantId: string;
+115:  clientId?: unknown;
+162:      clientIdentities: new Map(),
+193:  for (const [clientId, peer] of live.admitted) {
+194:    if (isOwnerOf(roomId, peer.userEmail, database)) return clientId;
+210:function sendHostRole(live: LiveRoom, clientId: string, isHost: boolean): void {
+211:  const peer = live.admitted.get(clientId);
+212:  if (peer) send(peer.ws, { type: 'host-role', clientId, isHost });
+215:function broadcastHostRole(live: LiveRoom, clientId: string, isHost: boolean): void {
+216:  for (const [, peer] of live.admitted) send(peer.ws, { type: 'host-role', clientId, isHost });
+239:  for (const [clientId, peer] of live.admitted) {
+241:      setActingHostClientId(live, clientId);
+284:function clearPendingShareRequestForPeer(live: LiveRoom, roomId: string, clientId: string, database: Database.Database): void {
+285:  if (live.pendingShareRequest?.clientId !== clientId) return;
+287:  broadcastToOwners(live, roomId, { type: 'share-request-cancelled', clientId }, database);
+296:function issueReconnectToken(live: LiveRoom, clientId: string, entry: PeerEntry, supportsReconnect: boolean): void {
+303:    clientId,
+304:    participantId: entry.participantId,
+315:function stashReconnectTicket(live: LiveRoom, clientId: string, entry: PeerEntry): void {
+318:    clientId,
+319:    participantId: entry.participantId,
+329:function cleanupReconnectState(live: LiveRoom, clientId: string): void {
+330:  const reconnecting = live.reconnecting.get(clientId);
+332:  live.reconnecting.delete(clientId);
+333:  live.shareGrants.delete(clientId);
+335:    if (ticket.clientId === clientId) live.reconnectTickets.delete(token);
+339:function closeSupersededAdmittedPeer(live: LiveRoom, clientId: string): void {
+340:  const entry = live.admitted.get(clientId);
+342:  live.admitted.delete(clientId);
+343:  if (live.actingHostClientId === clientId) live.actingHostClientId = null;
+344:  live.shareGrants.delete(clientId);
+358:function rejectForRoomFull(roomId: string, clientId: string, pending: PeerEntry, live: LiveRoom, database: Database.Database): void {
+359:  live.pending.delete(clientId);
+367:  broadcastToOwners(live, roomId, { type: 'knock-cancelled', clientId }, database);
+407:function rememberClientIdentity(live: LiveRoom, clientKey: string | null, participantId: string, name: string, wasAdmitted: boolean): void {
+409:  const current = live.clientIdentities.get(clientKey);
+410:  live.clientIdentities.set(clientKey, {
+411:    participantId,
+413:    wasAdmitted: wasAdmitted || (current?.wasAdmitted === true && current.revoked !== true),
+414:    revoked: wasAdmitted ? false : current?.revoked === true,
+420:  live.clientIdentities.set(entry.clientKey, {
+421:    participantId: entry.participantId,
+423:    wasAdmitted: false,
+424:    revoked: true,
+428:function findAdmittedClientByParticipant(live: LiveRoom, participantId: string): [string, PeerEntry] | null {
+430:    if (peer.participantId === participantId) return [id, peer];
+435:function findReconnectingClientByParticipant(live: LiveRoom, participantId: string): [string, ReconnectingPeer] | null {
+437:    if (peer.participantId === participantId) return [id, peer];

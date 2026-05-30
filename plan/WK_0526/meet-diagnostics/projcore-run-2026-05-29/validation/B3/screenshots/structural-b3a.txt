@@ -1,0 +1,57 @@
+=== S-KEY-LITERAL: grep -rn 'meet-poc.diagnosticsLogging' frontend/src ===
+Result: 2 matches — key literal in diagnostics-prefs.ts (definition) + diagnostics-prefs.spec.ts (sanity-check assert only)
+No second real definition exists in any other file. PASS.
+
+frontend/src/app/services/diagnostics-prefs.ts:15:export const DIAGNOSTICS_LOGGING_STORAGE_KEY = 'meet-poc.diagnosticsLogging';
+frontend/src/app/services/diagnostics-prefs.spec.ts:39:assert.strictEqual(KEY, 'meet-poc.diagnosticsLogging', 'shared key constant is the single source of truth');
+
+---
+
+=== S-14a: No duplicate function/key in room.page.ts ===
+Result: 0 matches — PASS (no 'function readDiagnosticsLoggingEnabled' or 'DIAGNOSTICS_LOGGING_STORAGE_KEY' in room.page.ts)
+
+---
+
+=== S-14b: Shared import present in room.page.ts ===
+Result: 2 matches — PASS (import + signal initializer)
+
+32:import { readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
+225:  readonly diagnosticsLoggingEnabled = signal(readDiagnosticsLoggingEnabled());
+
+---
+
+=== S-15: Gate sites (diagnosticsLoggingEnabled() occurrences) ===
+Result: 4 matches — PASS (3 required gate sites + 1 diagnostics payload builder at line 502)
+
+502:        diagnosticsLoggingEnabled: this.diagnosticsLoggingEnabled(),
+2555:    if (this.diagnosticsLogTimer || !this.currentSessionId() || !this.diagnosticsLoggingEnabled()) return;
+2732:    if (this.state() !== 'in-call' || !this.currentSessionId() || !this.diagnosticsLoggingEnabled()) return;
+2749:    if (!sessionId || !this.diagnosticsLoggingEnabled()) return;
+TOTAL_COUNT=4
+
+Gate lines confirmed:
+  startDiagnosticsLogger  ~line 2555: if (this.diagnosticsLogTimer || !this.currentSessionId() || !this.diagnosticsLoggingEnabled()) return;
+  queueDiagnosticsLog     ~line 2732: if (this.state() !== 'in-call' || !this.currentSessionId() || !this.diagnosticsLoggingEnabled()) return;
+  flushDiagnosticsLog     ~line 2749: if (!sessionId || !this.diagnosticsLoggingEnabled()) return;
+
+---
+
+=== S-9/S-12/S-13: Settings toggle (account-settings.component.html) ===
+Result: label + checkbox + ngModelChange + toggle-row all present. PASS.
+
+145:      <label class="toggle-row">
+148:          name="diagnosticsLogging"
+149:          [ngModel]="diagnosticsLogging()"
+150:          (ngModelChange)="setDiagnosticsLogging($event)"
+152:        Diagnostics logging
+
+---
+
+=== S-10/S-11/S-12/S-13: Settings toggle (account-settings.component.ts) ===
+Result: imports both reader+writer, seeds signal from readDiagnosticsLoggingEnabled(), change handler calls writeDiagnosticsLoggingEnabled(). PASS.
+
+8:import { readDiagnosticsLoggingEnabled, writeDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
+52:  readonly diagnosticsLogging = signal(readDiagnosticsLoggingEnabled());
+151:  setDiagnosticsLogging(enabled: boolean): void {
+152:    this.diagnosticsLogging.set(enabled);
+153:    writeDiagnosticsLoggingEnabled(enabled);

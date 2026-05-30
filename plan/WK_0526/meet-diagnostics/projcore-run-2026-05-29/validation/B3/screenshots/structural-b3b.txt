@@ -1,0 +1,60 @@
+=== B-2: auth.service.ts diagnosticsGloballyEnabled ===
+13:  diagnosticsGloballyEnabled?: boolean;
+32:  readonly diagnosticsGloballyEnabled = signal(true);
+44:        this.diagnosticsGloballyEnabled.set(res.diagnosticsGloballyEnabled ?? true);
+
+=== B-3: effectiveDiagnosticsEnabled() count (must be >= 3) ===
+Count: 3
+2560:    if (this.diagnosticsLogTimer || !this.currentSessionId() || !this.effectiveDiagnosticsEnabled()) return;
+2737:    if (this.state() !== 'in-call' || !this.currentSessionId() || !this.effectiveDiagnosticsEnabled()) return;
+2754:    if (!sessionId || !this.effectiveDiagnosticsEnabled()) return;
+
+=== B-3: bare !this.diagnosticsLoggingEnabled() (must be 0) ===
+(no matches - PASS)
+
+=== B-4b: admin.service getDiagnosticsEnabled/setDiagnosticsEnabled/URL ===
+35:  async getDiagnosticsEnabled(): Promise<boolean> {
+36:    const res = await firstValueFrom(this.http.get<{ enabled: boolean }>('/api/admin/settings/diagnostics'));
+40:  async setDiagnosticsEnabled(enabled: boolean): Promise<boolean> {
+42:      this.http.put<{ enabled: boolean }>('/api/admin/settings/diagnostics', { enabled }),
+
+=== B-4d: admin.page.ts URL must be 0 ===
+(no matches - PASS)
+
+=== NS8: requireAdmin reuse in admin/index.ts ===
+4:import { requireAdmin } from '../auth/middleware.js';
+23:  const admin = requireAdmin(database);
+39:        isAdmin: u.is_admin === 1,
+51:    const isAdmin = req.body?.isAdmin === true;
+66:      .run(email, hashPassword(password), now, now, displayName, isAdmin ? 1 : 0);
+67:    console.log(`[admin] user created: "${email}" (admin=${isAdmin})`);
+68:    return res.json({ user: { email, displayName, isAdmin, createdAt: now } });
+72:  // diagnostics flag — NOT a general settings editor. Reuses requireAdmin; no
+73:  // new auth/RBAC boundary.
+
+=== NS8: git diff middleware.ts (must be empty) ===
+(empty diff - PASS)
+
+=== C-2: no live push in signaling (must be 0) ===
+(no matches - PASS)
+
+=== Migration 0012_app_settings.sql: IF NOT EXISTS + no INSERT seed ===
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+=== B-4c: admin.page.html diagnostics toggle ===
+39:  <section class="panel" aria-label="Diagnostics">
+40:    <h3>Diagnostics logging</h3>
+41:    <p class="muted">Master switch. When OFF, the backend stops persisting call diagnostics and clients stop collecting. Applies globally to all users.</p>
+43:      <input type="checkbox" name="diagnosticsEnabled" [ngModel]="diagnosticsEnabled()" (ngModelChange)="setDiagnosticsEnabled($event)">
+44:      <span>Diagnostics logging {{ diagnosticsEnabled() ? 'ON' : 'OFF' }}</span>
+46:    @if (diagnosticsError()) {
+47:      <p class="admin-error" role="alert">{{ diagnosticsError() }}</p>
+
+=== B-4a: adminGuard reuse ===
+frontend/src/app/app.routes.ts:4:import { adminGuard } from './guards/admin.guard';
+frontend/src/app/app.routes.ts:27:      { path: 'admin', loadComponent: () => import('./pages/admin/admin.page').then((m) => m.AdminPage), canActivate: [adminGuard] },
+frontend/src/app/guards/admin.guard.ts:5:export const adminGuard: CanActivateFn = async () => {

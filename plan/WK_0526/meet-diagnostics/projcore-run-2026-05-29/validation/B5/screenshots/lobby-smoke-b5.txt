@@ -1,0 +1,23 @@
+LOBBY-SMOKE-RESULT:
+  url: http://localhost:4700/room/3f324d8be763
+  app-lobby-preview count: 0
+  "No sound detected" visible: false (expected false under fake-media tone — NS5)
+  console.error count: 0
+  pageerror count: 0
+  screenshot: /home/agjrom/websites/meet-poc/plan/WK_0526/meet-diagnostics/projcore-run-2026-05-29/validation/B5/screenshots/lobby-render-b5.png
+
+--- INTERPRETATION (OPTIONAL smoke — NOT a gate; SKIPPED-GRACEFULLY for the lobby surface) ---
+The persistent test room 3f324d8be763 has been deleted, so the route rendered the
+SPA "Room not found" card (see lobby-render-b5.png), NOT the lobby preview.
+- app-lobby-preview count: 0  => the lobby self-test surface was NOT reached.
+- console.error: 0, pageerror: 0 => the Angular SPA still bootstraps cleanly (the
+  room.page route + all eager imports load without a runtime crash), but this does
+  NOT exercise the new lobbySelfTestFlag / micTestFlagged / micTestDeviceLabel
+  bindings, which only render inside app-lobby-preview / lobby app-device-dialog
+  once a live room + lobby preflight mount.
+Creating an authenticated room solely for this optional render-smoke would create
+test-room pollution against the cleanup discipline and is out of scope for the gate.
+Per the B5 instructions: route requires a real room => SKIP gracefully and note it;
+the unit + build + structural proofs are the gate (all PASS). Runtime render of the
+new bindings is covered by MANUAL M-1..M-3 on the USER seat (localhost:4700).
+NS5: a fake-media "silent mic flag" Playwright test is impossible and was NOT attempted.

@@ -1,0 +1,84 @@
+=== STRUCTURAL CHECKS — Batch B5 (R8) — HEAD 2c062ff ===
+Date: 2026-05-30T02:48:30Z
+Tested against: working tree @ feat/meet-diagnostics-audio-20260529 @ 2c062ff
+
+--- S1 (U-10): "No sound detected" present in BOTH lobby-preview AND device-dialog dirs ---
+$ grep -rl "No sound detected" frontend/src/app/components/lobby-preview/ frontend/src/app/components/device-dialog/
+frontend/src/app/components/lobby-preview/lobby-preview.component.html
+frontend/src/app/components/device-dialog/device-dialog.component.html
+RESULT: hit in EACH dir. PASS
+
+  Rendered copy (Copy Lock verify), both substring "No sound detected":
+  - lobby-preview.component.html:50  <div class="mic-test-flag" role="status">No sound detected from {{ micTestDeviceLabel() }} — pick another</div>
+  - device-dialog.component.html:55  <div class="mic-test-flag" role="status">No sound detected from {{ micTestDeviceLabel() }} — pick another</div>
+  Full rendered string == Copy Lock: "No sound detected from <device> — pick another" (names device, em-dash). PASS
+
+--- S2 (U-10): flag gated to lobby mode in device-dialog template (in-call dialog untouched) ---
+$ grep -n "micTestFlagged\|mode() === 'lobby'" frontend/src/app/components/device-dialog/device-dialog.component.html
+54:              @if (micTestFlagged() && mode() === 'lobby') {
+RESULT: flag gated on micTestFlagged() && mode()==='lobby'. PASS
+
+--- S3 (U-10): NO new AudioContext/createAnalyser added to media.service.ts ---
+$ git diff 4a50da2 2c062ff -- frontend/src/app/services/media.service.ts | grep -E '^\+' | grep -E 'new AudioContext|createAnalyser' | wc -l
+0
+RESULT: 0 added analyser/context constructions (single existing analyser reused). PASS
+
+--- S4 (U-10): lobbySelfTestFlag passed to app-lobby-preview + lobby dialog, NOT in-call dialog ---
+$ grep -n "lobbySelfTestFlag" frontend/src/app/pages/room/room.page.html
+420:            [micTestFlagged]="lobbySelfTestFlag()"      <- app-lobby-preview
+533:          [micTestFlagged]="lobbySelfTestFlag()"        <- lobby app-device-dialog (mode="lobby", line 517)
+RESULT: 2 bindings only. In-call app-device-dialog (line 157, mode="in-call") receives NO micTestFlagged. PASS
+
+  Confirming the two device-dialog instances:
+  $ grep -n "app-device-dialog|mode=|micTestFlagged|micTestDeviceLabel" room.page.html
+  157:      <app-device-dialog        (in-call instance)
+  159:        mode="in-call"          -> NO micTestFlagged input
+  420:            [micTestFlagged]="lobbySelfTestFlag()"    (app-lobby-preview)
+  421:            [micTestDeviceLabel]="selectedAudioLabel()"
+  515:        <app-device-dialog        (lobby instance)
+  517:          mode="lobby"
+  533:          [micTestFlagged]="lobbySelfTestFlag()"
+  534:          [micTestDeviceLabel]="selectedAudioLabel()"
+
+--- S5 (U-9): Join submit button only connecting-gated; no lobbySelfTestFlag in any [disabled] ---
+$ grep -n "state() === 'connecting'" frontend/src/app/pages/room/room.page.html
+446:              [disabled]="state() === 'connecting'"
+461:                [disabled]="state() === 'connecting'"
+476:                [disabled]="state() === 'connecting'"
+500:            [disabled]="state() === 'connecting'"   <- Join submit button (lines 497-504)
+
+  Join submit button block (497-504):
+            <button
+              type="submit"
+              class="primary-btn"
+              [disabled]="state() === 'connecting'"
+            >
+              {{ auth.user() ? 'Join now' : 'Ask to join' }}
+            </button>
+
+$ grep -nE "\[disabled\]" frontend/src/app/pages/room/room.page.html
+25:        <button type="submit" class="primary-btn" [disabled]="passwordBusy()">
+343:                [disabled]="activeChatRecipient() !== 'everyone' && !activeChatRecipientOnline()"
+347:              <button type="submit" [disabled]="!canSendChat()">Send</button>
+446:              [disabled]="state() === 'connecting'"
+461:                [disabled]="state() === 'connecting'"
+476:                [disabled]="state() === 'connecting'"
+500:            [disabled]="state() === 'connecting'"
+
+$ grep -nE "\[disabled\][^>]*lobbySelfTestFlag" frontend/src/app/pages/room/room.page.html
+(no output; grep exit 1)
+RESULT: No [disabled] binding references lobbySelfTestFlag/micTest. Join stays non-blocking. PASS
+
+--- mic-selftest.spec.ts carries scenario-ID labelled blocks (test-name contract) ---
+$ grep -n "U-[0-9]" frontend/src/app/services/mic-selftest.spec.ts
+21:// U-1 — accumulator: silent frames ⇒ FLAT cumulative energy (delta < epsilon; level 0)
+44:// U-2 — accumulator: quiet-but-working frames ⇒ STRICTLY INCREASING cumulative energy
+72:// U-3 — lobby SILENT window ⇒ flag (false-pass kill); SAME 0.01 threshold as in-call
+93:// U-4 — lobby RISING window ⇒ NO flag (U-8 preserved) + clear-on-fix
+106:// U-5 — micActive=false (mic off / muted in lobby) ⇒ NO flag
+112:// U-6 — thin window (<2 usable energy samples) ⇒ indeterminate ⇒ HOLD (anti-flicker, AC6)
+127:// U-8 — constraint parity: lobby self-test constraints DEEP-EQUAL the call-path
+152:console.log('mic-selftest: all assertions passed');
+RESULT: U-1,U-2,U-3,U-4,U-5,U-6,U-8 present as labelled blocks. PASS
+
+=== ALL STRUCTURAL CHECKS PASS ===

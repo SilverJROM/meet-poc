@@ -1,0 +1,1 @@
+mic-capture-health: all assertions passed

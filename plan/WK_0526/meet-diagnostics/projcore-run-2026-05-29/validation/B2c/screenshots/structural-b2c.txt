@@ -1,0 +1,34 @@
+NO new meter added
+=== NO-NEW-METER GREP (B2c diff 1ba17b5..4a50da2) ===
+NO new meter added
+
+=== ADOPTION COPY + TERMINAL SURFACE + replaceAudioTrack/removeAudioTrack (room.page.ts) ===
+181:  readonly micSilentWarning = signal(false);
+182:  // B2c — the message rendered in the single micSilentWarning surface. Default is
+185:  readonly micSilentWarningMessage = signal("We can't detect sound from your microphone");
+2006:    this.micSilentWarning.set(false);
+2007:    this.micSilentWarningMessage.set("We can't detect sound from your microphone");
+2028:      const track = await this.media.replaceAudioTrack(deviceId || undefined, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
+2038:          const fallbackTrack = await this.media.replaceAudioTrack(undefined, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
+2248:          const track = await this.media.replaceAudioTrack(candidate.deviceId, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
+2262:    await this.sfuClient.replaceAudioTrack(null);
+2263:    this.media.removeAudioTrack();
+2303:  // ALL the framework I/O (enumerate, replaceAudioTrack, re-sample, signals) and
+2318:        this.micSilentWarningMessage.set('No working microphone detected — check your mic/permissions');
+2319:        this.micSilentWarning.set(true);
+2332:          const track = await this.media.replaceAudioTrack(deviceId || undefined, (nextTrack) =>
+2333:            this.sfuClient.replaceAudioTrack(nextTrack),
+2351:        this.micSilentWarning.set(false);
+2352:        this.micSilentWarningMessage.set("We can't detect sound from your microphone");
+2356:            `Switched to ${result.label || 'another microphone'} — your previous microphone had no sound`,
+2362:        // switch, so no "Switched to" notice; just clear the banner.
+2372:        this.micSilentWarningMessage.set('No working microphone detected — check your mic/permissions');
+2373:        this.micSilentWarning.set(true);
+2385:      this.micSilentWarningMessage.set('No working microphone detected — check your mic/permissions');
+2386:      this.micSilentWarning.set(true);
+2480:    return label ? `Switched to ${label}.` : `${kind[0].toUpperCase()}${kind.slice(1)} reconnected.`;
+2544:  // classifyMicCapture, and drives the micSilentWarning banner via the pure
+2576:      this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', false));
+2599:      this.micSilentWarning.set(false);
+2600:      this.micSilentWarningMessage.set("We can't detect sound from your microphone");
+2602:      this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', true));

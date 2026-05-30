@@ -1,0 +1,72 @@
+==============================================================
+B2a STRUCTURAL / STATIC CHECKS — [qa] 2026-05-30T00:56:48Z  @ b8fa5f7
+==============================================================
+
+### S-1 (U-5/AC2): exactly ONE executable media-source EXTRACTION definition
+$ grep -rn "stat.type === 'media-source'" frontend/src/app/services/
+frontend/src/app/services/mic-energy.ts:69:    if (stat && stat.type === 'media-source' && stat.kind === 'audio') {
+--- (broader) any 'media-source' string mention in the two services ---
+$ grep -n "media-source" frontend/src/app/services/mic-energy.ts frontend/src/app/services/sfu-client.service.ts
+frontend/src/app/services/mic-energy.ts:62: * `media-source`/`kind==='audio'` entry's audioLevel/totalAudioEnergy (non-number
+frontend/src/app/services/mic-energy.ts:63: * fields → null, never throw), or null when there is no audio media-source.
+frontend/src/app/services/mic-energy.ts:69:    if (stat && stat.type === 'media-source' && stat.kind === 'audio') {
+frontend/src/app/services/mic-energy.ts:196:  // TT-D — live + enabled but the browser exposes no media-source audio stat:
+frontend/src/app/services/sfu-client.service.ts:191:   * peer-connection or no audio media-source stat.
+frontend/src/app/services/sfu-client.service.ts:355:    // report — no second getStats(), no duplicate media-source loop.
+
+### S-2 (U-18): NO new AudioContext/AnalyserNode/createMediaStreamSource introduced by B2a
+$ git diff 3c1ebff..b8fa5f7 -- frontend/src/app | grep -nE "^\+.*(new AudioContext|AnalyserNode|createMediaStreamSource)"
+(no added matches — energy gate reuses getStats only)
+
+### S-3 (U-19): gate hooked in the published block + one-shot guard
+$ grep -n "verifyInitialCaptureEnergy\|initialCaptureEnergyChecked\|state?.status === 'published'" frontend/src/app/pages/room/room.page.ts
+386:  private initialCaptureEnergyChecked = false;
+967:    if (state?.status === 'published') {
+1322:          if (state?.status === 'published') {
+1330:            void this.verifyInitialCaptureEnergy();
+1945:    this.initialCaptureEnergyChecked = false;
+2246:  private async verifyInitialCaptureEnergy(): Promise<void> {
+2247:    if (this.initialCaptureEnergyChecked) return;
+2248:    this.initialCaptureEnergyChecked = true;
+
+### S-3b: one-shot guard reset in cleanupCall
+$ grep -n "cleanupCall\|initialCaptureEnergyChecked = false" frontend/src/app/pages/room/room.page.ts
+385:  // per call. Reset in cleanupCall() so a fresh join re-arms it.
+386:  private initialCaptureEnergyChecked = false;
+1203:    this.cleanupCall(sendLeaveMessage);
+1210:    this.cleanupCall();
+1251:      this.cleanupCall();
+1257:      this.cleanupCall();
+1264:      // cleanupCall closes the socket intentionally, so we do NOT auto-reconnect
+1266:      this.cleanupCall();
+1932:  private cleanupCall(sendLeaveMessage = false): void {
+1945:    this.initialCaptureEnergyChecked = false;
+2120:    this.cleanupCall();
+
+### S-4 (U-16 non-destructive): the gate method must NOT reference removeAudioTrack/recoverLocalAudioTrack
+$ grep -n "removeAudioTrack\|recoverLocalAudioTrack" frontend/src/app/pages/room/room.page.ts
+2194:      if (kind === 'audio') await this.recoverLocalAudioTrack();
+2202:  private async recoverLocalAudioTrack(): Promise<void> {
+2228:    this.media.removeAudioTrack();
+2269:    // destructive recoverLocalAudioTrack() path.
+
+### S-4b (scoped): destructive calls WITHIN the gate method body (lines 2246-2296)?
+$ sed -n '2246,2296p' room.page.ts | grep -nE 'removeAudioTrack|recoverLocalAudioTrack\('
+24:    // destructive recoverLocalAudioTrack() path.
+
+### S-5: shared public reader getOutboundAudioSource exists on sfu-client (gate sampling primitive)
+$ grep -n 'getOutboundAudioSource\|extractOutboundAudioSource' frontend/src/app/services/sfu-client.service.ts
+8:import { extractOutboundAudioSource, type OutboundAudioSourceStat } from './mic-energy';
+193:  async getOutboundAudioSource(): Promise<OutboundAudioSourceStat | null> {
+202:    return extractOutboundAudioSource(stats);
+354:    // reads (getOutboundAudioSource). Runs over this single already-fetched stats
+356:    const outboundAudioSource: OutboundAudioSourceStat | null = extractOutboundAudioSource(stats);
+
+### S-6: media.service delegates audioConstraints to the shared pure builder (AC1 surface)
+$ grep -n 'audioCaptureConstraints\|audioConstraints\|AUDIO_PROCESSING_CONSTRAINTS' frontend/src/app/services/media.service.ts
+3:import { audioCaptureConstraints } from './mic-energy';
+62:      audio: this.audioConstraints(constraints.audio, constraints.audioDeviceId),
+80:    const audio = this.audioConstraints(true, options.audioDeviceId);
+92:    const audio = this.audioConstraints(true, deviceId);
+352:  private audioConstraints(audio: boolean, deviceId?: string): boolean | MediaTrackConstraints {
+355:    return audioCaptureConstraints(audio, deviceId);

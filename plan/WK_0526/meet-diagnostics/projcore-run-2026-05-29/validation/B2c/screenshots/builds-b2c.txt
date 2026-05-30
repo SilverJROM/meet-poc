@@ -1,0 +1,78 @@
+
+> @meet-poc/frontend@0.1.0 build
+> ng build
+
+❯ Building...
+✔ Building...
+Initial chunk files   | Names               |  Raw size | Estimated transfer size
+chunk-NUO4LJOW.js     | -                   | 179.43 kB |                52.29 kB
+main-VYEHJTXG.js      | main                | 156.19 kB |                41.47 kB
+chunk-RICWRTDO.js     | -                   |  85.04 kB |                21.59 kB
+chunk-XRWFFFQV.js     | -                   |  36.06 kB |                12.51 kB
+chunk-FFRQ3ZLR.js     | -                   |  35.43 kB |                 7.54 kB
+polyfills-IA5XWQYN.js | polyfills           |  34.59 kB |                11.33 kB
+chunk-HLRTQUJZ.js     | -                   |  10.16 kB |                 2.63 kB
+chunk-WHVA6XVZ.js     | -                   |   5.84 kB |                 2.31 kB
+chunk-KNXTUT3E.js     | -                   |   5.74 kB |                 2.13 kB
+styles-G3P4UUE6.css   | styles              |   2.00 kB |               687 bytes
+chunk-PMIZ3TB4.js     | -                   |   1.61 kB |               614 bytes
+chunk-3IOYT2R5.js     | -                   |   1.12 kB |               435 bytes
+chunk-KSLJWWZ5.js     | -                   | 998 bytes |               998 bytes
+chunk-VBOG27KK.js     | -                   | 997 bytes |               997 bytes
+chunk-45IEAKLY.js     | -                   | 976 bytes |               976 bytes
+chunk-Y2WIHXPJ.js     | -                   | 943 bytes |               943 bytes
+chunk-L6V4JEYB.js     | -                   | 932 bytes |               932 bytes
+chunk-3MVUB7D5.js     | -                   | 833 bytes |               833 bytes
+chunk-YQA2WRLS.js     | -                   | 544 bytes |               544 bytes
+chunk-ICN5JZIR.js     | -                   |  99 bytes |                99 bytes
+
+                      | Initial total       | 559.52 kB |               161.86 kB
+
+Lazy chunk files      | Names               |  Raw size | Estimated transfer size
+chunk-JGI5UCUK.js     | room-page           | 296.89 kB |                58.36 kB
+chunk-DTMTLWYL.js     | selfie_segmentation |  43.92 kB |                14.96 kB
+chunk-GUC4T3LV.js     | settings-page       |  36.23 kB |                 8.09 kB
+chunk-4ENPC43S.js     | rooms-page          |  29.77 kB |                 6.59 kB
+chunk-AFG7GZKO.js     | -                   |  28.53 kB |                 5.89 kB
+chunk-EQ4ZYYNY.js     | diagnostics-page    |  21.39 kB |                 5.67 kB
+chunk-JPYAESHR.js     | transcripts-page    |  14.47 kB |                 3.76 kB
+chunk-EEJI6QMU.js     | recordings-page     |  10.18 kB |                 3.03 kB
+chunk-G6O5EJNC.js     | admin-page          |   9.24 kB |                 2.71 kB
+chunk-2GF6XR4R.js     | app-shell-component |   7.79 kB |                 2.33 kB
+chunk-6P4D3VPV.js     | join-page           |   7.14 kB |                 2.38 kB
+chunk-45SPZ42B.js     | past-page           |   5.15 kB |                 1.92 kB
+chunk-6YKQCIIZ.js     | p-CEmXdzGo          |   4.97 kB |                 1.98 kB
+chunk-QJDQR4LA.js     | -                   |   3.88 kB |                 1.43 kB
+chunk-TLKSCRM3.js     | login-page          |   3.77 kB |                 1.41 kB
+...and 17 more lazy chunks files. Use "--verbose" to show all the files.
+
+Application bundle generation complete. [2.843 seconds] - 2026-05-30T02:11:17.871Z
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mNG8113: DatePipe is not used within the template of RoomsPage[0m [1m[35m[plugin angular-compiler][0m
+
+    src/app/pages/rooms/rooms.page.ts:16:12:
+[37m      16 │   imports: [[32mDatePipe[37m, FormsModule, RouterLink, PaginationComponent],
+         ╵             [32m~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mThe glob pattern import("./**/*.entry.js*") did not match any files[0m [empty-glob]
+
+    ../node_modules/@stencil/core/internal/client/index.js:160:2:
+[37m      160 │   [32m`./${bundleId}.entry.js${BUILD5.hotModuleReplacement && hmrVers[37m...
+          ╵   [32m~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~[0m
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mModule '@mediapipe/selfie_segmentation' used by 'src/app/services/background-effects.service.ts' is not ESM[0m
+
+  CommonJS or AMD dependencies can cause optimization bailouts.
+  For more information see: [4mhttps://angular.dev/tools/cli/build#configuring-commonjs-dependencies[0m
+
+
+Output location: /home/agjrom/websites/meet-poc/frontend/dist/meet-poc-frontend
+
+EXIT:0
+
+> @meet-poc/backend@0.1.0 build
+> tsc -p tsconfig.json
+
+EXIT:0

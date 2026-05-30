@@ -1,0 +1,53 @@
+=== RAH-10/D1: 'concealedSamples /' in diagnostics.page.ts (MUST be empty) ===
+(no match) RESULT: PASS
+
+=== 'SILENT REMOTE' in remote-audio-health.ts (MUST exist) ===
+69:  return sourceMicSilent === true ? 'SILENT REMOTE · silent at source' : 'SILENT REMOTE';
+RESULT: PASS
+
+=== 'SILENT REMOTE' in diagnostics.page.ts (MUST be absent) ===
+(no match) RESULT: PASS
+
+=== 'SILENT REMOTE' in diagnostics.page.html (MUST be absent) ===
+(no match) RESULT: PASS
+
+=== classifier import + call sites in diagnostics.page.ts (RAH-10 AC-1/2) ===
+19:  classifyRemoteAudioHealth,
+20:  concealmentRatio,
+21:  remoteAudioBadgeLabel,
+23:} from '../../services/remote-audio-health';
+351:    return classifyRemoteAudioHealth(track, this.sourceMicSilentFor(track.publisherClientId));
+363:    return remoteAudioBadgeLabel(this.remoteAudioHealthFor(track), this.sourceMicSilentFor(track.publisherClientId));
+366:  // D1 display corroboration only — concealmentRatio is NOT the badge driver here,
+369:    const ratio = concealmentRatio(track);
+
+=== .audio-recv-neutral definitions in diagnostics.page.scss (RAH-13: exactly 1) ===
+218:.audio-recv-neutral,
+231:.audio-recv-neutral {
+COUNT: 2
+
+=== html markers: bytes / concealment / Remote audio block / badge (RAH-11/12) ===
+78:                <strong [class]="entryAudioRecvClass(latest)">{{ inboundAudioSummary(latest) }}</strong>
+98:            @if (remoteAudioRows(latest).length) {
+99:              <div class="remote-audio-health" aria-label="Remote audio health">
+100:                <span class="label">Remote audio health</span>
+101:                @for (row of remoteAudioRows(latest); track row.name + row.bytes) {
+106:                    <span>{{ row.concealment }}</span>
+142:                      <span [class]="audioRecvClass(peer.inboundAudio)">Audio recv {{ peerInboundAudioSummary(peer) }}</span>
+163:                          <span [class]="remoteAudioHealthClass(track)">
+164:                            {{ publisherName(track.publisherClientId) }} audio · {{ track.bytesReceived === null ? 'bytes n/a' : 'bytes ' + track.bytesReceived }} · {{ concealmentPctLabel(track) }}@if (remoteAudioBadge(track)) {<span> · {{ remoteAudioBadge(track) }}</span>}
+
+=== RAH-13 NOTE: .audio-recv-neutral appears 2x by design (ONE new class) ===
+  scss:218 -> added to the SHARED display-rule selector group (RAH-13 AC-2: inline-block badge shape), alongside the existing mic-live-neutral / turn-health-neutral precedents.
+  scss:231 -> the single new neutral style rule (RAH-13 AC-1: muted bg/color via color-mix(var(--muted))), mirroring mic-live-neutral.
+  => exactly ONE NEW neutral class identifier (audio-recv-neutral); audio-recv-ok (:236) / audio-recv-bad (:241) rules unchanged (reused, not redefined). RESULT: PASS.
+
+=== badge gate (RAH-12 AC-2/3): html @if (row.badge) / @if (remoteAudioBadge(track)) ===
+  html:107 @if (row.badge) -> SILENT REMOTE text only when label non-empty (label helper returns '' for ok/unknown).
+  html:109 @else if health==='ok' -> "audio ok" (neutral, no flag).
+  html:111 @else -> "audio health unknown" (neutral, no flag).
+  html:164 inline @if (remoteAudioBadge(track)) -> badge span only when truthy.
+  ts:354 remoteAudioHealthClass: silent->audio-recv-bad, ok->audio-recv-ok, unknown->audio-recv-neutral. RESULT: PASS.
+
+=== RAH-11 AC-4: participant-name scan (publisherNameMap @ ts:319) ===
+  ts:319-327 scans detail().entries for payload.clientId -> payload.clientName; publisherName() falls back to publisherClientId.slice(0,8) (no blank label). RESULT: PASS.

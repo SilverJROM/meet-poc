@@ -1,0 +1,23 @@
+==============================================================
+B2b BUILDS  (run 2026-05-30T01:25:02Z)  HEAD=1ba17b5
+==============================================================
+
+### BACKEND — cd backend && npm run build
+
+> @meet-poc/backend@0.1.0 build
+> tsc -p tsconfig.json
+
+BACKEND_EXIT=0  (PASS)
+
+### FRONTEND — cd frontend && npm run build
+
+
+[33m▲ [43;33m[[43;30mWARNING[43;33m][0m [1mModule '@mediapipe/selfie_segmentation' used by 'src/app/services/background-effects.service.ts' is not ESM[0m
+
+  CommonJS or AMD dependencies can cause optimization bailouts.
+  For more information see: [4mhttps://angular.dev/tools/cli/build#configuring-commonjs-dependencies[0m
+
+
+Output location: /home/agjrom/websites/meet-poc/frontend/dist/meet-poc-frontend
+
+FRONTEND_EXIT=0  (PASS)

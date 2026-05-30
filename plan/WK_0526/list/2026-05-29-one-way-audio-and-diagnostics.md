@@ -36,3 +36,16 @@ This is the #1 thing to fix to "properly diagnose these issues should it arise."
 2. Per-participant attribution for diagnostic rows (currently all stored under host_email).
 3. Global on/off switch for diagnostics (settings UI + backend gate; default ON).
 4. (Optional, same run) capture-side fix: silent-mic / wrong-device detection + warn + auto-recover.
+
+## Update 2026-05-29 — greenlight + root-cause refinement
+JROM: mic was tested working + worked on Meet ⇒ it's our code. Greenlight ("go ham").
+- Run launched: `plan/WK_0526/meet-diagnostics/projcore-run-2026-05-29/` (overmind wf #6).
+- Implementer: /lead (Opus) in tmux `lkvc-opus`; projcore validates (verifier≠fixer).
+- Status: IN PROGRESS — B1 (mic-energy metric) in plan-handshake.
+- B2 retargeted to root-cause the capture (device selection + getUserMedia constraints), watchdog as safety net (north-star NS9).
+
+## Update 2026-05-29 (#2) — device self-test false pass injected (R8)
+JROM: the pre-call mic self-test passed but the call sent silence — "unacceptable." Injected as R8 / batch B5 (runs after the capture fix B2): self-test must measure the real transmit path + flag a non-working mic. Greenlight mode (no re-interview).
+
+## Update 2026-05-30 (#3) — multi-device mic fallback (R10 / B2c)
+JROM: fall back to other available mics when one fails; prompt only when none work. Amends B2a's same-device-only lock (AC5). Injected as R10 / B2c right after the in-flight B2b. Recovery stays non-destructive + bounded (one sweep/episode).

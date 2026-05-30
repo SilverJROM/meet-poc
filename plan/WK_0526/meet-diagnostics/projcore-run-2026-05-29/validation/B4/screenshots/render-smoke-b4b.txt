@@ -1,0 +1,9 @@
+
+Running 1 test using 1 worker
+
+RAH-14 audio-health elements in DOM: 2
+RAH-14 console.error count: 0
+RAH-14 pageerror count: 0
+  ✓  1 [chromium] › tests/rah14-render-smoke-b4b.spec.ts:9:1 › RAH-14 diagnostics render-smoke: 0 console errors (3.4s)
+
+  1 passed (4.3s)

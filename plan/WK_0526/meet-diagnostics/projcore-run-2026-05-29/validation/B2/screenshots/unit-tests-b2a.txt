@@ -1,0 +1,15 @@
+==============================================================
+B2a UNIT TESTS — captured by [qa] 2026-05-30T00:56:27Z
+Branch feat/meet-diagnostics-audio-20260529 @ b8fa5f7 (B2a) on top of B1 3c1ebff
+Run dir: frontend/  Command base: npx tsx src/app/services/<spec>
+==============================================================
+
+### B2a primary spec: mic-capture-health.spec.ts  (AC1 U-1..U-3, AC2 U-4..U-6, AC3 U-7..U-11, AC4/AC5 U-12..U-17)
+$ npx tsx src/app/services/mic-capture-health.spec.ts
+mic-capture-health: all assertions passed
+EXIT=0
+
+### B1 regression spec: mic-energy.spec.ts (must stay green)
+$ npx tsx src/app/services/mic-energy.spec.ts
+mic-energy: all assertions passed
+EXIT=0

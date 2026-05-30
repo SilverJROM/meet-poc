@@ -1,0 +1,1 @@
+mic-selftest: all assertions passed
