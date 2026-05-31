@@ -19,3 +19,6 @@ jromlogin.md
 .DS_Store
 e2e/.test-rooms.json
 .env
+# overmind ephemeral run state
+.overmind-state.json
+**/.overmind-state.json

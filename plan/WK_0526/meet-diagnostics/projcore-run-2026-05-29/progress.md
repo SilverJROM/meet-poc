@@ -97,3 +97,6 @@
 - Test-pollution cleanup: 62 validator e2e rooms (03:21-03:25 window) + sessions + diagnostics deleted; TEST_ROOM01 + JROMRoom + JROM Test preserved. 3 real rooms remain.
 - MANUAL/USER-seat closure pending (headless cannot drive real mics): R1 live media-source emit, R2/R3/R10 real silent-mic+multi-device, R8 real dead-device flag. All logic+deterministic-tests VERIFIED.
 - Branch feat/meet-diagnostics-audio-20260529 (off baseline 81661dd); NOT merged to main (JROM's call).
+[overmind] 2026-05-30T07:45:39+00:00 sync OK current='' tasks=8
+[overmind] 2026-05-30T07:45:40+00:00 complete OK session=lkvc
+## [projcore TEARDOWN] child session lkvc-opus killed at 2026-05-30T07:45:47Z
