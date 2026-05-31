@@ -315,6 +315,9 @@ The `recordings/` directory was preserved at cutover.
 | Q-PS-3 | Move legacy code to `legacy-poc/` or git history only? | `legacy-poc/` until B6 verified, then delete | B1 |
 | Q-PS-4 | coturn auth: static credentials or shared secret (TURN REST API)? | static — simpler, single-tenant | B6 |
 | Q-PS-5 | Hardening protocol adopted? | NOT yet — same as lokalcamp (no `plan/hardening/`) | — |
+| Q-PS-6 | § 1 / § 5 / § 11 still describe the earlier v2 module map and STUN-only/TURN-deferred state, but live code now includes `ice-config`, `realtime-sfu`, `questions`, `llm`, `telegram`, `account`, `admin`, `backgrounds`, and Cloudflare Realtime SFU. Should the base spec be refreshed in a separate docs pass? | Yes — separate from this § 14 agent-specialization pass | — |
+| Q-PS-7 | § 8 has local PM2 proxy on `4700`, e2e default proxy on `4710`, and DEV tunnel text split between `4700` and `4710`. Which port should be the canonical DEV tunnel target? | PM2/live = `4700`; e2e isolated harness = `4710` | — |
+| Q-PS-8 | `backend/src/modules/ice-config/index.ts` calls Cloudflare TURN `/credentials/generate`; current Cloudflare docs emphasize `/credentials/generate-ice-servers`. Should a code audit verify the live account endpoint and normalize naming? | Yes — verify before changing; keep static TURN fallback | — |
 
 ## 11. Module surface (live)
 
@@ -340,3 +343,81 @@ Filled in as batches close. Empty at run start.
 ## 12. Changelog (rule changes)
 
 - **2026-05-19:** bootstrap — locked from /projcore intake conversation. Stack: Angular 20 FE + TS Node BE + better-sqlite3 + coturn. REST chosen over GraphQL (autonomous /projcore call). Single user. Room cap 8 (warning at 6). Repo rewrite in place.
+- **2026-05-30:** added § 14 Stack & Specialty (agent specialization slot per PROJECT_SPECS_PROTOCOL.md update).
+
+---
+
+## 14. Stack & Specialty (agent specialization)
+
+> OPTIONAL per `~/.claude/agents/PROJECT_SPECS_PROTOCOL.md`. Populated 2026-05-30 with what's known. Lazy-extend as needed.
+
+### Interface
+- Primary: Web UI (Angular 20 standalone + Ionic standalone providers/icons)
+- Secondary: REST API (TS Node + Express), WebSocket signaling (`ws`), Cloudflare Realtime SFU, Cloudflare TURN/static TURN via `/api/ice-config`, recordings/transcripts persisted with filesystem sidecars + better-sqlite3 metadata
+
+### Validation toolset
+- Web UI -> Playwright (`e2e/playwright.config.ts`, default `E2E_BASE_URL=http://localhost:4710`; live smoke can use `e2e/playwright.live.config.ts` with `E2E_BASE_URL=http://localhost:4700` or `https://voice.silverjrom.app`)
+- REST API -> curl + JSON assertion, or focused Vitest under `backend/tests/`
+- WebSocket/signaling -> focused Vitest (`backend/tests/signaling-*.test.ts`) plus Playwright for browser-observable flows
+- WebRTC/SFU -> Playwright with Chromium fake media flags, `window.__meetDebug` diagnostics, and manual/browser smoke for live Cloudflare media behavior
+- Telegram bot webhook/linking -> backend Vitest + API assertions; no fixture-backed bot harness is declared yet
+- CLI -> none
+
+### Build / dev commands
+- Install: `npm install --workspaces`
+- Backend dev: `npm run dev -w backend` (or PM2 `meet-poc-be`, `PORT=4720`)
+- Frontend dev: `npm run start -w frontend -- --host 127.0.0.1 --port 4711 --proxy-config proxy.conf.json`
+- Consolidated local proxy: `npm run serve` (defaults `PORT=4710`) or PM2 `meet-poc-fe` (`PORT=4700`, `BACKEND_ORIGIN=http://localhost:4720`, `FRONTEND_ORIGIN=http://localhost:4711`)
+- Root build: `npm run build`
+- Backend build: `npm run build -w backend`
+- Frontend build: `npm run build -w frontend`
+- Backend tests: `npm test -w backend` or focused `npm test -w backend -- <test-file-or-pattern>`
+- E2E tests: `npm test -w e2e -- <tests/path> --config=playwright.config.ts --workers=1`
+- Isolated E2E ports: set `MEET_DB_PATH`, `MEET_RECORDINGS_DIR`, `E2E_BACKEND_PORT`, `E2E_FRONTEND_PORT`, `E2E_PROXY_PORT`, `E2E_BASE_URL`, and `E2E_WS_ORIGIN` together to avoid hitting live PM2 state
+
+### Per-agent guidance
+
+- **[fast_lead]:**
+  - Smoke verify: Web UI = open page + verify selector; REST = curl + assert JSON; WebRTC/SFU = room join -> `__meetDebug.sfuPublishState.status === "published"` or visible in-call media state; live Cloudflare media still needs browser/manual confirmation when credentials are involved
+  - Default DEV URL: `https://voice.silverjrom.app`
+  - Project gotchas: Cloudflare Realtime SFU session/track lifecycle, TURN endpoint drift (`generate` vs `generate-ice-servers`), mediaDevices mocking in tests, better-sqlite3 sync semantics, filesystem sidecar consistency for recordings/transcripts
+- **[arch] / [sysarch]:**
+  - Stack-knowledge file: `~/.codex/skills/sysarch/references/stacks/webrtc-coturn-node.md`
+  - Tenancy: single-user (no multi-tenancy)
+  - Migration pattern: better-sqlite3 schema migration via `backend/src/db.ts` + numbered SQL files under `backend/migrations/` (no D1)
+  - Allowed architectural pivots: improve Cloudflare SFU/TURN reliability, diagnostics, and simulcast policy inside the existing SFU-first media plane
+  - Forbidden architectural pivots without explicit JROM approval: automatic hybrid mesh+SFU routing, replacing Cloudflare Realtime, changing auth/session model, or moving persistence off better-sqlite3/filesystem sidecars
+- **[coord]:**
+  - Default target env: DEV (`https://voice.silverjrom.app`) backed by local PM2 + CF Tunnel
+  - Tier 2 smoke: Playwright/curl against the deployed URL, then browser/manual verification for media-device and live SFU behavior when needed
+- **[projcore]:**
+  - `projcore_session: lkvc` (already in header)
+  - Per-module E2E command pattern: `npm test -w e2e -- e2e/tests/<module-or-batch>/ --config=playwright.config.ts --workers=1`
+  - Per-module backend command pattern: `npm test -w backend -- <test-file-or-pattern>`
+  - Full backend capstone: `npm test -w backend`
+  - Full E2E capstone: `npm test -w e2e -- --config=playwright.config.ts --workers=1` (run only after module slices are green; may require isolated env ports)
+  - Atomic module list: backend/auth, backend/rooms, backend/signaling, backend/sessions, backend/recording, backend/ice-config, backend/realtime-sfu, backend/questions, backend/llm, backend/telegram, backend/account, backend/admin, backend/backgrounds, frontend/app-shell, frontend/rooms, frontend/room-lobby, frontend/room-call-controls, frontend/sfu-client/media/ice, frontend/recordings/transcripts, frontend/settings/admin, e2e/fixtures
+- **[mockup]:**
+  - Applicable: yes (Web UI iteration scenarios)
+  - Mockups should use the existing Angular/Ionic standalone component style and route/page layout; avoid backend bypass unless clearly marked as fixture-only
+- **[dev] / [elitedev01]:**
+  - Bug-reproduce interface: Web UI = Playwright + browser; REST = curl/Vitest; WebRTC/SFU = Playwright with fake media + live browser/manual verification when Cloudflare credentials or real devices matter
+  - Code conventions pointer: standalone Angular components/signals/services in `frontend/src/app/`; Express routers and stores under `backend/src/modules/<module>/`; no ad hoc DB string parsing when a store/helper exists
+  - Stack-knowledge: `~/.codex/skills/sysarch/references/stacks/webrtc-coturn-node.md`
+  - Regression scenario locations: `e2e/tests/`, frontend service specs under `frontend/src/app/services/*.spec.ts`, backend Vitest under `backend/tests/`
+- **[qa] / $tester / $testkeeper:**
+  - Test framework: Playwright (`e2e/playwright.config.ts`) + backend Vitest (`backend/tests/`)
+  - Scenario library location: `e2e/tests/` plus plan-specific scenarios under `plan/WK_0519/` and `plan/WK_0526/`
+  - Per-module test selector pattern: E2E directory or spec path; backend Vitest filename/pattern
+  - Interface-specific evidence: Web UI = screenshot/DOM assertion; REST = response capture; WebSocket = message transcript; WebRTC/SFU = `__meetDebug`, selected candidate pair/route quality, console capture, and live/manual note when fake media cannot prove the field behavior
+  - Login fixture: use `e2e/fixtures/auth.ts` and backend seed path rather than hardcoding browser state
+- **[reviewer]:**
+  - Review additions: verify docs/tests do not claim mesh routing when SFU-only is active; check TURN credential handling, env leakage into PM2, synchronous DB hot paths, recording sidecar path safety, and Playwright hardcoded-port regressions
+- **[deployer]:**
+  - Deploy mechanism: local PM2 (`meet-poc-be`, `meet-poc-fe`) + named CF Tunnel to `voice.silverjrom.app`
+  - Deploy command shape: `npm install --workspaces`, `npm run build -w backend`, `npm run build -w frontend`, then `pm2 restart meet-poc-be meet-poc-fe --update-env` only when env changes are intentional
+  - Smoke verify: `curl -fsS http://localhost:4720/health`, `curl -fsSI http://localhost:4700/login`, open `https://voice.silverjrom.app`, verify login/room join, and check `/api/ice-config` when TURN/SFU changes are involved
+  - Rollback: no supported live legacy rollback after B6; recover from git history/rollback notes and preserve `recordings/`
+- **[migrator-cf] / [promoter]:** N/A — not a CF-only Pages/Workers project (CF Tunnel only).
+- **[gapfiller] / [bsconsult]:** use plan docs under `plan/WK_0519/` and `plan/WK_0526/`; requirements should state observable Web UI/API/WebRTC evidence, not just implementation intent.
+- **[jromhead] / [webdesign]:** screenshot evidence belongs under the active plan validation folder; UI follows the existing dark, dense app-shell/call-surface style with Ionic icons but not Ionic page chrome.
