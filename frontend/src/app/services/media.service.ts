@@ -1,6 +1,7 @@
 import { Injectable, Signal, inject, signal } from '@angular/core';
 import { ViewportService } from './viewport.service';
 import { accumulateEnergyFrame, audioCaptureConstraints, type EnergySample } from './mic-energy';
+import { resolveMediaToggleAction } from './media-toggle';
 
 // B5 — bounded ~3s rolling capture window for the lobby self-test. ~24 samples
 // at the 125ms startMicLevel interval ≈ 3s — long enough for classifyMicCapture
@@ -227,12 +228,44 @@ export class MediaService {
     return this.micCaptureWindow.slice();
   }
 
-  toggleMic(): boolean {
-    const track = this.localStream()?.getAudioTracks()[0];
-    if (!track) return false;
-    track.enabled = !track.enabled;
-    this.micOn.set(track.enabled);
-    return track.enabled;
+  async toggleMic(
+    onAudioTrackChanged: (track: MediaStreamTrack | null) => Promise<void> = async () => {},
+    options: { audioDeviceId?: string } = {},
+  ): Promise<boolean> {
+    const stream = this.localStream();
+    const track = stream?.getAudioTracks()[0];
+    const action = resolveMediaToggleAction({
+      streamExists: !!stream,
+      trackExists: !!track,
+      trackEnabled: !!track?.enabled,
+    });
+
+    if (action !== 'acquire' && track) {
+      track.enabled = action === 'enable';
+      this.micOn.set(track.enabled);
+      return track.enabled;
+    }
+
+    // 'acquire' — re-ask permission, getUserMedia, add + publish, mirror replaceAudioTrack.
+    const nextStream = await navigator.mediaDevices.getUserMedia({
+      audio: this.audioConstraints(true, options.audioDeviceId),
+      video: false,
+    });
+    registerDebugTracks(nextStream);
+    const nextTrack = nextStream.getAudioTracks()[0];
+    if (!nextTrack) {
+      nextStream.getTracks().forEach((t) => t.stop());
+      return false;
+    }
+    if (!stream) {
+      this.localStream.set(nextStream);
+    } else {
+      stream.addTrack(nextTrack);
+    }
+    this.micOn.set(true);
+    await onAudioTrackChanged(nextTrack);
+    this.startMicLevel(nextTrack);
+    return true;
   }
 
   muteMic(): boolean {
@@ -251,21 +284,35 @@ export class MediaService {
     options: { videoDeviceId?: string; facingMode?: 'user' | 'environment' } = {},
   ): Promise<boolean> {
     const stream = this.localStream();
-    if (!stream) return false;
-    const existing = stream.getVideoTracks()[0];
-    if (existing) {
-      existing.enabled = !existing.enabled;
+    const existing = stream?.getVideoTracks()[0];
+    const action = resolveMediaToggleAction({
+      streamExists: !!stream,
+      trackExists: !!existing,
+      trackEnabled: !!existing?.enabled,
+    });
+
+    if (action !== 'acquire' && existing) {
+      existing.enabled = action === 'enable';
       this.cameraOn.set(existing.enabled);
       await onVideoTrackChanged(existing.enabled ? existing : null);
       return existing.enabled;
     }
 
+    // 'acquire' — covers BOTH no-localStream and stream-without-video-track.
     const camStream = await navigator.mediaDevices.getUserMedia({
       video: this.videoConstraints(true, options),
     });
     registerDebugTracks(camStream);
     const track = camStream.getVideoTracks()[0];
-    stream.addTrack(track);
+    if (!track) {
+      camStream.getTracks().forEach((t) => t.stop());
+      return false;
+    }
+    if (!stream) {
+      this.localStream.set(camStream);
+    } else {
+      stream.addTrack(track);
+    }
     this.cameraOn.set(true);
     await onVideoTrackChanged(track);
     return true;

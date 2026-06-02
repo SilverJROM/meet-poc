@@ -31,6 +31,7 @@ import {
 } from '../../services/mic-energy';
 import { computeEffectiveDiagnosticsEnabled, readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
 import { resolveSelectedAudioId } from '../../services/device-selection';
+import { permissionBlockHint } from '../../services/media-toggle';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
@@ -939,8 +940,16 @@ export class RoomPage implements OnDestroy {
   }
 
   async toggleMic(): Promise<void> {
-    const mic = this.media.toggleMic();
-    this.broadcastMediaState(mic, this.media.cameraOn());
+    try {
+      const mic = await this.media.toggleMic(
+        (track) => this.sfuClient.replaceAudioTrack(track),
+        { audioDeviceId: this.selectedAudioId() || undefined },
+      );
+      this.actionNotice.set(null);
+      this.broadcastMediaState(mic, this.media.cameraOn());
+    } catch (err) {
+      this.handleInCallMediaPermission(err, 'audio');
+    }
   }
 
   async toggleCamera(): Promise<void> {
@@ -956,10 +965,20 @@ export class RoomPage implements OnDestroy {
           facingMode: this.videoFacingModeForRequest(true),
         },
       );
+      this.actionNotice.set(null);
       this.broadcastMediaState(this.media.micOn(), cam);
     } catch (err) {
-      this.status.set(`Camera access failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+      this.handleInCallMediaPermission(err, 'video');
     }
+  }
+
+  private handleInCallMediaPermission(err: unknown, kind: 'audio' | 'video'): void {
+    const hint = permissionBlockHint(kind, err);
+    if (hint) {
+      this.actionNotice.set(hint);
+      return;
+    }
+    this.status.set(`${kind === 'audio' ? 'Microphone' : 'Camera'} access failed: ${err instanceof Error ? err.message : 'unknown error'}`);
   }
 
   async toggleScreen(): Promise<void> {
