@@ -1,5 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { PeerState } from './peer-state';
+import { evaluateRemoteAudioPlayability } from './remote-audio-playability';
 
 type RemoteSource = {
   stream: MediaStream;
@@ -28,6 +29,13 @@ export class RemoteAudioService {
   readonly contextState = signal<AudioContextState | 'none'>('none');
   readonly mutedAll = signal(false);
   readonly volume = signal(DEFAULT_VOLUME);
+  // Bumped whenever a mixer source is added/removed, so reactive consumers (the
+  // room-page playability effect) re-evaluate the banner on source-add (R1.3 BUG-2).
+  readonly sourcesVersion = signal(0);
+  // Tracks whether the mixer output element is genuinely playing (play/pause/ended
+  // element events), so the playability effect clears the banner once playout truly
+  // settles — not on the transient running-context-but-output-still-pausing window.
+  readonly outputPlaying = signal(false);
 
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
@@ -56,9 +64,33 @@ export class RemoteAudioService {
   }
 
   attachOutputElement(element: HTMLAudioElement | null): void {
+    if (this.outputElement && this.outputElement !== element) this.detachOutputListeners(this.outputElement);
     this.outputElement = element;
-    if (!element || !this.mixerEnabled()) return;
+    if (!element) {
+      this.outputPlaying.set(false);
+      return;
+    }
+    this.attachOutputListeners(element);
+    if (!this.mixerEnabled()) return;
     this.bindOutputElement();
+  }
+
+  private readonly onOutputPlay = () => this.outputPlaying.set(!!this.outputElement && !this.outputElement.paused);
+  private readonly onOutputPause = () => this.outputPlaying.set(false);
+
+  private attachOutputListeners(element: HTMLAudioElement): void {
+    element.addEventListener('playing', this.onOutputPlay);
+    element.addEventListener('play', this.onOutputPlay);
+    element.addEventListener('pause', this.onOutputPause);
+    element.addEventListener('ended', this.onOutputPause);
+    this.outputPlaying.set(!element.paused);
+  }
+
+  private detachOutputListeners(element: HTMLAudioElement): void {
+    element.removeEventListener('playing', this.onOutputPlay);
+    element.removeEventListener('play', this.onOutputPlay);
+    element.removeEventListener('pause', this.onOutputPause);
+    element.removeEventListener('ended', this.onOutputPause);
   }
 
   syncPeers(peers: PeerState[]): void {
@@ -90,11 +122,22 @@ export class RemoteAudioService {
   async unlockAndPlayRemoteSinks(deviceId?: string): Promise<boolean> {
     if (this.mixerEnabled()) {
       this.ensureGraph();
-      await this.resumeContext();
+      // R1.3 / NS3: kick off resume() SYNCHRONOUSLY within the gesture call stack,
+      // BEFORE the first await, so the browser's transient user-activation isn't
+      // lost to a microtask boundary. We capture the promise and await it below to
+      // refresh contextState; a non-gesture caller (setTimeout(0)) will simply have
+      // the resume rejected, leaving the context non-running ⇒ honest banner.
+      const resumePromise =
+        this.context && this.context.state === 'suspended'
+          ? this.context.resume().catch((err) => {
+              console.debug('[media] remote audio context resume rejected (likely non-gesture)', err);
+            })
+          : Promise.resolve();
+      await resumePromise;
+      if (this.context && this.context.state !== 'closed') this.contextState.set(this.context.state);
       await this.applySinkId(this.outputElement, deviceId);
     }
 
-    let allPlayable = true;
     const elements = Array.from(document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio]'));
     await Promise.all(
       elements.map(async (audio) => {
@@ -102,27 +145,35 @@ export class RemoteAudioService {
         try {
           await audio.play();
         } catch (err) {
-          allPlayable = false;
           console.debug('[media] remote audio element still blocked after user gesture', err);
         }
-        if (audio.paused) allPlayable = false;
       }),
     );
 
     if (this.mixerEnabled() && this.sources.size > 0) {
       const output = this.outputElement;
-      if (!output) return false;
-      this.bindOutputElement();
-      try {
-        await output.play();
-      } catch (err) {
-        allPlayable = false;
-        console.debug('[media] remote audio mixer still blocked after user gesture', err);
+      if (output) {
+        this.bindOutputElement();
+        try {
+          await output.play();
+        } catch (err) {
+          console.debug('[media] remote audio mixer still blocked after user gesture', err);
+        }
       }
-      if (output.paused) allPlayable = false;
     }
 
-    return allPlayable;
+    // BUG-1 fix: the playability verdict now routes through the pure decision fn,
+    // which treats a non-'running' context (with sources) as NOT playable — instead
+    // of the old element.paused-only check that returned true for a suspended context.
+    const perPeerAllUnpaused = elements.every((audio) => !audio.paused);
+    return evaluateRemoteAudioPlayability({
+      mixerEnabled: this.mixerEnabled(),
+      contextState: this.context?.state ?? 'none',
+      sourcesCount: this.sources.size,
+      outputAttached: !!this.outputElement,
+      outputPaused: this.outputElement?.paused ?? true,
+      perPeerAllUnpaused,
+    });
   }
 
   async applyOutputDevice(deviceId: string): Promise<void> {
@@ -132,10 +183,45 @@ export class RemoteAudioService {
 
   allSinksPlaying(): boolean {
     const elements = Array.from(document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio]'));
-    const perPeerPlaying = elements.every((audio) => !audio.paused);
-    if (!this.mixerEnabled()) return perPeerPlaying;
-    if (this.sources.size === 0) return perPeerPlaying;
-    return perPeerPlaying && !!this.outputElement && !this.outputElement.paused;
+    const perPeerAllUnpaused = elements.every((audio) => !audio.paused);
+    return evaluateRemoteAudioPlayability({
+      mixerEnabled: this.mixerEnabled(),
+      contextState: this.context?.state ?? 'none',
+      sourcesCount: this.sources.size,
+      outputAttached: !!this.outputElement,
+      outputPaused: this.outputElement?.paused ?? true,
+      perPeerAllUnpaused,
+    });
+  }
+
+  /**
+   * Test-only: drive the live AudioContext into 'suspended' so an e2e can model the
+   * autoplay-blocked / suspended-with-sources reality (BUG-1 negative path). Guarded
+   * to localhost at the call site (room.page.ts debug object). No-op if no context.
+   */
+  async suspendForTest(): Promise<void> {
+    if (!this.context || this.context.state !== 'running') return;
+    await this.context.suspend();
+    this.contextState.set(this.context.state);
+  }
+
+  /**
+   * Test-only: mount a REAL MediaStreamAudioSourceNode for a synthetic remote audio
+   * stream into the live mixer graph, exercising the genuine sources.size > 0
+   * running-required playability branch end-to-end without depending on a flaky
+   * cross-context WebRTC peer connection in headless CI. Guarded to localhost at the
+   * call site (room.page.ts debug object). Mirrors active-speaker's injectDebugStream.
+   */
+  injectRemoteSourceForTest(id: string, stream: MediaStream): void {
+    const track = stream.getAudioTracks()[0];
+    if (!track) return;
+    this.removeSource(id);
+    this.addSource(id, stream, track);
+    this.bindOutputElement();
+  }
+
+  removeRemoteSourceForTest(id: string): void {
+    this.removeSource(id);
   }
 
   debugSnapshot(): RemoteAudioDebugSnapshot {
@@ -172,6 +258,7 @@ export class RemoteAudioService {
       const onEnded = () => this.removeSource(id);
       track.addEventListener('ended', onEnded, { once: true });
       this.sources.set(id, { stream, track, source, onEnded });
+      this.sourcesVersion.update((v) => v + 1);
     } catch (err) {
       console.debug('[media] remote audio mixer source failed', err);
     }
@@ -187,6 +274,7 @@ export class RemoteAudioService {
       // best effort
     }
     this.sources.delete(id);
+    this.sourcesVersion.update((v) => v + 1);
   }
 
   private clearSources(): void {

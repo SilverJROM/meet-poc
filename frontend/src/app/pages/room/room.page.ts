@@ -34,7 +34,7 @@ import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
-import { RemoteAudioService } from '../../services/remote-audio.service';
+import { RemoteAudioService, type RemoteAudioDebugSnapshot } from '../../services/remote-audio.service';
 import { RoomsService } from '../../services/rooms.service';
 import { ViewportService } from '../../services/viewport.service';
 import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.service';
@@ -521,7 +521,10 @@ export class RoomPage implements OnDestroy {
         activeSpeakerAnalyzerCount: this.activeSpeaker.analyzerCount(),
         activeSpeakerLastMaxRms: this.activeSpeaker.lastMaxRms(),
         activeSpeakerContextState: this.activeSpeaker.contextState(),
-        remoteAudioMixer: this.remoteAudio.debugSnapshot(),
+        remoteAudioMixer: {
+          ...this.remoteAudio.debugSnapshot(),
+          debugSnapshot: () => this.remoteAudio.debugSnapshot(),
+        } as RemoteAudioMixerDebug,
         sfuPublishState: this.sfuClient.localPublishState(),
         sfuConnectionQuality: this.sfuClient.connectionQuality(),
         sfuRemoteStreams: this.sfuClient.remoteStreams(),
@@ -538,6 +541,15 @@ export class RoomPage implements OnDestroy {
         debug.sfuVideoEncodings = () => this.sfuClient.getVideoEncodings();
         debug.sfuUpdateCameraLayer = () => this.sfuClient.updateCameraLayer();
         debug.sfuSubscribedTracks = () => Object.fromEntries(this.sfuClient.subscribedTracks());
+        // B1 test-only: drive the live remote-audio AudioContext into 'suspended' so
+        // an e2e can model the autoplay-blocked / suspended-with-sources negative path.
+        // Attached to the remoteAudioMixer debug object (next to debugSnapshot()).
+        const mixerDebug = debug.remoteAudioMixer as RemoteAudioMixerDebug;
+        mixerDebug.__suspendForTest = () => this.remoteAudio.suspendForTest();
+        // Mount a synthetic remote audio source into the live mixer so e2e can exercise
+        // the sources.size > 0 running-required branch without flaky cross-context ICE.
+        mixerDebug.__injectRemoteSourceForTest = (id: string, stream: MediaStream) => this.remoteAudio.injectRemoteSourceForTest(id, stream);
+        mixerDebug.__removeRemoteSourceForTest = (id: string) => this.remoteAudio.removeRemoteSourceForTest(id);
       }
       window.__meetDebug = debug;
     });
@@ -553,6 +565,26 @@ export class RoomPage implements OnDestroy {
       window.setTimeout(() => {
         void this.unlockAudioFromGesture(false).catch((err) => console.debug('[media] remote audio sync failed', err));
       }, 0);
+    });
+    // B1 / NS2+NS3: honest playability re-evaluation, reactive + AUTHORITATIVE.
+    // Tracks the live mixer contextState + outputPlaying + source-count signals. When
+    // remote-audio sources exist and the mixer is NOT genuinely playing them (context
+    // not 'running' OR output not playing) — the suspended-with-sources reality that
+    // the non-gesture setTimeout re-unlock can NOT resume — surface the
+    // remoteAudioBlocked banner; once playout settles (running + outputPlaying) the
+    // banner clears. Gating clear on outputPlaying (an element-event signal, not a
+    // transient .paused read) avoids both the false-clear during a resume transition
+    // and the stuck-banner-after-recovery race.
+    effect(() => {
+      const contextState = this.remoteAudio.contextState();
+      const outputPlaying = this.remoteAudio.outputPlaying();
+      this.remoteAudio.sourcesVersion();
+      const hasSources = this.remoteAudio.debugSnapshot().mixedPeerIds.length > 0;
+      this.peers();
+      if (this.state() !== 'in-call') return;
+      if (!this.remoteAudioMixerEnabled() || !hasSources) return;
+      const playing = contextState === 'running' && outputPlaying;
+      this.remoteAudioBlocked.set(!playing);
     });
     effect(() => {
       void this.syncShareCameraCut(this.anyScreenShareActive(), this.media.screenOn(), this.shareCameraManualOverride());
@@ -3131,6 +3163,15 @@ function canSetSinkId(): boolean {
   return typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
 }
 
+// B1: the __meetDebug.remoteAudioMixer object spreads a live snapshot and also
+// exposes debugSnapshot() (fresh read) + a localhost-only __suspendForTest() hook.
+type RemoteAudioMixerDebug = RemoteAudioDebugSnapshot & {
+  debugSnapshot: () => RemoteAudioDebugSnapshot;
+  __suspendForTest?: () => Promise<void>;
+  __injectRemoteSourceForTest?: (id: string, stream: MediaStream) => void;
+  __removeRemoteSourceForTest?: (id: string) => void;
+};
+
 declare global {
   interface Window {
     __meetDebug?: {
@@ -3197,14 +3238,7 @@ declare global {
       activeSpeakerAnalyzerCount?: number;
       activeSpeakerLastMaxRms?: number;
       activeSpeakerContextState?: string;
-      remoteAudioMixer?: {
-        mixerEnabled: boolean;
-        contextState: AudioContextState | 'none';
-        outputAttached: boolean;
-        outputPaused: boolean;
-        mixedPeerIds: string[];
-        mixedTrackIds: string[];
-      };
+      remoteAudioMixer?: RemoteAudioMixerDebug;
       sfuPublishState?: LocalPublishState | null;
       sfuConnectionQuality?: SfuConnectionQuality | null;
       sfuRemoteStreams?: Map<string, MediaStream>;
