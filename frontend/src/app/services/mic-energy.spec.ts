@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import { deriveOutboundAudioFields, MIC_SILENCE_LEVEL_THRESHOLD } from './mic-energy.js';
+import {
+  deriveOutboundAudioFields,
+  MIC_SILENCE_LEVEL_THRESHOLD,
+  audioCaptureConstraints,
+  unappliedAudioProcessing,
+} from './mic-energy.js';
 
 // SC-1 / TT-A — active mic with audible signal
 {
@@ -91,6 +96,50 @@ import { deriveOutboundAudioFields, MIC_SILENCE_LEVEL_THRESHOLD } from './mic-en
 // Threshold constant sanity
 {
   assert.strictEqual(MIC_SILENCE_LEVEL_THRESHOLD, 0.01, 'threshold is 0.01');
+}
+
+// B2 RF1-S1 — audioCaptureConstraints requests EC+NS+AGC gracefully (no {exact})
+{
+  const c = audioCaptureConstraints(true) as MediaTrackConstraints;
+  assert.deepStrictEqual(c.echoCancellation, { ideal: true }, 'EC is {ideal:true}');
+  assert.deepStrictEqual(c.noiseSuppression, { ideal: true }, 'NS is {ideal:true}');
+  assert.deepStrictEqual(c.autoGainControl, { ideal: true }, 'AGC is {ideal:true}');
+  assert.strictEqual('exact' in (c.echoCancellation as object), false, 'EC has no exact');
+  assert.strictEqual('exact' in (c.noiseSuppression as object), false, 'NS has no exact');
+  assert.strictEqual('exact' in (c.autoGainControl as object), false, 'AGC has no exact');
+  assert.strictEqual('deviceId' in c, false, 'no deviceId when none given');
+
+  const withDev = audioCaptureConstraints(true, 'dev-123') as MediaTrackConstraints;
+  assert.deepStrictEqual(withDev.deviceId, { exact: 'dev-123' }, 'deviceId {exact}');
+  assert.deepStrictEqual(withDev.echoCancellation, { ideal: true }, 'EC still {ideal} with device');
+  assert.deepStrictEqual(withDev.noiseSuppression, { ideal: true }, 'NS still {ideal} with device');
+  assert.deepStrictEqual(withDev.autoGainControl, { ideal: true }, 'AGC still {ideal} with device');
+
+  assert.strictEqual(audioCaptureConstraints(false), false, 'audio:false ⇒ false');
+  assert.strictEqual('deviceId' in (audioCaptureConstraints(true, undefined) as object), false, 'undefined device ⇒ no deviceId');
+  assert.strictEqual('deviceId' in (audioCaptureConstraints(true, '') as object), false, 'empty device ⇒ no deviceId');
+}
+
+// B2 RF1-S2 — unappliedAudioProcessing truth table
+{
+  assert.deepStrictEqual(
+    unappliedAudioProcessing({ echoCancellation: true, noiseSuppression: true, autoGainControl: true }),
+    [],
+    'all true ⇒ []',
+  );
+  assert.deepStrictEqual(unappliedAudioProcessing({ echoCancellation: false }), ['echoCancellation'], 'EC false');
+  assert.deepStrictEqual(unappliedAudioProcessing({ noiseSuppression: false }), ['noiseSuppression'], 'NS false');
+  assert.deepStrictEqual(unappliedAudioProcessing({ autoGainControl: false }), ['autoGainControl'], 'AGC false');
+  assert.deepStrictEqual(unappliedAudioProcessing({}), [], 'all absent ⇒ []');
+  assert.deepStrictEqual(
+    unappliedAudioProcessing({ echoCancellation: false, noiseSuppression: false, autoGainControl: false }),
+    ['echoCancellation', 'noiseSuppression', 'autoGainControl'],
+    'all false ⇒ all 3 in deterministic order',
+  );
+  // undefined value NOT flagged (browsers omit unsupported keys)
+  assert.deepStrictEqual(unappliedAudioProcessing({ echoCancellation: undefined }), [], 'undefined ⇒ not flagged');
+  // strict === false only: 0 / '' (non-boolean falsy) NOT flagged
+  assert.deepStrictEqual(unappliedAudioProcessing({ echoCancellation: 0 as any }), [], '0 ⇒ not flagged (not strict false)');
 }
 
 console.log('mic-energy: all assertions passed');

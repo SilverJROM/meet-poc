@@ -54,6 +54,33 @@ export function audioCaptureConstraints(audio: boolean, deviceId?: string): bool
   };
 }
 
+/** Subset of MediaTrackSettings carrying the three processing flags (B2 R1). */
+export type AudioProcessingSettings = {
+  echoCancellation?: boolean;
+  noiseSuppression?: boolean;
+  autoGainControl?: boolean;
+};
+
+/**
+ * Pure diagnostic: which of EC/NS/AGC the DEVICE declined (B2 R1).
+ *
+ * `audioCaptureConstraints` requests the three as `{ ideal: true }` — best-effort,
+ * never hard-required — so a device may quietly NOT apply one. `track.getSettings()`
+ * reports what was ACTUALLY applied. This returns the names that came back STRICTLY
+ * `=== false` (the device applied-and-disabled them). An ABSENT key (undefined —
+ * browsers omit keys they don't support) is NOT flagged, and a non-boolean falsy
+ * value (0, '') is NOT flagged: only an explicit boolean `false` counts. Pure,
+ * framework-free, tsx-testable; consumed by media.service's log-only verifier.
+ * Deterministic check order: echoCancellation, noiseSuppression, autoGainControl.
+ */
+export function unappliedAudioProcessing(settings: AudioProcessingSettings): string[] {
+  const unapplied: string[] = [];
+  if (settings.echoCancellation === false) unapplied.push('echoCancellation');
+  if (settings.noiseSuppression === false) unapplied.push('noiseSuppression');
+  if (settings.autoGainControl === false) unapplied.push('autoGainControl');
+  return unapplied;
+}
+
 /**
  * Pure extractor for the source-side outbound-audio stat (AC2).
  *

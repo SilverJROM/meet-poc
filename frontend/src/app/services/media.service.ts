@@ -1,6 +1,6 @@
 import { Injectable, Signal, inject, signal } from '@angular/core';
 import { ViewportService } from './viewport.service';
-import { accumulateEnergyFrame, audioCaptureConstraints, type EnergySample } from './mic-energy';
+import { accumulateEnergyFrame, audioCaptureConstraints, unappliedAudioProcessing, type AudioProcessingSettings, type EnergySample } from './mic-energy';
 import { resolveMediaToggleAction } from './media-toggle';
 
 // B5 — bounded ~3s rolling capture window for the lobby self-test. ~24 samples
@@ -108,6 +108,7 @@ export class MediaService {
       nextStream.getTracks().forEach((track) => track.stop());
       return null;
     }
+    this.verifyAudioProcessing(nextTrack);
     stream.addTrack(nextTrack);
     await onAudioTrackChanged(nextTrack);
     if (oldTrack) {
@@ -194,6 +195,20 @@ export class MediaService {
     return true;
   }
 
+  /**
+   * B2 R1 — LOG-ONLY diagnostic at the audio-acquire chokepoint. Reports which of
+   * EC/NS/AGC the device declined (best-effort `{ideal}` may be ignored by a device).
+   * Zero behavior change: no track/constraint mutation, no control flow, no state write.
+   */
+  private verifyAudioProcessing(track: MediaStreamTrack): void {
+    try {
+      const unapplied = unappliedAudioProcessing(track.getSettings() as AudioProcessingSettings);
+      if (unapplied.length) console.debug('[media] audio processing not applied by device', unapplied);
+    } catch {
+      /* getSettings unsupported — ignore */
+    }
+  }
+
   private startMicLevel(track: MediaStreamTrack): void {
     if (!this.audioContext || this.audioContext.state === 'closed') return;
     this.stopMicLevel();
@@ -257,6 +272,7 @@ export class MediaService {
       nextStream.getTracks().forEach((t) => t.stop());
       return false;
     }
+    this.verifyAudioProcessing(nextTrack);
     if (!stream) {
       this.localStream.set(nextStream);
     } else {

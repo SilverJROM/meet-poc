@@ -24,6 +24,10 @@ const VOLUME_STORAGE_KEY = 'meet-poc:volume:value';
 const DEFAULT_VOLUME = 1;
 const MAX_VOLUME = 1.3;
 
+// B2 — brick-wall limiter taming runaway same-room feedback peaks. dB / dB / :1 / s / s.
+// NO makeup gain so mute-all (gain=0) stays silent (0 in ⇒ 0 out through the compressor).
+export const FEEDBACK_LIMITER_PARAMS = { threshold: -3, knee: 0, ratio: 20, attack: 0.003, release: 0.25 } as const;
+
 @Injectable({ providedIn: 'root' })
 export class RemoteAudioService {
   readonly contextState = signal<AudioContextState | 'none'>('none');
@@ -39,6 +43,7 @@ export class RemoteAudioService {
 
   private context: AudioContext | null = null;
   private gain: GainNode | null = null;
+  private limiter: DynamicsCompressorNode | null = null;
   private destination: MediaStreamAudioDestinationNode | null = null;
   private outputElement: HTMLAudioElement | null = null;
   private readonly sources = new Map<string, RemoteSource>();
@@ -241,10 +246,12 @@ export class RemoteAudioService {
     this.clearSources();
     this.outputElement = null;
     this.gain?.disconnect();
+    this.limiter?.disconnect();
     this.destination?.disconnect();
     if (this.context && this.context.state !== 'closed') void this.context.close().catch(() => undefined);
     this.context = null;
     this.gain = null;
+    this.limiter = null;
     this.destination = null;
     this.mutedAll.set(false);
     this.contextState.set('none');
@@ -292,9 +299,21 @@ export class RemoteAudioService {
       this.gain = this.context.createGain();
       this.gain.gain.value = this.mutedAll() ? 0 : this.volume();
     }
+    if (!this.limiter) {
+      // Brick-wall limiter downstream of the volume/mute gain: caps runaway same-room
+      // feedback peaks WITHOUT makeup gain, so gain=0 (mute-all) still yields silence.
+      this.limiter = this.context.createDynamicsCompressor();
+      this.limiter.threshold.value = FEEDBACK_LIMITER_PARAMS.threshold;
+      this.limiter.knee.value = FEEDBACK_LIMITER_PARAMS.knee;
+      this.limiter.ratio.value = FEEDBACK_LIMITER_PARAMS.ratio;
+      this.limiter.attack.value = FEEDBACK_LIMITER_PARAMS.attack;
+      this.limiter.release.value = FEEDBACK_LIMITER_PARAMS.release;
+    }
     if (!this.destination) {
       this.destination = this.context.createMediaStreamDestination();
-      this.gain.connect(this.destination);
+      // Chain: source(s) → gain (volume/mute) → limiter (peak cap) → destination.
+      this.gain.connect(this.limiter);
+      this.limiter.connect(this.destination);
     }
     return this.context;
   }
