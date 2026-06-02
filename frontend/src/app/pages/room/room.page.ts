@@ -30,6 +30,7 @@ import {
   type SweepHooks,
 } from '../../services/mic-energy';
 import { computeEffectiveDiagnosticsEnabled, readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
+import { resolveSelectedAudioId } from '../../services/device-selection';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
@@ -2141,9 +2142,14 @@ export class RoomPage implements OnDestroy {
   }
 
   private syncSelectedAudioIdToTrack(track: MediaStreamTrack | null | undefined): void {
-    const actualDeviceId = audioTrackDeviceId(track);
-    this.selectedAudioId.set(actualDeviceId);
-    storeDevice(DEVICE_STORAGE.audioInput, actualDeviceId);
+    const next = resolveSelectedAudioId({
+      chosenId: this.selectedAudioId(),
+      trackReportedId: audioTrackDeviceId(track),
+      enumeratedIds: this.audioInputs().map((d) => d.deviceId),
+      storedId: readStoredDevice(DEVICE_STORAGE.audioInput),
+    });
+    this.selectedAudioId.set(next);
+    storeDevice(DEVICE_STORAGE.audioInput, next);
   }
 
   private syncSelectedVideoIdToTrack(track: MediaStreamTrack | null | undefined): void {
