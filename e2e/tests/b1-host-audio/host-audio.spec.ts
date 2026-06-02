@@ -1,7 +1,16 @@
 import { expect, type APIRequestContext, type Page, test } from '@playwright/test';
+import path from 'node:path';
 import { cleanupRoomsByPrefix } from '../../fixtures/db';
 import { loginAsJrom } from '../../fixtures/auth';
 import { createRoomViaApi, type TestRoom } from '../../fixtures/rooms';
+
+// Optional evidence sink (QA Rule 2). When B1_SHOTS_DIR is set, key state
+// transitions are captured as PNGs for the validation report.
+const SHOTS_DIR = process.env.B1_SHOTS_DIR;
+async function shot(page: Page, name: string): Promise<void> {
+  if (!SHOTS_DIR) return;
+  await page.screenshot({ path: path.join(SHOTS_DIR, `${name}.png`), fullPage: true });
+}
 
 // B1 — Host remote-audio playout: honest playability detection + AudioContext resume.
 //
@@ -61,6 +70,7 @@ test('E1: positive — context running, output unpaused, banner hidden', async (
   expect(s.outputPaused).toBe(false);
   expect(s.mixedPeerIds.length).toBeGreaterThan(0);
   await expect(page.locator('.audio-unblock-notice')).toHaveCount(0);
+  await shot(page, 'E1-positive-running-banner-hidden');
 });
 
 test('E2: negative — sources + non-running context ⇒ Tap to enable audio banner', async ({ page, request }) => {
@@ -80,6 +90,7 @@ test('E2: negative — sources + non-running context ⇒ Tap to enable audio ban
   await expect(page.locator('.audio-unblock-notice')).toBeVisible();
   await expect(page.locator('.audio-unblock-notice')).toContainText('Tap to enable audio');
   await expect(page.getByRole('button', { name: 'Enable audio' })).toBeVisible();
+  await shot(page, 'E2-negative-banner-shown');
 });
 
 test('E3: recovery — Enable audio gesture resumes context, clears banner', async ({ page, request }) => {
@@ -99,6 +110,7 @@ test('E3: recovery — Enable audio gesture resumes context, clears banner', asy
   // Banner clears a beat after the resume settles (gesture sets remoteAudioBlocked
   // false only after output.play() resolves) — poll rather than assert instantly.
   await expect.poll(() => page.locator('.audio-unblock-notice').count(), { timeout: 8_000 }).toBe(0);
+  await shot(page, 'E3-recovery-running-banner-cleared');
 });
 
 test('E4: source-add re-unlock — source added while context not running ⇒ banner, then gesture resumes', async ({ page, request }) => {
