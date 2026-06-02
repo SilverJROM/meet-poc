@@ -58,9 +58,9 @@
 
             <label>
               <span>Microphone</span>
-              <select class="device-select mic-select" [value]="selectedAudioId()" [disabled]="busy()" (change)="onAudioChange($event)">
+              <select class="device-select mic-select" [disabled]="busy()" (change)="onAudioChange($event)">
                 @for (device of audioInputs(); track device.deviceId) {
-                  <option [value]="device.deviceId">{{ device.label || 'Microphone' }}</option>
+                  <option [value]="device.deviceId" [selected]="device.deviceId === selectedAudioId()">{{ device.label || 'Microphone' }}</option>
                 }
               </select>
             </label>
