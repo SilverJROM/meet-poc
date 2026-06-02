@@ -2,13 +2,14 @@
 
 ## OG Spec: plan/WK_0526/meet-incall-camera-feedback/projcore-run-2026-06-02/og-requirements.md (RC)
 ## Current: Phase 3, Batch B1
-## Last action: qa test mode PASS (HARD gates green; 3/3 SOFT e2e vs real SFU); DEV deployed (pm2 meet-poc-fe #78)
-## Next action: independent validator (Rule 11) → merge
+## Last action: independent validation PASS (AC1-4 all PASS); committed @ dcda820; callback appended
+## Next action: projcore independent validation + merge (branch left unmerged per projcore protocol)
 
 ### Batch B1: in-call mic AND camera always enable-able; never stiff
-- Status: IN PROGRESS
-- Branch: feat/incall-media-always-enableable-20260602
-- Artifacts: scenarios ✓ | changes ✓ | review ✓ (APPROVE) | test-report ✓ (PASS) | screenshots ✓ (6) | independent-validation ✗
+- Status: DONE (pipeline complete, branch left for projcore merge)
+- Branch: feat/incall-media-always-enableable-20260602 @ dcda820
+- Artifacts: scenarios ✓ | changes ✓ | review ✓ (APPROVE) | test-report ✓ (PASS) | screenshots ✓ (6) | independent-validation ✓ (PASS)
+- Deployed: DEV pm2 meet-poc-fe (#78)
 
 ### Honest finding (qa): Bug A mic-acquire-from-absent is UNREACHABLE via current lobby UI
 - Mic access is a join prerequisite (hasMicAccess) → guest always joins WITH an audio track → in-call mic is always a flip, never a dead no-op. Mic acquire path is defensive + unit-proven (S1.2) but not live-reachable through today's lobby gating.
