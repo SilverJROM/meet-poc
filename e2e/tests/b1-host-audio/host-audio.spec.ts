@@ -34,6 +34,8 @@ type RemoteAudioSnap = {
   volume: number;
   mixedPeerIds: string[];
   mixedTrackIds: string[];
+  kickstartCount: number;
+  kickstartPlayingCount: number;
 };
 
 type B1MeetDebug = {
@@ -63,47 +65,50 @@ test('E1: positive — context running, output unpaused, banner hidden', async (
   await injectRemoteSource(page, 'e1-src');
 
   await expect.poll(() => snap(page).then((s) => s.contextState), { timeout: 8_000 }).toBe('running');
+  await expectKickstartPlaying(page, 'e1-src');
   const s = await snap(page);
   expect(s.mixerEnabled).toBe(true);
   expect(s.contextState).toBe('running');
   expect(s.outputAttached).toBe(true);
   expect(s.outputPaused).toBe(false);
   expect(s.mixedPeerIds.length).toBeGreaterThan(0);
+  expect(s.kickstartCount).toBe(1);
+  expect(s.kickstartPlayingCount).toBe(1);
   await expect(page.locator('.audio-unblock-notice')).toHaveCount(0);
   await shot(page, 'E1-positive-running-banner-hidden');
 });
 
-test('E2: negative — sources + non-running context ⇒ Tap to enable audio banner', async ({ page, request }) => {
+test('E2: #121673 kickstart — source add creates muted playing audio element', async ({ page, request }) => {
   test.setTimeout(60_000);
   await joinHostAlone(page, request, 'E2');
   await ensureRemoteAudioEnabled(page);
   await injectRemoteSource(page, 'e2-src');
   await expect.poll(() => snap(page).then((s) => s.mixedPeerIds.length), { timeout: 8_000 }).toBeGreaterThan(0);
 
-  // Drive the live context into 'suspended' to model the autoplay-blocked reality;
-  // the reactive playability effect surfaces the banner honestly (BUG-1 fix).
-  await suspendContext(page);
-
-  await expect.poll(() => snap(page).then((s) => s.contextState), { timeout: 8_000 }).not.toBe('running');
-  expect((await snap(page)).mixedPeerIds.length).toBeGreaterThan(0);
-
-  await expect(page.locator('.audio-unblock-notice')).toBeVisible();
-  await expect(page.locator('.audio-unblock-notice')).toContainText('Tap to enable audio');
-  await expect(page.getByRole('button', { name: 'Enable audio' })).toBeVisible();
-  await shot(page, 'E2-negative-banner-shown');
+  await expectKickstartPlaying(page, 'e2-src');
+  const kickstart = page.locator('audio[data-remote-audio-kickstart="e2-src"]');
+  await expect(kickstart).toHaveCount(1);
+  const state = await kickstart.evaluate((audio) => {
+    const el = audio as HTMLAudioElement;
+    return { muted: el.muted, paused: el.paused, hasStream: el.srcObject instanceof MediaStream };
+  });
+  expect(state).toEqual({ muted: true, paused: false, hasStream: true });
+  await shot(page, 'E2-kickstart-muted-playing');
 });
 
-test('E3: recovery — Enable audio gesture resumes context, clears banner', async ({ page, request }) => {
+test('E3: recovery — any in-call interaction resumes context, clears banner', async ({ page, request }) => {
   test.setTimeout(60_000);
   await joinHostAlone(page, request, 'E3');
   await ensureRemoteAudioEnabled(page);
   await injectRemoteSource(page, 'e3-src');
   await expect.poll(() => snap(page).then((s) => s.mixedPeerIds.length), { timeout: 8_000 }).toBeGreaterThan(0);
-  await suspendContext(page);
-  await expect(page.locator('.audio-unblock-notice')).toBeVisible({ timeout: 8_000 });
+  await page.evaluate(async () => {
+    const d = (window as unknown as { __meetDebug?: B1MeetDebug }).__meetDebug;
+    await d?.remoteAudioMixer?.__suspendForTest?.();
+  });
 
-  // Genuine gesture recovery — resume + mixer play() re-attempted (R1.3).
-  await page.getByRole('button', { name: 'Enable audio' }).click();
+  // Genuine in-call interaction — not the banner button — resumes + replays mixer/kickstart.
+  await page.keyboard.press('Shift');
 
   await expect.poll(() => snap(page).then((s) => s.contextState), { timeout: 8_000 }).toBe('running');
   await expect.poll(() => snap(page).then((s) => s.outputPaused), { timeout: 8_000 }).toBe(false);
@@ -113,25 +118,20 @@ test('E3: recovery — Enable audio gesture resumes context, clears banner', asy
   await shot(page, 'E3-recovery-running-banner-cleared');
 });
 
-test('E4: source-add re-unlock — source added while context not running ⇒ banner, then gesture resumes', async ({ page, request }) => {
+test('E4: source-add re-unlock — late source while context not running recovers automatically', async ({ page, request }) => {
   test.setTimeout(60_000);
   await joinHostAlone(page, request, 'E4');
 
   // Host settled in-call with NO remote source yet.
   expect((await snap(page)).mixedPeerIds.length).toBe(0);
 
-  // Drive context non-running, THEN add a source — the BUG-2 path where the
-  // non-gesture setTimeout(0) re-unlock could not resume. The reactive playability
-  // effect must surface the banner.
+  // Drive context non-running, THEN add a source — the previously missed host-alone
+  // late-join path. Source-add recovery should resume without requiring the banner.
   await ensureRemoteAudioEnabled(page); // resume so we have a running context to suspend
   await suspendContext(page);
   await injectRemoteSource(page, 'e4-src');
   await expect.poll(() => snap(page).then((s) => s.mixedPeerIds.length), { timeout: 8_000 }).toBeGreaterThan(0);
-  await expect.poll(() => snap(page).then((s) => s.contextState), { timeout: 8_000 }).not.toBe('running');
-  await expect(page.locator('.audio-unblock-notice')).toBeVisible({ timeout: 8_000 });
-
-  // User reacts to the banner with a genuine gesture ⇒ resume re-attempted.
-  await page.getByRole('button', { name: 'Enable audio' }).click();
+  await expectKickstartPlaying(page, 'e4-src');
   await expect.poll(() => snap(page).then((s) => s.contextState), { timeout: 8_000 }).toBe('running');
   await expect.poll(() => snap(page).then((s) => s.outputPaused), { timeout: 8_000 }).toBe(false);
   await expect.poll(() => page.locator('.audio-unblock-notice').count(), { timeout: 8_000 }).toBe(0);
@@ -258,6 +258,21 @@ async function injectRemoteSource(page: Page, id: string): Promise<void> {
     d?.remoteAudioMixer?.__injectRemoteSourceForTest?.(sourceId, dest.stream);
   }, id);
   await page.waitForTimeout(300);
+}
+
+async function expectKickstartPlaying(page: Page, id: string): Promise<void> {
+  const kickstart = page.locator(`audio[data-remote-audio-kickstart="${id}"]`);
+  await expect(kickstart).toHaveCount(1);
+  await expect
+    .poll(
+      () =>
+        kickstart.evaluate((audio) => {
+          const el = audio as HTMLAudioElement;
+          return el.muted && !el.paused && el.srcObject instanceof MediaStream;
+        }),
+      { timeout: 8_000 },
+    )
+    .toBe(true);
 }
 
 async function suspendContext(page: Page): Promise<void> {

@@ -6,6 +6,7 @@ type RemoteSource = {
   stream: MediaStream;
   track: MediaStreamTrack;
   source: MediaStreamAudioSourceNode;
+  kickstartElement: HTMLAudioElement;
   onEnded: () => void;
 };
 
@@ -18,6 +19,8 @@ export type RemoteAudioDebugSnapshot = {
   volume: number;
   mixedPeerIds: string[];
   mixedTrackIds: string[];
+  kickstartCount: number;
+  kickstartPlayingCount: number;
 };
 
 const VOLUME_STORAGE_KEY = 'meet-poc:volume:value';
@@ -45,6 +48,8 @@ export class RemoteAudioService {
   private gain: GainNode | null = null;
   private limiter: DynamicsCompressorNode | null = null;
   private destination: MediaStreamAudioDestinationNode | null = null;
+  private keepaliveOscillator: OscillatorNode | null = null;
+  private keepaliveGain: GainNode | null = null;
   private outputElement: HTMLAudioElement | null = null;
   private readonly sources = new Map<string, RemoteSource>();
 
@@ -166,6 +171,7 @@ export class RemoteAudioService {
         }
       }
     }
+    await this.playKickstartElements(deviceId);
 
     // BUG-1 fix: the playability verdict now routes through the pure decision fn,
     // which treats a non-'running' context (with sources) as NOT playable — instead
@@ -184,6 +190,34 @@ export class RemoteAudioService {
   async applyOutputDevice(deviceId: string): Promise<void> {
     if (!this.mixerEnabled()) return;
     await this.applySinkId(this.outputElement, deviceId);
+    await Promise.all([...this.sources.values()].map((source) => this.applySinkId(source.kickstartElement, deviceId)));
+  }
+
+  async recoverPlayback(deviceId?: string): Promise<boolean> {
+    if (!this.mixerEnabled()) return this.allSinksPlaying();
+    this.ensureGraph();
+    try {
+      await this.resumeContext();
+    } catch (err) {
+      console.debug('[media] remote audio context recovery resume rejected', err);
+    }
+    await this.playKickstartElements(deviceId);
+    const output = this.outputElement;
+    if (output) {
+      await this.applySinkId(output, deviceId);
+      this.bindOutputElement();
+      try {
+        await output.play();
+      } catch (err) {
+        console.debug('[media] remote audio mixer recovery play rejected', err);
+      }
+    }
+    this.contextState.set(this.context?.state ?? 'none');
+    return this.allSinksPlaying();
+  }
+
+  hasSources(): boolean {
+    return this.sources.size > 0;
   }
 
   allSinksPlaying(): boolean {
@@ -239,6 +273,8 @@ export class RemoteAudioService {
       volume: this.volume(),
       mixedPeerIds: [...this.sources.keys()],
       mixedTrackIds: [...this.sources.values()].map((source) => source.track.id),
+      kickstartCount: this.sources.size,
+      kickstartPlayingCount: [...this.sources.values()].filter((source) => !source.kickstartElement.paused).length,
     };
   }
 
@@ -248,6 +284,7 @@ export class RemoteAudioService {
     this.gain?.disconnect();
     this.limiter?.disconnect();
     this.destination?.disconnect();
+    this.stopKeepalive();
     if (this.context && this.context.state !== 'closed') void this.context.close().catch(() => undefined);
     this.context = null;
     this.gain = null;
@@ -262,10 +299,12 @@ export class RemoteAudioService {
       const context = this.ensureGraph();
       const source = context.createMediaStreamSource(new MediaStream([track]));
       source.connect(this.gain!);
+      const kickstartElement = this.createKickstartElement(id, stream);
       const onEnded = () => this.removeSource(id);
       track.addEventListener('ended', onEnded, { once: true });
-      this.sources.set(id, { stream, track, source, onEnded });
+      this.sources.set(id, { stream, track, source, kickstartElement, onEnded });
       this.sourcesVersion.update((v) => v + 1);
+      void this.recoverPlayback().catch((err) => console.debug('[media] remote audio source-add recovery failed', err));
     } catch (err) {
       console.debug('[media] remote audio mixer source failed', err);
     }
@@ -280,6 +319,7 @@ export class RemoteAudioService {
     } catch {
       // best effort
     }
+    this.destroyKickstartElement(current.kickstartElement);
     this.sources.delete(id);
     this.sourcesVersion.update((v) => v + 1);
   }
@@ -315,6 +355,7 @@ export class RemoteAudioService {
       this.gain.connect(this.limiter);
       this.limiter.connect(this.destination);
     }
+    this.ensureKeepalive();
     return this.context;
   }
 
@@ -330,6 +371,78 @@ export class RemoteAudioService {
     if (!this.context || this.context.state === 'closed') return;
     if (this.context.state === 'suspended') await this.context.resume();
     this.contextState.set(this.context.state);
+  }
+
+  private createKickstartElement(id: string, stream: MediaStream): HTMLAudioElement {
+    const audio = document.createElement('audio');
+    audio.dataset['remoteAudioKickstart'] = id;
+    audio.autoplay = true;
+    audio.setAttribute('playsinline', '');
+    audio.muted = true;
+    audio.srcObject = stream;
+    audio.style.display = 'none';
+    audio.setAttribute('aria-hidden', 'true');
+    document.body.append(audio);
+    void audio.play().catch((err) => {
+      console.debug('[media] remote audio kickstart play rejected', err);
+    });
+    return audio;
+  }
+
+  private destroyKickstartElement(audio: HTMLAudioElement): void {
+    try {
+      audio.pause();
+    } catch {
+      // best effort
+    }
+    audio.srcObject = null;
+    audio.remove();
+  }
+
+  private async playKickstartElements(deviceId?: string): Promise<void> {
+    await Promise.all(
+      [...this.sources.values()].map(async ({ stream, kickstartElement }) => {
+        if (kickstartElement.srcObject !== stream) kickstartElement.srcObject = stream;
+        kickstartElement.muted = true;
+        await this.applySinkId(kickstartElement, deviceId);
+        try {
+          await kickstartElement.play();
+        } catch (err) {
+          console.debug('[media] remote audio kickstart still blocked', err);
+        }
+      }),
+    );
+  }
+
+  private ensureKeepalive(): void {
+    if (!this.context || !this.destination || this.keepaliveOscillator) return;
+    this.keepaliveGain = this.context.createGain();
+    this.keepaliveGain.gain.value = 0;
+    this.keepaliveOscillator = this.context.createOscillator();
+    this.keepaliveOscillator.frequency.value = 20;
+    this.keepaliveOscillator.connect(this.keepaliveGain);
+    this.keepaliveGain.connect(this.destination);
+    try {
+      this.keepaliveOscillator.start();
+    } catch {
+      // best effort
+    }
+  }
+
+  private stopKeepalive(): void {
+    try {
+      this.keepaliveOscillator?.stop();
+    } catch {
+      // best effort
+    }
+    try {
+      this.keepaliveOscillator?.disconnect();
+      this.keepaliveGain?.disconnect();
+    } catch {
+      // best effort
+    }
+    this.keepaliveOscillator = null;
+    this.keepaliveGain = null;
   }
 
   private async applySinkId(element: HTMLMediaElement | null, deviceId?: string): Promise<void> {

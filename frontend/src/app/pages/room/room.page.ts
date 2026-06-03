@@ -60,6 +60,7 @@ const CAPTURE_ENERGY_GATE_RESAMPLES = 3;
 // logger is too coarse to fill a sustained window). 6 samples ≈ a ~5-6s window.
 const MIC_SILENCE_WATCHDOG_POLL_MS = 1_000;
 const MIC_SILENCE_WATCHDOG_WINDOW = 6;
+const REMOTE_AUDIO_KEEPALIVE_MS = 15_000;
 // B5 — lobby self-test poller (R8): mirrors the in-call watchdog ~1s cadence on a
 // SEPARATE lobbySelfTestFlag, reading the SAME classifyMicCapture verdict off the
 // lobby capture window so a mic that publishes silence cannot show a false pass.
@@ -427,8 +428,10 @@ export class RoomPage implements OnDestroy {
   private deviceChangeListenerInstalled = false;
   private audioRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private videoRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private remoteAudioKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private audioRecoveryInFlight = false;
   private videoRecoveryInFlight = false;
+  private remoteAudioInteractionRecoveryInstalled = false;
   private lastSfuVideoTrack: MediaStreamTrack | null = null;
   // B2a one-shot guard: the post-publish capture-energy gate runs at most once
   // per call. Reset in cleanupCall() so a fresh join re-arms it.
@@ -587,6 +590,25 @@ export class RoomPage implements OnDestroy {
       if (!this.remoteAudioMixerEnabled() || !hasSources) return;
       const playing = contextState === 'running' && outputPlaying;
       this.remoteAudioBlocked.set(!playing);
+    });
+    effect(() => {
+      const state = this.state();
+      const contextState = this.remoteAudio.contextState();
+      this.remoteAudio.sourcesVersion();
+      const hasSources = this.remoteAudio.hasSources();
+      if (state !== 'in-call') {
+        this.stopRemoteAudioKeepalive();
+        this.uninstallRemoteAudioInteractionRecovery();
+        return;
+      }
+      this.startRemoteAudioKeepalive();
+      if (contextState !== 'running') this.installRemoteAudioInteractionRecovery();
+      else this.uninstallRemoteAudioInteractionRecovery();
+      if (contextState !== 'running' || hasSources) {
+        window.setTimeout(() => {
+          void this.recoverRemoteAudio('effect').catch((err) => console.debug('[media] remote audio effect recovery failed', err));
+        }, 0);
+      }
     });
     effect(() => {
       void this.syncShareCameraCut(this.anyScreenShareActive(), this.media.screenOn(), this.shareCameraManualOverride());
@@ -2101,6 +2123,8 @@ export class RoomPage implements OnDestroy {
     this.currentFacingMode.set('user');
     this.activeSpeaker.reset();
     this.remoteAudio.reset();
+    this.stopRemoteAudioKeepalive();
+    this.uninstallRemoteAudioInteractionRecovery();
     this.stopClock();
     this.uninstallMobileVisibilityPause();
   }
@@ -2228,16 +2252,65 @@ export class RoomPage implements OnDestroy {
     return allPlayable;
   }
 
+  private async recoverRemoteAudio(reason: 'effect' | 'interaction' | 'visibility' | 'keepalive'): Promise<boolean> {
+    const allPlayable = await this.remoteAudio.recoverPlayback(this.selectedAudioOutputId() || undefined);
+    if (this.state() === 'in-call') this.remoteAudioBlocked.set(!allPlayable && this.remoteAudio.hasSources());
+    if (this.remoteAudio.contextState() !== 'running') this.installRemoteAudioInteractionRecovery();
+    if (reason !== 'keepalive') console.debug('[media] remote audio recovery attempted', reason, { allPlayable });
+    return allPlayable;
+  }
+
+  private startRemoteAudioKeepalive(): void {
+    if (this.remoteAudioKeepaliveTimer) return;
+    this.remoteAudioKeepaliveTimer = window.setInterval(() => {
+      if (this.state() !== 'in-call') {
+        this.stopRemoteAudioKeepalive();
+        return;
+      }
+      void this.recoverRemoteAudio('keepalive').catch((err) => console.debug('[media] remote audio keepalive failed', err));
+    }, REMOTE_AUDIO_KEEPALIVE_MS);
+  }
+
+  private stopRemoteAudioKeepalive(): void {
+    if (!this.remoteAudioKeepaliveTimer) return;
+    window.clearInterval(this.remoteAudioKeepaliveTimer);
+    this.remoteAudioKeepaliveTimer = null;
+  }
+
+  private installRemoteAudioInteractionRecovery(): void {
+    if (this.remoteAudioInteractionRecoveryInstalled) return;
+    window.addEventListener('pointerdown', this.handleRemoteAudioInteractionRecovery, { capture: true });
+    window.addEventListener('click', this.handleRemoteAudioInteractionRecovery, { capture: true });
+    window.addEventListener('keydown', this.handleRemoteAudioInteractionRecovery, { capture: true });
+    this.remoteAudioInteractionRecoveryInstalled = true;
+  }
+
+  private uninstallRemoteAudioInteractionRecovery(): void {
+    if (!this.remoteAudioInteractionRecoveryInstalled) return;
+    window.removeEventListener('pointerdown', this.handleRemoteAudioInteractionRecovery, { capture: true });
+    window.removeEventListener('click', this.handleRemoteAudioInteractionRecovery, { capture: true });
+    window.removeEventListener('keydown', this.handleRemoteAudioInteractionRecovery, { capture: true });
+    this.remoteAudioInteractionRecoveryInstalled = false;
+  }
+
+  private readonly handleRemoteAudioInteractionRecovery = (): void => {
+    this.uninstallRemoteAudioInteractionRecovery();
+    if (this.state() !== 'in-call') return;
+    void this.recoverRemoteAudio('interaction').catch((err) => console.debug('[media] remote audio interaction recovery failed', err));
+  };
+
   private installPageLifecycleCleanup(): void {
     window.addEventListener('pagehide', this.handlePageLifecycleLeave);
     window.addEventListener('beforeunload', this.handlePageLifecycleLeave);
     document.addEventListener('visibilitychange', this.handleLobbyVisibilityRelease);
+    document.addEventListener('visibilitychange', this.handleRemoteAudioVisibilityRecovery);
   }
 
   private uninstallPageLifecycleCleanup(): void {
     window.removeEventListener('pagehide', this.handlePageLifecycleLeave);
     window.removeEventListener('beforeunload', this.handlePageLifecycleLeave);
     document.removeEventListener('visibilitychange', this.handleLobbyVisibilityRelease);
+    document.removeEventListener('visibilitychange', this.handleRemoteAudioVisibilityRecovery);
   }
 
   private readonly handlePageLifecycleLeave = (): void => {
@@ -2251,6 +2324,12 @@ export class RoomPage implements OnDestroy {
     if (document.visibilityState !== 'hidden') return;
     if (this.state() === 'in-call') return;
     if (this.media.localStream()) this.media.stopLocal();
+  };
+
+  private readonly handleRemoteAudioVisibilityRecovery = (): void => {
+    if (document.visibilityState !== 'visible') return;
+    if (this.state() !== 'in-call') return;
+    void this.recoverRemoteAudio('visibility').catch((err) => console.debug('[media] remote audio visibility recovery failed', err));
   };
 
   private attachLocalTrackFailureHandlers(stream: MediaStream): void {
