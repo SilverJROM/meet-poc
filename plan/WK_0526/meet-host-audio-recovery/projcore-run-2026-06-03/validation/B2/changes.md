@@ -20,7 +20,7 @@ R1 fixed known Chrome playout causes, but there was no outcome-level per-party w
 
 ## Commits
 
-- `8c8f980` [batch-2] add remote voice playout watchdog | scenarios: R2
+- `bf5a1c4` [batch-2] add remote voice playout watchdog | scenarios: R2
 
 ## Standing Rules
 
