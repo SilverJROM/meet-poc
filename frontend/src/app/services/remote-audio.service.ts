@@ -10,6 +10,20 @@ type RemoteSource = {
   onEnded: () => void;
 };
 
+export type VoiceRecoveryAction = 'none' | 'resume' | 'kickstart' | 'replay' | 'rebuild';
+export type VoiceRecoveryStep = Exclude<VoiceRecoveryAction, 'none'>;
+
+export type VoiceRecoverySample = {
+  bytes: number;
+  emitted: number;
+};
+
+export type VoiceRecoveryDecisionInput = {
+  samples: VoiceRecoverySample[];
+  attemptsThisWindow: number;
+  mutedAll: boolean;
+};
+
 export type RemoteAudioDebugSnapshot = {
   mixerEnabled: boolean;
   contextState: AudioContextState | 'none';
@@ -21,15 +35,40 @@ export type RemoteAudioDebugSnapshot = {
   mixedTrackIds: string[];
   kickstartCount: number;
   kickstartPlayingCount: number;
+  voiceRecoveryCounters: Record<VoiceRecoveryStep, number>;
 };
 
 const VOLUME_STORAGE_KEY = 'meet-poc:volume:value';
 const DEFAULT_VOLUME = 1;
 const MAX_VOLUME = 1.3;
+export const VOICE_RECOVERY_SAMPLE_WINDOW = 4;
+export const VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW = 4;
+export const VOICE_RECOVERY_MIN_BYTES_DELTA = 0;
+export const VOICE_RECOVERY_MAX_EMITTED_DELTA = 0;
 
 // B2 — brick-wall limiter taming runaway same-room feedback peaks. dB / dB / :1 / s / s.
 // NO makeup gain so mute-all (gain=0) stays silent (0 in ⇒ 0 out through the compressor).
 export const FEEDBACK_LIMITER_PARAMS = { threshold: -3, knee: 0, ratio: 20, attack: 0.003, release: 0.25 } as const;
+
+export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRecoveryAction {
+  if (input.mutedAll) return 'none';
+  if (input.attemptsThisWindow >= VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW) return 'none';
+  if (input.samples.length < VOICE_RECOVERY_SAMPLE_WINDOW) return 'none';
+
+  const first = input.samples[0];
+  const last = input.samples[input.samples.length - 1];
+  if (!sampleUsable(first) || !sampleUsable(last)) return 'none';
+
+  const bytesDelta = last.bytes - first.bytes;
+  const emittedDelta = last.emitted - first.emitted;
+  if (bytesDelta <= VOICE_RECOVERY_MIN_BYTES_DELTA) return 'none';
+  if (emittedDelta > VOICE_RECOVERY_MAX_EMITTED_DELTA) return 'none';
+
+  if (input.attemptsThisWindow === 0) return 'resume';
+  if (input.attemptsThisWindow === 1) return 'kickstart';
+  if (input.attemptsThisWindow === 2) return 'replay';
+  return 'rebuild';
+}
 
 @Injectable({ providedIn: 'root' })
 export class RemoteAudioService {
@@ -52,6 +91,12 @@ export class RemoteAudioService {
   private keepaliveGain: GainNode | null = null;
   private outputElement: HTMLAudioElement | null = null;
   private readonly sources = new Map<string, RemoteSource>();
+  private readonly voiceRecoveryCounters: Record<VoiceRecoveryStep, number> = {
+    resume: 0,
+    kickstart: 0,
+    replay: 0,
+    rebuild: 0,
+  };
 
   constructor() {
     this.setVolume(readStoredVolume());
@@ -216,6 +261,36 @@ export class RemoteAudioService {
     return this.allSinksPlaying();
   }
 
+  async recoverVoicePlayout(peerId: string, step: VoiceRecoveryStep, deviceId?: string): Promise<void> {
+    if (!this.mixerEnabled()) return;
+    this.voiceRecoveryCounters[step] += 1;
+    console.debug('[media] remote voice watchdog remediation', { peerId, step, count: this.voiceRecoveryCounters[step] });
+
+    if (step === 'resume') {
+      this.ensureGraph();
+      try {
+        await this.resumeContext();
+      } catch (err) {
+        console.debug('[media] remote voice watchdog context resume rejected', err);
+      }
+      return;
+    }
+
+    if (step === 'kickstart') {
+      await this.ensureKickstartPlaying(peerId, deviceId);
+      return;
+    }
+
+    if (step === 'replay') {
+      await this.replayMixerOutput(deviceId);
+      return;
+    }
+
+    this.rebuildSource(peerId);
+    await this.ensureKickstartPlaying(peerId, deviceId);
+    await this.replayMixerOutput(deviceId);
+  }
+
   hasSources(): boolean {
     return this.sources.size > 0;
   }
@@ -275,6 +350,7 @@ export class RemoteAudioService {
       mixedTrackIds: [...this.sources.values()].map((source) => source.track.id),
       kickstartCount: this.sources.size,
       kickstartPlayingCount: [...this.sources.values()].filter((source) => !source.kickstartElement.paused).length,
+      voiceRecoveryCounters: { ...this.voiceRecoveryCounters },
     };
   }
 
@@ -292,6 +368,10 @@ export class RemoteAudioService {
     this.destination = null;
     this.mutedAll.set(false);
     this.contextState.set('none');
+    this.voiceRecoveryCounters.resume = 0;
+    this.voiceRecoveryCounters.kickstart = 0;
+    this.voiceRecoveryCounters.replay = 0;
+    this.voiceRecoveryCounters.rebuild = 0;
   }
 
   private addSource(id: string, stream: MediaStream, track: MediaStreamTrack): void {
@@ -322,6 +402,15 @@ export class RemoteAudioService {
     this.destroyKickstartElement(current.kickstartElement);
     this.sources.delete(id);
     this.sourcesVersion.update((v) => v + 1);
+  }
+
+  private rebuildSource(id: string): void {
+    const current = this.sources.get(id);
+    if (!current) return;
+    const { stream, track } = current;
+    this.removeSource(id);
+    if (track.readyState === 'ended') return;
+    this.addSource(id, stream, track);
   }
 
   private clearSources(): void {
@@ -399,6 +488,34 @@ export class RemoteAudioService {
     audio.remove();
   }
 
+  private async ensureKickstartPlaying(id: string, deviceId?: string): Promise<void> {
+    const current = this.sources.get(id);
+    if (!current) return;
+    if (!current.kickstartElement.isConnected || current.kickstartElement.srcObject !== current.stream) {
+      this.destroyKickstartElement(current.kickstartElement);
+      current.kickstartElement = this.createKickstartElement(id, current.stream);
+    }
+    current.kickstartElement.muted = true;
+    await this.applySinkId(current.kickstartElement, deviceId);
+    try {
+      await current.kickstartElement.play();
+    } catch (err) {
+      console.debug('[media] remote voice watchdog kickstart play rejected', err);
+    }
+  }
+
+  private async replayMixerOutput(deviceId?: string): Promise<void> {
+    const output = this.outputElement;
+    if (!output) return;
+    this.bindOutputElement();
+    await this.applySinkId(output, deviceId);
+    try {
+      await output.play();
+    } catch (err) {
+      console.debug('[media] remote voice watchdog mixer replay rejected', err);
+    }
+  }
+
   private async playKickstartElements(deviceId?: string): Promise<void> {
     await Promise.all(
       [...this.sources.values()].map(async ({ stream, kickstartElement }) => {
@@ -455,6 +572,10 @@ export class RemoteAudioService {
 function currentAudioTrack(stream: MediaStream | null): MediaStreamTrack | null {
   const tracks = stream?.getAudioTracks() ?? [];
   return tracks.find((track) => track.readyState !== 'ended') ?? tracks[0] ?? null;
+}
+
+function sampleUsable(sample: VoiceRecoverySample | undefined): sample is VoiceRecoverySample {
+  return !!sample && Number.isFinite(sample.bytes) && Number.isFinite(sample.emitted);
 }
 
 function readStoredVolume(): number {

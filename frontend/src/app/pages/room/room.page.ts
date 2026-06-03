@@ -18,7 +18,7 @@ import { AuthService } from '../../services/auth.service';
 import { BackgroundEffectsService } from '../../services/background-effects.service';
 import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
-import type { DiagnosticsPayload, SfuConnectionQuality, SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service';
+import type { DiagnosticsPayload, SfuConnectionQuality, SfuDiagnosticsSnapshot, SfuInboundTrackStats } from '../../services/meeting-sessions.service';
 import {
   classifyMicCapture,
   deriveOutboundAudioFields,
@@ -36,7 +36,13 @@ import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
-import { RemoteAudioService, type RemoteAudioDebugSnapshot } from '../../services/remote-audio.service';
+import {
+  decideVoiceRecovery,
+  RemoteAudioService,
+  VOICE_RECOVERY_SAMPLE_WINDOW,
+  type RemoteAudioDebugSnapshot,
+  type VoiceRecoverySample,
+} from '../../services/remote-audio.service';
 import { RoomsService } from '../../services/rooms.service';
 import { ViewportService } from '../../services/viewport.service';
 import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.service';
@@ -61,6 +67,7 @@ const CAPTURE_ENERGY_GATE_RESAMPLES = 3;
 const MIC_SILENCE_WATCHDOG_POLL_MS = 1_000;
 const MIC_SILENCE_WATCHDOG_WINDOW = 6;
 const REMOTE_AUDIO_KEEPALIVE_MS = 15_000;
+const REMOTE_VOICE_WATCHDOG_POLL_MS = 1_500;
 // B5 — lobby self-test poller (R8): mirrors the in-call watchdog ~1s cadence on a
 // SEPARATE lobbySelfTestFlag, reading the SAME classifyMicCapture verdict off the
 // lobby capture window so a mic that publishes silence cannot show a false pass.
@@ -81,6 +88,11 @@ type LobbyError =
   | { kind: 'in-use' }
   | { kind: 'video-denied-but-audio-ok' }
   | { kind: 'unknown'; message: string };
+
+type RemoteVoiceWatchdogPeerState = {
+  samples: VoiceRecoverySample[];
+  attemptsThisWindow: number;
+};
 
 // Identity fields tracked per remote peer via signaling messages.
 // Streams are merged in from sfuClient in the peers computed.
@@ -405,6 +417,9 @@ export class RoomPage implements OnDestroy {
   private waitingRoomTimer: ReturnType<typeof setInterval> | null = null;
   private diagnosticsLogTimer: ReturnType<typeof setInterval> | null = null;
   private connectionQualityTimer: ReturnType<typeof setInterval> | null = null;
+  private remoteVoiceWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private remoteVoiceWatchdogInFlight = false;
+  private readonly remoteVoiceWatchdogPeers = new Map<string, RemoteVoiceWatchdogPeerState>();
   // B2b — in-call silent-mic watchdog: its own ~1s interval + rolling window.
   private micSilenceWatchdogTimer: ReturnType<typeof setInterval> | null = null;
   private micSilenceWindow: { audioLevel: number | null; totalAudioEnergy: number | null }[] = [];
@@ -598,10 +613,12 @@ export class RoomPage implements OnDestroy {
       const hasSources = this.remoteAudio.hasSources();
       if (state !== 'in-call') {
         this.stopRemoteAudioKeepalive();
+        this.stopRemoteVoiceWatchdog();
         this.uninstallRemoteAudioInteractionRecovery();
         return;
       }
       this.startRemoteAudioKeepalive();
+      this.startRemoteVoiceWatchdog();
       if (contextState !== 'running') this.installRemoteAudioInteractionRecovery();
       else this.uninstallRemoteAudioInteractionRecovery();
       if (contextState !== 'running' || hasSources) {
@@ -2067,6 +2084,7 @@ export class RoomPage implements OnDestroy {
   private cleanupCall(sendLeaveMessage = false): void {
     if (this.state() === 'in-call') this.flushDiagnosticsLog('call-end', { useBeacon: true });
     this.stopDiagnosticsLogger();
+    this.stopRemoteVoiceWatchdog();
     this.stopMicSilenceWatchdog();
     this.stopLobbySelfTest();
     this.stopConnectionQualitySampler();
@@ -2275,6 +2293,95 @@ export class RoomPage implements OnDestroy {
     if (!this.remoteAudioKeepaliveTimer) return;
     window.clearInterval(this.remoteAudioKeepaliveTimer);
     this.remoteAudioKeepaliveTimer = null;
+  }
+
+  private startRemoteVoiceWatchdog(): void {
+    if (this.remoteVoiceWatchdogTimer || this.state() !== 'in-call') return;
+    this.remoteVoiceWatchdogTimer = window.setInterval(() => {
+      void this.pollRemoteVoiceWatchdog();
+    }, REMOTE_VOICE_WATCHDOG_POLL_MS);
+    void this.pollRemoteVoiceWatchdog();
+  }
+
+  private stopRemoteVoiceWatchdog(): void {
+    if (this.remoteVoiceWatchdogTimer) window.clearInterval(this.remoteVoiceWatchdogTimer);
+    this.remoteVoiceWatchdogTimer = null;
+    this.remoteVoiceWatchdogInFlight = false;
+    this.remoteVoiceWatchdogPeers.clear();
+  }
+
+  private async pollRemoteVoiceWatchdog(): Promise<void> {
+    if (this.state() !== 'in-call') {
+      this.stopRemoteVoiceWatchdog();
+      return;
+    }
+    if (this.remoteVoiceWatchdogInFlight) return;
+    this.remoteVoiceWatchdogInFlight = true;
+    try {
+      if (this.remoteAudio.mutedAll()) {
+        this.remoteVoiceWatchdogPeers.clear();
+        return;
+      }
+
+      const diagnostics = await this.sfuClient.collectDiagnostics();
+      const inboundAudio = (diagnostics?.inboundTracks ?? []).filter(
+        (track): track is SfuInboundTrackStats & { publisherClientId: string } =>
+          track.kind === 'audio' && !!track.publisherClientId,
+      );
+      const activePeerIds = new Set(inboundAudio.map((track) => track.publisherClientId));
+
+      for (const peerId of [...this.remoteVoiceWatchdogPeers.keys()]) {
+        if (!activePeerIds.has(peerId)) this.remoteVoiceWatchdogPeers.delete(peerId);
+      }
+
+      for (const track of inboundAudio) {
+        await this.observeRemoteVoiceTrack(track);
+      }
+    } catch (err) {
+      console.debug('[media] remote voice watchdog poll failed', err);
+    } finally {
+      this.remoteVoiceWatchdogInFlight = false;
+    }
+  }
+
+  private async observeRemoteVoiceTrack(track: SfuInboundTrackStats & { publisherClientId: string }): Promise<void> {
+    const sample = remoteVoiceSample(track);
+    if (!sample) {
+      this.remoteVoiceWatchdogPeers.delete(track.publisherClientId);
+      return;
+    }
+
+    const state = this.remoteVoiceWatchdogPeers.get(track.publisherClientId) ?? {
+      samples: [],
+      attemptsThisWindow: 0,
+    };
+    state.samples.push(sample);
+    if (state.samples.length > VOICE_RECOVERY_SAMPLE_WINDOW) state.samples.shift();
+
+    if (remoteVoiceEmittedClimbed(state.samples)) {
+      this.remoteVoiceWatchdogPeers.set(track.publisherClientId, { samples: [sample], attemptsThisWindow: 0 });
+      return;
+    }
+
+    if (state.samples.length >= VOICE_RECOVERY_SAMPLE_WINDOW && !remoteVoiceBytesClimbed(state.samples)) {
+      this.remoteVoiceWatchdogPeers.set(track.publisherClientId, { samples: [sample], attemptsThisWindow: 0 });
+      return;
+    }
+
+    const action = decideVoiceRecovery({
+      samples: state.samples,
+      attemptsThisWindow: state.attemptsThisWindow,
+      mutedAll: this.remoteAudio.mutedAll(),
+    });
+
+    if (action === 'none') {
+      this.remoteVoiceWatchdogPeers.set(track.publisherClientId, state);
+      return;
+    }
+
+    state.attemptsThisWindow += 1;
+    this.remoteVoiceWatchdogPeers.set(track.publisherClientId, { samples: [sample], attemptsThisWindow: state.attemptsThisWindow });
+    await this.remoteAudio.recoverVoicePlayout(track.publisherClientId, action, this.selectedAudioOutputId() || undefined);
   }
 
   private installRemoteAudioInteractionRecovery(): void {
@@ -3265,6 +3372,24 @@ function mediaTrackDeviceId(track: MediaStreamTrack | null | undefined): string 
 
 function canSetSinkId(): boolean {
   return typeof HTMLMediaElement !== 'undefined' && 'setSinkId' in HTMLMediaElement.prototype;
+}
+
+function remoteVoiceSample(track: SfuInboundTrackStats): VoiceRecoverySample | null {
+  const bytes = track.bytesReceived;
+  const emitted = track.jitterBufferEmittedCount;
+  if (typeof bytes !== 'number' || typeof emitted !== 'number') return null;
+  if (!Number.isFinite(bytes) || !Number.isFinite(emitted)) return null;
+  return { bytes, emitted };
+}
+
+function remoteVoiceEmittedClimbed(samples: VoiceRecoverySample[]): boolean {
+  if (samples.length < 2) return false;
+  return samples[samples.length - 1].emitted > samples[samples.length - 2].emitted;
+}
+
+function remoteVoiceBytesClimbed(samples: VoiceRecoverySample[]): boolean {
+  if (samples.length < 2) return false;
+  return samples[samples.length - 1].bytes > samples[0].bytes;
 }
 
 // B1: the __meetDebug.remoteAudioMixer object spreads a live snapshot and also
