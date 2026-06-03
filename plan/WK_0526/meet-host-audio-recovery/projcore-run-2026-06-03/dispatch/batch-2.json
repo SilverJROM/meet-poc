@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "batch_id": "batch-2",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-host-audio-recovery/projcore-run-2026-06-03",
+  "session": "meet-codex",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-host-audio-recovery/projcore-run-2026-06-03/prompts/batch-2.md",
+  "dispatched_at": "2026-06-03T00:32:50Z",
+  "estimate_min": 35,
+  "bucket": "MEDIUM",
+  "wakeup_delay_sec": 3600,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-host-audio-recovery/projcore-run-2026-06-03/dispatch/batch-2.wakeup-required",
+  "watcher_pid": 3274703,
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-host-audio-recovery/projcore-run-2026-06-03/dispatch/watcher-batch-2.log",
+  "dispatch_marker": "DISPATCH-batch-2-3274260-1780446770",
+  "wakeup_acked_at": "2026-06-03T00:33:09Z",
+  "wakeup_acked_by": "projcore"
+}
