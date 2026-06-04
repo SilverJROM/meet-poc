@@ -6,6 +6,13 @@ export type IceServerConfig = {
   credential?: string;
 };
 
+export type IceConfigHealth = {
+  turnConfigured: boolean;
+  hasTurnServers: boolean;
+  configuredSources: string[];
+  acceptedCloudflareTokenEnv: string[];
+};
+
 const DEFAULT_STUN_SERVERS: IceServerConfig[] = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
 const CLOUDFLARE_TURN_TTL_SECONDS = 86_400;
 const CLOUDFLARE_CACHE_SKEW_MS = 5 * 60 * 1000;
@@ -26,6 +33,10 @@ export function iceConfigRouter(): Router {
     res.json({ iceServers });
   });
 
+  router.get('/ice-config/health', async (_req, res) => {
+    res.json(await getIceConfigHealthFromEnv());
+  });
+
   return router;
 }
 
@@ -38,6 +49,17 @@ export async function getIceServersFromEnv(env: NodeJS.ProcessEnv = process.env)
   if (cloudflareTurn.length > 0) servers.push(...cloudflareTurn);
 
   return servers;
+}
+
+export async function getIceConfigHealthFromEnv(env: NodeJS.ProcessEnv = process.env): Promise<IceConfigHealth> {
+  const iceServers = await getIceServersFromEnv(env);
+  const configuredSources = readConfiguredTurnSources(env);
+  return {
+    turnConfigured: configuredSources.length > 0,
+    hasTurnServers: iceServers.some(hasTurnServer),
+    configuredSources,
+    acceptedCloudflareTokenEnv: ['TURN_API_Key', 'TURN_API_KEY', 'MEET_CLOUDFLARE_TURN_TOKEN', 'CLOUDFLARE_TURN_TOKEN'],
+  };
 }
 
 function readStaticTurn(env: NodeJS.ProcessEnv): IceServerConfig | null {
@@ -56,10 +78,10 @@ function readStaticTurn(env: NodeJS.ProcessEnv): IceServerConfig | null {
 
 async function readCloudflareTurn(env: NodeJS.ProcessEnv): Promise<IceServerConfig[]> {
   const keyId = firstPresent(env.TURN_ID, env.MEET_CLOUDFLARE_TURN_SERVICE_ID, env.CLOUDFLARE_TURN_SERVICE_ID);
-  const token = firstPresent(env.TURN_API_Key, env.MEET_CLOUDFLARE_TURN_TOKEN, env.CLOUDFLARE_TURN_TOKEN);
+  const token = firstPresent(env.TURN_API_Key, env.TURN_API_KEY, env.MEET_CLOUDFLARE_TURN_TOKEN, env.CLOUDFLARE_TURN_TOKEN);
   if (!keyId && !token) return [];
   if (!keyId || !token) {
-    console.warn('[ice-config] ignoring incomplete Cloudflare TURN env; require TURN_ID and TURN_API_Key');
+    console.warn('[ice-config] ignoring incomplete Cloudflare TURN env; require TURN_ID and TURN_API_Key or TURN_API_KEY');
     return [];
   }
 
@@ -138,6 +160,24 @@ function parseUrlList(raw: string | undefined): string[] {
 
 function firstPresent(...values: Array<string | undefined>): string | undefined {
   return values.find((value) => value && value.trim())?.trim();
+}
+
+function readConfiguredTurnSources(env: NodeJS.ProcessEnv): string[] {
+  const sources: string[] = [];
+  const staticUrls = parseUrlList(env.MEET_TURN_URLS || env.TURN_URLS);
+  const staticUsername = firstPresent(env.MEET_TURN_USERNAME, env.TURN_USERNAME);
+  const staticCredential = firstPresent(env.MEET_TURN_CREDENTIAL, env.TURN_CREDENTIAL);
+  if (staticUrls.length > 0 && staticUsername && staticCredential) sources.push('static');
+
+  const cloudflareId = firstPresent(env.TURN_ID, env.MEET_CLOUDFLARE_TURN_SERVICE_ID, env.CLOUDFLARE_TURN_SERVICE_ID);
+  const cloudflareToken = firstPresent(env.TURN_API_Key, env.TURN_API_KEY, env.MEET_CLOUDFLARE_TURN_TOKEN, env.CLOUDFLARE_TURN_TOKEN);
+  if (cloudflareId && cloudflareToken) sources.push('cloudflare');
+  return sources;
+}
+
+function hasTurnServer(server: IceServerConfig): boolean {
+  const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
+  return urls.some((url) => url.toLowerCase().startsWith('turn:') || url.toLowerCase().startsWith('turns:'));
 }
 
 function withTurnTls443Fallback(urls: string[]): string[] {

@@ -371,6 +371,12 @@ h1 {
   color: #5f4200;
 }
 
+.lobby-warning-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .lobby-error h2 {
   margin: 0;
   font-size: 16px;

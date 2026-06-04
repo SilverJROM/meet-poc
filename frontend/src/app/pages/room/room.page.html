@@ -495,6 +495,12 @@
           @if (setupWarning()) {
             <div class="lobby-warning" role="status">
               <p>{{ setupWarning() }}</p>
+              @if (relayUnavailableWarning()) {
+                <div class="lobby-warning-actions">
+                  <button type="button" class="secondary-btn" [disabled]="relayConfigRetrying()" (click)="retryRelayConfigForJoin()">Retry</button>
+                  <button type="button" class="secondary-btn" [disabled]="relayConfigRetrying()" (click)="joinAnywayWithoutRelay()">Join anyway</button>
+                </div>
+              }
             </div>
           }
           @if (joinPrereqPopout(); as prereqMessage) {

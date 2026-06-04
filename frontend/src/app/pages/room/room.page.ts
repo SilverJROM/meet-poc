@@ -34,7 +34,7 @@ import { isGenericAudioDeviceId, resolveSelectedAudioId } from '../../services/d
 import { resolvedAcquiredDeviceId } from '../../services/media-acquisition';
 import { localAudioRecoveryTerminalMessage } from '../../services/local-media-recovery';
 import { permissionBlockHint } from '../../services/media-toggle';
-import { IceConfigService } from '../../services/ice-config.service';
+import { IceConfigService, type TurnHealthResult } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
@@ -234,6 +234,8 @@ export class RoomPage implements OnDestroy {
   readonly remoteAudioBlocked = signal(false);
   readonly equalSizeTiles = signal(readEqualSizeTiles());
   readonly setupWarning = signal<string | null>(null);
+  readonly relayUnavailableWarning = signal(false);
+  readonly relayConfigRetrying = signal(false);
   readonly joinPrereqPopout = signal<string | null>(null);
   readonly myId = signal<string | null>(null);
   readonly myParticipantId = signal<string | null>(null);
@@ -469,6 +471,9 @@ export class RoomPage implements OnDestroy {
   private remoteAudioInteractionRecoveryInstalled = false;
   private lastSfuVideoTrack: MediaStreamTrack | null = null;
   private initialPublishRunId = 0;
+  private joinAnywayWithStunFallback = false;
+  private readonly forceRelayDiagnostic = signal<TurnHealthResult | null>(null);
+  private readonly forceRelayDiagnosticRequested = signal(false);
   // B2a one-shot guard: the post-publish capture-energy gate runs at most once
   // per call. Reset in cleanupCall() so a fresh join re-arms it.
   private initialCaptureEnergyChecked = false;
@@ -547,6 +552,7 @@ export class RoomPage implements OnDestroy {
         myParticipantId: this.myParticipantId(),
         roomState: this.state(),
         diagnosticsLoggingEnabled: this.diagnosticsLoggingEnabled(),
+        forceRelayDiagnostic: this.forceRelayDiagnostic(),
         waitingRemainingSeconds: this.waitRemainingSeconds(),
         localAudioTrackId: this.media.localStream()?.getAudioTracks()[0]?.id,
         localVideoTrackId: this.media.localStream()?.getVideoTracks()[0]?.id,
@@ -575,6 +581,7 @@ export class RoomPage implements OnDestroy {
         isMobile: () => this.viewport.isMobile(),
         isIOS: () => this.platform.isIOS(),
         isAndroid: () => this.platform.isAndroid(),
+        forceRelayDiagnostics: () => this.runForceRelayDiagnostics(),
       };
       if (window.location.hostname === 'localhost') {
         debug.injectActiveSpeakerStream = (id: string, stream: MediaStream) => this.activeSpeaker.injectDebugStream(id, stream);
@@ -841,7 +848,11 @@ export class RoomPage implements OnDestroy {
       return;
     }
     this.applyLobbyMicPreference();
-    await this.checkIceConfigForJoin();
+    if (!(await this.checkIceConfigForJoin())) {
+      this.state.set('lobby');
+      this.status.set('');
+      return;
+    }
     this.ws.connect(
       this.roomId,
       (msg) => void this.handleMessage(msg),
@@ -1411,6 +1422,33 @@ export class RoomPage implements OnDestroy {
       return;
     }
     await this.publishInitialSfuWithRetry(participantId, sessionId);
+  }
+
+  async retryRelayConfigForJoin(): Promise<void> {
+    if (this.relayConfigRetrying() || this.state() === 'connecting') return;
+    this.relayConfigRetrying.set(true);
+    this.joinAnywayWithStunFallback = false;
+    this.setupWarning.set('Retrying relay configuration...');
+    try {
+      await this.iceConfig.forceRefresh();
+      if (this.iceConfig.relayUnavailable()) {
+        this.showRelayUnavailableWarning();
+        return;
+      }
+      this.relayUnavailableWarning.set(false);
+      this.setupWarning.set(null);
+      await this.join();
+    } finally {
+      this.relayConfigRetrying.set(false);
+    }
+  }
+
+  async joinAnywayWithoutRelay(): Promise<void> {
+    if (this.state() === 'connecting') return;
+    this.joinAnywayWithStunFallback = true;
+    this.relayUnavailableWarning.set(false);
+    this.setupWarning.set(null);
+    await this.join();
   }
 
   async rejoinAfterInitialPublishFailure(): Promise<void> {
@@ -2057,6 +2095,7 @@ export class RoomPage implements OnDestroy {
     this.deviceDialogError.set(null);
     this.permissionError.set(null);
     this.setupWarning.set(null);
+    this.relayUnavailableWarning.set(false);
     this.error.set(null);
     try {
       const requestedAudioDeviceId = this.selectedAudioId();
@@ -2172,14 +2211,18 @@ export class RoomPage implements OnDestroy {
     }
   }
 
-  private async checkIceConfigForJoin(): Promise<void> {
+  private async checkIceConfigForJoin(): Promise<boolean> {
     await this.iceConfig.getIceServers();
     const fetchError = this.iceConfig.lastFetchError();
-    this.setupWarning.set(
-      fetchError
-        ? 'Connection relay configuration could not be loaded. The call will use fallback STUN servers; if joining fails, retry or contact support.'
-        : null,
-    );
+    const allowFallback = this.joinAnywayWithStunFallback;
+    this.joinAnywayWithStunFallback = false;
+    if (fetchError && !allowFallback) {
+      this.showRelayUnavailableWarning();
+      return false;
+    }
+    this.relayUnavailableWarning.set(false);
+    this.setupWarning.set(fetchError ? 'Joining with fallback STUN only. You may not connect on restrictive networks.' : null);
+    return true;
   }
 
   private async handleLobbyMediaError(err: unknown, videoRequested: boolean): Promise<boolean> {
@@ -2348,6 +2391,9 @@ export class RoomPage implements OnDestroy {
     this.shareCameraPreShareOn = null;
     this.shareCameraManualOverride.set(false);
     this.setupWarning.set(null);
+    this.relayUnavailableWarning.set(false);
+    this.relayConfigRetrying.set(false);
+    this.joinAnywayWithStunFallback = false;
     this.nameError.set(null);
     this.hostRecording.set(false);
     this.recordingStartedAt.set(null);
@@ -3292,7 +3338,10 @@ export class RoomPage implements OnDestroy {
       wsStatus: this.ws.status(),
       wsReconnectAttempts: this.ws.reconnectAttempts(),
       wsHealth: this.ws.diagnosticsSnapshot(),
-      forceRelay: false,
+      forceRelay: this.forceRelayDiagnosticRequested(),
+      requestedIceTransportPolicy: this.forceRelayDiagnosticRequested() ? 'relay' : (sfuDiagnostics?.requestedIceTransportPolicy ?? 'all'),
+      selectedCandidatePairType: selectedCandidatePairType(sfuDiagnostics),
+      forceRelayDiagnostic: this.forceRelayDiagnostic(),
       manualAudioOnly: false,
       outboundAudioLevel: micFields.outboundAudioLevel,
       outboundAudioEnergy: micFields.outboundAudioEnergy,
@@ -3302,6 +3351,19 @@ export class RoomPage implements OnDestroy {
     if (sfuDiagnostics) payload.sfuDiagnostics = sfuDiagnostics;
     if (error) payload.error = error;
     return payload;
+  }
+
+  private showRelayUnavailableWarning(): void {
+    this.relayUnavailableWarning.set(true);
+    this.setupWarning.set('Relay configuration could not be loaded. Retry to get TURN relay for restrictive networks, or join anyway with fallback STUN only. You may not connect on restrictive networks.');
+  }
+
+  private async runForceRelayDiagnostics(): Promise<TurnHealthResult> {
+    this.forceRelayDiagnosticRequested.set(true);
+    const result = await this.iceConfig.checkTurnHealth();
+    this.forceRelayDiagnostic.set(result);
+    this.queueDiagnosticsLog('state-change', `force-relay diagnostic ${result.status}`);
+    return result;
   }
 
   private appendChatMessage(threadId: string, message: ChatMessage): void {
@@ -3656,6 +3718,15 @@ function remoteVoiceBytesClimbed(samples: VoiceRecoverySample[]): boolean {
   return samples[samples.length - 1].bytes > samples[0].bytes;
 }
 
+function selectedCandidatePairType(sfuDiagnostics: SfuDiagnosticsSnapshot | undefined): string | null {
+  const pair = sfuDiagnostics?.selectedCandidatePair;
+  const localType = pair?.local?.candidateType ?? null;
+  const remoteType = pair?.remote?.candidateType ?? null;
+  if (!localType && !remoteType) return null;
+  if (localType && remoteType) return `${localType}/${remoteType}`;
+  return localType ?? remoteType;
+}
+
 // B1: the __meetDebug.remoteAudioMixer object spreads a live snapshot and also
 // exposes debugSnapshot() (fresh read) + a localhost-only __suspendForTest() hook.
 type RemoteAudioMixerDebug = RemoteAudioDebugSnapshot & {
@@ -3713,6 +3784,7 @@ declare global {
       myClientId?: string | null;
       myParticipantId?: string | null;
       diagnosticsLoggingEnabled?: boolean;
+      forceRelayDiagnostic?: TurnHealthResult | null;
       roomState?: string;
       waitingRemainingSeconds?: number;
       localAudioTrackId?: string;
@@ -3740,6 +3812,7 @@ declare global {
       sfuVideoEncodings?: () => RTCRtpEncodingParameters[];
       sfuUpdateCameraLayer?: () => Promise<void>;
       sfuSubscribedTracks?: () => Record<string, import('../../services/sfu-client.service').SubscribedTrackEntry>;
+      forceRelayDiagnostics?: () => Promise<TurnHealthResult>;
       closeSignalingForTest?: () => void;
       isMobile?: () => boolean;
       isIOS?: () => boolean;

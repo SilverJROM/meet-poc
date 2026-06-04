@@ -1,16 +1,35 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
+import {
+  DEFAULT_ICE_SERVERS,
+  decideIceConfigOutcome,
+  iceServersFromConfigPayload,
+  iceServersHaveTurn,
+  ICE_CONFIG_FETCH_TIMEOUT_MS,
+  ICE_CONFIG_MAX_ATTEMPTS,
+  ICE_CONFIG_RETRY_BACKOFF_MS,
+} from './ice-config-utils';
 
-const DEFAULT_ICE_SERVERS: RTCIceServer[] = [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }];
+export {
+  DEFAULT_ICE_SERVERS,
+  decideIceConfigOutcome,
+  iceServersFromConfigPayload,
+  iceServersHaveTurn,
+  ICE_CONFIG_FETCH_TIMEOUT_MS,
+  ICE_CONFIG_MAX_ATTEMPTS,
+  ICE_CONFIG_RETRY_BACKOFF_MS,
+} from './ice-config-utils';
+
 const ICE_CONFIG_CACHE_TTL_MS = 12 * 60 * 1000;
-const ICE_CONFIG_FETCH_TIMEOUT_MS = 5000;
 const TURN_HEALTH_TIMEOUT_MS = 5000;
 
 export type TurnHealthResult = {
   status: 'reachable' | 'unavailable';
   checkedAt: number;
   elapsedMs: number;
+  iceTransportPolicy: RTCIceTransportPolicy;
+  candidateType: string | null;
   transport: string | null;
   error: string | null;
 };
@@ -21,6 +40,7 @@ export class IceConfigService {
   private cached: { iceServers: RTCIceServer[]; expiresAtMs: number } | null = null;
   private pending: Promise<RTCIceServer[]> | null = null;
   readonly lastFetchError = signal<string | null>(null);
+  readonly relayUnavailable = signal(false);
   readonly lastTurnHealth = signal<TurnHealthResult | null>(null);
   readonly turnHealthInFlight = signal(false);
 
@@ -49,7 +69,7 @@ export class IceConfigService {
 
     try {
       const iceServers = await this.forceRefresh();
-      if (!iceServers.some(hasTurnUrl)) {
+      if (!iceServersHaveTurn(iceServers)) {
         return this.setTurnHealth(this.unavailableTurnHealth(startedAt, Date.now(), 'ICE config does not include TURN servers.', null));
       }
       if (typeof RTCPeerConnection === 'undefined') {
@@ -83,6 +103,8 @@ export class IceConfigService {
               status: 'reachable',
               checkedAt: Date.now(),
               elapsedMs: Date.now() - startedAt,
+              iceTransportPolicy: 'relay',
+              candidateType: 'relay',
               transport: candidateProtocolFromCandidateLine(candidate.candidate),
               error: null,
             });
@@ -121,27 +143,57 @@ export class IceConfigService {
   }
 
   private async fetchIceServers(): Promise<RTCIceServer[]> {
-    try {
-      const config = await withTimeout(
-        firstValueFrom(this.http.get<{ iceServers?: RTCIceServer[] }>('/api/ice-config')),
-        ICE_CONFIG_FETCH_TIMEOUT_MS,
-        '/api/ice-config',
-      );
-      if (Array.isArray(config.iceServers) && config.iceServers.length > 0) {
-        this.lastFetchError.set(null);
-        return config.iceServers;
+    let lastError = 'ICE configuration request failed.';
+
+    for (let attempt = 1; attempt <= ICE_CONFIG_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const config = await withTimeout(
+          firstValueFrom(this.http.get<{ iceServers?: unknown }>('/api/ice-config')),
+          ICE_CONFIG_FETCH_TIMEOUT_MS,
+          '/api/ice-config',
+        );
+        const iceServers = iceServersFromConfigPayload(config);
+        const outcome = decideIceConfigOutcome({
+          fetchOk: true,
+          hasUsableServers: iceServers.length > 0,
+          attempt,
+          maxAttempts: ICE_CONFIG_MAX_ATTEMPTS,
+        });
+        if (outcome === 'use') {
+          this.relayUnavailable.set(false);
+          this.lastFetchError.set(null);
+          return iceServers;
+        }
+        lastError = 'ICE configuration did not include usable servers.';
+        if (outcome === 'retry') {
+          await sleep(ICE_CONFIG_RETRY_BACKOFF_MS[attempt - 1] ?? 0);
+          continue;
+        }
+      } catch (err) {
+        lastError = err instanceof Error ? err.message : 'ICE configuration request failed.';
+        const outcome = decideIceConfigOutcome({
+          fetchOk: false,
+          hasUsableServers: false,
+          attempt,
+          maxAttempts: ICE_CONFIG_MAX_ATTEMPTS,
+        });
+        if (outcome === 'retry') {
+          await sleep(ICE_CONFIG_RETRY_BACKOFF_MS[attempt - 1] ?? 0);
+          continue;
+        }
       }
-      this.lastFetchError.set('ICE configuration did not include usable servers.');
-    } catch (err) {
-      this.lastFetchError.set(err instanceof Error ? err.message : 'ICE configuration request failed.');
-      const message = err instanceof Error ? err.message : '';
-      if (message.includes('timed out')) {
-        console.warn('[ice-config] /api/ice-config timed out - using fallback STUN', err);
-      } else {
-        console.warn('[ice-config] failed to fetch /api/ice-config; using default STUN servers', err);
-      }
+
+      break;
     }
-    return DEFAULT_ICE_SERVERS;
+
+    this.relayUnavailable.set(true);
+    this.lastFetchError.set(lastError);
+    if (lastError.includes('timed out')) {
+      console.warn('[ice-config] /api/ice-config timed out after retries - using explicit fallback STUN');
+    } else {
+      console.warn('[ice-config] failed to fetch usable /api/ice-config after retries; using explicit fallback STUN', lastError);
+    }
+    return DEFAULT_ICE_SERVERS.map((server) => ({ ...server }));
   }
 
   private setTurnHealth(result: TurnHealthResult): TurnHealthResult {
@@ -154,15 +206,12 @@ export class IceConfigService {
       status: 'unavailable',
       checkedAt,
       elapsedMs: checkedAt - startedAt,
+      iceTransportPolicy: 'relay',
+      candidateType: null,
       transport,
       error,
     };
   }
-}
-
-function hasTurnUrl(server: RTCIceServer): boolean {
-  const urls = Array.isArray(server.urls) ? server.urls : [server.urls];
-  return urls.some((url) => typeof url === 'string' && url.toLowerCase().startsWith('turn'));
 }
 
 function candidateTypeFromCandidateLine(candidate: string | undefined): string | null {
@@ -189,6 +238,10 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function closePeerConnection(pc: RTCPeerConnection | null): void {

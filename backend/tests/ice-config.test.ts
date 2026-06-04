@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../src/server.js';
-import { clearIceConfigCacheForTests, getIceServersFromEnv } from '../src/modules/ice-config/index.js';
+import { clearIceConfigCacheForTests, getIceConfigHealthFromEnv, getIceServersFromEnv } from '../src/modules/ice-config/index.js';
 import { createTestDb } from './helpers.js';
 
 const ENV_KEYS = [
@@ -17,6 +17,7 @@ const ENV_KEYS = [
   'CLOUDFLARE_TURN_SERVICE_ID',
   'TURN_ID',
   'TURN_API_Key',
+  'TURN_API_KEY',
 ];
 
 describe('ice config API', () => {
@@ -110,6 +111,100 @@ describe('ice config API', () => {
         credential: 'minted-secret',
       },
     ]);
+  });
+
+  it('B16 accepts conventional TURN_API_KEY while keeping Cloudflare TURN behavior', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        iceServers: {
+          urls: ['turns:turn.cloudflare.com:5349?transport=tcp'],
+          username: 'minted-user',
+          credential: 'minted-secret',
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    process.env.TURN_ID = 'cloudflare-key-id';
+    process.env.TURN_API_KEY = 'upper-token';
+
+    const servers = await getIceServersFromEnv();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://rtc.live.cloudflare.com/v1/turn/keys/cloudflare-key-id/credentials/generate',
+      expect.objectContaining({
+        headers: {
+          Authorization: 'Bearer upper-token',
+          'Content-Type': 'application/json',
+        },
+      }),
+    );
+    expect(servers.at(-1)).toEqual({
+      urls: ['turns:turn.cloudflare.com:5349?transport=tcp', 'turns:turn.cloudflare.com:443?transport=tcp'],
+      username: 'minted-user',
+      credential: 'minted-secret',
+    });
+  });
+
+  it('B16 reports TURN health configured true when either accepted Cloudflare token env is complete', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          iceServers: {
+            urls: ['turns:turn.cloudflare.com:443?transport=tcp'],
+            username: 'minted-user',
+            credential: 'minted-secret',
+          },
+        }),
+      })),
+    );
+    process.env.TURN_ID = 'cloudflare-key-id';
+    process.env.TURN_API_KEY = 'upper-token';
+
+    const health = await getIceConfigHealthFromEnv();
+
+    expect(health.turnConfigured).toBe(true);
+    expect(health.hasTurnServers).toBe(true);
+    expect(health.configuredSources).toEqual(['cloudflare']);
+    expect(health.acceptedCloudflareTokenEnv).toContain('TURN_API_Key');
+    expect(health.acceptedCloudflareTokenEnv).toContain('TURN_API_KEY');
+  });
+
+  it('B16 exposes TURN configured state on the ice-config health endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          iceServers: {
+            urls: ['turns:turn.cloudflare.com:443?transport=tcp'],
+            username: 'minted-user',
+            credential: 'minted-secret',
+          },
+        }),
+      })),
+    );
+    process.env.TURN_ID = 'cloudflare-key-id';
+    process.env.TURN_API_Key = 'prod-token';
+
+    const res = await request(createApp(createTestDb())).get('/api/ice-config/health').expect(200);
+
+    expect(res.body.turnConfigured).toBe(true);
+    expect(res.body.hasTurnServers).toBe(true);
+    expect(res.body.configuredSources).toEqual(['cloudflare']);
+  });
+
+  it('B16 reports TURN health configured false when no complete TURN env exists', async () => {
+    const health = await getIceConfigHealthFromEnv();
+
+    expect(health.turnConfigured).toBe(false);
+    expect(health.hasTurnServers).toBe(false);
+    expect(health.configuredSources).toEqual([]);
   });
 
   it('DR-36 mints Cloudflare TURN credentials from an array response and preserves every returned TURN url', async () => {

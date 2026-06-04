@@ -115,6 +115,7 @@ export class SfuClientService {
   private transportRecoveryAttempts = 0;
   private transportRecoveryScheduled = false;
   private transportRecoveryInFlight = false;
+  private currentIceTransportPolicy: RTCIceTransportPolicy = 'all';
 
   enqueue<T>(op: () => Promise<T>): Promise<T> {
     const result = this.opQueue.then(() => op());
@@ -553,6 +554,7 @@ export class SfuClientService {
     if (!pc || !publishState) {
       return {
         cfSessionId: publishState?.cfSessionId ?? '',
+        requestedIceTransportPolicy: this.currentIceTransportPolicy,
         connectionState: null,
         iceConnectionState: null,
         rttMs: null,
@@ -574,6 +576,7 @@ export class SfuClientService {
     } catch {
       return {
         cfSessionId: publishState.cfSessionId,
+        requestedIceTransportPolicy: this.currentIceTransportPolicy,
         connectionState: pc.connectionState,
         iceConnectionState: pc.iceConnectionState,
         rttMs: null,
@@ -680,6 +683,7 @@ export class SfuClientService {
 
     return {
       cfSessionId: publishState.cfSessionId,
+      requestedIceTransportPolicy: this.currentIceTransportPolicy,
       connectionState: pc.connectionState,
       iceConnectionState: pc.iceConnectionState,
       rttMs,
@@ -1275,12 +1279,11 @@ export class SfuClientService {
     this.localPublishState.set({ cfSessionId: '', status: 'publishing', tracks: [] });
 
     try {
-      // ICE: CF STUN first + existing TURN creds as fallback
       this.setPublishPhase('ice-config');
-      const turnServers = await this.iceConfigService.getIceServers();
-      const iceServers: RTCIceServer[] = [{ urls: 'stun:stun.cloudflare.com:3478' }, ...turnServers];
+      const iceServers = await this.iceConfigService.getIceServers();
+      this.currentIceTransportPolicy = 'all';
       this.setPublishPhase('pc-create');
-      this.pc = new RTCPeerConnection({ iceServers });
+      this.pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: this.currentIceTransportPolicy });
       this.installTransportStateHandlers(this.pc);
 
       // Set ontrack BEFORE any subscribe requests so no track event is missed

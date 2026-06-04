@@ -310,6 +310,7 @@ export type SfuPublishPhase = 'ice-config' | 'pc-create' | 'offer' | 'cf-session
 
 export type SfuDiagnosticsSnapshot = {
   cfSessionId: string;
+  requestedIceTransportPolicy?: RTCIceTransportPolicy;
   connectionState: string | null;
   iceConnectionState: string | null;
   rttMs: number | null;
@@ -341,6 +342,17 @@ export type DiagnosticsPayload = {
   wsReconnectAttempts: number;
   wsHealth: DiagnosticsWsHealth;
   forceRelay: boolean;
+  requestedIceTransportPolicy?: RTCIceTransportPolicy;
+  selectedCandidatePairType?: string | null;
+  forceRelayDiagnostic?: {
+    status: 'reachable' | 'unavailable';
+    checkedAt: number;
+    elapsedMs: number;
+    iceTransportPolicy: RTCIceTransportPolicy;
+    candidateType: string | null;
+    transport: string | null;
+    error: string | null;
+  } | null;
   manualAudioOnly: boolean;
   outboundAudioLevel: number | null;
   outboundAudioEnergy: number | null;
