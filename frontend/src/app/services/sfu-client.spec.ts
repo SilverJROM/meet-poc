@@ -40,10 +40,12 @@ function createSfuClient(http: Partial<HttpClient> = {}): SfuClientService {
   return runInInjectionContext(injector, () => new SfuClientService());
 }
 
-function withFakeTimers(run: (timers: { active: boolean; callback: () => void }[]) => void): void {
+type FakeTimer = { id: number; active: boolean; callback: () => void };
+
+function withFakeTimers(run: (timers: FakeTimer[]) => void): void {
   const originalSetTimeout = globalThis.setTimeout;
   const originalClearTimeout = globalThis.clearTimeout;
-  const timers: { id: number; active: boolean; callback: () => void }[] = [];
+  const timers: FakeTimer[] = [];
   Object.defineProperty(globalThis, 'setTimeout', {
     configurable: true,
     value: (callback: () => void) => {
@@ -61,6 +63,33 @@ function withFakeTimers(run: (timers: { active: boolean; callback: () => void }[
   });
   try {
     run(timers);
+  } finally {
+    Object.defineProperty(globalThis, 'setTimeout', { configurable: true, value: originalSetTimeout });
+    Object.defineProperty(globalThis, 'clearTimeout', { configurable: true, value: originalClearTimeout });
+  }
+}
+
+async function withFakeTimersAsync(run: (timers: FakeTimer[]) => Promise<void>): Promise<void> {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers: FakeTimer[] = [];
+  Object.defineProperty(globalThis, 'setTimeout', {
+    configurable: true,
+    value: (callback: () => void) => {
+      const timer = { id: timers.length + 1, active: true, callback };
+      timers.push(timer);
+      return timer.id;
+    },
+  });
+  Object.defineProperty(globalThis, 'clearTimeout', {
+    configurable: true,
+    value: (id: number) => {
+      const timer = timers.find((entry) => entry.id === id);
+      if (timer) timer.active = false;
+    },
+  });
+  try {
+    await run(timers);
   } finally {
     Object.defineProperty(globalThis, 'setTimeout', { configurable: true, value: originalSetTimeout });
     Object.defineProperty(globalThis, 'clearTimeout', { configurable: true, value: originalClearTimeout });
@@ -113,6 +142,14 @@ function installPublishedSfuState(sfu: SfuClientService, pc: RTCPeerConnection):
   privateSfu.pc = pc;
   privateSfu.callerCreds = { clientKey: 'ck', participantId: 'local-p', sessionId: 'room-1' };
   sfu.localPublishState.set({ cfSessionId: 'local-cf', status: 'published', tracks: [] });
+}
+
+async function flushSfuQueue(sfu: SfuClientService): Promise<void> {
+  const privateSfu = sfu as unknown as { opQueue: Promise<void> };
+  await privateSfu.opQueue;
+  await Promise.resolve();
+  await privateSfu.opQueue;
+  await Promise.resolve();
 }
 
 // applyPresenceUpdate — applies a newer revision
@@ -276,6 +313,359 @@ function installPublishedSfuState(sfu: SfuClientService, pc: RTCPeerConnection):
       assert.equal(sfu.subscribeRetryVersion(), versionAfterCleanup, `${methodName} leaves no active backoff callback to bump retry version`);
       assert.equal(timers.slice(beforeScheduleCount).every((timer) => !timer.active), true, `${methodName} clearTimeouts every tracked backoff`);
     }
+  });
+}
+
+// FIX2 — transient mid-call subscribe failure retries directly and eventually commits the missing track.
+{
+  await withFakeTimersAsync(async (timers) => {
+    const sfu = createSfuClient();
+    const publisher: RemotePublisher = {
+      clientId: 'alice',
+      participantId: 'p-alice',
+      cfSessionId: 'alice-cf',
+      revision: 2,
+      tracks: [
+        { trackName: 'alice-video', kind: 'video' },
+        { trackName: 'alice-audio', kind: 'audio' },
+      ],
+    };
+    sfu.remotePublishers.set(new Map([['alice', publisher]]));
+    const privateSfu = sfu as unknown as {
+      subscribeNewRemoteTracks: (publisher: RemotePublisher, previousTracks: { trackName: string; kind: string }[]) => void;
+      doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
+      midToEntry: Map<string, SubscribedTrackEntry>;
+      midCallSubscribeRetryAttempts: Map<string, number>;
+      midCallSubscribeRetryTimers: Map<string, unknown>;
+    };
+    const attempts: string[][] = [];
+    privateSfu.doSubscribeTracks = async (attemptPublisher, tracks) => {
+      attempts.push(tracks.map((track) => track.trackName));
+      if (attempts.length === 1) throw new Error('transient not_found_track_error');
+      const nextSubscribed = new Map(sfu.subscribedTracks());
+      for (const track of tracks) {
+        const mid = `mid-${attempts.length}-${track.trackName}`;
+        const entry: SubscribedTrackEntry = { publisherClientId: attemptPublisher.clientId, trackName: track.trackName, kind: track.kind, mid };
+        privateSfu.midToEntry.set(mid, entry);
+        nextSubscribed.set(mid, entry);
+      }
+      sfu.subscribedTracks.set(nextSubscribed);
+    };
+
+    privateSfu.subscribeNewRemoteTracks(publisher, [{ trackName: 'alice-video', kind: 'video' }]);
+    await flushSfuQueue(sfu);
+
+    assert.deepEqual(attempts, [['alice-audio']], 'first mid-call attempt subscribes only the newly advertised audio');
+    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 1, 'failed mid-call subscribe schedules one bounded retry timer');
+
+    const retryTimer = timers.find((timer) => timer.active);
+    assert.ok(retryTimer, 'retry timer should be active');
+    retryTimer.active = false;
+    retryTimer.callback();
+    await flushSfuQueue(sfu);
+
+    assert.deepEqual(attempts, [['alice-audio'], ['alice-audio']], 'retry drives doSubscribeTracks directly for the missing track');
+    assert.equal([...sfu.subscribedTracks().values()].some((entry) => entry.trackName === 'alice-audio'), true, 'retry success commits audio to subscribedTracks');
+    assert.equal([...privateSfu.midToEntry.values()].some((entry) => entry.trackName === 'alice-audio'), true, 'retry success commits audio to midToEntry');
+    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 0, 'successful retry clears the retry timer state');
+    assert.equal(privateSfu.midCallSubscribeRetryAttempts.size, 0, 'successful retry clears the retry counter state');
+  });
+}
+
+// FIX2 — cap exhaustion stops permanently for that mid-call track and leaves no dangling timer.
+{
+  await withFakeTimersAsync(async () => {
+    const sfu = createSfuClient();
+    const publisher: RemotePublisher = {
+      clientId: 'alice',
+      participantId: 'p-alice',
+      cfSessionId: 'alice-cf',
+      revision: 2,
+      tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
+    };
+    sfu.remotePublishers.set(new Map([['alice', publisher]]));
+    const privateSfu = sfu as unknown as {
+      subscribeNewRemoteTracks: (publisher: RemotePublisher, previousTracks: { trackName: string; kind: string }[]) => void;
+      doSubscribeTracks: () => Promise<void>;
+      midCallSubscribeRetryKey: (clientId: string, cfSessionId: string, trackName: string) => string;
+      midCallSubscribeRetryAttempts: Map<string, number>;
+      midCallSubscribeRetryTimers: Map<string, unknown>;
+    };
+    const key = privateSfu.midCallSubscribeRetryKey('alice', 'alice-cf', 'alice-audio');
+    privateSfu.midCallSubscribeRetryAttempts.set(key, 7);
+    privateSfu.doSubscribeTracks = async () => {
+      throw new Error('persistent failure');
+    };
+
+    privateSfu.subscribeNewRemoteTracks(publisher, []);
+    await flushSfuQueue(sfu);
+
+    assert.equal(privateSfu.midCallSubscribeRetryAttempts.get(key), 8, 'cap exhaustion records the capped attempt');
+    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 0, 'capped mid-call retry leaves no scheduled timer');
+  });
+}
+
+// FIX2 — successful first mid-call subscribe has no retry timer, no extra enqueue, and no churn.
+{
+  await withFakeTimersAsync(async () => {
+    const sfu = createSfuClient();
+    const publisher: RemotePublisher = {
+      clientId: 'bob',
+      participantId: 'p-bob',
+      cfSessionId: 'bob-cf',
+      revision: 2,
+      tracks: [{ trackName: 'bob-audio', kind: 'audio' }],
+    };
+    const privateSfu = sfu as unknown as {
+      subscribeNewRemoteTracks: (publisher: RemotePublisher, previousTracks: { trackName: string; kind: string }[]) => void;
+      doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
+      midToEntry: Map<string, SubscribedTrackEntry>;
+      midCallSubscribeRetryAttempts: Map<string, number>;
+      midCallSubscribeRetryTimers: Map<string, unknown>;
+    };
+    let calls = 0;
+    privateSfu.doSubscribeTracks = async (attemptPublisher, tracks) => {
+      calls += 1;
+      const entry: SubscribedTrackEntry = { publisherClientId: attemptPublisher.clientId, trackName: tracks[0].trackName, kind: tracks[0].kind, mid: 'bob-mid' };
+      privateSfu.midToEntry.set('bob-mid', entry);
+      sfu.subscribedTracks.set(new Map([['bob-mid', entry]]));
+    };
+
+    privateSfu.subscribeNewRemoteTracks(publisher, []);
+    await flushSfuQueue(sfu);
+
+    assert.equal(calls, 1, 'successful first mid-call subscribe enqueues exactly once');
+    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 0, 'successful first try schedules no retry timer');
+    assert.equal(privateSfu.midCallSubscribeRetryAttempts.size, 0, 'successful first try creates no retry counter');
+  });
+}
+
+// FIX2 — retry tick stops when the publisher removed the track from live remotePublishers.
+{
+  await withFakeTimersAsync(async (timers) => {
+    const sfu = createSfuClient();
+    const publisher: RemotePublisher = {
+      clientId: 'carol',
+      participantId: 'p-carol',
+      cfSessionId: 'carol-cf',
+      revision: 2,
+      tracks: [{ trackName: 'carol-audio', kind: 'audio' }],
+    };
+    sfu.remotePublishers.set(new Map([['carol', publisher]]));
+    const privateSfu = sfu as unknown as {
+      subscribeNewRemoteTracks: (publisher: RemotePublisher, previousTracks: { trackName: string; kind: string }[]) => void;
+      doSubscribeTracks: () => Promise<void>;
+      midCallSubscribeRetryAttempts: Map<string, number>;
+      midCallSubscribeRetryTimers: Map<string, unknown>;
+    };
+    let calls = 0;
+    privateSfu.doSubscribeTracks = async () => {
+      calls += 1;
+      throw new Error('transient failure');
+    };
+
+    privateSfu.subscribeNewRemoteTracks(publisher, []);
+    await flushSfuQueue(sfu);
+    sfu.remotePublishers.set(new Map([['carol', { ...publisher, revision: 3, tracks: [] }]]));
+
+    const retryTimer = timers.find((timer) => timer.active);
+    assert.ok(retryTimer, 'retry timer should be active before track removal tick');
+    retryTimer.active = false;
+    retryTimer.callback();
+    await flushSfuQueue(sfu);
+
+    assert.equal(calls, 1, 'removed track is not retried');
+    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 0, 'removed-track stop clears timer state');
+    assert.equal(privateSfu.midCallSubscribeRetryAttempts.size, 0, 'removed-track stop clears counter state');
+  });
+}
+
+// FIX2 — retry tick stops when the publisher cfSessionId changed.
+{
+  await withFakeTimersAsync(async (timers) => {
+    const sfu = createSfuClient();
+    const publisher: RemotePublisher = {
+      clientId: 'dave',
+      participantId: 'p-dave',
+      cfSessionId: 'old-cf',
+      revision: 2,
+      tracks: [{ trackName: 'dave-audio', kind: 'audio' }],
+    };
+    sfu.remotePublishers.set(new Map([['dave', publisher]]));
+    const privateSfu = sfu as unknown as {
+      subscribeNewRemoteTracks: (publisher: RemotePublisher, previousTracks: { trackName: string; kind: string }[]) => void;
+      doSubscribeTracks: () => Promise<void>;
+      midCallSubscribeRetryAttempts: Map<string, number>;
+      midCallSubscribeRetryTimers: Map<string, unknown>;
+    };
+    let calls = 0;
+    privateSfu.doSubscribeTracks = async () => {
+      calls += 1;
+      throw new Error('old session failure');
+    };
+
+    privateSfu.subscribeNewRemoteTracks(publisher, []);
+    await flushSfuQueue(sfu);
+    sfu.remotePublishers.set(new Map([['dave', { ...publisher, cfSessionId: 'new-cf', revision: 3 }]]));
+
+    const retryTimer = timers.find((timer) => timer.active);
+    assert.ok(retryTimer, 'retry timer should be active before cfSession change tick');
+    retryTimer.active = false;
+    retryTimer.callback();
+    await flushSfuQueue(sfu);
+
+    assert.equal(calls, 1, 'old cfSession retry does not call doSubscribeTracks again');
+    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 0, 'cfSession-change stop clears timer state');
+    assert.equal(privateSfu.midCallSubscribeRetryAttempts.size, 0, 'cfSession-change stop clears counter state');
+  });
+}
+
+// FIX2 — retry tick stops when the track has already been subscribed by another path.
+{
+  await withFakeTimersAsync(async (timers) => {
+    const sfu = createSfuClient();
+    const publisher: RemotePublisher = {
+      clientId: 'erin',
+      participantId: 'p-erin',
+      cfSessionId: 'erin-cf',
+      revision: 2,
+      tracks: [{ trackName: 'erin-audio', kind: 'audio' }],
+    };
+    sfu.remotePublishers.set(new Map([['erin', publisher]]));
+    const privateSfu = sfu as unknown as {
+      subscribeNewRemoteTracks: (publisher: RemotePublisher, previousTracks: { trackName: string; kind: string }[]) => void;
+      doSubscribeTracks: () => Promise<void>;
+      midToEntry: Map<string, SubscribedTrackEntry>;
+      midCallSubscribeRetryAttempts: Map<string, number>;
+      midCallSubscribeRetryTimers: Map<string, unknown>;
+    };
+    let calls = 0;
+    privateSfu.doSubscribeTracks = async () => {
+      calls += 1;
+      throw new Error('first path failed');
+    };
+
+    privateSfu.subscribeNewRemoteTracks(publisher, []);
+    await flushSfuQueue(sfu);
+    const entry: SubscribedTrackEntry = { publisherClientId: 'erin', trackName: 'erin-audio', kind: 'audio', mid: 'erin-mid' };
+    privateSfu.midToEntry.set('erin-mid', entry);
+    sfu.subscribedTracks.set(new Map([['erin-mid', entry]]));
+
+    const retryTimer = timers.find((timer) => timer.active);
+    assert.ok(retryTimer, 'retry timer should be active before already-subscribed tick');
+    retryTimer.active = false;
+    retryTimer.callback();
+    await flushSfuQueue(sfu);
+
+    assert.equal(calls, 1, 'already subscribed track is not double-subscribed');
+    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 0, 'already-subscribed stop clears timer state');
+    assert.equal(privateSfu.midCallSubscribeRetryAttempts.size, 0, 'already-subscribed stop clears counter state');
+  });
+}
+
+// FIX2 — already-subscribed state from subscribedTracks alone suppresses initial duplicate subscribe.
+{
+  const sfu = createSfuClient();
+  const publisher: RemotePublisher = {
+    clientId: 'fran',
+    participantId: 'p-fran',
+    cfSessionId: 'fran-cf',
+    revision: 2,
+    tracks: [{ trackName: 'fran-audio', kind: 'audio' }],
+  };
+  const privateSfu = sfu as unknown as {
+    subscribeNewRemoteTracks: (publisher: RemotePublisher, previousTracks: { trackName: string; kind: string }[]) => void;
+    doSubscribeTracks: () => Promise<void>;
+  };
+  const entry: SubscribedTrackEntry = { publisherClientId: 'fran', trackName: 'fran-audio', kind: 'audio', mid: 'fran-mid' };
+  sfu.subscribedTracks.set(new Map([['fran-mid', entry]]));
+  let calls = 0;
+  privateSfu.doSubscribeTracks = async () => {
+    calls += 1;
+  };
+
+  privateSfu.subscribeNewRemoteTracks(publisher, []);
+  await flushSfuQueue(sfu);
+
+  assert.equal(calls, 0, 'already subscribed track in subscribedTracks is not double-subscribed');
+}
+
+// FIX2 — mid-call retry timers/counters clear in global teardown, peer teardown, and cfSession eviction.
+{
+  await withFakeTimersAsync(async (timers) => {
+    for (const methodName of ['clearLocalTransportSessionState', 'closeLiveTracksForExit', 'destroy'] as const) {
+      const sfu = createSfuClient();
+      const publisher: RemotePublisher = {
+        clientId: `global-${methodName}`,
+        participantId: `p-${methodName}`,
+        cfSessionId: `cf-${methodName}`,
+        revision: 2,
+        tracks: [{ trackName: `${methodName}-audio`, kind: 'audio' }],
+      };
+      const privateSfu = sfu as unknown as {
+        scheduleMidCallSubscribeRetry: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[], err: unknown) => void;
+        midCallSubscribeRetryAttempts: Map<string, number>;
+        midCallSubscribeRetryTimers: Map<string, unknown>;
+        clearLocalTransportSessionState: () => void;
+        closeLiveTracksForExit: () => void;
+        destroy: () => void;
+      };
+      const beforeScheduleCount = timers.length;
+      privateSfu.scheduleMidCallSubscribeRetry(publisher, publisher.tracks, new Error('teardown setup'));
+      assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 1, `${methodName} setup tracks one pending mid-call retry`);
+
+      privateSfu[methodName]();
+
+      assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 0, `${methodName} clears mid-call retry timers`);
+      assert.equal(privateSfu.midCallSubscribeRetryAttempts.size, 0, `${methodName} clears mid-call retry counters`);
+      assert.equal(timers.slice(beforeScheduleCount).every((timer) => !timer.active), true, `${methodName} clearTimeouts every tracked mid-call retry`);
+    }
+
+    const peerSfu = createSfuClient();
+    const peerPrivate = peerSfu as unknown as {
+      scheduleMidCallSubscribeRetry: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[], err: unknown) => void;
+      midCallSubscribeRetryAttempts: Map<string, number>;
+      midCallSubscribeRetryTimers: Map<string, unknown>;
+      subscribedClientIds: Set<string>;
+    };
+    const peerPublisher: RemotePublisher = {
+      clientId: 'peer-clear',
+      participantId: 'p-peer-clear',
+      cfSessionId: 'peer-cf',
+      revision: 2,
+      tracks: [{ trackName: 'peer-audio', kind: 'audio' }],
+    };
+    peerSfu.remotePublishers.set(new Map([['peer-clear', peerPublisher]]));
+    peerPrivate.subscribedClientIds.add('peer-clear');
+    peerPrivate.scheduleMidCallSubscribeRetry(peerPublisher, peerPublisher.tracks, new Error('peer setup'));
+    peerSfu.removePeer('peer-clear');
+    assert.equal(peerPrivate.midCallSubscribeRetryTimers.size, 0, 'removePeer clears mid-call retry timers');
+    assert.equal(peerPrivate.midCallSubscribeRetryAttempts.size, 0, 'removePeer clears mid-call retry counters');
+
+    const cfSfu = createSfuClient();
+    const oldPublisher: RemotePublisher = {
+      clientId: 'cf-clear',
+      participantId: 'p-cf-clear',
+      cfSessionId: 'old-cf',
+      revision: 2,
+      tracks: [{ trackName: 'cf-audio', kind: 'audio' }],
+    };
+    const cfPrivate = cfSfu as unknown as {
+      scheduleMidCallSubscribeRetry: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[], err: unknown) => void;
+      midCallSubscribeRetryAttempts: Map<string, number>;
+      midCallSubscribeRetryTimers: Map<string, unknown>;
+    };
+    cfSfu.remotePublishers.set(new Map([['cf-clear', oldPublisher]]));
+    cfPrivate.scheduleMidCallSubscribeRetry(oldPublisher, oldPublisher.tracks, new Error('cf setup'));
+    cfSfu.handleSfuPresence({
+      clientId: 'cf-clear',
+      participantId: 'p-cf-clear',
+      cfSessionId: 'new-cf',
+      tracks: [{ trackName: 'cf-new-audio', kind: 'audio' }],
+      revision: 3,
+    });
+    assert.equal(cfPrivate.midCallSubscribeRetryTimers.size, 0, 'cfSession eviction clears mid-call retry timers');
+    assert.equal(cfPrivate.midCallSubscribeRetryAttempts.size, 0, 'cfSession eviction clears mid-call retry counters');
   });
 }
 

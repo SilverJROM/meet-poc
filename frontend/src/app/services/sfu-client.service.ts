@@ -105,6 +105,8 @@ export class SfuClientService {
   private subscribeFirstFrameAt = new Map<string, number>();
   private subscribeStuckTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private subscribeBackoffTimers = new Set<ReturnType<typeof setTimeout>>();
+  private midCallSubscribeRetryAttempts = new Map<string, number>();
+  private midCallSubscribeRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly SUBSCRIBE_STUCK_THRESHOLD_MS = 10_000;
   private previousConnectionQualityPackets: { packetsReceived: number; packetsLost: number } | null = null;
   private adaptiveCameraRidCandidate: AdaptiveCameraRidCap = null;
@@ -234,6 +236,35 @@ export class SfuClientService {
   private clearAllSubscribeBackoffTimers(): void {
     for (const timer of this.subscribeBackoffTimers) clearTimeout(timer);
     this.subscribeBackoffTimers.clear();
+  }
+
+  private midCallSubscribeRetryKey(clientId: string, cfSessionId: string, trackName: string): string {
+    return `${clientId}\u0000${cfSessionId}\u0000${trackName}`;
+  }
+
+  private midCallSubscribeRetryKeyPrefix(clientId: string, cfSessionId?: string): string {
+    return cfSessionId === undefined ? `${clientId}\u0000` : `${clientId}\u0000${cfSessionId}\u0000`;
+  }
+
+  private clearMidCallSubscribeRetryKey(key: string): void {
+    const timer = this.midCallSubscribeRetryTimers.get(key);
+    if (timer) clearTimeout(timer);
+    this.midCallSubscribeRetryTimers.delete(key);
+    this.midCallSubscribeRetryAttempts.delete(key);
+  }
+
+  private clearMidCallSubscribeRetryState(clientId: string, cfSessionId?: string): void {
+    const prefix = this.midCallSubscribeRetryKeyPrefix(clientId, cfSessionId);
+    const keys = new Set([...this.midCallSubscribeRetryAttempts.keys(), ...this.midCallSubscribeRetryTimers.keys()]);
+    for (const key of keys) {
+      if (key.startsWith(prefix)) this.clearMidCallSubscribeRetryKey(key);
+    }
+  }
+
+  private clearAllMidCallSubscribeRetryState(): void {
+    for (const timer of this.midCallSubscribeRetryTimers.values()) clearTimeout(timer);
+    this.midCallSubscribeRetryTimers.clear();
+    this.midCallSubscribeRetryAttempts.clear();
   }
 
   replaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
@@ -396,6 +427,7 @@ export class SfuClientService {
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
     this.clearAllSubscribeBackoffTimers();
+    this.clearAllMidCallSubscribeRetryState();
     this.resetConnectionQuality();
     this.opQueue = Promise.resolve();
     this.localPublishState.set(null);
@@ -867,6 +899,7 @@ export class SfuClientService {
     if (prev && prev.cfSessionId !== msg.cfSessionId) {
       this.clearPublisherSubscriptionStateForRetry(msg.clientId);
       this.subscribeRetryAttempts.delete(msg.clientId);
+      this.clearMidCallSubscribeRetryState(msg.clientId);
     }
     const samePublisherSession = !!prev && prev.cfSessionId === msg.cfSessionId;
     const prevHadScreen = prev?.tracks.some((t) => t.kind === 'screen') ?? false;
@@ -889,6 +922,7 @@ export class SfuClientService {
       if (prev && prev.cfSessionId !== publisher.cfSessionId) {
         this.clearPublisherSubscriptionStateForRetry(publisher.clientId);
         this.subscribeRetryAttempts.delete(publisher.clientId);
+        this.clearMidCallSubscribeRetryState(publisher.clientId);
       }
     }
     this.remotePublishers.set(applyRosterSnapshot(publishers));
@@ -901,6 +935,7 @@ export class SfuClientService {
   }
 
   private tearDownPeerSubscription(clientId: string): void {
+    this.clearMidCallSubscribeRetryState(clientId);
     if (!this.subscribedClientIds.has(clientId)) return;
 
     const mids: string[] = [];
@@ -973,13 +1008,116 @@ export class SfuClientService {
     this.subscribeInitiatedAt.delete(clientId);
     this.subscribeFirstFrameAt.delete(clientId);
     this.disarmSubscribeStuckWatchdog(clientId);
+    this.clearMidCallSubscribeRetryState(clientId);
   }
 
   private subscribeNewRemoteTracks(publisher: import('./sfu-roster-utils.js').RemotePublisher, previousTracks: { trackName: string; kind: string }[]): void {
-    const alreadySubscribed = new Set([...this.midToEntry.values()].map((e) => e.trackName));
+    const alreadySubscribed = this.currentSubscribedTrackNames();
     const newTracks = selectNewRemoteTracks(previousTracks, publisher.tracks, alreadySubscribed);
     if (!newTracks.length) return;
-    void this.enqueue(() => this.doSubscribeTracks(publisher, newTracks));
+    this.enqueueMidCallSubscribeTracks(publisher, newTracks);
+  }
+
+  private currentSubscribedTrackNames(): Set<string> {
+    return new Set([
+      ...[...this.midToEntry.values()].map((entry) => entry.trackName),
+      ...[...this.subscribedTracks().values()].map((entry) => entry.trackName),
+    ]);
+  }
+
+  private isTrackSubscribed(clientId: string, trackName: string): boolean {
+    for (const entry of this.midToEntry.values()) {
+      if (entry.publisherClientId === clientId && entry.trackName === trackName) return true;
+    }
+    for (const entry of this.subscribedTracks().values()) {
+      if (entry.publisherClientId === clientId && entry.trackName === trackName) return true;
+    }
+    return false;
+  }
+
+  private missingAdvertisedRemoteTracks(
+    publisher: import('./sfu-roster-utils.js').RemotePublisher,
+    trackNames?: Set<string>,
+  ): { trackName: string; kind: string }[] {
+    return publisher.tracks.filter((track) => {
+      if (trackNames && !trackNames.has(track.trackName)) return false;
+      return !this.isTrackSubscribed(publisher.clientId, track.trackName);
+    });
+  }
+
+  private enqueueMidCallSubscribeTracks(
+    publisher: import('./sfu-roster-utils.js').RemotePublisher,
+    tracks: { trackName: string; kind: string }[],
+  ): void {
+    const missingTracks = this.missingAdvertisedRemoteTracks(publisher, new Set(tracks.map((track) => track.trackName)));
+    if (!missingTracks.length) return;
+    void this.enqueue(() => this.doSubscribeTracks(publisher, missingTracks))
+      .then(() => {
+        for (const track of missingTracks) {
+          this.clearMidCallSubscribeRetryKey(this.midCallSubscribeRetryKey(publisher.clientId, publisher.cfSessionId, track.trackName));
+        }
+      })
+      .catch((err) => this.scheduleMidCallSubscribeRetry(publisher, missingTracks, err));
+  }
+
+  private scheduleMidCallSubscribeRetry(
+    publisher: import('./sfu-roster-utils.js').RemotePublisher,
+    tracks: { trackName: string; kind: string }[],
+    err: unknown,
+  ): void {
+    for (const track of tracks) {
+      if (this.isTrackSubscribed(publisher.clientId, track.trackName)) {
+        this.clearMidCallSubscribeRetryKey(this.midCallSubscribeRetryKey(publisher.clientId, publisher.cfSessionId, track.trackName));
+        continue;
+      }
+
+      const key = this.midCallSubscribeRetryKey(publisher.clientId, publisher.cfSessionId, track.trackName);
+      if (this.midCallSubscribeRetryTimers.has(key)) continue;
+      const retry = planSubscribeRetry({
+        currentAttempts: this.midCallSubscribeRetryAttempts.get(key) ?? 0,
+        cap: this.SUBSCRIBE_RETRY_CAP,
+        hasFirstFrame: false,
+        baseBackoffMs: this.SUBSCRIBE_RETRY_BASE_BACKOFF_MS,
+        maxBackoffMs: this.SUBSCRIBE_RETRY_MAX_BACKOFF_MS,
+      });
+      this.midCallSubscribeRetryAttempts.set(key, retry.nextAttempts);
+      if (!retry.shouldRetry) {
+        if (retry.capped) {
+          console.warn('[SFU] mid-call subscribe permanently stopped after capped retries', {
+            publisherClientId: publisher.clientId,
+            publisherCfSessionId: publisher.cfSessionId,
+            trackName: track.trackName,
+            retryAttempts: retry.nextAttempts,
+            error: String(err),
+          });
+        }
+        this.midCallSubscribeRetryTimers.delete(key);
+        continue;
+      }
+
+      const timer = setTimeout(() => {
+        this.midCallSubscribeRetryTimers.delete(key);
+        this.retryMidCallSubscribeTrack(publisher.clientId, publisher.cfSessionId, track.trackName);
+      }, retry.backoffMs ?? 0);
+      this.midCallSubscribeRetryTimers.set(key, timer);
+    }
+  }
+
+  private retryMidCallSubscribeTrack(clientId: string, cfSessionId: string, trackName: string): void {
+    const key = this.midCallSubscribeRetryKey(clientId, cfSessionId, trackName);
+    const publisher = this.remotePublishers().get(clientId);
+    if (!publisher || publisher.cfSessionId !== cfSessionId) {
+      this.clearMidCallSubscribeRetryKey(key);
+      return;
+    }
+
+    const missingTracks = this.missingAdvertisedRemoteTracks(publisher, new Set([trackName]));
+    if (!missingTracks.length) {
+      this.clearMidCallSubscribeRetryKey(key);
+      return;
+    }
+
+    this.enqueueMidCallSubscribeTracks(publisher, missingTracks);
   }
 
   private tearDownScreenSubscription(clientId: string): void {
@@ -1266,6 +1404,7 @@ export class SfuClientService {
     this.pendingOntrack.clear();
     this.clearAllSubscribeStuckWatchdogs();
     this.clearAllSubscribeBackoffTimers();
+    this.clearAllMidCallSubscribeRetryState();
     this.resetConnectionQuality();
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
@@ -1304,6 +1443,7 @@ export class SfuClientService {
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
     this.clearAllSubscribeBackoffTimers();
+    this.clearAllMidCallSubscribeRetryState();
     this.resetConnectionQuality();
     this.resetTransportRecoveryState(true);
     this.localPublishState.set(null);
