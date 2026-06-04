@@ -6,6 +6,7 @@ import {
   acquireVideo,
   createMediaAcquisitionQueue,
 } from './media-acquisition';
+import { normalizeMediaError, type MediaError } from './media-errors';
 import { resolveMediaToggleAction } from './media-toggle';
 
 // B5 — bounded ~3s rolling capture window for the lobby self-test. ~24 samples
@@ -13,7 +14,7 @@ import { resolveMediaToggleAction } from './media-toggle';
 // to prove flat-vs-rising energy off the SAME single AnalyserNode.
 const MIC_CAPTURE_WINDOW_CAP = 24;
 
-export type MediaError = { code: 'denied' | 'no-devices' | 'in-use' | 'unknown'; message: string };
+export type { MediaError } from './media-errors';
 
 export class ScreenShareUnsupportedError extends Error {
   constructor(message: string) {
@@ -569,24 +570,6 @@ function stopStreamTracks(stream: MediaStream): void {
   stream.getTracks().forEach((track) => {
     if (track.readyState !== 'ended') track.stop();
   });
-}
-
-function normalizeMediaError(err: unknown): MediaError {
-  const value = err as { name?: string; message?: string };
-  if (value?.name === 'NotAllowedError' || value?.name === 'PermissionDeniedError') {
-    return { code: 'denied', message: 'Media permission denied' };
-  }
-  if (value?.name === 'NotFoundError' || value?.name === 'DevicesNotFoundError') {
-    return { code: 'no-devices', message: 'No devices found' };
-  }
-  if (
-    value?.name === 'NotReadableError'
-    || value?.name === 'TrackStartError'
-    || /in use|busy|could not start/i.test(String(value?.message || ''))
-  ) {
-    return { code: 'in-use', message: 'Camera or microphone is in use by another app or tab' };
-  }
-  return { code: 'unknown', message: String(value?.message || err) };
 }
 
 declare global {

@@ -32,6 +32,7 @@ import {
 import { computeEffectiveDiagnosticsEnabled, readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
 import { isGenericAudioDeviceId, resolveSelectedAudioId } from '../../services/device-selection';
 import { resolvedAcquiredDeviceId } from '../../services/media-acquisition';
+import { localAudioRecoveryTerminalMessage } from '../../services/local-media-recovery';
 import { permissionBlockHint } from '../../services/media-toggle';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
@@ -2769,6 +2770,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private async recoverLocalAudioTrack(): Promise<void> {
+    let lastRecoveryError: unknown = { name: 'NotFoundError' };
     for (let attempt = 0; attempt < DEVICE_RECOVERY_MAX_ATTEMPTS; attempt += 1) {
       if (attempt > 0) await delay(DEVICE_RECOVERY_BACKOFF_MS * attempt);
       const devices = await this.media.enumerateDevices();
@@ -2791,6 +2793,7 @@ export class RoomPage implements OnDestroy {
           this.queueDiagnosticsLog('state-change', 'local audio track recovered via replaceTrack');
           return;
         } catch (err) {
+          lastRecoveryError = err;
           console.debug('[devices] microphone recovery candidate failed', candidate.deviceId || 'default', err);
         }
       }
@@ -2799,7 +2802,7 @@ export class RoomPage implements OnDestroy {
     this.media.removeAudioTrack();
     this.broadcastMediaState(false, this.media.cameraOn());
     this.actionNotice.set(null);
-    this.deviceFailureNotice.set('No microphone available. Connect a microphone, then choose it from devices.');
+    this.deviceFailureNotice.set(localAudioRecoveryTerminalMessage(lastRecoveryError));
     this.queueDiagnosticsLog('error', 'local audio recovery failed; no microphone available');
   }
 
