@@ -116,29 +116,52 @@ export class MediaService {
   }
 
   async reacquire(options: ReacquireOptions): Promise<MediaStream> {
-    const audio = this.audioConstraints(true, options.audioDeviceId);
-    const video = this.videoConstraints(options.video, {
-      deviceId: options.videoDeviceId,
-      facingMode: options.facingMode,
+    const audio = await acquireAudio(this.acquisitionQueue, {
+      deviceId: options.audioDeviceId,
+      baseConstraints: this.audioConstraints(true) as MediaTrackConstraints,
+    }).catch((err) => {
+      throw normalizeMediaError(err);
     });
-    return this.acquire({ audio, video });
+    const video = options.video
+      ? await acquireVideo(this.acquisitionQueue, {
+          deviceId: options.videoDeviceId,
+          facingMode: options.facingMode,
+          baseConstraints: this.videoConstraints(true) as MediaTrackConstraints,
+        }).catch((err) => {
+          console.debug('[media] camera reacquire skipped after acquisition failure', err);
+          return null;
+        })
+      : null;
+    return this.commitAcquiredLocalStream(new MediaStream([
+      audio.track,
+      ...(video ? [video.track] : []),
+    ]), {
+      audio: audio.constraints,
+      video: video?.constraints ?? false,
+    });
   }
 
   async replaceAudioTrack(deviceId: string | undefined, onAudioTrackChanged: (track: MediaStreamTrack) => Promise<void>): Promise<MediaStreamTrack | null> {
     const stream = this.localStream();
     if (!stream) return null;
     const oldTrack = stream.getAudioTracks()[0] ?? null;
-    const audio = this.audioConstraints(true, deviceId);
-    const nextStream = await navigator.mediaDevices.getUserMedia({ audio, video: false });
-    registerDebugTracks(nextStream);
-    const nextTrack = nextStream.getAudioTracks()[0];
-    if (!nextTrack) {
-      nextStream.getTracks().forEach((track) => track.stop());
-      return null;
-    }
+    const acquired = await acquireAudio(this.acquisitionQueue, {
+      deviceId,
+      baseConstraints: this.audioConstraints(true) as MediaTrackConstraints,
+    }).catch((err) => {
+      throw normalizeMediaError(err);
+    });
+    registerDebugTracks(acquired.stream);
+    const nextTrack = acquired.track;
     this.verifyAudioProcessing(nextTrack);
     stream.addTrack(nextTrack);
-    await onAudioTrackChanged(nextTrack);
+    try {
+      await onAudioTrackChanged(nextTrack);
+    } catch (err) {
+      stream.removeTrack(nextTrack);
+      stopStreamTracks(acquired.stream);
+      throw err;
+    }
     if (oldTrack) {
       stream.removeTrack(oldTrack);
       oldTrack.stop();
@@ -156,21 +179,29 @@ export class MediaService {
     const stream = this.localStream();
     if (!stream) return null;
     const oldTrack = stream.getVideoTracks()[0] ?? null;
-    const video = this.videoConstraints(true, { deviceId, facingMode });
-    const nextStream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
-    registerDebugTracks(nextStream);
-    const nextTrack = nextStream.getVideoTracks()[0];
-    if (!nextTrack) {
-      nextStream.getTracks().forEach((track) => track.stop());
-      return null;
-    }
+    const acquired = await acquireVideo(this.acquisitionQueue, {
+      deviceId,
+      facingMode,
+      baseConstraints: this.videoConstraints(true) as MediaTrackConstraints,
+    }).catch((err) => {
+      throw normalizeMediaError(err);
+    });
+    if (!acquired) return null;
+    registerDebugTracks(acquired.stream);
+    const nextTrack = acquired.track;
     stream.addTrack(nextTrack);
+    try {
+      await onVideoTrackChanged(nextTrack);
+    } catch (err) {
+      stream.removeTrack(nextTrack);
+      stopStreamTracks(acquired.stream);
+      throw err;
+    }
     if (oldTrack) {
       stream.removeTrack(oldTrack);
       oldTrack.stop();
     }
     this.cameraOn.set(true);
-    await onVideoTrackChanged(nextTrack);
     return nextTrack;
   }
 
@@ -290,24 +321,29 @@ export class MediaService {
     }
 
     // 'acquire' — re-ask permission, getUserMedia, add + publish, mirror replaceAudioTrack.
-    const nextStream = await navigator.mediaDevices.getUserMedia({
-      audio: this.audioConstraints(true, options.audioDeviceId),
-      video: false,
+    const acquired = await acquireAudio(this.acquisitionQueue, {
+      deviceId: options.audioDeviceId,
+      baseConstraints: this.audioConstraints(true) as MediaTrackConstraints,
+    }).catch((err) => {
+      throw normalizeMediaError(err);
     });
-    registerDebugTracks(nextStream);
-    const nextTrack = nextStream.getAudioTracks()[0];
-    if (!nextTrack) {
-      nextStream.getTracks().forEach((t) => t.stop());
-      return false;
-    }
+    registerDebugTracks(acquired.stream);
+    const nextTrack = acquired.track;
     this.verifyAudioProcessing(nextTrack);
     if (!stream) {
-      this.localStream.set(nextStream);
+      this.localStream.set(acquired.stream);
     } else {
       stream.addTrack(nextTrack);
     }
-    this.micOn.set(true);
-    await onAudioTrackChanged(nextTrack);
+    try {
+      await onAudioTrackChanged(nextTrack);
+    } catch (err) {
+      if (!stream) this.localStream.set(null);
+      else stream.removeTrack(nextTrack);
+      stopStreamTracks(acquired.stream);
+      throw err;
+    }
+    this.micOn.set(nextTrack.enabled);
     this.startMicLevel(nextTrack);
     return true;
   }
@@ -343,22 +379,30 @@ export class MediaService {
     }
 
     // 'acquire' — covers BOTH no-localStream and stream-without-video-track.
-    const camStream = await navigator.mediaDevices.getUserMedia({
-      video: this.videoConstraints(true, options),
+    const acquired = await acquireVideo(this.acquisitionQueue, {
+      deviceId: options.videoDeviceId,
+      facingMode: options.facingMode,
+      baseConstraints: this.videoConstraints(true) as MediaTrackConstraints,
+    }).catch((err) => {
+      throw normalizeMediaError(err);
     });
-    registerDebugTracks(camStream);
-    const track = camStream.getVideoTracks()[0];
-    if (!track) {
-      camStream.getTracks().forEach((t) => t.stop());
-      return false;
-    }
+    if (!acquired) return false;
+    registerDebugTracks(acquired.stream);
+    const track = acquired.track;
     if (!stream) {
-      this.localStream.set(camStream);
+      this.localStream.set(acquired.stream);
     } else {
       stream.addTrack(track);
     }
-    this.cameraOn.set(true);
-    await onVideoTrackChanged(track);
+    try {
+      await onVideoTrackChanged(track);
+    } catch (err) {
+      if (!stream) this.localStream.set(null);
+      else stream.removeTrack(track);
+      stopStreamTracks(acquired.stream);
+      throw err;
+    }
+    this.cameraOn.set(track.enabled);
     return true;
   }
 
@@ -376,14 +420,22 @@ export class MediaService {
       return false;
     }
 
-    const camStream = await navigator.mediaDevices.getUserMedia({
-      video: this.videoConstraints(true, { deviceId: options.videoDeviceId, facingMode: options.facingMode }),
+    const acquired = await acquireVideo(this.acquisitionQueue, {
+      deviceId: options.videoDeviceId,
+      facingMode: options.facingMode,
+      baseConstraints: this.videoConstraints(true) as MediaTrackConstraints,
+    }).catch((err) => {
+      throw normalizeMediaError(err);
     });
-    registerDebugTracks(camStream);
-    const track = camStream.getVideoTracks()[0];
+    if (!acquired) {
+      this.cameraOn.set(false);
+      return false;
+    }
+    registerDebugTracks(acquired.stream);
+    const track = acquired.track;
     stream.addTrack(track);
-    this.cameraOn.set(true);
-    return true;
+    this.cameraOn.set(track.enabled);
+    return track.enabled;
   }
 
   async toggleScreen(onVideoTrackChanged: (track: MediaStreamTrack | null) => Promise<void>): Promise<boolean> {
@@ -420,21 +472,6 @@ export class MediaService {
 
   stopLocal(): void {
     this.stopCurrentMedia({ closeAudioContext: true });
-  }
-
-  private async acquire(constraints: MediaStreamConstraints): Promise<MediaStream> {
-    this.stopCurrentMedia({ closeAudioContext: false });
-    this.lastVideoConstraints.set(cloneConstraints(constraints));
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      registerDebugTracks(stream);
-      this.localStream.set(stream);
-      this.micOn.set(stream.getAudioTracks()[0]?.enabled ?? false);
-      this.cameraOn.set(stream.getVideoTracks().length > 0);
-      return stream;
-    } catch (err) {
-      throw normalizeMediaError(err);
-    }
   }
 
   private commitAcquiredLocalStream(stream: MediaStream, constraints: MediaStreamConstraints): MediaStream {
@@ -505,6 +542,12 @@ export class MediaService {
 
 function cloneConstraints(constraints: MediaStreamConstraints): MediaStreamConstraints {
   return JSON.parse(JSON.stringify(constraints)) as MediaStreamConstraints;
+}
+
+function stopStreamTracks(stream: MediaStream): void {
+  stream.getTracks().forEach((track) => {
+    if (track.readyState !== 'ended') track.stop();
+  });
 }
 
 function normalizeMediaError(err: unknown): MediaError {

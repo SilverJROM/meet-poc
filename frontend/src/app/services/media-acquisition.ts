@@ -34,6 +34,12 @@ export interface AcquireMediaOptions {
   baseConstraints?: MediaTrackConstraints;
 }
 
+export interface ResolveAcquiredDeviceIdInput {
+  requestedDeviceId?: string;
+  acquiredDeviceId?: string;
+  stage: Exclude<MediaAcquireStage, 'none'>;
+}
+
 export function resolveInitialStage(deviceId?: string): Exclude<MediaAcquireStage, 'ideal' | 'none'> {
   return deviceId ? 'exact' : 'default';
 }
@@ -57,6 +63,14 @@ export function resolveNextOnError(input: ResolveNextOnErrorInput): MediaAcquire
   if (input.failedStage === 'ideal') return 'default';
   if (input.failedStage === 'default' && input.kind === 'video') return 'none';
   return null;
+}
+
+export function resolvedAcquiredDeviceId(input: ResolveAcquiredDeviceIdInput): string {
+  const requested = input.requestedDeviceId ?? '';
+  const acquired = input.acquiredDeviceId ?? '';
+  if (input.stage === 'exact') return requested || acquired;
+  if (acquired && !isGenericAcquiredDeviceId(acquired)) return acquired;
+  return requested;
 }
 
 export function createMediaAcquisitionQueue(getUserMedia: GetUserMediaFn): MediaAcquisitionQueue {
@@ -131,4 +145,8 @@ function stopStream(stream: MediaStream): void {
   stream.getTracks().forEach((track) => {
     if (track.readyState !== 'ended') track.stop();
   });
+}
+
+function isGenericAcquiredDeviceId(id: string): boolean {
+  return id === '' || id === 'default' || id === 'communications';
 }

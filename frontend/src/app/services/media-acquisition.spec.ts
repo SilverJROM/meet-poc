@@ -3,6 +3,7 @@ import {
   acquireAudio,
   acquireVideo,
   createMediaAcquisitionQueue,
+  resolvedAcquiredDeviceId,
   resolveConstraints,
   resolveNextOnError,
   type GetUserMediaFn,
@@ -96,6 +97,48 @@ import {
   await Promise.all([audio1, video1, audio2]);
   assert.deepStrictEqual(completions, ['audio1', 'video1', 'audio2'], 'concurrent requests resolve in FIFO call order');
   assert.strictEqual(maxActive, 1, 'no overlapping getUserMedia calls occurred');
+}
+
+// U-5 — exact success keeps the requested id even if the track reports a generic alias.
+{
+  assert.strictEqual(
+    resolvedAcquiredDeviceId({ requestedDeviceId: 'mic-1', acquiredDeviceId: 'default', stage: 'exact' }),
+    'mic-1',
+    'exact success keeps requested id',
+  );
+}
+
+// U-6 — real fallback adopts the actual acquired device so storage is not pinned to a dead id.
+{
+  assert.strictEqual(
+    resolvedAcquiredDeviceId({ requestedDeviceId: 'mic-dead', acquiredDeviceId: 'mic-live', stage: 'default' }),
+    'mic-live',
+    'default fallback adopts concrete acquired device',
+  );
+  assert.strictEqual(
+    resolvedAcquiredDeviceId({ requestedDeviceId: 'cam-dead', acquiredDeviceId: 'cam-live', stage: 'ideal' }),
+    'cam-live',
+    'ideal fallback adopts concrete acquired device',
+  );
+}
+
+// U-7 — empty/generic reports never clobber the requested id after fallback.
+{
+  assert.strictEqual(
+    resolvedAcquiredDeviceId({ requestedDeviceId: 'mic-1', acquiredDeviceId: '', stage: 'default' }),
+    'mic-1',
+    'empty acquired id does not clobber requested id',
+  );
+  assert.strictEqual(
+    resolvedAcquiredDeviceId({ requestedDeviceId: 'mic-1', acquiredDeviceId: 'default', stage: 'default' }),
+    'mic-1',
+    'generic default id does not clobber requested id',
+  );
+  assert.strictEqual(
+    resolvedAcquiredDeviceId({ requestedDeviceId: 'mic-1', acquiredDeviceId: 'communications', stage: 'ideal' }),
+    'mic-1',
+    'generic communications id does not clobber requested id',
+  );
 }
 
 function fakeStream(kind: MediaAcquireKind): MediaStream {

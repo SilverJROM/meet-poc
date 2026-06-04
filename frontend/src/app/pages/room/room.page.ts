@@ -30,7 +30,8 @@ import {
   type SweepHooks,
 } from '../../services/mic-energy';
 import { computeEffectiveDiagnosticsEnabled, readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
-import { resolveSelectedAudioId } from '../../services/device-selection';
+import { isGenericAudioDeviceId, resolveSelectedAudioId } from '../../services/device-selection';
+import { resolvedAcquiredDeviceId } from '../../services/media-acquisition';
 import { permissionBlockHint } from '../../services/media-toggle';
 import { IceConfigService } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
@@ -980,10 +981,12 @@ export class RoomPage implements OnDestroy {
 
   async toggleMic(): Promise<void> {
     try {
+      const requestedAudioDeviceId = this.selectedAudioId();
       const mic = await this.media.toggleMic(
         (track) => this.sfuClient.replaceAudioTrack(track),
-        { audioDeviceId: this.selectedAudioId() || undefined },
+        { audioDeviceId: requestedAudioDeviceId || undefined },
       );
+      if (mic) this.syncSelectedAudioIdToTrack(this.media.localStream()?.getAudioTracks()[0], requestedAudioDeviceId);
       this.actionNotice.set(null);
       this.broadcastMediaState(mic, this.media.cameraOn());
     } catch (err) {
@@ -997,13 +1000,15 @@ export class RoomPage implements OnDestroy {
       return;
     }
     try {
+      const requestedVideoDeviceId = this.selectedVideoDeviceIdForRequest() ?? '';
       const cam = await this.media.toggleCamera(
         (track: MediaStreamTrack | null) => this.replaceEffectiveVideoTrack(track),
         {
-          videoDeviceId: this.selectedVideoDeviceIdForRequest(),
+          videoDeviceId: requestedVideoDeviceId || undefined,
           facingMode: this.videoFacingModeForRequest(true),
         },
       );
+      if (cam && requestedVideoDeviceId) this.syncSelectedVideoIdToTrack(this.media.localStream()?.getVideoTracks()[0], requestedVideoDeviceId);
       this.actionNotice.set(null);
       this.broadcastMediaState(this.media.micOn(), cam);
     } catch (err) {
@@ -1868,11 +1873,13 @@ export class RoomPage implements OnDestroy {
     this.setupWarning.set(null);
     this.error.set(null);
     try {
+      const requestedAudioDeviceId = this.selectedAudioId();
+      const requestedVideoDeviceId = this.selectedVideoDeviceIdForRequest() ?? '';
       const stream = await this.media.preflight({
         audio: true,
         video: this.cameraRequested(),
-        audioDeviceId: this.selectedAudioId() || undefined,
-        videoDeviceId: this.selectedVideoDeviceIdForRequest(),
+        audioDeviceId: requestedAudioDeviceId || undefined,
+        videoDeviceId: requestedVideoDeviceId || undefined,
         facingMode: this.videoFacingModeForRequest(this.cameraRequested()),
       });
       this.attachLocalTrackFailureHandlers(stream);
@@ -1880,6 +1887,8 @@ export class RoomPage implements OnDestroy {
       this.micLevel.set(this.media.getMicLevel(stream));
       this.startLobbySelfTest();
       await this.refreshDevices();
+      this.syncSelectedAudioIdToTrack(stream.getAudioTracks()[0], requestedAudioDeviceId);
+      if (this.cameraRequested() && requestedVideoDeviceId) this.syncSelectedVideoIdToTrack(stream.getVideoTracks()[0], requestedVideoDeviceId);
       await this.ensureSelectedAudioDevice('lobby-preflight');
     } catch (err) {
       await this.handleLobbyMediaError(err, this.cameraRequested());
@@ -1899,9 +1908,11 @@ export class RoomPage implements OnDestroy {
     this.setupWarning.set(null);
     this.error.set(null);
     try {
+      const requestedAudioDeviceId = this.selectedAudioId();
+      const requestedVideoDeviceId = this.selectedVideoDeviceIdForRequest() ?? '';
       const stream = await this.media.reacquire({
-        audioDeviceId: this.selectedAudioId() || undefined,
-        videoDeviceId: this.selectedVideoDeviceIdForRequest(),
+        audioDeviceId: requestedAudioDeviceId || undefined,
+        videoDeviceId: requestedVideoDeviceId || undefined,
         facingMode: this.videoFacingModeForRequest(this.cameraRequested()),
         video: this.cameraRequested(),
       });
@@ -1910,6 +1921,8 @@ export class RoomPage implements OnDestroy {
       this.micLevel.set(this.media.getMicLevel(stream));
       this.startLobbySelfTest();
       await this.refreshDevices();
+      this.syncSelectedAudioIdToTrack(stream.getAudioTracks()[0], requestedAudioDeviceId);
+      if (this.cameraRequested() && requestedVideoDeviceId) this.syncSelectedVideoIdToTrack(stream.getVideoTracks()[0], requestedVideoDeviceId);
       await this.ensureSelectedAudioDevice('lobby-reacquire');
     } catch (err) {
       await this.handleLobbyMediaError(err, this.cameraRequested());
@@ -2036,6 +2049,10 @@ export class RoomPage implements OnDestroy {
     if (!stream || !selectedDeviceId) return;
     const currentDeviceId = audioTrackDeviceId(stream.getAudioTracks()[0]);
     if (currentDeviceId === selectedDeviceId) return;
+    if (
+      isGenericAudioDeviceId(currentDeviceId)
+      && this.audioInputs().some((device) => device.deviceId === selectedDeviceId)
+    ) return;
 
     console.info(`[devices] reconciling selected microphone for ${reason}; selected=${selectedDeviceId} current=${currentDeviceId || 'unknown'}`);
     if (this.state() === 'in-call') {
@@ -2047,15 +2064,18 @@ export class RoomPage implements OnDestroy {
 
   private async reacquireLobbyAudioDevice(deviceId: string): Promise<void> {
     try {
+      const requestedVideoDeviceId = this.selectedVideoDeviceIdForRequest() ?? '';
       const stream = await this.media.reacquire({
         audioDeviceId: deviceId,
-        videoDeviceId: this.selectedVideoDeviceIdForRequest(),
+        videoDeviceId: requestedVideoDeviceId || undefined,
         facingMode: this.videoFacingModeForRequest(this.cameraRequested()),
         video: this.cameraRequested(),
       });
       this.attachLocalTrackFailureHandlers(stream);
       this.applyLobbyMicPreference(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
+      this.syncSelectedAudioIdToTrack(stream.getAudioTracks()[0], deviceId);
+      if (this.cameraRequested() && requestedVideoDeviceId) this.syncSelectedVideoIdToTrack(stream.getVideoTracks()[0], requestedVideoDeviceId);
     } catch (err) {
       console.warn('[devices] selected microphone unavailable; falling back to default audio', err);
       await this.reacquireDefaultLobbyAudio();
@@ -2064,9 +2084,10 @@ export class RoomPage implements OnDestroy {
 
   private async reacquireDefaultLobbyAudio(): Promise<void> {
     try {
+      const requestedVideoDeviceId = this.selectedVideoDeviceIdForRequest() ?? '';
       const stream = await this.media.reacquire({
         audioDeviceId: undefined,
-        videoDeviceId: this.selectedVideoDeviceIdForRequest(),
+        videoDeviceId: requestedVideoDeviceId || undefined,
         facingMode: this.videoFacingModeForRequest(this.cameraRequested()),
         video: this.cameraRequested(),
       });
@@ -2074,6 +2095,7 @@ export class RoomPage implements OnDestroy {
       this.applyLobbyMicPreference(stream);
       this.micLevel.set(this.media.getMicLevel(stream));
       this.syncSelectedAudioIdToTrack(stream.getAudioTracks()[0]);
+      if (this.cameraRequested() && requestedVideoDeviceId) this.syncSelectedVideoIdToTrack(stream.getVideoTracks()[0], requestedVideoDeviceId);
       this.setupWarning.set('Selected microphone is unavailable. Using the system default microphone.');
     } catch (fallbackErr) {
       await this.handleLobbyMediaError(fallbackErr, this.cameraRequested());
@@ -2153,6 +2175,7 @@ export class RoomPage implements OnDestroy {
     try {
       const track = await this.media.replaceAudioTrack(deviceId || undefined, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
       if (track) {
+        this.syncSelectedAudioIdToTrack(track, deviceId);
         this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
         this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([track])));
         this.broadcastMediaState(track.enabled, this.media.cameraOn());
@@ -2192,6 +2215,7 @@ export class RoomPage implements OnDestroy {
         this.videoFacingModeForRequest(true),
       );
       if (track) {
+        if (deviceId) this.syncSelectedVideoIdToTrack(track, deviceId);
         this.broadcastMediaState(this.media.micOn(), true);
         this.queueDiagnosticsLog('state-change');
       }
@@ -2202,10 +2226,16 @@ export class RoomPage implements OnDestroy {
     }
   }
 
-  private syncSelectedAudioIdToTrack(track: MediaStreamTrack | null | undefined): void {
+  private syncSelectedAudioIdToTrack(track: MediaStreamTrack | null | undefined, requestedDeviceId = this.selectedAudioId()): void {
+    const trackReportedId = audioTrackDeviceId(track);
+    const resolvedId = resolvedAcquiredDeviceId({
+      requestedDeviceId,
+      acquiredDeviceId: trackReportedId,
+      stage: requestedDeviceId && trackReportedId === requestedDeviceId ? 'exact' : 'default',
+    });
     const next = resolveSelectedAudioId({
-      chosenId: this.selectedAudioId(),
-      trackReportedId: audioTrackDeviceId(track),
+      chosenId: resolvedId || this.selectedAudioId(),
+      trackReportedId,
       enumeratedIds: this.audioInputs().map((d) => d.deviceId),
       storedId: readStoredDevice(DEVICE_STORAGE.audioInput),
     });
@@ -2213,11 +2243,16 @@ export class RoomPage implements OnDestroy {
     storeDevice(DEVICE_STORAGE.audioInput, next);
   }
 
-  private syncSelectedVideoIdToTrack(track: MediaStreamTrack | null | undefined): void {
+  private syncSelectedVideoIdToTrack(track: MediaStreamTrack | null | undefined, requestedDeviceId = this.selectedVideoId()): void {
     const actualDeviceId = mediaTrackDeviceId(track);
-    this.selectedVideoId.set(actualDeviceId);
-    this.videoDevicePinned.set(!!actualDeviceId);
-    storeDevice(DEVICE_STORAGE.videoInput, actualDeviceId);
+    const next = resolvedAcquiredDeviceId({
+      requestedDeviceId,
+      acquiredDeviceId: actualDeviceId,
+      stage: requestedDeviceId && actualDeviceId === requestedDeviceId ? 'exact' : 'default',
+    });
+    this.selectedVideoId.set(next);
+    this.videoDevicePinned.set(!!next);
+    storeDevice(DEVICE_STORAGE.videoInput, next);
   }
 
   private installDeviceChangeHandler(): void {
