@@ -49,6 +49,7 @@ import { ViewportService } from '../../services/viewport.service';
 import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.service';
 import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
 import { planInitialPublishRetry } from '../../services/sfu-roster-utils';
+import { decideRoomLifecycleLeave } from './room-lifecycle';
 
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
@@ -455,6 +456,7 @@ export class RoomPage implements OnDestroy {
   private pendingListInitialized = false;
   private lastDoorbellAt = 0;
   private deviceChangeListenerInstalled = false;
+  private lifecycleResumeInFlight = false;
   private audioRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private videoRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private remoteAudioKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
@@ -2616,6 +2618,7 @@ export class RoomPage implements OnDestroy {
 
   private installPageLifecycleCleanup(): void {
     window.addEventListener('pagehide', this.handlePageLifecycleLeave);
+    window.addEventListener('pageshow', this.handlePageLifecycleShow);
     window.addEventListener('beforeunload', this.handlePageLifecycleLeave);
     document.addEventListener('visibilitychange', this.handleLobbyVisibilityRelease);
     document.addEventListener('visibilitychange', this.handleRemoteAudioVisibilityRecovery);
@@ -2623,13 +2626,39 @@ export class RoomPage implements OnDestroy {
 
   private uninstallPageLifecycleCleanup(): void {
     window.removeEventListener('pagehide', this.handlePageLifecycleLeave);
+    window.removeEventListener('pageshow', this.handlePageLifecycleShow);
     window.removeEventListener('beforeunload', this.handlePageLifecycleLeave);
     document.removeEventListener('visibilitychange', this.handleLobbyVisibilityRelease);
     document.removeEventListener('visibilitychange', this.handleRemoteAudioVisibilityRecovery);
   }
 
-  private readonly handlePageLifecycleLeave = (): void => {
-    this.cleanupCall();
+  private readonly handlePageLifecycleLeave = (event: PageTransitionEvent | BeforeUnloadEvent): void => {
+    const action = decideRoomLifecycleLeave({
+      eventType: event.type === 'beforeunload' ? 'beforeunload' : 'pagehide',
+      persisted: 'persisted' in event ? event.persisted : false,
+      visibilityState: document.visibilityState,
+      mobileBackgroundPauseEnabled: this.shouldEnableBgPause(),
+    });
+    if (action === 'cleanup') this.cleanupCall();
+  };
+
+  private readonly handlePageLifecycleShow = (event: PageTransitionEvent): void => {
+    if (!event.persisted || this.state() !== 'in-call') return;
+    void this.resumeAfterLifecycleFreeze().catch((err) => console.debug('[lifecycle] pageshow resume failed', err));
+  };
+
+  private async resumeAfterLifecycleFreeze(): Promise<void> {
+    if (this.lifecycleResumeInFlight || this.state() !== 'in-call') return;
+    this.lifecycleResumeInFlight = true;
+    try {
+      await this.recoverRemoteAudio('visibility');
+      this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+      if (this.sfuClient.isLocalPublishHealthy()) return;
+      if (this.sfuClient.localPublishState()?.status === 'published') this.sfuClient.resetForTransportRecovery();
+      await this.republishSfuAfterTransportRecovery();
+    } finally {
+      this.lifecycleResumeInFlight = false;
+    }
   };
 
   // While in lobby (not yet in the call), release camera/mic if the tab is

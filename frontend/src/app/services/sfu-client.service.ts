@@ -125,6 +125,15 @@ export class SfuClientService {
     return result;
   }
 
+  isLocalPublishHealthy(): boolean {
+    const publishState = this.localPublishState();
+    const pc = this.pc;
+    if (publishState?.status !== 'published' || !pc) return false;
+    if (pc.connectionState === 'failed' || pc.connectionState === 'closed') return false;
+    if (pc.iceConnectionState === 'failed' || pc.iceConnectionState === 'closed') return false;
+    return true;
+  }
+
   publish(params: { clientKey: string; participantId: string; sessionId: string; localStream: MediaStream | null }): Promise<void> {
     return this.enqueue(() => this.doPublish(params));
   }
