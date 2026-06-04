@@ -1,6 +1,11 @@
 import { Injectable, Signal, inject, signal } from '@angular/core';
 import { ViewportService } from './viewport.service';
 import { accumulateEnergyFrame, audioCaptureConstraints, unappliedAudioProcessing, type AudioProcessingSettings, type EnergySample } from './mic-energy';
+import {
+  acquireAudio,
+  acquireVideo,
+  createMediaAcquisitionQueue,
+} from './media-acquisition';
 import { resolveMediaToggleAction } from './media-toggle';
 
 // B5 — bounded ~3s rolling capture window for the lobby self-test. ~24 samples
@@ -41,6 +46,7 @@ type PreflightOptions = {
 @Injectable({ providedIn: 'root' })
 export class MediaService {
   private readonly viewport = inject(ViewportService);
+  private readonly acquisitionQueue = createMediaAcquisitionQueue((constraints) => navigator.mediaDevices.getUserMedia(constraints));
 
   readonly localStream = signal<MediaStream | null>(null);
   readonly screenStream = signal<MediaStream | null>(null);
@@ -69,12 +75,34 @@ export class MediaService {
   }
 
   async preflight(constraints: PreflightOptions): Promise<MediaStream> {
-    return this.acquire({
-      audio: this.audioConstraints(constraints.audio, constraints.audioDeviceId),
-      video: this.videoConstraints(constraints.video, {
-        deviceId: constraints.videoDeviceId,
-        facingMode: constraints.facingMode,
-      }),
+    const audio = constraints.audio
+      ? await acquireAudio(this.acquisitionQueue, {
+          deviceId: constraints.audioDeviceId,
+          baseConstraints: this.audioConstraints(true) as MediaTrackConstraints,
+        }).catch((err) => {
+          throw normalizeMediaError(err);
+        })
+      : null;
+
+    const video = constraints.video
+      ? await acquireVideo(this.acquisitionQueue, {
+          deviceId: constraints.videoDeviceId,
+          facingMode: constraints.facingMode,
+          baseConstraints: this.videoConstraints(true) as MediaTrackConstraints,
+        }).catch((err) => {
+          console.debug('[media] camera preflight skipped after acquisition failure', err);
+          return null;
+        })
+      : null;
+
+    const stream = new MediaStream([
+      ...(audio ? [audio.track] : []),
+      ...(video ? [video.track] : []),
+    ]);
+    if (constraints.audio && stream.getAudioTracks().length === 0) throw normalizeMediaError(new Error('No microphone track acquired'));
+    return this.commitAcquiredLocalStream(stream, {
+      audio: audio?.constraints ?? false,
+      video: video?.constraints ?? false,
     });
   }
 
@@ -409,6 +437,18 @@ export class MediaService {
     }
   }
 
+  private commitAcquiredLocalStream(stream: MediaStream, constraints: MediaStreamConstraints): MediaStream {
+    const previous = this.localStream();
+    this.lastVideoConstraints.set(cloneConstraints(constraints));
+    this.stopMicLevel();
+    registerDebugTracks(stream);
+    this.localStream.set(stream);
+    this.micOn.set(stream.getAudioTracks()[0]?.enabled ?? false);
+    this.cameraOn.set(stream.getVideoTracks().length > 0);
+    stopTracksNotInStream(previous, stream);
+    return stream;
+  }
+
   private stopMicLevel(): void {
     if (this.micInterval) clearInterval(this.micInterval);
     this.micInterval = null;
@@ -496,4 +536,12 @@ function registerDebugTracks(stream: MediaStream): void {
   const tracks = stream.getTracks();
   if (tracks.length === 0) return;
   window.__activeTracks = [...(window.__activeTracks ?? []), ...tracks];
+}
+
+function stopTracksNotInStream(previous: MediaStream | null, next: MediaStream): void {
+  if (!previous) return;
+  const nextTracks = new Set(next.getTracks());
+  previous.getTracks().forEach((track) => {
+    if (!nextTracks.has(track) && track.readyState !== 'ended') track.stop();
+  });
 }
