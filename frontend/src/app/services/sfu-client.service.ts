@@ -1571,6 +1571,8 @@ export class SfuClientService {
       throw new Error('[sfu] doSubscribeTracks: not ready (no creds/publish/pc)');
     }
     if (!tracks.length) return;
+    const tracksToSubscribe = tracks.filter((track) => !this.isTrackSubscribed(publisher.clientId, track.trackName));
+    if (!tracksToSubscribe.length) return;
     if (!this.subscribeInitiatedAt.has(publisher.clientId)) {
       this.subscribeInitiatedAt.set(publisher.clientId, Date.now());
     }
@@ -1587,7 +1589,7 @@ export class SfuClientService {
     const priorityOrdering = rid === 'l' ? ['l', 'm', 'h'] : ['h', 'm', 'l'];
 
     // kind lookup used by reconcileSubscribedMids below
-    const kindMap = new Map(tracks.map((t) => [t.trackName, t.kind]));
+    const kindMap = new Map(tracksToSubscribe.map((t) => [t.trackName, t.kind]));
 
     // Snapshot existing transceiver mids before POST — new ones added by CF renegotiation
     const existingMids = new Set(this.pc.getTransceivers().map((t) => t.mid).filter((m): m is string => !!m));
@@ -1597,7 +1599,7 @@ export class SfuClientService {
         this.http.post<CfTracksResponse>('/api/sfu/tracks', {
           ...creds,
           cfSessionId,
-          tracks: tracks.map((t) => {
+          tracks: tracksToSubscribe.map((t) => {
             const base = { location: 'remote' as const, sessionId: publisher.cfSessionId, trackName: t.trackName };
             if (t.kind === 'video') {
               return { ...base, preferredRid: rid, priorityOrdering, ridNotAvailable: 'degrade' };

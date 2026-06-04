@@ -134,6 +134,42 @@ function makeSubscribePc(options: { renegotiateFails: boolean }): RTCPeerConnect
   return pc as unknown as RTCPeerConnection & { rollbackCount: number };
 }
 
+function makeSingleTrackSubscribePc(): RTCPeerConnection & { rollbackCount: number; transceiverCount: () => number } {
+  const transceivers = [{ mid: '0', receiver: { track: { kind: 'audio' } } }];
+  const pc = {
+    rollbackCount: 0,
+    signalingState: 'stable',
+    localDescription: null as RTCSessionDescriptionInit | null,
+    getTransceivers(): RTCRtpTransceiver[] {
+      return transceivers as unknown as RTCRtpTransceiver[];
+    },
+    async setRemoteDescription(desc: RTCSessionDescriptionInit): Promise<void> {
+      if (desc.type === 'rollback') {
+        this.signalingState = 'stable';
+        return;
+      }
+      transceivers.push({ mid: String(transceivers.length), receiver: { track: { kind: 'audio' } } });
+    },
+    async createAnswer(): Promise<RTCSessionDescriptionInit> {
+      return { type: 'answer', sdp: 'answer-sdp' };
+    },
+    async setLocalDescription(desc: RTCSessionDescriptionInit): Promise<void> {
+      if (desc.type === 'rollback') {
+        this.rollbackCount += 1;
+        this.signalingState = 'stable';
+        this.localDescription = null;
+        return;
+      }
+      this.localDescription = desc;
+      this.signalingState = 'stable';
+    },
+    transceiverCount(): number {
+      return transceivers.length;
+    },
+  };
+  return pc as unknown as RTCPeerConnection & { rollbackCount: number; transceiverCount: () => number };
+}
+
 function installPublishedSfuState(sfu: SfuClientService, pc: RTCPeerConnection): void {
   const privateSfu = sfu as unknown as {
     pc: RTCPeerConnection;
@@ -815,6 +851,172 @@ async function flushSfuQueue(sfu: SfuClientService): Promise<void> {
   ];
   const nextTracks = [...previousTracks];
   assert.deepEqual(selectNewRemoteTracks(previousTracks, nextTracks, new Set()).map((track) => track.trackName), []);
+}
+
+// FIX3 — fully already-subscribed doSubscribeTracks is a clean no-op before POST, stamp, or mutation.
+{
+  let postCalls = 0;
+  const http = {
+    post: () => {
+      postCalls += 1;
+      return of({});
+    },
+  } as unknown as Partial<HttpClient>;
+  const sfu = createSfuClient(http);
+  const pc = makeSingleTrackSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  const privateSfu = sfu as unknown as {
+    doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
+    midToEntry: Map<string, SubscribedTrackEntry>;
+    subscribeInitiatedAt: Map<string, number>;
+  };
+  const existingEntry: SubscribedTrackEntry = { publisherClientId: 'alice', trackName: 'alice-audio', kind: 'audio', mid: '1' };
+  privateSfu.midToEntry.set('1', existingEntry);
+  sfu.subscribedTracks.set(new Map([['1', existingEntry]]));
+
+  await privateSfu.doSubscribeTracks(
+    { clientId: 'alice', participantId: 'p-alice', cfSessionId: 'alice-cf', revision: 1, tracks: [] },
+    [{ trackName: 'alice-audio', kind: 'audio' }],
+  );
+
+  assert.equal(postCalls, 0, 'already-subscribed full set does not issue POST /api/sfu/tracks');
+  assert.equal(privateSfu.subscribeInitiatedAt.has('alice'), false, 'already-subscribed full set does not stamp subscribeInitiatedAt');
+  assert.deepEqual([...privateSfu.midToEntry.entries()], [['1', existingEntry]], 'already-subscribed full set leaves midToEntry unchanged');
+  assert.deepEqual([...sfu.subscribedTracks().entries()], [['1', existingEntry]], 'already-subscribed full set leaves subscribedTracks unchanged');
+}
+
+// FIX3 — double-trigger same-track subscribe serializes to one POST, one transceiver, and one subscribed entry.
+{
+  const postBodies: Array<{ tracks: Array<{ trackName: string }> }> = [];
+  const http = {
+    post: (_url: string, body: { tracks: Array<{ trackName: string }> }) => {
+      postBodies.push(body);
+      return of({
+        requiresImmediateRenegotiation: true,
+        sessionDescription: { type: 'offer', sdp: 'remote-offer' },
+        tracks: [{ trackName: 'alice-audio', mid: '' }],
+      });
+    },
+    put: () => of({}),
+  } as unknown as Partial<HttpClient>;
+  const sfu = createSfuClient(http);
+  const pc = makeSingleTrackSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  const privateSfu = sfu as unknown as {
+    doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
+    midToEntry: Map<string, SubscribedTrackEntry>;
+  };
+  const publisher: RemotePublisher = {
+    clientId: 'alice',
+    participantId: 'p-alice',
+    cfSessionId: 'alice-cf',
+    revision: 2,
+    tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
+  };
+
+  await privateSfu.doSubscribeTracks(publisher, publisher.tracks);
+  await privateSfu.doSubscribeTracks(publisher, publisher.tracks);
+
+  const aliceAudioEntries = [...privateSfu.midToEntry.values()].filter((entry) => entry.publisherClientId === 'alice' && entry.trackName === 'alice-audio');
+  assert.equal(postBodies.length, 1, 'double-trigger same-track subscribe issues exactly one POST');
+  assert.deepEqual(postBodies[0].tracks.map((track) => track.trackName), ['alice-audio'], 'first POST subscribes the missing audio track');
+  assert.equal(pc.transceiverCount(), 2, 'double-trigger same-track subscribe adds exactly one receive transceiver');
+  assert.equal(aliceAudioEntries.length, 1, 'double-trigger same-track subscribe commits exactly one subscribed entry');
+  assert.equal(sfu.subscribedTracks().size, 1, 'double-trigger same-track subscribe leaves exactly one subscribedTracks entry');
+}
+
+// FIX3 — mixed already-subscribed and missing tracks POST/reconcile only the missing track.
+{
+  const postBodies: Array<{ tracks: Array<{ trackName: string }> }> = [];
+  const http = {
+    post: (_url: string, body: { tracks: Array<{ trackName: string }> }) => {
+      postBodies.push(body);
+      return of({
+        requiresImmediateRenegotiation: true,
+        sessionDescription: { type: 'offer', sdp: 'remote-offer' },
+        tracks: [{ trackName: 'bob-new-audio', mid: '' }],
+      });
+    },
+    put: () => of({}),
+  } as unknown as Partial<HttpClient>;
+  const sfu = createSfuClient(http);
+  const pc = makeSingleTrackSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  const privateSfu = sfu as unknown as {
+    doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
+    midToEntry: Map<string, SubscribedTrackEntry>;
+  };
+  const existingEntry: SubscribedTrackEntry = { publisherClientId: 'bob', trackName: 'bob-old-audio', kind: 'audio', mid: 'old-mid' };
+  privateSfu.midToEntry.set('old-mid', existingEntry);
+  sfu.subscribedTracks.set(new Map([['old-mid', existingEntry]]));
+  const tracks = [
+    { trackName: 'bob-old-audio', kind: 'audio' },
+    { trackName: 'bob-new-audio', kind: 'audio' },
+  ];
+
+  await privateSfu.doSubscribeTracks({ clientId: 'bob', participantId: 'p-bob', cfSessionId: 'bob-cf', revision: 2, tracks }, tracks);
+
+  assert.equal(postBodies.length, 1, 'mixed subscribe still POSTs for a genuinely missing track');
+  assert.deepEqual(postBodies[0].tracks.map((track) => track.trackName), ['bob-new-audio'], 'POST body excludes already-subscribed tracks');
+  assert.equal(privateSfu.midToEntry.get('old-mid'), existingEntry, 'existing subscribed entry is preserved');
+  assert.equal(privateSfu.midToEntry.get('1')?.trackName, 'bob-new-audio', 'missing track is reconciled and committed');
+  assert.equal(sfu.subscribedTracks().get('1')?.trackName, 'bob-new-audio', 'missing track reaches subscribedTracks');
+}
+
+// FIX3 — FIX2 mid-call retry of a truly missing track still drives real doSubscribeTracks to success.
+{
+  await withFakeTimersAsync(async (timers) => {
+    let postCalls = 0;
+    const http = {
+      post: () => {
+        postCalls += 1;
+        if (postCalls === 1) {
+          return of({
+            tracks: [{ trackName: 'carol-audio', mid: '', errorCode: 'not_found_track_error' }],
+          });
+        }
+        return of({
+          requiresImmediateRenegotiation: true,
+          sessionDescription: { type: 'offer', sdp: 'remote-offer' },
+          tracks: [{ trackName: 'carol-audio', mid: '' }],
+        });
+      },
+      put: () => of({}),
+    } as unknown as Partial<HttpClient>;
+    const sfu = createSfuClient(http);
+    const pc = makeSingleTrackSubscribePc();
+    installPublishedSfuState(sfu, pc);
+    const publisher: RemotePublisher = {
+      clientId: 'carol',
+      participantId: 'p-carol',
+      cfSessionId: 'carol-cf',
+      revision: 2,
+      tracks: [{ trackName: 'carol-audio', kind: 'audio' }],
+    };
+    sfu.remotePublishers.set(new Map([['carol', publisher]]));
+    const privateSfu = sfu as unknown as {
+      subscribeNewRemoteTracks: (publisher: RemotePublisher, previousTracks: { trackName: string; kind: string }[]) => void;
+      midToEntry: Map<string, SubscribedTrackEntry>;
+      midCallSubscribeRetryTimers: Map<string, unknown>;
+    };
+
+    privateSfu.subscribeNewRemoteTracks(publisher, []);
+    await flushSfuQueue(sfu);
+
+    assert.equal(postCalls, 1, 'first truly-missing mid-call subscribe attempts once');
+    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 1, 'transient real doSubscribeTracks failure schedules FIX2 retry');
+
+    const retryTimer = timers.find((timer) => timer.active);
+    assert.ok(retryTimer, 'FIX2 retry timer should be active for a truly missing track');
+    retryTimer.active = false;
+    retryTimer.callback();
+    await flushSfuQueue(sfu);
+
+    assert.equal(postCalls, 2, 'FIX2 retry re-enters real doSubscribeTracks for the truly missing track');
+    assert.equal(privateSfu.midToEntry.get('1')?.trackName, 'carol-audio', 'FIX2 retry success commits missing track to midToEntry');
+    assert.equal(sfu.subscribedTracks().get('1')?.trackName, 'carol-audio', 'FIX2 retry success reaches subscribedTracks');
+    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 0, 'successful real FIX2 retry clears timer state');
+  });
 }
 
 // SFU-S1 — failed subscribe renegotiate restores touched mid entries, subscribedTracks, retry metadata, and rolls back PC.
