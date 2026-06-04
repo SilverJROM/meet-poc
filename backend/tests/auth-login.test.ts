@@ -15,7 +15,7 @@ describe('auth login', () => {
       .send({ email: 'jrom@silverjrom.app', password: initialPassword() })
       .expect(200);
 
-    expect(res.body).toEqual({ email: 'jrom@silverjrom.app' });
+    expect(res.body).toEqual({ email: 'jrom@silverjrom.app', displayName: 'jrom', isAdmin: false });
     const cookie = res.headers['set-cookie']?.[0] || '';
     expect(cookie).toContain('session=');
     expect(cookie).toContain('HttpOnly');

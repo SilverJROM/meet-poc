@@ -39,6 +39,6 @@ describe('legacy migration', () => {
     await request(createApp(db))
       .post('/api/login')
       .send({ email: 'jrom@silverjrom.app', password: initialPassword() })
-      .expect(200, { email: 'jrom@silverjrom.app' });
+      .expect(200, { email: 'jrom@silverjrom.app', displayName: 'jrom', isAdmin: false });
   });
 });
