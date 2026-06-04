@@ -531,8 +531,8 @@ export class MediaService {
     const target = options.deviceId ? { deviceId: { exact: options.deviceId } } : options.facingMode ? { facingMode: options.facingMode } : {};
     if (this.viewport.isMobile()) {
       return {
-        width: { ideal: 854, max: 854 },
-        height: { ideal: 480, max: 480 },
+        width: { ideal: 854 },
+        height: { ideal: 480 },
         ...target,
       };
     }

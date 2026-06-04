@@ -141,6 +141,32 @@ import {
   );
 }
 
+// U-8 — audio/video acquisition never combines constraints, and failed video resolves null.
+{
+  const calls: MediaStreamConstraints[] = [];
+  const getUserMedia: GetUserMediaFn = async (constraints) => {
+    calls.push(constraints);
+    if (constraints.audio) return fakeStream('audio');
+    throw new Error('No camera available');
+  };
+  const queue = createMediaAcquisitionQueue(getUserMedia);
+
+  const audio = await acquireAudio(queue, { baseConstraints: { echoCancellation: { ideal: true } } });
+  const video = await acquireVideo(queue, { baseConstraints: { width: { ideal: 854 }, height: { ideal: 480 } } });
+
+  assert.strictEqual(audio.track.readyState, 'live', 'audio acquisition still must succeed');
+  assert.strictEqual(video, null, 'camera failure is optional and resolves null');
+  assert.strictEqual(calls.length, 2, 'audio and video are requested as separate getUserMedia calls');
+  assert.deepStrictEqual(
+    calls.map((constraints) => ({ audio: !!constraints.audio, video: !!constraints.video })),
+    [
+      { audio: true, video: false },
+      { audio: false, video: true },
+    ],
+    'no getUserMedia call combines audio and video',
+  );
+}
+
 function fakeStream(kind: MediaAcquireKind): MediaStream {
   const track = {
     readyState: 'live',

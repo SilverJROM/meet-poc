@@ -19,15 +19,17 @@ test('S5.1 mobile camera preflight requests 480p constraints', async ({ page }) 
   await page.getByLabel('Start with camera on').check();
   const constraints = await expect.poll(() => page.evaluate(() => window.__meetDebug?.lastVideoConstraints)).toMatchObject({
     video: {
-      width: { ideal: 854, max: 854 },
-      height: { ideal: 480, max: 480 },
+      width: { ideal: 854 },
+      height: { ideal: 480 },
     },
   });
   void constraints;
   const debugConstraints = await page.evaluate(() => window.__meetDebug?.lastVideoConstraints);
   expect(debugConstraints?.video).toMatchObject({
-    width: { ideal: 854, max: 854 },
-    height: { ideal: 480, max: 480 },
+    width: { ideal: 854 },
+    height: { ideal: 480 },
   });
+  expect((debugConstraints?.video as MediaTrackConstraints).width).not.toMatchObject({ max: 854 });
+  expect((debugConstraints?.video as MediaTrackConstraints).height).not.toMatchObject({ max: 480 });
   await page.screenshot({ path: `${MB2_SCREENSHOT_DIR}/mobile-480p-constraint-debug.png`, fullPage: true });
 });

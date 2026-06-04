@@ -1891,8 +1891,8 @@ export class RoomPage implements OnDestroy {
       if (this.cameraRequested() && requestedVideoDeviceId) this.syncSelectedVideoIdToTrack(stream.getVideoTracks()[0], requestedVideoDeviceId);
       await this.ensureSelectedAudioDevice('lobby-preflight');
     } catch (err) {
-      await this.handleLobbyMediaError(err, this.cameraRequested());
-      this.deviceDialogError.set((err as MediaError).message || 'Device setup failed');
+      const recovered = await this.handleLobbyMediaError(err, this.cameraRequested());
+      if (!recovered) this.deviceDialogError.set((err as MediaError).message || 'Device setup failed');
     } finally {
       this.deviceDialogBusy.set(false);
     }
@@ -1925,8 +1925,8 @@ export class RoomPage implements OnDestroy {
       if (this.cameraRequested() && requestedVideoDeviceId) this.syncSelectedVideoIdToTrack(stream.getVideoTracks()[0], requestedVideoDeviceId);
       await this.ensureSelectedAudioDevice('lobby-reacquire');
     } catch (err) {
-      await this.handleLobbyMediaError(err, this.cameraRequested());
-      this.deviceDialogError.set((err as MediaError).message || 'Device change failed');
+      const recovered = await this.handleLobbyMediaError(err, this.cameraRequested());
+      if (!recovered) this.deviceDialogError.set((err as MediaError).message || 'Device change failed');
     } finally {
       this.deviceDialogBusy.set(false);
     }
@@ -1996,27 +1996,29 @@ export class RoomPage implements OnDestroy {
     );
   }
 
-  private async handleLobbyMediaError(err: unknown, videoRequested: boolean): Promise<void> {
+  private async handleLobbyMediaError(err: unknown, videoRequested: boolean): Promise<boolean> {
     const mediaError = err as MediaError;
-    if (videoRequested && mediaError.code === 'denied') {
+    if (videoRequested) {
       try {
         const stream = await this.media.preflight({ audio: true, video: false, audioDeviceId: this.selectedAudioId() || undefined });
         this.cameraRequested.set(false);
         this.permissionError.set({ kind: 'video-denied-but-audio-ok' });
         this.error.set(null);
+        this.deviceDialogError.set(null);
         this.attachLocalTrackFailureHandlers(stream);
         this.applyLobbyMicPreference(stream);
         this.micLevel.set(this.media.getMicLevel(stream));
         await this.refreshDevices();
-        return;
+        return true;
       } catch (fallbackErr) {
         this.permissionError.set(toLobbyError(fallbackErr as MediaError));
         this.error.set((fallbackErr as MediaError).message || 'Media access failed');
-        return;
+        return false;
       }
     }
     this.permissionError.set(toLobbyError(mediaError));
     this.error.set(mediaError.message || 'Media access failed');
+    return false;
   }
 
   private async refreshDevices(): Promise<void> {
@@ -2098,8 +2100,8 @@ export class RoomPage implements OnDestroy {
       if (this.cameraRequested() && requestedVideoDeviceId) this.syncSelectedVideoIdToTrack(stream.getVideoTracks()[0], requestedVideoDeviceId);
       this.setupWarning.set('Selected microphone is unavailable. Using the system default microphone.');
     } catch (fallbackErr) {
-      await this.handleLobbyMediaError(fallbackErr, this.cameraRequested());
-      this.deviceDialogError.set((fallbackErr as MediaError).message || 'Device setup failed');
+      const recovered = await this.handleLobbyMediaError(fallbackErr, this.cameraRequested());
+      if (!recovered) this.deviceDialogError.set((fallbackErr as MediaError).message || 'Device setup failed');
     }
   }
 
