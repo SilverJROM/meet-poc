@@ -54,6 +54,7 @@ import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.ser
 import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
 import { planInitialPublishRetry } from '../../services/sfu-roster-utils';
 import { decideRoomLifecycleLeave } from './room-lifecycle';
+import { recordPeerResumed, syncRecorderPeerStreams } from './room-recording';
 
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
@@ -691,15 +692,7 @@ export class RoomPage implements OnDestroy {
       void this.sfuClient.updateCameraLayer();
     });
     effect(() => {
-      const activePeerIds = new Set<string>();
-      for (const peer of this.peers()) {
-        if (peer.isLocal) continue;
-        activePeerIds.add(peer.id);
-        this.recorder.addPeerStream(peer.id, peer.stream);
-      }
-      for (const peer of this.peers()) {
-        if (!peer.isLocal && !activePeerIds.has(peer.id)) this.recorder.removePeerStream(peer.id);
-      }
+      syncRecorderPeerStreams(this.peers(), this.recorder);
     });
     effect(() => {
       const publishStatus = this.sfuClient.localPublishState()?.status ?? null;
@@ -1252,7 +1245,7 @@ export class RoomPage implements OnDestroy {
     if (!localStream) return;
     try {
       if (!this.recorder.isRecording()) {
-        this.recorder.start(localStream, this.remoteStreams(), {
+        await this.recorder.start(localStream, this.remoteStreams(), {
           sessionId: this.currentSessionId() || '',
           roomId: this.roomId,
           participants: this.participantSnapshot(),
@@ -1806,6 +1799,11 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-resumed') {
       this.status.set(`${msg.name} reconnected.`);
+      recordPeerResumed(this.recorder, msg.oldClientId, {
+        clientId: msg.clientId,
+        displayName: msg.name,
+        isHost: !!msg.host || msg.clientId === this.hostClientId(),
+      });
       this.sfuClient.removePeer(msg.oldClientId);
       this.rekeyChatThread(msg.oldClientId, msg.clientId, msg.name);
       this.peersWithShareGrant.update((ids) => {
@@ -1830,11 +1828,6 @@ export class RoomPage implements OnDestroy {
       if (this.state() === 'in-call') {
         this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
       }
-      this.recorder.notifyParticipantJoined({
-        clientId: msg.clientId,
-        displayName: msg.name,
-        isHost: !!msg.host || msg.clientId === this.hostClientId(),
-      });
       this.queueDiagnosticsLog('reconnect');
       return;
     }

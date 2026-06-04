@@ -82,11 +82,11 @@ export class RecorderService {
     });
   }
 
-  start(
+  async start(
     localStream: MediaStream,
     peerStreams: Map<string, MediaStream>,
     metadata?: { sessionId: string; roomId: string; participants: ParticipantSnapshot[] },
-  ): void {
+  ): Promise<void> {
     if (this.isRecording()) return;
     const AudioCtor = window.AudioContext || window.webkitAudioContext;
     const ctx = new AudioCtor();
@@ -104,6 +104,13 @@ export class RecorderService {
     this.addStream('local', localStream);
     for (const [clientId, stream] of peerStreams) {
       this.addStream(clientId, stream);
+    }
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch (err) {
+        console.warn('recording audio context resume failed', err);
+      }
     }
 
     const selected = this.pickMime();
@@ -140,6 +147,10 @@ export class RecorderService {
     }
     this.sourceFor.delete(clientId);
     this.sourceCount.set(this.sourceFor.size);
+  }
+
+  recordedClientIds(): string[] {
+    return [...this.sourceFor.keys()];
   }
 
   async stop(): Promise<Blob> {
