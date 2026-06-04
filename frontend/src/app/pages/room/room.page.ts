@@ -1796,9 +1796,9 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'meeting-ended') {
-      this.flushDiagnosticsLog('call-end', { useBeacon: true });
-      this.ws.close();
-      if (!this.isHost()) {
+      const wasHost = this.isHost();
+      this.cleanupCall(false);
+      if (!wasHost) {
         this.meetingEndedToastOpen.set(true);
       }
       return;
