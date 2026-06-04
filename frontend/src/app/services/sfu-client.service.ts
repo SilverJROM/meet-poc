@@ -3,7 +3,15 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { IceConfigService } from './ice-config.service';
 import { ViewportService } from './viewport.service';
-import { applyPresenceUpdate, applyRosterSnapshot, planSubscribeRetry, removeFromRoster, selectNewRemoteTracks, shouldRegisterFirstAddedLocalTrack } from './sfu-roster-utils.js';
+import {
+  applyPresenceUpdate,
+  applyRosterSnapshot,
+  planSfuTransportRecovery,
+  planSubscribeRetry,
+  removeFromRoster,
+  selectNewRemoteTracks,
+  shouldRegisterFirstAddedLocalTrack,
+} from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
 import { extractOutboundAudioSource, type OutboundAudioSourceStat } from './mic-energy';
 import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair, SfuConnectionQuality } from './meeting-sessions.service';
@@ -44,6 +52,10 @@ const VIDEO_SIMULCAST_ENCODINGS: RTCRtpEncodingParameters[] = [
   { rid: 'l', scaleResolutionDownBy: 4, maxBitrate: 120_000 },
 ];
 const SFU_HTTP_TIMEOUT_MS = 6000;
+const SFU_TRANSPORT_DISCONNECTED_GRACE_MS = 8000;
+const SFU_TRANSPORT_RECOVERY_CAP = 3;
+const SFU_TRANSPORT_RECOVERY_BASE_BACKOFF_MS = 500;
+const SFU_TRANSPORT_RECOVERY_MAX_BACKOFF_MS = 2000;
 const CONNECTION_QUALITY_THRESHOLDS: SfuConnectionQuality['thresholds'] = {
   goodRttMs: 150,
   fairRttMs: 300,
@@ -97,6 +109,12 @@ export class SfuClientService {
   private adaptiveCameraRidCandidate: AdaptiveCameraRidCap = null;
   private adaptiveCameraRidCandidateSamples = 0;
   private adaptiveCameraRidCap: AdaptiveCameraRidCap = null;
+  private transportRecoveryHandler: (() => Promise<void>) | null = null;
+  private transportDisconnectedSinceMs: number | null = null;
+  private transportDisconnectedTimer: ReturnType<typeof setTimeout> | null = null;
+  private transportRecoveryAttempts = 0;
+  private transportRecoveryScheduled = false;
+  private transportRecoveryInFlight = false;
 
   enqueue<T>(op: () => Promise<T>): Promise<T> {
     const result = this.opQueue.then(() => op());
@@ -109,6 +127,10 @@ export class SfuClientService {
 
   publish(params: { clientKey: string; participantId: string; sessionId: string; localStream: MediaStream | null }): Promise<void> {
     return this.enqueue(() => this.doPublish(params));
+  }
+
+  setTransportRecoveryHandler(handler: (() => Promise<void>) | null): void {
+    this.transportRecoveryHandler = handler;
   }
 
   subscribeIfNeeded(publisher: import('./sfu-roster-utils.js').RemotePublisher): void {
@@ -314,6 +336,186 @@ export class SfuClientService {
     this.previousConnectionQualityPackets = null;
     this.resetAdaptiveCameraRidCap();
     this.connectionQuality.set(null);
+  }
+
+  private clearTransportRecoveryTimer(): void {
+    if (this.transportDisconnectedTimer) clearTimeout(this.transportDisconnectedTimer);
+    this.transportDisconnectedTimer = null;
+  }
+
+  private resetTransportRecoveryState(resetAttempts: boolean): void {
+    this.clearTransportRecoveryTimer();
+    this.transportDisconnectedSinceMs = null;
+    if (resetAttempts) this.transportRecoveryAttempts = 0;
+  }
+
+  private closePeerConnectionForRecovery(): void {
+    if (this.pc) {
+      this.pc.ontrack = null;
+      this.pc.oniceconnectionstatechange = null;
+      this.pc.onconnectionstatechange = null;
+      this.pc.close();
+      this.pc = null;
+    }
+    this.audioSender = null;
+    this.videoSender = null;
+    this.screenSender = null;
+  }
+
+  private clearLocalTransportSessionState(): void {
+    this.closePeerConnectionForRecovery();
+    this.subscribedClientIds.clear();
+    this.midToEntry.clear();
+    this.pendingOntrack.clear();
+    this.subscribeRetryAttempts.clear();
+    this.subscribeInitiatedAt.clear();
+    this.subscribeFirstFrameAt.clear();
+    this.clearAllSubscribeStuckWatchdogs();
+    this.resetConnectionQuality();
+    this.opQueue = Promise.resolve();
+    this.localPublishState.set(null);
+    this.setPublishPhase(null);
+    this.remoteStreams.set(new Map());
+    this.remoteScreenStreams.set(new Map());
+    this.subscribedTracks.set(new Map());
+    this.subscribeRetryVersion.update((v) => v + 1);
+  }
+
+  resetForTransportRecovery(): void {
+    this.clearLocalTransportSessionState();
+    this.resetTransportRecoveryState(false);
+  }
+
+  private installTransportStateHandlers(pc: RTCPeerConnection): void {
+    const handleStateChange = () => {
+      if (this.pc !== pc) return;
+      this.handleTransportStateChange();
+    };
+    pc.oniceconnectionstatechange = handleStateChange;
+    pc.onconnectionstatechange = handleStateChange;
+  }
+
+  private handleTransportStateChange(): void {
+    const pc = this.pc;
+    if (!pc) return;
+    if (pc.connectionState === 'disconnected' || pc.iceConnectionState === 'disconnected') {
+      this.transportDisconnectedSinceMs ??= Date.now();
+    }
+    const disconnectedElapsedMs = this.transportDisconnectedSinceMs === null ? null : Date.now() - this.transportDisconnectedSinceMs;
+    const decision = planSfuTransportRecovery({
+      connectionState: pc.connectionState,
+      iceConnectionState: pc.iceConnectionState,
+      disconnectedElapsedMs,
+      disconnectedGraceMs: SFU_TRANSPORT_DISCONNECTED_GRACE_MS,
+      currentAttempts: this.transportRecoveryAttempts,
+      cap: SFU_TRANSPORT_RECOVERY_CAP,
+      baseBackoffMs: SFU_TRANSPORT_RECOVERY_BASE_BACKOFF_MS,
+      maxBackoffMs: SFU_TRANSPORT_RECOVERY_MAX_BACKOFF_MS,
+    });
+
+    if (decision.action === 'reset') {
+      this.resetTransportRecoveryState(true);
+      return;
+    }
+    if (decision.action === 'wait') {
+      this.armTransportDisconnectedGraceTimer(disconnectedElapsedMs ?? 0);
+      return;
+    }
+    this.clearTransportRecoveryTimer();
+    if (decision.action === 'recover') {
+      this.startTransportRecovery(decision);
+    } else if (decision.action === 'capped') {
+      this.transportRecoveryAttempts = decision.nextAttempts;
+      console.error('[sfu] transport recovery capped; leaving retry/rejoin UI to publish recovery path', {
+        connectionState: pc.connectionState,
+        iceConnectionState: pc.iceConnectionState,
+        attempts: decision.nextAttempts,
+      });
+    }
+  }
+
+  private armTransportDisconnectedGraceTimer(disconnectedElapsedMs: number): void {
+    if (this.transportDisconnectedTimer) return;
+    const remainingMs = Math.max(0, SFU_TRANSPORT_DISCONNECTED_GRACE_MS - disconnectedElapsedMs);
+    this.transportDisconnectedTimer = setTimeout(() => {
+      this.transportDisconnectedTimer = null;
+      this.handleTransportStateChange();
+    }, remainingMs);
+  }
+
+  private startTransportRecovery(decision: ReturnType<typeof planSfuTransportRecovery>): void {
+    if (this.transportRecoveryScheduled || this.transportRecoveryInFlight) return;
+    this.transportRecoveryAttempts = decision.nextAttempts;
+    this.transportRecoveryScheduled = true;
+    void (async () => {
+      try {
+        if (decision.backoffMs) await sleep(decision.backoffMs);
+        const pc = this.pc;
+        if (pc && (pc.connectionState === 'connected' || pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed')) {
+          this.resetTransportRecoveryState(true);
+          return;
+        }
+        this.transportRecoveryInFlight = true;
+        await this.recoverTransport(decision.reason);
+        this.resetTransportRecoveryState(true);
+      } catch (err) {
+        console.error('[sfu] transport recovery failed', err);
+      } finally {
+        this.transportRecoveryInFlight = false;
+        this.transportRecoveryScheduled = false;
+      }
+    })();
+  }
+
+  private async recoverTransport(reason: string): Promise<void> {
+    try {
+      await this.enqueue(() => this.doRestartIceRenegotiate(reason));
+      console.info('[sfu] transport recovered with ICE restart', { reason });
+      return;
+    } catch (err) {
+      console.warn('[sfu] ICE restart recovery failed; resetting SFU transport for full republish', err);
+    }
+
+    this.resetForTransportRecovery();
+    const handler = this.transportRecoveryHandler;
+    if (!handler) throw new Error('[sfu] no full-republish handler registered for transport recovery');
+    await handler();
+    console.info('[sfu] transport recovered with full republish', { reason });
+  }
+
+  private async doRestartIceRenegotiate(reason: string): Promise<void> {
+    const pc = this.pc;
+    const creds = this.callerCreds;
+    const publishState = this.localPublishState();
+    if (!pc || !creds || !publishState || publishState.status !== 'published') {
+      throw new Error('[sfu] ICE restart skipped: SFU publish state is not ready');
+    }
+    if (typeof pc.restartIce !== 'function') {
+      throw new Error('[sfu] ICE restart unsupported by this browser');
+    }
+    if (pc.signalingState !== 'stable') {
+      throw new Error(`[sfu] ICE restart skipped: signalingState=${pc.signalingState}`);
+    }
+
+    pc.restartIce();
+    const offer = await pc.createOffer({ iceRestart: true });
+    await pc.setLocalDescription(offer);
+    const res = await withTimeout(
+      firstValueFrom(
+        this.http.put<{ sessionDescription?: RTCSessionDescriptionInit }>('/api/sfu/renegotiate', {
+          ...creds,
+          cfSessionId: publishState.cfSessionId,
+          sessionDescription: { type: pc.localDescription!.type, sdp: pc.localDescription!.sdp },
+          recoveryReason: reason,
+        }),
+      ),
+      SFU_HTTP_TIMEOUT_MS,
+      'PUT /api/sfu/renegotiate',
+    );
+    if (!res.sessionDescription) {
+      throw new Error('[sfu] ICE restart renegotiate did not return a remote description');
+    }
+    await pc.setRemoteDescription(res.sessionDescription);
   }
 
   private extractSelectedTransport(stats: RTCStatsReport): {
@@ -544,16 +746,11 @@ export class SfuClientService {
 
   resetFailedPublishAttempt(): void {
     if (this.localPublishState()?.status === 'published') return;
-    if (this.pc) {
-      this.pc.close();
-      this.pc = null;
-    }
-    this.audioSender = null;
-    this.videoSender = null;
-    this.screenSender = null;
+    this.closePeerConnectionForRecovery();
     this.callerCreds = null;
     this.localPublishState.set(null);
     this.setPublishPhase(null);
+    this.resetTransportRecoveryState(false);
     this.opQueue = Promise.resolve();
   }
 
@@ -992,42 +1189,17 @@ export class SfuClientService {
   // Called when a drop-reconnect is detected (admitted with wasInCall=true, SFU mode).
   // The old CF session is dead — no API calls needed. Clears all state so re-publish + re-subscribe start clean.
   resetForReconnect(): void {
-    if (this.pc) {
-      this.pc.close();
-      this.pc = null;
-    }
-    this.audioSender = null;
-    this.videoSender = null;
-    this.screenSender = null;
+    this.clearLocalTransportSessionState();
     this.callerCreds = null;
-    this.subscribedClientIds.clear();
-    this.midToEntry.clear();
-    this.pendingOntrack.clear();
-    this.subscribeRetryAttempts.clear();
-    this.subscribeInitiatedAt.clear();
-    this.subscribeFirstFrameAt.clear();
-    this.clearAllSubscribeStuckWatchdogs();
-    this.resetConnectionQuality();
-    this.opQueue = Promise.resolve();
-    this.localPublishState.set(null);
-    this.setPublishPhase(null);
     this.remotePublishers.set(new Map());
-    this.remoteStreams.set(new Map());
-    this.remoteScreenStreams.set(new Map());
-    this.subscribedTracks.set(new Map());
+    this.resetTransportRecoveryState(true);
   }
 
   // Exit teardown: close the SFU PC immediately (stops media), then fire-and-forget the CF
   // track-close PUT. State is cleared immediately so double-calls (deliberate-exit cleanupCall
   // followed by ngOnDestroy cleanupCall) are no-ops. CF 30s GC is the fallback.
   closeLiveTracksForExit(): void {
-    if (this.pc) {
-      this.pc.close();
-      this.pc = null;
-      this.audioSender = null;
-      this.videoSender = null;
-      this.screenSender = null;
-    }
+    this.closePeerConnectionForRecovery();
 
     // Snapshot and clear immediately — makes this call idempotent (second call returns early)
     const publishState = this.localPublishState();
@@ -1044,6 +1216,7 @@ export class SfuClientService {
     this.subscribeRetryAttempts.clear();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
+    this.resetTransportRecoveryState(true);
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
     this.remoteScreenStreams.set(new Map());
@@ -1065,13 +1238,7 @@ export class SfuClientService {
   }
 
   destroy(): void {
-    if (this.pc) {
-      this.pc.close();
-      this.pc = null;
-    }
-    this.audioSender = null;
-    this.videoSender = null;
-    this.screenSender = null;
+    this.closePeerConnectionForRecovery();
     this.callerCreds = null;
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
@@ -1081,6 +1248,7 @@ export class SfuClientService {
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
     this.resetConnectionQuality();
+    this.resetTransportRecoveryState(true);
     this.localPublishState.set(null);
     this.setPublishPhase(null);
     this.opQueue = Promise.resolve();
@@ -1104,6 +1272,7 @@ export class SfuClientService {
       const iceServers: RTCIceServer[] = [{ urls: 'stun:stun.cloudflare.com:3478' }, ...turnServers];
       this.setPublishPhase('pc-create');
       this.pc = new RTCPeerConnection({ iceServers });
+      this.installTransportStateHandlers(this.pc);
 
       // Set ontrack BEFORE any subscribe requests so no track event is missed
       this.pc.ontrack = (event) => {
@@ -1321,6 +1490,10 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function applyAdaptiveCameraRidCap(baseRid: SfuCameraRid, cap: AdaptiveCameraRidCap): SfuCameraRid {

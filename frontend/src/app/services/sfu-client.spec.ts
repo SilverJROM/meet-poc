@@ -3,6 +3,7 @@ import {
   applyPresenceUpdate,
   applyRosterSnapshot,
   planInitialPublishRetry,
+  planSfuTransportRecovery,
   planSubscribeRetry,
   removeFromRoster,
   selectNewRemoteTracks,
@@ -192,6 +193,86 @@ function makeTransceivers(entries: { mid: string; receiverKind: string }[]): RTC
   assert.equal(retry.shouldRetry, false, 'permanent failure must not burn retries');
   assert.equal(retry.shouldAnnounce, false, 'permanent failure must not announce');
   assert.equal(retry.reason, 'permanent', 'permanent failure should report permanent reason');
+}
+
+// planSfuTransportRecovery — failed transport recovers immediately
+{
+  const recovery = planSfuTransportRecovery({
+    connectionState: 'failed',
+    iceConnectionState: 'failed',
+    disconnectedElapsedMs: null,
+    disconnectedGraceMs: 8000,
+    currentAttempts: 0,
+    cap: 3,
+    baseBackoffMs: 500,
+    maxBackoffMs: 2000,
+  });
+  assert.equal(recovery.action, 'recover', 'failed transport should trigger recovery');
+  assert.equal(recovery.nextAttempts, 1, 'first failed recovery records attempt 1');
+  assert.equal(recovery.backoffMs, 0, 'first failed recovery should run immediately');
+  assert.equal(recovery.reason, 'failed');
+}
+
+// planSfuTransportRecovery — disconnected inside grace waits
+{
+  const recovery = planSfuTransportRecovery({
+    connectionState: 'disconnected',
+    iceConnectionState: 'disconnected',
+    disconnectedElapsedMs: 2500,
+    disconnectedGraceMs: 8000,
+    currentAttempts: 0,
+    cap: 3,
+  });
+  assert.equal(recovery.action, 'wait', 'brief disconnected state should wait for grace');
+  assert.equal(recovery.nextAttempts, 0, 'waiting inside grace must not burn attempts');
+  assert.equal(recovery.reason, 'disconnected-grace');
+}
+
+// planSfuTransportRecovery — connected resets pending disconnected/retry state
+{
+  const recovery = planSfuTransportRecovery({
+    connectionState: 'connected',
+    iceConnectionState: 'connected',
+    disconnectedElapsedMs: 4000,
+    disconnectedGraceMs: 8000,
+    currentAttempts: 2,
+    cap: 3,
+  });
+  assert.equal(recovery.action, 'reset', 'connected transport should cancel pending recovery state');
+  assert.equal(recovery.nextAttempts, 0, 'connected transport resets attempts');
+  assert.equal(recovery.backoffMs, null);
+  assert.equal(recovery.reason, 'connected');
+}
+
+// planSfuTransportRecovery — disconnected after grace uses bounded backoff and caps
+{
+  const second = planSfuTransportRecovery({
+    connectionState: 'disconnected',
+    iceConnectionState: 'checking',
+    disconnectedElapsedMs: 8500,
+    disconnectedGraceMs: 8000,
+    currentAttempts: 1,
+    cap: 3,
+    baseBackoffMs: 500,
+    maxBackoffMs: 2000,
+  });
+  const capped = planSfuTransportRecovery({
+    connectionState: 'failed',
+    iceConnectionState: 'failed',
+    disconnectedElapsedMs: null,
+    disconnectedGraceMs: 8000,
+    currentAttempts: 3,
+    cap: 3,
+    baseBackoffMs: 500,
+    maxBackoffMs: 2000,
+  });
+  assert.equal(second.action, 'recover', 'expired disconnected state should recover');
+  assert.equal(second.nextAttempts, 2, 'second recovery advances attempts');
+  assert.equal(second.backoffMs, 500, 'second recovery uses base backoff');
+  assert.equal(second.reason, 'disconnected-expired');
+  assert.equal(capped.action, 'capped', 'recovery stops after cap');
+  assert.equal(capped.nextAttempts, 4, 'capped attempt is recorded for diagnostics');
+  assert.equal(capped.backoffMs, null, 'capped recovery must not schedule backoff');
 }
 
 // selectNewRemoteTracks — partial subscribe covers added audio/video/screen and skips existing names

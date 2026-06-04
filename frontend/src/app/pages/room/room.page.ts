@@ -487,6 +487,7 @@ export class RoomPage implements OnDestroy {
 
   constructor() {
     addIcons({ arrowBackOutline, colorWandOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline });
+    this.sfuClient.setTransportRecoveryHandler(() => this.republishSfuAfterTransportRecovery());
     this.installPageLifecycleCleanup();
     this.installDeviceChangeHandler();
     void this.bootstrap();
@@ -1408,6 +1409,7 @@ export class RoomPage implements OnDestroy {
   }
 
   ngOnDestroy(): void {
+    this.sfuClient.setTransportRecoveryHandler(null);
     this.uninstallPageLifecycleCleanup();
     this.uninstallDeviceChangeHandler();
     this.cleanupCall();
@@ -1470,6 +1472,7 @@ export class RoomPage implements OnDestroy {
     const publishStream = await this.initialPublishStream();
     await this.sfuClient.publish({ clientKey: readClientKey(), participantId, sessionId, localStream: publishStream });
     this.lastSfuVideoTrack = publishStream.getVideoTracks()[0] ?? null;
+    await this.republishLiveScreenTrackIfNeeded();
     const state = this.sfuClient.localPublishState();
     if (state?.status !== 'published') throw new Error('[sfu] publish did not reach published state');
     try {
@@ -1480,6 +1483,32 @@ export class RoomPage implements OnDestroy {
     // B2a: one-shot capture-energy gate — proves the published audio
     // track actually carries energy; recovers once on a silent-but-live mic.
     void this.verifyInitialCaptureEnergy();
+  }
+
+  private async republishLiveScreenTrackIfNeeded(): Promise<void> {
+    const screenTrack = this.media.screenStream()?.getVideoTracks().find((track) => track.readyState !== 'ended') ?? null;
+    if (!this.media.screenOn() || !screenTrack) return;
+    const hasScreenTrack = this.sfuClient.localPublishState()?.tracks.some((track) => track.kind === 'screen' && track.status === 'live') ?? false;
+    if (hasScreenTrack) return;
+    try {
+      await this.sfuClient.publishScreen(screenTrack);
+    } catch (err) {
+      this.sfuClient.resetForTransportRecovery();
+      throw err;
+    }
+  }
+
+  private async republishSfuAfterTransportRecovery(): Promise<void> {
+    const participantId = this.myParticipantId();
+    const sessionId = this.currentSessionId();
+    if (this.state() !== 'in-call' || !participantId || !sessionId) {
+      throw new Error('[sfu] transport recovery cannot republish without an active call session');
+    }
+    this.status.set('Reconnecting audio/video...');
+    await this.publishInitialSfuWithRetry(participantId, sessionId);
+    if (this.sfuClient.localPublishState()?.status !== 'published') {
+      throw new Error('[sfu] transport recovery republish did not reach published state');
+    }
   }
 
   private async initialPublishStream(): Promise<MediaStream> {
@@ -1615,7 +1644,7 @@ export class RoomPage implements OnDestroy {
         const participantId = msg.participantId;
         const sessionId = msg.sessionId;
         if (wasInCall) {
-          void this.publishSfuOnceAfterAdmit(participantId, sessionId).catch((err: unknown) => {
+          void this.publishInitialSfuWithRetry(participantId, sessionId).catch((err: unknown) => {
             console.error('[sfu-client] publish failed', err);
             this.actionNotice.set('Unable to start your audio/video. Please refresh the page.');
           });

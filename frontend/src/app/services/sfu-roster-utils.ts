@@ -33,6 +33,13 @@ export interface InitialPublishRetryPlan {
   reason: 'published' | 'retryable' | 'capped' | 'permanent';
 }
 
+export interface SfuTransportRecoveryPlan {
+  action: 'recover' | 'wait' | 'reset' | 'ignore' | 'capped';
+  nextAttempts: number;
+  backoffMs: number | null;
+  reason: 'failed' | 'disconnected-grace' | 'disconnected-expired' | 'connected' | 'stable' | 'capped';
+}
+
 export function planSubscribeRetry(params: {
   currentAttempts: number;
   cap: number;
@@ -80,6 +87,63 @@ export function planInitialPublishRetry(params: {
   const maxBackoffMs = params.maxBackoffMs ?? 2000;
   const backoffMs = Math.min(baseBackoffMs * Math.pow(2, failedAttempt - 1), maxBackoffMs);
   return { outcome: 'retry', shouldRetry: true, shouldAnnounce: false, nextAttempt: failedAttempt + 1, backoffMs, reason: 'retryable' };
+}
+
+export function planSfuTransportRecovery(params: {
+  connectionState: RTCPeerConnectionState | null;
+  iceConnectionState: RTCIceConnectionState | null;
+  disconnectedElapsedMs: number | null;
+  disconnectedGraceMs: number;
+  currentAttempts: number;
+  cap: number;
+  baseBackoffMs?: number;
+  maxBackoffMs?: number;
+}): SfuTransportRecoveryPlan {
+  const currentAttempts = Math.max(0, Math.floor(params.currentAttempts));
+  const connectionState = params.connectionState;
+  const iceConnectionState = params.iceConnectionState;
+  const failed = connectionState === 'failed' || iceConnectionState === 'failed';
+  const connected =
+    connectionState === 'connected' ||
+    iceConnectionState === 'connected' ||
+    iceConnectionState === 'completed';
+  if (failed) {
+    const nextAttempts = currentAttempts + 1;
+    if (nextAttempts > params.cap) {
+      return { action: 'capped', nextAttempts, backoffMs: null, reason: 'capped' };
+    }
+    const baseBackoffMs = params.baseBackoffMs ?? 500;
+    const maxBackoffMs = params.maxBackoffMs ?? 2000;
+    const backoffMs = nextAttempts === 1 ? 0 : Math.min(baseBackoffMs * Math.pow(2, nextAttempts - 2), maxBackoffMs);
+    return { action: 'recover', nextAttempts, backoffMs, reason: 'failed' };
+  }
+  if (connected) {
+    return { action: 'reset', nextAttempts: 0, backoffMs: null, reason: 'connected' };
+  }
+
+  const disconnected = connectionState === 'disconnected' || iceConnectionState === 'disconnected';
+  if (!disconnected) {
+    return { action: 'ignore', nextAttempts: currentAttempts, backoffMs: null, reason: 'stable' };
+  }
+
+  if ((params.disconnectedElapsedMs ?? 0) < params.disconnectedGraceMs) {
+    return { action: 'wait', nextAttempts: currentAttempts, backoffMs: null, reason: 'disconnected-grace' };
+  }
+
+  const nextAttempts = currentAttempts + 1;
+  if (nextAttempts > params.cap) {
+    return { action: 'capped', nextAttempts, backoffMs: null, reason: 'capped' };
+  }
+
+  const baseBackoffMs = params.baseBackoffMs ?? 500;
+  const maxBackoffMs = params.maxBackoffMs ?? 2000;
+  const backoffMs = nextAttempts === 1 ? 0 : Math.min(baseBackoffMs * Math.pow(2, nextAttempts - 2), maxBackoffMs);
+  return {
+    action: 'recover',
+    nextAttempts,
+    backoffMs,
+    reason: failed ? 'failed' : 'disconnected-expired',
+  };
 }
 
 export function shouldRegisterFirstAddedLocalTrack(tracks: PublishedTrackLike[], kind: 'audio' | 'video', hasLiveSenderTrack: boolean): boolean {
