@@ -865,9 +865,8 @@ export class SfuClientService {
     const prev = this.remotePublishers().get(msg.clientId);
     // New cfSessionId = publisher reconnected — reset retry state so fresh subscribe can happen
     if (prev && prev.cfSessionId !== msg.cfSessionId) {
+      this.clearPublisherSubscriptionStateForRetry(msg.clientId);
       this.subscribeRetryAttempts.delete(msg.clientId);
-      this.subscribedClientIds.delete(msg.clientId);
-      this.disarmSubscribeStuckWatchdog(msg.clientId);
     }
     const samePublisherSession = !!prev && prev.cfSessionId === msg.cfSessionId;
     const prevHadScreen = prev?.tracks.some((t) => t.kind === 'screen') ?? false;
@@ -884,6 +883,14 @@ export class SfuClientService {
   }
 
   handleSfuRoster(publishers: { clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }[]): void {
+    const previous = this.remotePublishers();
+    for (const publisher of publishers) {
+      const prev = previous.get(publisher.clientId);
+      if (prev && prev.cfSessionId !== publisher.cfSessionId) {
+        this.clearPublisherSubscriptionStateForRetry(publisher.clientId);
+        this.subscribeRetryAttempts.delete(publisher.clientId);
+      }
+    }
     this.remotePublishers.set(applyRosterSnapshot(publishers));
   }
 
@@ -1124,6 +1131,19 @@ export class SfuClientService {
     }
   }
 
+  private async rollbackAddedScreenTransceiver(transceiver: RTCRtpTransceiver): Promise<void> {
+    try {
+      await transceiver.sender.replaceTrack(null);
+    } catch {
+      // Best-effort cleanup; the pending offer rollback is the consistency guarantee.
+    }
+    try {
+      transceiver.stop();
+    } catch {
+      // Older browser shims may not allow stopping an uncommitted transceiver.
+    }
+  }
+
   private async doPublishScreen(displayTrack: MediaStreamTrack): Promise<void> {
     const publishState = this.localPublishState();
     const creds = this.callerCreds;
@@ -1135,32 +1155,39 @@ export class SfuClientService {
 
     // Add screen as a NEW transceiver — requires renegotiation (publish-style, not replaceTrack)
     const transceiver = this.pc.addTransceiver(displayTrack, { direction: 'sendonly' });
-    const offer = await this.pc.createOffer();
-    await this.pc.setLocalDescription(offer);
-    const mid = transceiver.mid!;
+    try {
+      const offer = await this.pc.createOffer();
+      await this.pc.setLocalDescription(offer);
+      const mid = transceiver.mid!;
 
-    const tracksRes = await withTimeout(
-      firstValueFrom(
-        this.http.post<{ sessionDescription: RTCSessionDescriptionInit }>('/api/sfu/tracks', {
-          clientKey,
-          participantId,
-          sessionId,
-          cfSessionId,
-          sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
-          tracks: [{ location: 'local', mid, trackName }],
-        }),
-      ),
-      SFU_HTTP_TIMEOUT_MS,
-      'POST /api/sfu/tracks',
-    );
+      const tracksRes = await withTimeout(
+        firstValueFrom(
+          this.http.post<{ sessionDescription: RTCSessionDescriptionInit }>('/api/sfu/tracks', {
+            clientKey,
+            participantId,
+            sessionId,
+            cfSessionId,
+            sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+            tracks: [{ location: 'local', mid, trackName }],
+          }),
+        ),
+        SFU_HTTP_TIMEOUT_MS,
+        'POST /api/sfu/tracks',
+      );
 
-    await this.pc.setRemoteDescription(tracksRes.sessionDescription);
-    this.screenSender = transceiver.sender;
+      await this.pc.setRemoteDescription(tracksRes.sessionDescription);
+      this.screenSender = transceiver.sender;
 
-    this.localPublishState.set({
-      ...publishState,
-      tracks: [...publishState.tracks, { trackName, kind: 'screen', mid, status: 'live' }],
-    });
+      this.localPublishState.set({
+        ...publishState,
+        tracks: [...publishState.tracks, { trackName, kind: 'screen', mid, status: 'live' }],
+      });
+    } catch (err) {
+      await this.rollbackPendingLocalOffer();
+      await this.rollbackAddedScreenTransceiver(transceiver);
+      if (this.screenSender === transceiver.sender) this.screenSender = null;
+      throw err;
+    }
   }
 
   private async doStopScreen(): Promise<void> {
@@ -1456,49 +1483,94 @@ export class SfuClientService {
       throw new Error(`[sfu] CF subscribe not ready: ${errorTrack.errorCode}`);
     }
 
-    const nextSubscribed = new Map(this.subscribedTracks());
+    const subscribedBefore = new Map(this.subscribedTracks());
+    const nextSubscribed = new Map(subscribedBefore);
+    const touchedMidEntries = new Map<string, { hadEntry: boolean; entry: SubscribedTrackEntry | null }>();
+    const firstFrameSnapshot = this.subscribeFirstFrameAt.has(publisher.clientId)
+      ? { hadValue: true, value: this.subscribeFirstFrameAt.get(publisher.clientId)! }
+      : { hadValue: false, value: 0 };
+    const retryAttemptSnapshot = this.subscribeRetryAttempts.has(publisher.clientId)
+      ? { hadValue: true, value: this.subscribeRetryAttempts.get(publisher.clientId)! }
+      : { hadValue: false, value: 0 };
 
-    // Full renegotiation inside this enqueue op — must not interleave with other ops
-    if (res.requiresImmediateRenegotiation && res.sessionDescription) {
-      await this.pc.setRemoteDescription(res.sessionDescription);
+    const rememberTouchedMid = (mid: string): void => {
+      if (touchedMidEntries.has(mid)) return;
+      touchedMidEntries.set(mid, {
+        hadEntry: this.midToEntry.has(mid),
+        entry: this.midToEntry.get(mid) ?? null,
+      });
+    };
 
-      // Populate before the next event-loop yield; ontrack from SRD can fire before createAnswer resolves.
-      const transceivers = this.pc.getTransceivers();
-      const newTransceiverMids = transceivers
-        .map((t) => t.mid)
-        .filter((m): m is string => !!m && !existingMids.has(m));
-
-      const reconciled = reconcileSubscribedMids(responseTracks, newTransceiverMids, transceivers, kindMap, publisher.clientId);
-      for (const r of reconciled) {
-        const entry: SubscribedTrackEntry = { publisherClientId: r.publisherClientId, trackName: r.trackName, kind: r.kind, mid: r.realMid };
-        this.midToEntry.set(r.realMid, entry);
-        nextSubscribed.set(r.realMid, entry);
+    const rollbackSubscribeMutation = async (): Promise<void> => {
+      for (const [mid, previous] of touchedMidEntries) {
+        if (previous.hadEntry && previous.entry) {
+          this.midToEntry.set(mid, previous.entry);
+        } else {
+          this.midToEntry.delete(mid);
+        }
       }
-      this.flushPendingOntrack();
-
-      const answer = await this.pc.createAnswer();
-      await this.pc.setLocalDescription(answer);
-
-      await withTimeout(
-        firstValueFrom(
-          this.http.put('/api/sfu/renegotiate', {
-            ...creds,
-            cfSessionId,
-            sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
-          }),
-        ),
-        SFU_HTTP_TIMEOUT_MS,
-        'PUT /api/sfu/renegotiate',
-      );
-    } else {
-      // No renegotiation — CF mids should be valid (non-empty) in this path
-      for (const rt of responseTracks) {
-        if (!rt.mid) continue;
-        const entry: SubscribedTrackEntry = { publisherClientId: publisher.clientId, trackName: rt.trackName, kind: kindMap.get(rt.trackName) ?? 'unknown', mid: rt.mid };
-        this.midToEntry.set(rt.mid, entry);
-        nextSubscribed.set(rt.mid, entry);
+      this.subscribedTracks.set(subscribedBefore);
+      if (firstFrameSnapshot.hadValue) {
+        this.subscribeFirstFrameAt.set(publisher.clientId, firstFrameSnapshot.value);
+      } else {
+        this.subscribeFirstFrameAt.delete(publisher.clientId);
       }
-      this.flushPendingOntrack();
+      if (retryAttemptSnapshot.hadValue) {
+        this.subscribeRetryAttempts.set(publisher.clientId, retryAttemptSnapshot.value);
+      } else {
+        this.subscribeRetryAttempts.delete(publisher.clientId);
+      }
+      await this.rollbackPendingLocalOffer();
+    };
+
+    try {
+      // Full renegotiation inside this enqueue op — must not interleave with other ops
+      if (res.requiresImmediateRenegotiation && res.sessionDescription) {
+        await this.pc.setRemoteDescription(res.sessionDescription);
+
+        // Populate before the next event-loop yield; ontrack from SRD can fire before createAnswer resolves.
+        const transceivers = this.pc.getTransceivers();
+        const newTransceiverMids = transceivers
+          .map((t) => t.mid)
+          .filter((m): m is string => !!m && !existingMids.has(m));
+
+        const reconciled = reconcileSubscribedMids(responseTracks, newTransceiverMids, transceivers, kindMap, publisher.clientId);
+        for (const r of reconciled) {
+          const entry: SubscribedTrackEntry = { publisherClientId: r.publisherClientId, trackName: r.trackName, kind: r.kind, mid: r.realMid };
+          rememberTouchedMid(r.realMid);
+          this.midToEntry.set(r.realMid, entry);
+          nextSubscribed.set(r.realMid, entry);
+        }
+        this.flushPendingOntrack();
+
+        const answer = await this.pc.createAnswer();
+        await this.pc.setLocalDescription(answer);
+
+        await withTimeout(
+          firstValueFrom(
+            this.http.put('/api/sfu/renegotiate', {
+              ...creds,
+              cfSessionId,
+              sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+            }),
+          ),
+          SFU_HTTP_TIMEOUT_MS,
+          'PUT /api/sfu/renegotiate',
+        );
+      } else {
+        // No renegotiation — CF mids should be valid (non-empty) in this path
+        for (const rt of responseTracks) {
+          if (!rt.mid) continue;
+          const entry: SubscribedTrackEntry = { publisherClientId: publisher.clientId, trackName: rt.trackName, kind: kindMap.get(rt.trackName) ?? 'unknown', mid: rt.mid };
+          rememberTouchedMid(rt.mid);
+          this.midToEntry.set(rt.mid, entry);
+          nextSubscribed.set(rt.mid, entry);
+        }
+        this.flushPendingOntrack();
+      }
+    } catch (err) {
+      await rollbackSubscribeMutation();
+      throw err;
     }
 
     // Set signal after mids are reconciled (not before — subscribedTracks must reflect real mids)
