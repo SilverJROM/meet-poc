@@ -16,7 +16,7 @@ import { Recording, RecordingsService, Transcript } from '../../services/recordi
 export class TranscriptsPage implements OnDestroy {
   private readonly recordingsService = inject(RecordingsService);
   private readonly questionsService = inject(QuestionsService);
-  private pollTimer: ReturnType<typeof window.setInterval> | null = null;
+  private pollTimer: number | null = null;
 
   readonly recordings = signal<Recording[]>([]);
   readonly questions = signal<Question[]>([]);

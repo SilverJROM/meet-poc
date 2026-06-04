@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import '@angular/compiler';
 import { HttpClient } from '@angular/common/http';
 import { of, throwError } from 'rxjs';
-import { createEnvironmentInjector, runInInjectionContext } from '@angular/core';
+import { createEnvironmentInjector, runInInjectionContext, type EnvironmentInjector } from '@angular/core';
 import { SfuClientService } from './sfu-client.service.js';
 import { IceConfigService } from './ice-config.service.js';
 import { ViewportService } from './viewport.service.js';
@@ -29,11 +29,14 @@ function makeTransceivers(entries: { mid: string; receiverKind: string }[]): RTC
 }
 
 function createSfuClient(http: Partial<HttpClient> = {}): SfuClientService {
-  const injector = createEnvironmentInjector([
-    { provide: HttpClient, useValue: http },
-    { provide: IceConfigService, useValue: { getIceServers: async () => [] } },
-    { provide: ViewportService, useValue: { isMobile: () => false } },
-  ]);
+  const injector = createEnvironmentInjector(
+    [
+      { provide: HttpClient, useValue: http },
+      { provide: IceConfigService, useValue: { getIceServers: async () => [] } },
+      { provide: ViewportService, useValue: { isMobile: () => false } },
+    ],
+    undefined as unknown as EnvironmentInjector,
+  );
   return runInInjectionContext(injector, () => new SfuClientService());
 }
 
@@ -609,7 +612,15 @@ function installPublishedSfuState(sfu: SfuClientService, pc: RTCPeerConnection):
       stopCount += 1;
     },
   } as unknown as RTCRtpTransceiver;
-  const pc = {
+  type ScreenPublishPc = {
+    rollbackCount: number;
+    signalingState: RTCSignalingState;
+    localDescription: RTCSessionDescriptionInit | null;
+    addTransceiver: () => RTCRtpTransceiver;
+    createOffer: () => Promise<RTCSessionDescriptionInit>;
+    setLocalDescription: (desc: RTCSessionDescriptionInit) => Promise<void>;
+  };
+  const pc: ScreenPublishPc = {
     rollbackCount: 0,
     signalingState: 'stable',
     localDescription: null as RTCSessionDescriptionInit | null,
@@ -627,8 +638,8 @@ function installPublishedSfuState(sfu: SfuClientService, pc: RTCPeerConnection):
       this.localDescription = desc;
       this.signalingState = 'have-local-offer';
     },
-  } as unknown as RTCPeerConnection & { rollbackCount: number };
-  installPublishedSfuState(sfu, pc);
+  };
+  installPublishedSfuState(sfu, pc as unknown as RTCPeerConnection);
   const privateSfu = sfu as unknown as {
     doPublishScreen: (track: MediaStreamTrack) => Promise<void>;
     screenSender: RTCRtpSender | null;

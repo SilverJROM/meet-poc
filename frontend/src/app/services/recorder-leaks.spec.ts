@@ -11,6 +11,14 @@ type FakeSource = {
   disconnect: () => void;
 };
 
+type FakeRecorder = {
+  state: RecordingState;
+  mimeType: string;
+  onstop: ((event: Event) => void) | null;
+  stopCount: number;
+  stop: () => void;
+};
+
 function createRecorder(): RecorderService {
   const recorder = Object.create(RecorderService.prototype) as RecorderService;
   (recorder as unknown as { sourceFor: Map<string, MediaStreamAudioSourceNode> }).sourceFor = new Map();
@@ -63,21 +71,21 @@ function installCleanupSpy(service: RecorderService): { cleanupCount: () => numb
   return { cleanupCount: () => cleanupCount };
 }
 
-function installRecorder(service: RecorderService, mimeType = 'audio/webm'): { recorder: MediaRecorder & { stopCount: number }; fireStop: () => void } {
-  const fakeRecorder = {
+function installRecorder(service: RecorderService, mimeType = 'audio/webm'): { recorder: FakeRecorder; fireStop: () => void } {
+  const fakeRecorder: FakeRecorder = {
     state: 'recording' as RecordingState,
     mimeType,
-    onstop: null as (() => void) | null,
+    onstop: null,
     stopCount: 0,
-    stop() {
+    stop(): void {
       this.stopCount += 1;
       this.state = 'inactive' as RecordingState;
     },
-  } as MediaRecorder & { stopCount: number };
-  (service as unknown as { recorder: MediaRecorder }).recorder = fakeRecorder;
+  };
+  (service as unknown as { recorder: MediaRecorder }).recorder = fakeRecorder as unknown as MediaRecorder;
   return {
     recorder: fakeRecorder,
-    fireStop: () => fakeRecorder.onstop?.(),
+    fireStop: () => fakeRecorder.onstop?.(new Event('stop')),
   };
 }
 

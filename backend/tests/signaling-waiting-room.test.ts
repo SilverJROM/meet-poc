@@ -60,7 +60,7 @@ describe('signaling waiting room access gate', () => {
     await closeServer(server);
   });
 
-  it('promotes closed-room waiters into the normal admit flow when the host opens the room', async () => {
+  it('promotes closed-room waiters into the normal admit flow when the owner joins and auto-opens the room', async () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Open during wait', 'jrom@silverjrom.app', db);
@@ -68,25 +68,24 @@ describe('signaling waiting room access gate', () => {
     expect(access.ok).toBe(true);
     const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
     const { server, url } = await startWsServer(db);
-    const owner = await connectWs(url, ownerCookie);
-    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner' }));
-    await nextMessage(owner, (msg) => msg.type === 'admitted');
 
     const guest = await connectWs(url);
     guest.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest' }));
     await nextMessage(guest, (msg) => msg.type === 'waiting-room' && msg.isOpen === false);
 
+    const owner = await connectWs(url, ownerCookie);
+    const ownerAdmittedPromise = nextMessage(owner, (msg) => msg.type === 'admitted');
     const stateUpdatePromise = nextMessage(guest, (msg) => msg.type === 'waiting-room' && msg.isOpen === true);
     const knockingPromise = nextMessage(guest, (msg) => msg.type === 'knocking');
     const knockPromise = nextMessage(owner, (msg) => msg.type === 'knock');
-    const opened = setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
-    expect(opened.ok).toBe(true);
-    if (opened.ok) notifyRoomAccessChanged(opened.room.id, opened.room.isOpen, opened.room.waitTimeoutMinutes, db);
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner' }));
 
+    const ownerAdmitted = await ownerAdmittedPromise;
     const stateUpdate = await stateUpdatePromise;
     const knocking = await knockingPromise;
     const knock = await knockPromise;
 
+    expect(ownerAdmitted).toMatchObject({ type: 'admitted', isOwner: true, roomTitle: 'Open during wait' });
     expect(stateUpdate).toMatchObject({ type: 'waiting-room', isOpen: true, roomTitle: 'Open during wait' });
     expect(knocking).toMatchObject({ type: 'knocking', roomTitle: 'Open during wait' });
     expect(knock).toMatchObject({ type: 'knock', name: 'Guest' });

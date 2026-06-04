@@ -1,14 +1,26 @@
 import assert from 'node:assert/strict';
-import { createEnvironmentInjector, runInInjectionContext } from '@angular/core';
+import { createEnvironmentInjector, runInInjectionContext, type EnvironmentInjector } from '@angular/core';
 import { MediaService } from './media.service.js';
 import { ViewportService } from './viewport.service.js';
 
 type FakeTrack = MediaStreamTrack & { stopCount: number; emitEnded: () => void; endedListeners: EventListener[] };
+type MutableFakeTrack = {
+  readyState: MediaStreamTrackState;
+  stopCount: number;
+  endedListeners: EventListener[];
+  contentHint: string;
+  onended: ((event: Event) => void) | null;
+  stop: () => void;
+  addEventListener: (type: string, listener: EventListener) => void;
+  removeEventListener: (type: string, listener: EventListener) => void;
+  emitEnded: () => void;
+};
 
 function createMediaService(): MediaService {
-  const injector = createEnvironmentInjector([
-    { provide: ViewportService, useValue: { isMobile: () => false } },
-  ]);
+  const injector = createEnvironmentInjector(
+    [{ provide: ViewportService, useValue: { isMobile: () => false } }],
+    undefined as unknown as EnvironmentInjector,
+  );
   return runInInjectionContext(injector, () => new MediaService());
 }
 
@@ -35,7 +47,7 @@ function installDisplayMedia(streams: MediaStream[]): void {
 }
 
 function fakeScreenStream(): { stream: MediaStream; track: FakeTrack } {
-  const track = {
+  const track: MutableFakeTrack = {
     readyState: 'live',
     stopCount: 0,
     endedListeners: [],
@@ -56,13 +68,14 @@ function fakeScreenStream(): { stream: MediaStream; track: FakeTrack } {
       this.onended?.(new Event('ended'));
       for (const listener of this.endedListeners) listener(new Event('ended'));
     },
-  } as FakeTrack;
+  };
+  const mediaTrack = track as unknown as FakeTrack;
   const stream = {
     getAudioTracks: () => [],
-    getVideoTracks: () => [track],
-    getTracks: () => [track],
+    getVideoTracks: () => [mediaTrack],
+    getTracks: () => [mediaTrack],
   } as unknown as MediaStream;
-  return { stream, track };
+  return { stream, track: mediaTrack };
 }
 
 async function flush(): Promise<void> {

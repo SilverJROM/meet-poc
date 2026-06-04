@@ -14,7 +14,10 @@ describe('session ttl', () => {
       Date.now() - 1000,
     );
 
-    await request(createApp(db)).get('/api/me').set('Cookie', 'session=expired-token').expect(200, { user: null });
+    await request(createApp(db)).get('/api/me').set('Cookie', 'session=expired-token').expect(200, {
+      user: null,
+      diagnosticsGloballyEnabled: true,
+    });
     const row = db.prepare('SELECT token FROM sessions WHERE token = ?').get('expired-token');
     expect(row).toBeUndefined();
   });

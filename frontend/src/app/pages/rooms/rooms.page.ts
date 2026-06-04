@@ -1,4 +1,3 @@
-import { DatePipe } from '@angular/common';
 import { Component, CUSTOM_ELEMENTS_SCHEMA, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -13,7 +12,7 @@ const DEFAULT_PAGE_SIZE = 20;
 @Component({
   selector: 'app-rooms-page',
   standalone: true,
-  imports: [DatePipe, FormsModule, RouterLink, PaginationComponent],
+  imports: [FormsModule, RouterLink, PaginationComponent],
   schemas: [CUSTOM_ELEMENTS_SCHEMA],
   templateUrl: './rooms.page.html',
   styleUrl: './rooms.page.scss',

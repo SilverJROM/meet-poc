@@ -452,21 +452,21 @@ export class RoomPage implements OnDestroy {
   readonly initialPublishRetrying = signal(false);
   private readonly callStartMs = signal<number | null>(null);
   private readonly clockTick = signal(0);
-  private clockInterval: ReturnType<typeof setInterval> | null = null;
+  private clockInterval: number | null = null;
   private visibilityListenerInstalled = false;
   private camOnBeforeBackground = false;
-  private preflightTimer: ReturnType<typeof setTimeout> | null = null;
-  private waitingRoomTimer: ReturnType<typeof setInterval> | null = null;
-  private diagnosticsLogTimer: ReturnType<typeof setInterval> | null = null;
-  private connectionQualityTimer: ReturnType<typeof setInterval> | null = null;
-  private remoteVoiceWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private preflightTimer: number | null = null;
+  private waitingRoomTimer: number | null = null;
+  private diagnosticsLogTimer: number | null = null;
+  private connectionQualityTimer: number | null = null;
+  private remoteVoiceWatchdogTimer: number | null = null;
   private remoteVoiceWatchdogInFlight = false;
   private readonly remoteVoiceWatchdogPeers = new Map<string, RemoteVoiceWatchdogPeerState>();
   // B2b — in-call silent-mic watchdog: its own ~1s interval + rolling window.
-  private micSilenceWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+  private micSilenceWatchdogTimer: number | null = null;
   private micSilenceWindow: { audioLevel: number | null; totalAudioEnergy: number | null }[] = [];
   // B5 — lobby self-test poller: its own ~1s interval, gated on lobby + mic-on.
-  private lobbySelfTestTimer: ReturnType<typeof setInterval> | null = null;
+  private lobbySelfTestTimer: number | null = null;
   private lastDiagnosticsEventAt = 0;
   private diagnosticsLogInFlight = false;
   private connectionQualityInFlight = false;
@@ -484,10 +484,10 @@ export class RoomPage implements OnDestroy {
   private lastDoorbellAt = 0;
   private deviceChangeListenerInstalled = false;
   private lifecycleResumeInFlight = false;
-  private audioRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
-  private videoRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private audioRecoveryTimer: number | null = null;
+  private videoRecoveryTimer: number | null = null;
   private readonly localTrackFailureHandlers: Partial<Record<LocalTrackKind, LocalTrackFailureHandlerRefs>> = {};
-  private remoteAudioKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
+  private remoteAudioKeepaliveTimer: number | null = null;
   private audioRecoveryInFlight = false;
   private videoRecoveryInFlight = false;
   private remoteAudioInteractionRecoveryInstalled = false;
@@ -2125,11 +2125,11 @@ export class RoomPage implements OnDestroy {
       this.waitRemainingSeconds.set(remaining);
     };
     tick();
-    this.waitingRoomTimer = setInterval(tick, 1000);
+    this.waitingRoomTimer = window.setInterval(tick, 1000);
   }
 
   private stopWaitingRoomCountdown(): void {
-    if (this.waitingRoomTimer) clearInterval(this.waitingRoomTimer);
+    if (this.waitingRoomTimer) window.clearInterval(this.waitingRoomTimer);
     this.waitingRoomTimer = null;
     this.waitExpiresAt.set(null);
     this.waitRemainingSeconds.set(0);
@@ -2266,7 +2266,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private clearPreflightTimer(): void {
-    if (this.preflightTimer) clearTimeout(this.preflightTimer);
+    if (this.preflightTimer) window.clearTimeout(this.preflightTimer);
     this.preflightTimer = null;
   }
 
@@ -3278,7 +3278,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private stopDiagnosticsLogger(): void {
-    if (this.diagnosticsLogTimer) clearInterval(this.diagnosticsLogTimer);
+    if (this.diagnosticsLogTimer) window.clearInterval(this.diagnosticsLogTimer);
     this.diagnosticsLogTimer = null;
     this.lastDiagnosticsEventAt = 0;
     this.diagnosticsLogInFlight = false;
@@ -3299,7 +3299,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private stopMicSilenceWatchdog(): void {
-    if (this.micSilenceWatchdogTimer) clearInterval(this.micSilenceWatchdogTimer);
+    if (this.micSilenceWatchdogTimer) window.clearInterval(this.micSilenceWatchdogTimer);
     this.micSilenceWatchdogTimer = null;
     this.micSilenceWindow = [];
   }
@@ -3372,7 +3372,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private stopLobbySelfTest(): void {
-    if (this.lobbySelfTestTimer) clearInterval(this.lobbySelfTestTimer);
+    if (this.lobbySelfTestTimer) window.clearInterval(this.lobbySelfTestTimer);
     this.lobbySelfTestTimer = null;
     this.lobbySelfTestFlag.set(false);
   }
@@ -3401,7 +3401,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private stopConnectionQualitySampler(): void {
-    if (this.connectionQualityTimer) clearInterval(this.connectionQualityTimer);
+    if (this.connectionQualityTimer) window.clearInterval(this.connectionQualityTimer);
     this.connectionQualityTimer = null;
     this.connectionQualityInFlight = false;
     this.relayedConnectionSamples = 0;
@@ -3695,11 +3695,11 @@ export class RoomPage implements OnDestroy {
     this.stopClock();
     this.callStartMs.set(Date.now());
     this.clockTick.set(0);
-    this.clockInterval = setInterval(() => this.clockTick.update((tick) => tick + 1), 1000);
+    this.clockInterval = window.setInterval(() => this.clockTick.update((tick) => tick + 1), 1000);
   }
 
   private stopClock(): void {
-    if (this.clockInterval) clearInterval(this.clockInterval);
+    if (this.clockInterval) window.clearInterval(this.clockInterval);
     this.clockInterval = null;
     this.callStartMs.set(null);
     this.clockTick.set(0);

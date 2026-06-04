@@ -192,17 +192,18 @@ import {
 }
 
 function fakeStream(kind: MediaAcquireKind): MediaStream {
-  const track = {
+  const track: { readyState: MediaStreamTrackState; stop: () => void } = {
     readyState: 'live',
     stop(): void {
       this.readyState = 'ended';
     },
-  } as MediaStreamTrack;
+  };
+  const mediaTrack = track as unknown as MediaStreamTrack;
 
   return {
-    getAudioTracks: () => (kind === 'audio' ? [track] : []),
-    getVideoTracks: () => (kind === 'video' ? [track] : []),
-    getTracks: () => [track],
+    getAudioTracks: () => (kind === 'audio' ? [mediaTrack] : []),
+    getVideoTracks: () => (kind === 'video' ? [mediaTrack] : []),
+    getTracks: () => [mediaTrack],
   } as unknown as MediaStream;
 }
 

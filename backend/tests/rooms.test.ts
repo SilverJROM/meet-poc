@@ -20,7 +20,7 @@ describe('rooms API', () => {
 
     expect(res.body.room).toMatchObject({
       title: 'Team sync',
-      slug: expect.stringMatching(/^team-sync-[a-z0-9]{6}$/),
+      slug: 'team-sync',
       ownerEmail: 'jrom@silverjrom.app',
     });
     expect(res.body.room.id).toMatch(/^[a-f0-9]{12}$/);
@@ -214,6 +214,8 @@ describe('rooms API', () => {
       title: 'Team sync',
       isOpen: false,
       waitTimeoutMinutes: 15,
+      passwordRequired: false,
+      isOwner: false,
     });
     await request(app).get('/api/rooms/missing/exists').expect(200, { exists: false });
   });
@@ -268,8 +270,8 @@ describe('rooms API', () => {
     const first = await request(app).post('/api/rooms').set('Cookie', cookie).send({ title: 'Weekly Sync' }).expect(200);
     const second = await request(app).post('/api/rooms').set('Cookie', cookie).send({ title: 'Weekly Sync' }).expect(200);
 
-    expect(first.body.room.slug).toMatch(/^weekly-sync-[a-z0-9]{6}$/);
-    expect(second.body.room.slug).toMatch(/^weekly-sync-[a-z0-9]{6}$/);
+    expect(first.body.room.slug).toBe('weekly-sync');
+    expect(second.body.room.slug).toMatch(/^weekly-sync-[a-f0-9]{4}$/);
     expect(first.body.room.slug).not.toBe(second.body.room.slug);
 
     await request(app).get(`/api/rooms/${first.body.room.slug}/exists`).expect(200, {
@@ -279,6 +281,8 @@ describe('rooms API', () => {
       title: 'Weekly Sync',
       isOpen: false,
       waitTimeoutMinutes: 15,
+      passwordRequired: false,
+      isOwner: false,
     });
     await request(app).get(`/api/rooms/${first.body.room.id}/exists`).expect(200, {
       exists: true,
@@ -287,6 +291,8 @@ describe('rooms API', () => {
       title: 'Weekly Sync',
       isOpen: false,
       waitTimeoutMinutes: 15,
+      passwordRequired: false,
+      isOwner: false,
     });
 
     const custom = await request(app)
