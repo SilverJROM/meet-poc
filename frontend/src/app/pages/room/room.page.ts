@@ -2855,6 +2855,7 @@ export class RoomPage implements OnDestroy {
     try {
       await this.recoverRemoteAudio('visibility');
       this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+      if (this.recorder.isRecording()) await this.recorder.resumeAudioContext();
       if (this.sfuClient.isLocalPublishHealthy()) return;
       if (this.sfuClient.localPublishState()?.status === 'published') this.sfuClient.resetForTransportRecovery();
       await this.republishSfuAfterTransportRecovery();

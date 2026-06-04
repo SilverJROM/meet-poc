@@ -22,6 +22,7 @@ type FakeRecorder = {
 function createRecorder(): RecorderService {
   const recorder = Object.create(RecorderService.prototype) as RecorderService;
   (recorder as unknown as { sourceFor: Map<string, MediaStreamAudioSourceNode> }).sourceFor = new Map();
+  (recorder as unknown as { streamFor: Map<string, MediaStream> }).streamFor = new Map();
   (recorder as unknown as { isRecording: ReturnType<typeof signal<boolean>> }).isRecording = signal(true);
   (recorder as unknown as { isUploading: ReturnType<typeof signal<boolean>> }).isUploading = signal(false);
   (recorder as unknown as { lastUpload: ReturnType<typeof signal<unknown>> }).lastUpload = signal(null);
@@ -45,6 +46,10 @@ function createRecorder(): RecorderService {
   (recorder as unknown as { pendingStopResolve: ((blob: Blob) => void) | null }).pendingStopResolve = null;
   (recorder as unknown as { platform: { isIOS: () => boolean } }).platform = { isIOS: () => false };
   return recorder;
+}
+
+function streamForMap(service: RecorderService): Map<string, MediaStream> {
+  return (service as unknown as { streamFor: Map<string, MediaStream> }).streamFor;
 }
 
 function fakeAudioStream(label: string): MediaStream {
@@ -211,22 +216,117 @@ function installFakeGraph(service: RecorderService): FakeSource[] {
   assert.equal(recorder.isRecording(), true, 'recorder is marked recording after resume and start complete');
 }
 
-// LEAK2 — re-adding the same recorder source disconnects the old node and keeps one live source.
+// REC1-iOS — lifecycle resume resumes a suspended recording AudioContext.
+{
+  let resumeCount = 0;
+  const recorder = createRecorder();
+  const ctx = {
+    state: 'suspended' as AudioContextState,
+    resume: async () => {
+      resumeCount += 1;
+      ctx.state = 'running' as AudioContextState;
+    },
+  };
+  (recorder as unknown as { ctx: unknown }).ctx = ctx;
+
+  await recorder.resumeAudioContext();
+
+  assert.equal(resumeCount, 1, 'suspended recording context is resumed once');
+  assert.equal(ctx.state, 'running', 'resumeAudioContext awaits the context resume');
+}
+
+// REC1-iOS — lifecycle resume is a no-op when not recording or already running.
+{
+  let resumeCount = 0;
+  const recorder = createRecorder();
+  const ctx = {
+    state: 'suspended' as AudioContextState,
+    resume: async () => {
+      resumeCount += 1;
+    },
+  };
+  (recorder as unknown as { ctx: unknown }).ctx = ctx;
+
+  recorder.isRecording.set(false);
+  await recorder.resumeAudioContext();
+  assert.equal(resumeCount, 0, 'not-recording suspended context is not resumed');
+
+  recorder.isRecording.set(true);
+  ctx.state = 'running' as AudioContextState;
+  await recorder.resumeAudioContext();
+  assert.equal(resumeCount, 0, 'running recording context is not resumed');
+}
+
+// REC1-iOS — lifecycle resume never throws when the browser rejects resume().
+{
+  const recorder = createRecorder();
+  const warnings: unknown[][] = [];
+  const originalWarn = console.warn;
+  const err = new Error('resume rejected');
+  (recorder as unknown as { ctx: unknown }).ctx = {
+    state: 'suspended' as AudioContextState,
+    resume: async () => {
+      throw err;
+    },
+  };
+  console.warn = (...args: unknown[]) => {
+    warnings.push(args);
+  };
+  try {
+    await recorder.resumeAudioContext();
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.equal(warnings.length, 1, 'resume rejection is warned once');
+  assert.equal(warnings[0][0], 'recording audio context resume failed', 'resume rejection warning names the lifecycle resume failure');
+  assert.equal(warnings[0][1], err, 'resume rejection warning preserves the rejected error');
+}
+
+// REC2 — re-adding the same stream object is a no-op; a changed stream still replaces the old node.
 {
   const recorder = createRecorder();
   const sources = installFakeGraph(recorder);
   const addStream = (recorder as unknown as { addStream: (clientId: string, stream: MediaStream) => void }).addStream.bind(recorder);
+  const firstStream = fakeAudioStream('first');
+  const replacementStream = fakeAudioStream('replacement');
 
-  addStream('peer-1', fakeAudioStream('first'));
+  addStream('peer-1', firstStream);
   assert.equal(recorder.sourceCount(), 1, 'first peer stream registers one source');
   assert.equal(sources.length, 1, 'first peer stream creates one source node');
   assert.equal(sources[0].connectCount, 1, 'first source is connected to the recorder mix');
+  assert.equal(streamForMap(recorder).get('peer-1'), firstStream, 'first peer stream object is tracked with the source');
 
-  addStream('peer-1', fakeAudioStream('replacement'));
+  addStream('peer-1', firstStream);
+  assert.equal(recorder.sourceCount(), 1, 'same-stream re-add keeps sourceCount stable at one for the peer');
+  assert.equal(sources.length, 1, 'same-stream re-add creates no replacement source node');
+  assert.equal(sources[0].disconnectCount, 0, 'same-stream re-add does not disconnect the retained source');
+  assert.equal(streamForMap(recorder).get('peer-1'), firstStream, 'same-stream re-add keeps the tracked stream object');
+
+  addStream('peer-1', replacementStream);
   assert.equal(recorder.sourceCount(), 1, 'replacement keeps sourceCount stable at one for the peer');
   assert.equal(sources.length, 2, 'replacement creates a new source node');
   assert.equal(sources[0].disconnectCount, 1, 'old source is disconnected before replacement is retained');
   assert.equal(sources[1].connectCount, 1, 'replacement source is connected to the recorder mix');
+  assert.equal(streamForMap(recorder).get('peer-1'), replacementStream, 'changed stream replaces the tracked stream object');
+}
+
+// REC2 — removing a peer clears both sourceFor and streamFor so a later re-add cannot be suppressed by a stale stream reference.
+{
+  const recorder = createRecorder();
+  const sources = installFakeGraph(recorder);
+  const addStream = (recorder as unknown as { addStream: (clientId: string, stream: MediaStream) => void }).addStream.bind(recorder);
+  const stream = fakeAudioStream('peer-stream');
+
+  addStream('peer-1', stream);
+  recorder.removePeerStream('peer-1');
+  assert.equal(recorder.sourceCount(), 0, 'removePeerStream clears sourceCount for the removed peer');
+  assert.equal(streamForMap(recorder).has('peer-1'), false, 'removePeerStream clears the peer stream reference');
+  assert.equal(sources[0].disconnectCount, 1, 'removePeerStream disconnects the removed peer source');
+
+  addStream('peer-1', stream);
+  assert.equal(recorder.sourceCount(), 1, 'same object can be legitimately re-added after removal');
+  assert.equal(sources.length, 2, 're-add after removal creates a new source node');
+  assert.equal(sources[1].connectCount, 1, 're-added source is connected after removal cleared streamFor');
 }
 
 // REC5 — stop-then-discard finalizes once, does not double-call MediaRecorder.stop, and late onstop is harmless.
@@ -364,6 +464,25 @@ function installFakeGraph(service: RecorderService): FakeSource[] {
   assert.equal(sources[0].disconnectCount, 0, 'local recorder source is not removed by remote-peer eviction');
   assert.equal(sources[1].disconnectCount, 1, 'dropped peer source is disconnected');
   assert.equal(sources[2].disconnectCount, 1, 'active peer old source is replaced by the fresh stream');
+}
+
+// REC2 — room sync with unchanged peer streams does not churn recorder sources and never removes local.
+{
+  const recorder = createRecorder();
+  const sources = installFakeGraph(recorder);
+  const addStream = (recorder as unknown as { addStream: (clientId: string, stream: MediaStream) => void }).addStream.bind(recorder);
+  const localStream = fakeAudioStream('local');
+  const peerStream = fakeAudioStream('peer-same');
+
+  addStream('local', localStream);
+  addStream('peer-1', peerStream);
+  syncRecorderPeerStreams([fakePeer('local-client-id', localStream, true), fakePeer('peer-1', peerStream)], recorder);
+
+  assert.deepEqual(recorder.recordedClientIds().sort(), ['local', 'peer-1'], 'unchanged sync keeps local plus the active remote recorded');
+  assert.equal(recorder.sourceCount(), 2, 'unchanged sync keeps sourceCount stable');
+  assert.equal(sources.length, 2, 'unchanged sync creates no replacement source nodes');
+  assert.equal(sources[0].disconnectCount, 0, 'local source is untouched by remote-peer sync');
+  assert.equal(sources[1].disconnectCount, 0, 'unchanged remote source is not disconnected/reconnected');
 }
 
 console.log('recorder-leaks: all assertions passed');

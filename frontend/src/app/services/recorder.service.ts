@@ -86,6 +86,7 @@ export class RecorderService {
   private recorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
   private sourceFor = new Map<string, MediaStreamAudioSourceNode>();
+  private streamFor = new Map<string, MediaStream>();
   private mimeType = 'audio/webm;codecs=opus';
   private extension = 'webm';
   private recordingStartedAt = 0;
@@ -119,6 +120,7 @@ export class RecorderService {
     this.ctx = ctx;
     this.dest = dest;
     this.sourceFor = new Map();
+    this.streamFor = new Map();
     this.sourceCount.set(0);
     this.chunks = [];
     this.stopInFlight = false;
@@ -164,15 +166,29 @@ export class RecorderService {
     this.addStream(clientId, stream);
   }
 
+  async resumeAudioContext(): Promise<void> {
+    const ctx = this.ctx;
+    if (!this.isRecording() || ctx?.state !== 'suspended') return;
+    try {
+      await ctx.resume();
+    } catch (err) {
+      console.warn('recording audio context resume failed', err);
+    }
+  }
+
   removePeerStream(clientId: string): void {
     const source = this.sourceFor.get(clientId);
-    if (!source) return;
+    if (!source) {
+      this.streamFor.delete(clientId);
+      return;
+    }
     try {
       source.disconnect();
     } catch {
       // Disconnect can throw if the node is already gone during cleanup.
     }
     this.sourceFor.delete(clientId);
+    this.streamFor.delete(clientId);
     this.sourceCount.set(this.sourceFor.size);
   }
 
@@ -271,6 +287,7 @@ export class RecorderService {
 
   private addStream(clientId: string, stream: MediaStream): void {
     if (!this.ctx || !this.dest) return;
+    if (this.sourceFor.has(clientId) && this.streamFor.get(clientId) === stream) return;
     if (this.sourceFor.has(clientId)) this.removePeerStream(clientId);
     if (stream.getAudioTracks().length === 0) {
       console.warn('recording stream skipped: no audio tracks', { clientId });
@@ -280,6 +297,7 @@ export class RecorderService {
       const source = this.ctx.createMediaStreamSource(stream);
       source.connect(this.dest);
       this.sourceFor.set(clientId, source);
+      this.streamFor.set(clientId, stream);
       this.sourceCount.set(this.sourceFor.size);
     } catch (err) {
       console.warn('recording mix source failed', err);
@@ -321,6 +339,7 @@ export class RecorderService {
       }
     }
     this.sourceFor.clear();
+    this.streamFor.clear();
     this.sourceCount.set(0);
     this.chunks = [];
     this.recorder = null;
