@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {
+  decideLocalTrackFailureRecovery,
   shouldAcquireMicTrackForToggle,
   shouldClearVideoPinAfterRefresh,
   shouldPromptGuestPassword,
@@ -75,6 +76,40 @@ assert.strictEqual(
   shouldAcquireMicTrackForToggle({ trackExists: true, trackReadyState: 'live' }),
   false,
   'A12: live audio track keeps the existing media.toggleMic fast path',
+);
+
+assert.strictEqual(
+  decideLocalTrackFailureRecovery({
+    inCall: true,
+    currentTrack: true,
+    trackEnabled: false,
+    event: 'ended',
+    trackReadyState: 'ended',
+  }),
+  'ignore',
+  'TINY6: intentionally disabled current track ending does not trigger recovery',
+);
+assert.strictEqual(
+  decideLocalTrackFailureRecovery({
+    inCall: true,
+    currentTrack: true,
+    trackEnabled: true,
+    event: 'ended',
+    trackReadyState: 'ended',
+  }),
+  'recover-ended',
+  'TINY6: enabled current track ending still triggers recovery',
+);
+assert.strictEqual(
+  decideLocalTrackFailureRecovery({
+    inCall: true,
+    currentTrack: true,
+    trackEnabled: true,
+    event: 'mute',
+    trackReadyState: 'live',
+  }),
+  'debounce-mute',
+  'TINY6: enabled live-track mute still schedules persistent-mute recovery',
 );
 
 console.log('room-decisions: all assertions passed');

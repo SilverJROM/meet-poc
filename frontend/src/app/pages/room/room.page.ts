@@ -54,6 +54,7 @@ import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.ser
 import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
 import { planInitialPublishRetry } from '../../services/sfu-roster-utils';
 import {
+  decideLocalTrackFailureRecovery,
   shouldAcquireMicTrackForToggle,
   shouldClearVideoPinAfterRefresh,
   shouldPromptGuestPassword,
@@ -110,6 +111,15 @@ type LobbyError =
 type RemoteVoiceWatchdogPeerState = {
   samples: VoiceRecoverySample[];
   attemptsThisWindow: number;
+};
+
+type LocalTrackKind = 'audio' | 'video';
+type LocalTrackFailureEvent = 'ended' | 'mute';
+type LocalTrackFailureHandlerRefs = {
+  track: MediaStreamTrack;
+  onEnded: () => void;
+  onMute: () => void;
+  onUnmute: () => void;
 };
 
 class InitialPublishPermanentError extends Error {
@@ -475,6 +485,7 @@ export class RoomPage implements OnDestroy {
   private lifecycleResumeInFlight = false;
   private audioRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   private videoRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly localTrackFailureHandlers: Partial<Record<LocalTrackKind, LocalTrackFailureHandlerRefs>> = {};
   private remoteAudioKeepaliveTimer: ReturnType<typeof setInterval> | null = null;
   private audioRecoveryInFlight = false;
   private videoRecoveryInFlight = false;
@@ -2419,6 +2430,7 @@ export class RoomPage implements OnDestroy {
     this.stopMicSilenceWatchdog();
     this.stopLobbySelfTest();
     this.stopConnectionQualitySampler();
+    this.detachLocalTrackFailureHandlers();
     this.clearLocalTrackRecoveryTimers();
     this.clearPreflightTimer();
     this.stopWaitingRoomCountdown();
@@ -2839,26 +2851,54 @@ export class RoomPage implements OnDestroy {
   };
 
   private attachLocalTrackFailureHandlers(stream: MediaStream): void {
-    const audioTrack = stream.getAudioTracks()[0];
-    if (audioTrack) {
-      audioTrack.onended = () => this.handleLocalTrackFailure('audio', audioTrack, 'ended');
-      audioTrack.onmute = () => this.handleLocalTrackFailure('audio', audioTrack, 'mute');
-      audioTrack.onunmute = () => this.clearLocalTrackRecoveryTimer('audio', audioTrack);
-    }
-    const videoTrack = stream.getVideoTracks()[0];
-    if (videoTrack) {
-      videoTrack.onended = () => this.handleLocalTrackFailure('video', videoTrack, 'ended');
-      videoTrack.onmute = () => this.handleLocalTrackFailure('video', videoTrack, 'mute');
-      videoTrack.onunmute = () => this.clearLocalTrackRecoveryTimer('video', videoTrack);
+    this.attachLocalTrackFailureHandler('audio', stream.getAudioTracks()[0] ?? null);
+    this.attachLocalTrackFailureHandler('video', stream.getVideoTracks()[0] ?? null);
+  }
+
+  private attachLocalTrackFailureHandler(kind: LocalTrackKind, track: MediaStreamTrack | null): void {
+    this.detachLocalTrackFailureHandlers(kind);
+    if (!track) return;
+    const refs: LocalTrackFailureHandlerRefs = {
+      track,
+      onEnded: () => this.handleLocalTrackFailure(kind, track, 'ended'),
+      onMute: () => this.handleLocalTrackFailure(kind, track, 'mute'),
+      onUnmute: () => this.clearLocalTrackRecoveryTimer(kind, track),
+    };
+    track.addEventListener('ended', refs.onEnded);
+    track.addEventListener('mute', refs.onMute);
+    track.addEventListener('unmute', refs.onUnmute);
+    this.localTrackFailureHandlers[kind] = refs;
+  }
+
+  private detachLocalTrackFailureHandlers(kind?: LocalTrackKind): void {
+    const kinds: LocalTrackKind[] = kind ? [kind] : ['audio', 'video'];
+    for (const entryKind of kinds) {
+      const refs = this.localTrackFailureHandlers[entryKind];
+      if (!refs) continue;
+      refs.track.removeEventListener('ended', refs.onEnded);
+      refs.track.removeEventListener('mute', refs.onMute);
+      refs.track.removeEventListener('unmute', refs.onUnmute);
+      delete this.localTrackFailureHandlers[entryKind];
     }
   }
 
-  private handleLocalTrackFailure(kind: 'audio' | 'video', track: MediaStreamTrack, event: 'ended' | 'mute'): void {
-    if (this.state() !== 'in-call' || !this.isCurrentLocalTrack(kind, track)) return;
+  private handleLocalTrackFailure(kind: LocalTrackKind, track: MediaStreamTrack, event: LocalTrackFailureEvent): void {
+    const inCall = this.state() === 'in-call';
+    const currentTrack = this.isCurrentLocalTrack(kind, track);
+    const action = decideLocalTrackFailureRecovery({
+      inCall,
+      currentTrack,
+      trackEnabled: track.enabled,
+      event,
+      trackReadyState: track.readyState,
+    });
+    if (!inCall || !currentTrack) return;
     this.clearLocalTrackRecoveryTimer(kind);
-    if (event === 'mute' && track.readyState === 'live') {
+    if (action === 'ignore') return;
+    if (action === 'debounce-mute') {
       const timer = window.setTimeout(() => {
         if (!this.isCurrentLocalTrack(kind, track)) return;
+        if (!track.enabled) return;
         if (track.muted || track.readyState === 'ended') void this.recoverLocalTrack(kind, 'persistent-mute');
       }, LOCAL_TRACK_MUTE_DEBOUNCE_MS);
       if (kind === 'audio') this.audioRecoveryTimer = timer;
@@ -2868,7 +2908,7 @@ export class RoomPage implements OnDestroy {
     void this.recoverLocalTrack(kind, 'ended');
   }
 
-  private clearLocalTrackRecoveryTimer(kind: 'audio' | 'video', track?: MediaStreamTrack): void {
+  private clearLocalTrackRecoveryTimer(kind: LocalTrackKind, track?: MediaStreamTrack): void {
     if (track && !this.isCurrentLocalTrack(kind, track)) return;
     const timer = kind === 'audio' ? this.audioRecoveryTimer : this.videoRecoveryTimer;
     if (timer) window.clearTimeout(timer);
@@ -2883,12 +2923,12 @@ export class RoomPage implements OnDestroy {
     this.videoRecoveryInFlight = false;
   }
 
-  private isCurrentLocalTrack(kind: 'audio' | 'video', track: MediaStreamTrack): boolean {
+  private isCurrentLocalTrack(kind: LocalTrackKind, track: MediaStreamTrack): boolean {
     const current = kind === 'audio' ? this.media.localStream()?.getAudioTracks()[0] : this.media.localStream()?.getVideoTracks()[0];
     return current === track;
   }
 
-  private async recoverLocalTrack(kind: 'audio' | 'video', trigger: 'ended' | 'persistent-mute'): Promise<void> {
+  private async recoverLocalTrack(kind: LocalTrackKind, trigger: 'ended' | 'persistent-mute'): Promise<void> {
     if (kind === 'audio') {
       if (this.audioRecoveryInFlight) return;
       this.audioRecoveryInFlight = true;
@@ -3259,6 +3299,13 @@ export class RoomPage implements OnDestroy {
     if (this.micSweepInProgress) return;
 
     const src = await this.sfuClient.getOutboundAudioSource();
+    const micStillActive = this.captureTrackLive() && this.captureTrackEnabled() && this.captureTrackUnmuted();
+    if (!micStillActive) {
+      this.micSilenceWindow = [];
+      this.micSweepDoneForEpisode = false;
+      this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', false));
+      return;
+    }
     this.micSilenceWindow.push({
       audioLevel: src?.audioLevel ?? null,
       totalAudioEnergy: src?.totalAudioEnergy ?? null,

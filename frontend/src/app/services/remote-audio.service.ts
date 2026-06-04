@@ -10,6 +10,12 @@ type RemoteSource = {
   onEnded: () => void;
 };
 
+type SinkIdTargetState = {
+  desiredDeviceId: string;
+  inFlight: Promise<boolean> | null;
+  rerun: boolean;
+};
+
 export type VoiceRecoveryAction = 'none' | 'resume' | 'kickstart' | 'replay' | 'rebuild';
 export type VoiceRecoveryStep = Exclude<VoiceRecoveryAction, 'none'>;
 
@@ -113,6 +119,42 @@ export function clearStoredAudioOutputDeviceId(): void {
   }
 }
 
+export class LatestSinkIdApplier {
+  private readonly targets = new WeakMap<HTMLMediaElement, SinkIdTargetState>();
+
+  apply(element: HTMLMediaElement | null, deviceId: string | undefined, options: ApplySinkIdOptions = {}): Promise<boolean> {
+    if (!element || deviceId === undefined) return applyMediaElementSinkWithDefaultFallback(element, deviceId, options);
+    let state = this.targets.get(element);
+    if (!state) {
+      state = { desiredDeviceId: deviceId, inFlight: null, rerun: false };
+      this.targets.set(element, state);
+    }
+    state.desiredDeviceId = deviceId;
+    if (state.inFlight) {
+      state.rerun = true;
+      return state.inFlight;
+    }
+
+    state.inFlight = this.drain(element, state, options);
+    return state.inFlight;
+  }
+
+  private async drain(element: HTMLMediaElement, state: SinkIdTargetState, options: ApplySinkIdOptions): Promise<boolean> {
+    try {
+      let applied = true;
+      while (true) {
+        state.rerun = false;
+        const deviceId = state.desiredDeviceId;
+        applied = await applyMediaElementSinkWithDefaultFallback(element, deviceId, options);
+        if (!state.rerun || state.desiredDeviceId === deviceId) return applied;
+      }
+    } finally {
+      state.inFlight = null;
+      state.rerun = false;
+    }
+  }
+}
+
 @Injectable({ providedIn: 'root' })
 export class RemoteAudioService {
   readonly contextState = signal<AudioContextState | 'none'>('none');
@@ -134,6 +176,7 @@ export class RemoteAudioService {
   private keepaliveGain: GainNode | null = null;
   private outputElement: HTMLAudioElement | null = null;
   private readonly sources = new Map<string, RemoteSource>();
+  private readonly sinkIdApplier = new LatestSinkIdApplier();
   private readonly voiceRecoveryCounters: Record<VoiceRecoveryStep, number> = {
     resume: 0,
     kickstart: 0,
@@ -607,7 +650,7 @@ export class RemoteAudioService {
   }
 
   private async applySinkId(element: HTMLMediaElement | null, deviceId?: string): Promise<boolean> {
-    return applyMediaElementSinkWithDefaultFallback(element, deviceId, {
+    return this.sinkIdApplier.apply(element, deviceId, {
       onSelectedSinkFailure: clearStoredAudioOutputDeviceId,
       label: 'remote-audio',
     });

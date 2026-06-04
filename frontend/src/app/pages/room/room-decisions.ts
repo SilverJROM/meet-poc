@@ -40,3 +40,17 @@ export function shouldClearVideoPinAfterRefresh(input: { selectedDeviceId: strin
 export function shouldAcquireMicTrackForToggle(input: { trackExists: boolean; trackReadyState?: MediaStreamTrackState }): boolean {
   return !input.trackExists || input.trackReadyState !== 'live';
 }
+
+export type LocalTrackFailureRecoveryAction = 'ignore' | 'debounce-mute' | 'recover-ended';
+
+export function decideLocalTrackFailureRecovery(input: {
+  inCall: boolean;
+  currentTrack: boolean;
+  trackEnabled: boolean;
+  event: 'ended' | 'mute';
+  trackReadyState: MediaStreamTrackState;
+}): LocalTrackFailureRecoveryAction {
+  if (!input.inCall || !input.currentTrack || !input.trackEnabled) return 'ignore';
+  if (input.event === 'mute' && input.trackReadyState === 'live') return 'debounce-mute';
+  return 'recover-ended';
+}
