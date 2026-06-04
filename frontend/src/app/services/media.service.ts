@@ -449,25 +449,46 @@ export class MediaService {
     this.screenShareAttempts.update((count) => count + 1);
     const screen = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
     const track = screen.getVideoTracks()[0];
+    if (!track) {
+      stopStreamTracks(screen);
+      throw new Error('No screen track acquired');
+    }
     if (track) track.contentHint = 'detail';
     registerDebugTracks(screen);
+    const previousTrack = this.screenTrack;
+    const previousStream = this.screenStream();
+    const previousScreenOn = this.screenOn();
     this.screenTrack = track;
     this.screenStream.set(screen);
     this.screenOn.set(true);
     track.onended = () => {
       void this.stopScreen(onVideoTrackChanged);
     };
-    await onVideoTrackChanged(track);
+    try {
+      await onVideoTrackChanged(track);
+    } catch (err) {
+      track.onended = null;
+      stopStreamTracks(screen);
+      this.screenTrack = previousTrack;
+      this.screenStream.set(previousStream);
+      this.screenOn.set(previousScreenOn);
+      throw err;
+    }
     return true;
   }
 
   async stopScreen(onVideoTrackChanged: (track: MediaStreamTrack | null) => Promise<void>): Promise<void> {
     const track = this.screenTrack;
+    await onVideoTrackChanged(this.localStream()?.getVideoTracks()[0] ?? null);
+    const screen = this.screenStream();
     this.screenTrack = null;
-    if (track) track.stop();
+    if (track) {
+      track.onended = null;
+      if (track.readyState !== 'ended') track.stop();
+    }
+    if (screen) stopStreamTracks(screen);
     this.screenStream.set(null);
     this.screenOn.set(false);
-    await onVideoTrackChanged(this.localStream()?.getVideoTracks()[0] ?? null);
   }
 
   stopLocal(): void {
