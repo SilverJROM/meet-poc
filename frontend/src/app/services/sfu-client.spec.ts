@@ -1,10 +1,20 @@
 import assert from 'node:assert/strict';
-import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster } from './sfu-roster-utils.js';
+import {
+  applyPresenceUpdate,
+  applyRosterSnapshot,
+  removeFromRoster,
+  selectNewRemoteTracks,
+  shouldRegisterFirstAddedLocalTrack,
+} from './sfu-roster-utils.js';
 import type { RemotePublisher } from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
 
 function makePublisher(clientId: string, revision: number): RemotePublisher {
   return { clientId, participantId: `p-${clientId}`, cfSessionId: `cf-${clientId}`, tracks: [], revision };
+}
+
+function makeTransceivers(entries: { mid: string; receiverKind: string }[]): RTCRtpTransceiver[] {
+  return entries.map((entry) => ({ mid: entry.mid, receiver: { track: { kind: entry.receiverKind } } })) as unknown as RTCRtpTransceiver[];
 }
 
 // applyPresenceUpdate — applies a newer revision
@@ -78,6 +88,61 @@ function makePublisher(clientId: string, revision: number): RemotePublisher {
   assert.equal(next, initial, 'should return the same map when entry does not exist');
 }
 
+// shouldRegisterFirstAddedLocalTrack — late video after camera-off join registers once
+{
+  const tracks = [{ trackName: 'p1:1:audio:a1', kind: 'audio', mid: '0', status: 'live' as const }];
+  assert.equal(shouldRegisterFirstAddedLocalTrack(tracks, 'video', true), true, 'first live video must register');
+}
+
+// shouldRegisterFirstAddedLocalTrack — late audio after publishing without mic registers once
+{
+  const tracks = [{ trackName: 'p1:1:video:v1', kind: 'video', mid: '1', status: 'live' as const }];
+  assert.equal(shouldRegisterFirstAddedLocalTrack(tracks, 'audio', true), true, 'first live audio must register');
+}
+
+// shouldRegisterFirstAddedLocalTrack — normal on-join replacements do not re-register
+{
+  const tracks = [
+    { trackName: 'p1:1:audio:a1', kind: 'audio', mid: '0', status: 'live' as const },
+    { trackName: 'p1:1:video:v1', kind: 'video', mid: '1', status: 'live' as const },
+  ];
+  assert.equal(shouldRegisterFirstAddedLocalTrack(tracks, 'audio', true), false, 'existing live audio must not re-register');
+  assert.equal(shouldRegisterFirstAddedLocalTrack(tracks, 'video', true), false, 'existing live video must not re-register');
+}
+
+// shouldRegisterFirstAddedLocalTrack — null sender tracks never register
+{
+  assert.equal(shouldRegisterFirstAddedLocalTrack([], 'audio', false), false, 'null audio sender must not register');
+  assert.equal(shouldRegisterFirstAddedLocalTrack([], 'video', false), false, 'null video sender must not register');
+}
+
+// selectNewRemoteTracks — partial subscribe covers added audio/video/screen and skips existing names
+{
+  const previousTracks = [{ trackName: 'p1:1:audio:a1', kind: 'audio' }];
+  const nextTracks = [
+    { trackName: 'p1:1:audio:a1', kind: 'audio' },
+    { trackName: 'p1:2:video:v1', kind: 'video' },
+    { trackName: 'p1:3:screen:s1', kind: 'screen' },
+    { trackName: 'p1:4:audio:a2', kind: 'audio' },
+  ];
+  const result = selectNewRemoteTracks(previousTracks, nextTracks, new Set(['p1:4:audio:a2']));
+  assert.deepEqual(
+    result.map((track) => track.trackName),
+    ['p1:2:video:v1', 'p1:3:screen:s1'],
+    'new remote tracks should include video and screen but skip already-subscribed audio',
+  );
+}
+
+// selectNewRemoteTracks — repeat presence update does not double-subscribe an existing track
+{
+  const previousTracks = [
+    { trackName: 'p1:1:audio:a1', kind: 'audio' },
+    { trackName: 'p1:2:video:v1', kind: 'video' },
+  ];
+  const nextTracks = [...previousTracks];
+  assert.deepEqual(selectNewRemoteTracks(previousTracks, nextTracks, new Set()).map((track) => track.trackName), []);
+}
+
 // reconcileSubscribedMids — audio+video both mid:"" (duplicate-key collision case)
 {
   const responseTracks = [
@@ -85,8 +150,12 @@ function makePublisher(clientId: string, revision: number): RemotePublisher {
     { trackName: 'p1:1:video:v1', mid: '' },
   ];
   const newTransceiverMids = ['2', '3'];
+  const transceivers = makeTransceivers([
+    { mid: '2', receiverKind: 'audio' },
+    { mid: '3', receiverKind: 'video' },
+  ]);
   const kindMap = new Map([['p1:1:audio:a1', 'audio'], ['p1:1:video:v1', 'video']]);
-  const result = reconcileSubscribedMids(responseTracks, newTransceiverMids, kindMap, 'client-a');
+  const result = reconcileSubscribedMids(responseTracks, newTransceiverMids, transceivers, kindMap, 'client-a');
   assert.equal(result.length, 2, 'both tracks should be reconciled');
   assert.equal(result[0].realMid, '2', 'audio gets first new transceiver mid');
   assert.equal(result[0].kind, 'audio', 'audio kind correct');
@@ -101,8 +170,9 @@ function makePublisher(clientId: string, revision: number): RemotePublisher {
 {
   const responseTracks = [{ trackName: 'p2:1:screen:s1', mid: '' }];
   const newTransceiverMids = ['7'];
+  const transceivers = makeTransceivers([{ mid: '7', receiverKind: 'video' }]);
   const kindMap = new Map([['p2:1:screen:s1', 'screen']]);
-  const result = reconcileSubscribedMids(responseTracks, newTransceiverMids, kindMap, 'client-b');
+  const result = reconcileSubscribedMids(responseTracks, newTransceiverMids, transceivers, kindMap, 'client-b');
   assert.equal(result.length, 1);
   assert.equal(result[0].realMid, '7');
   assert.equal(result[0].kind, 'screen');

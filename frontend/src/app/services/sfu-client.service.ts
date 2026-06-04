@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { IceConfigService } from './ice-config.service';
 import { ViewportService } from './viewport.service';
-import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster } from './sfu-roster-utils.js';
+import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster, selectNewRemoteTracks, shouldRegisterFirstAddedLocalTrack } from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
 import { extractOutboundAudioSource, type OutboundAudioSourceStat } from './mic-energy';
 import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair, SfuConnectionQuality } from './meeting-sessions.service';
@@ -170,6 +170,14 @@ export class SfuClientService {
 
   replaceAudioTrack(track: MediaStreamTrack | null): Promise<void> {
     return this.enqueue(() => this.doReplaceAudioTrack(track));
+  }
+
+  replaceVideoTrackAndPublishIfNeeded(track: MediaStreamTrack | null): Promise<boolean> {
+    return this.enqueue(() => this.doReplaceLocalTrackAndPublishIfNeeded('video', this.videoSender, track));
+  }
+
+  replaceAudioTrackAndPublishIfNeeded(track: MediaStreamTrack | null): Promise<boolean> {
+    return this.enqueue(() => this.doReplaceLocalTrackAndPublishIfNeeded('audio', this.audioSender, track));
   }
 
   publishScreen(displayTrack: MediaStreamTrack): Promise<void> {
@@ -594,18 +602,17 @@ export class SfuClientService {
       this.subscribedClientIds.delete(msg.clientId);
       this.disarmSubscribeStuckWatchdog(msg.clientId);
     }
+    const samePublisherSession = !!prev && prev.cfSessionId === msg.cfSessionId;
     const prevHadScreen = prev?.tracks.some((t) => t.kind === 'screen') ?? false;
     const next = applyPresenceUpdate(this.remotePublishers(), msg);
     if (next !== this.remotePublishers()) this.remotePublishers.set(next);
     const nowPublisher = next.get(msg.clientId);
     const nowHasScreen = nowPublisher?.tracks.some((t) => t.kind === 'screen') ?? false;
-    if (prevHadScreen && !nowHasScreen) {
+    if (samePublisherSession && prevHadScreen && !nowHasScreen) {
       this.tearDownScreenSubscription(msg.clientId);
-    } else if (!prevHadScreen && nowHasScreen && nowPublisher) {
-      // Screen track added mid-call — subscribe to just the new screen track.
-      // subscribeIfNeeded is guarded by subscribedClientIds (publisher already subscribed for camera/audio),
-      // so we need a separate partial-subscribe path for the screen track.
-      this.subscribeNewScreenTrack(nowPublisher);
+    }
+    if (samePublisherSession && nowPublisher) {
+      this.subscribeNewRemoteTracks(nowPublisher, prev.tracks);
     }
   }
 
@@ -660,12 +667,9 @@ export class SfuClientService {
     void this.updateCameraLayer().catch(() => undefined);
   }
 
-  private subscribeNewScreenTrack(publisher: import('./sfu-roster-utils.js').RemotePublisher): void {
-    const screenTracks = publisher.tracks.filter((t) => t.kind === 'screen');
-    if (!screenTracks.length) return;
-    // Skip any screen tracks already in our midToEntry (avoid double-subscribe on rapid presence updates)
+  private subscribeNewRemoteTracks(publisher: import('./sfu-roster-utils.js').RemotePublisher, previousTracks: { trackName: string; kind: string }[]): void {
     const alreadySubscribed = new Set([...this.midToEntry.values()].map((e) => e.trackName));
-    const newTracks = screenTracks.filter((t) => !alreadySubscribed.has(t.trackName));
+    const newTracks = selectNewRemoteTracks(previousTracks, publisher.tracks, alreadySubscribed);
     if (!newTracks.length) return;
     void this.enqueue(() => this.doSubscribeTracks(publisher, newTracks));
   }
@@ -738,6 +742,85 @@ export class SfuClientService {
   private async doReplaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
     if (!this.videoSender) return;
     await this.videoSender.replaceTrack(track);
+  }
+
+  private async doReplaceLocalTrackAndPublishIfNeeded(
+    kind: 'audio' | 'video',
+    sender: RTCRtpSender | null,
+    track: MediaStreamTrack | null,
+  ): Promise<boolean> {
+    if (!sender) return false;
+    const previousTrack = sender.track;
+    const publishState = this.localPublishState();
+    const publishedState = publishState?.status === 'published' ? publishState : null;
+    const shouldPublish =
+      !!publishedState &&
+      !!this.pc &&
+      !!this.callerCreds &&
+      shouldRegisterFirstAddedLocalTrack(publishedState.tracks, kind, !!track);
+
+    await sender.replaceTrack(track);
+    if (!shouldPublish || !track || !publishedState || !this.pc || !this.callerCreds) return false;
+
+    try {
+      return await this.doRegisterFirstAddedLocalTrack(kind, sender, publishedState, this.callerCreds);
+    } catch (err) {
+      await this.rollbackPendingLocalOffer();
+      await sender.replaceTrack(previousTrack);
+      throw err;
+    }
+  }
+
+  private async doRegisterFirstAddedLocalTrack(
+    kind: 'audio' | 'video',
+    sender: RTCRtpSender,
+    publishState: LocalPublishState,
+    creds: { clientKey: string; participantId: string; sessionId: string },
+  ): Promise<boolean> {
+    if (!this.pc) return false;
+    const transceiver = this.pc.getTransceivers().find((candidate) => candidate.sender === sender);
+    const mid = transceiver?.mid;
+    if (!mid) throw new Error(`[sfu] cannot publish first ${kind} track without a sender mid`);
+
+    const { clientKey, participantId, sessionId } = creds;
+    const trackName = `${participantId}:${Date.now()}:${kind}:${crypto.randomUUID()}`;
+
+    const offer = await this.pc.createOffer();
+    await this.pc.setLocalDescription(offer);
+
+    const tracksRes = await withTimeout(
+      firstValueFrom(
+        this.http.post<{ sessionDescription: RTCSessionDescriptionInit }>('/api/sfu/tracks', {
+          clientKey,
+          participantId,
+          sessionId,
+          cfSessionId: publishState.cfSessionId,
+          sessionDescription: { type: this.pc.localDescription!.type, sdp: this.pc.localDescription!.sdp },
+          tracks: [{ location: 'local', mid, trackName }],
+        }),
+      ),
+      SFU_HTTP_TIMEOUT_MS,
+      'POST /api/sfu/tracks',
+    );
+
+    await this.pc.setRemoteDescription(tracksRes.sessionDescription);
+    const currentState = this.localPublishState();
+    if (currentState?.status !== 'published') return false;
+    if (!shouldRegisterFirstAddedLocalTrack(currentState.tracks, kind, true)) return false;
+    this.localPublishState.set({
+      ...currentState,
+      tracks: [...currentState.tracks, { trackName, kind, mid, status: 'live' }],
+    });
+    return true;
+  }
+
+  private async rollbackPendingLocalOffer(): Promise<void> {
+    if (!this.pc || this.pc.signalingState !== 'have-local-offer') return;
+    try {
+      await this.pc.setLocalDescription({ type: 'rollback' } as RTCSessionDescriptionInit);
+    } catch {
+      // If rollback is unsupported or no longer valid, sender rollback still preserves local media.
+    }
   }
 
   private async doPublishScreen(displayTrack: MediaStreamTrack): Promise<void> {

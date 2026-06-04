@@ -983,7 +983,9 @@ export class RoomPage implements OnDestroy {
     try {
       const requestedAudioDeviceId = this.selectedAudioId();
       const mic = await this.media.toggleMic(
-        (track) => this.sfuClient.replaceAudioTrack(track),
+        async (track) => {
+          await this.replaceSfuAudioTrackAndAnnounce(track);
+        },
         { audioDeviceId: requestedAudioDeviceId || undefined },
       );
       if (mic) this.syncSelectedAudioIdToTrack(this.media.localStream()?.getAudioTracks()[0], requestedAudioDeviceId);
@@ -1127,6 +1129,11 @@ export class RoomPage implements OnDestroy {
     }
   }
 
+  private async replaceSfuAudioTrackAndAnnounce(nextTrack: MediaStreamTrack | null): Promise<void> {
+    const publishStateChanged = await this.sfuClient.replaceAudioTrackAndPublishIfNeeded(nextTrack);
+    if (publishStateChanged) this.announceSfuPublishState();
+  }
+
   private effectiveStreamForSourceTrack(sourceTrack?: MediaStreamTrack | null): MediaStream | null {
     const rawStream = this.media.localStream();
     if (!rawStream) return null;
@@ -1159,8 +1166,9 @@ export class RoomPage implements OnDestroy {
 
   private async replaceSfuVideoTrackIfChanged(nextTrack: MediaStreamTrack | null): Promise<void> {
     if (this.lastSfuVideoTrack === nextTrack) return;
+    const publishStateChanged = await this.sfuClient.replaceVideoTrackAndPublishIfNeeded(nextTrack);
     this.lastSfuVideoTrack = nextTrack;
-    await this.sfuClient.replaceVideoTrack(nextTrack);
+    if (publishStateChanged) this.announceSfuPublishState();
   }
 
   private async toggleCameraDuringShare(): Promise<void> {
@@ -2175,7 +2183,9 @@ export class RoomPage implements OnDestroy {
     this.deviceDialogBusy.set(true);
     this.deviceDialogError.set(null);
     try {
-      const track = await this.media.replaceAudioTrack(deviceId || undefined, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
+      const track = await this.media.replaceAudioTrack(deviceId || undefined, async (nextTrack) => {
+        await this.replaceSfuAudioTrackAndAnnounce(nextTrack);
+      });
       if (track) {
         this.syncSelectedAudioIdToTrack(track, deviceId);
         this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
@@ -2186,7 +2196,9 @@ export class RoomPage implements OnDestroy {
     } catch (err) {
       if (deviceId) {
         try {
-          const fallbackTrack = await this.media.replaceAudioTrack(undefined, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
+          const fallbackTrack = await this.media.replaceAudioTrack(undefined, async (nextTrack) => {
+            await this.replaceSfuAudioTrackAndAnnounce(nextTrack);
+          });
           if (fallbackTrack) {
             this.syncSelectedAudioIdToTrack(fallbackTrack);
             this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([fallbackTrack]));
@@ -2557,7 +2569,9 @@ export class RoomPage implements OnDestroy {
       const candidates = this.deviceCandidates(this.selectedAudioId(), devices.audioInputs);
       for (const candidate of candidates) {
         try {
-          const track = await this.media.replaceAudioTrack(candidate.deviceId, (nextTrack) => this.sfuClient.replaceAudioTrack(nextTrack));
+          const track = await this.media.replaceAudioTrack(candidate.deviceId, async (nextTrack) => {
+            await this.replaceSfuAudioTrackAndAnnounce(nextTrack);
+          });
           if (!track) continue;
           this.syncSelectedAudioIdToTrack(track);
           this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
@@ -2641,9 +2655,9 @@ export class RoomPage implements OnDestroy {
           hasLiveAudioTrack: this.captureTrackLive(),
         }),
         acquire: async (deviceId) => {
-          const track = await this.media.replaceAudioTrack(deviceId || undefined, (nextTrack) =>
-            this.sfuClient.replaceAudioTrack(nextTrack),
-          );
+          const track = await this.media.replaceAudioTrack(deviceId || undefined, async (nextTrack) => {
+            await this.replaceSfuAudioTrackAndAnnounce(nextTrack);
+          });
           if (!track) return null;
           // Mirror verifyInitialCaptureEnergy's re-acquire re-wiring.
           this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
