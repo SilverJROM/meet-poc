@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { IceConfigService } from './ice-config.service';
 import { ViewportService } from './viewport.service';
-import { applyPresenceUpdate, applyRosterSnapshot, removeFromRoster, selectNewRemoteTracks, shouldRegisterFirstAddedLocalTrack } from './sfu-roster-utils.js';
+import { applyPresenceUpdate, applyRosterSnapshot, planSubscribeRetry, removeFromRoster, selectNewRemoteTracks, shouldRegisterFirstAddedLocalTrack } from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
 import { extractOutboundAudioSource, type OutboundAudioSourceStat } from './mic-energy';
 import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair, SfuConnectionQuality } from './meeting-sessions.service';
@@ -86,6 +86,8 @@ export class SfuClientService {
   private pendingOntrack = new Map<string, RTCTrackEvent>();
   private subscribeRetryAttempts = new Map<string, number>();
   private readonly SUBSCRIBE_RETRY_CAP = 7;
+  private readonly SUBSCRIBE_RETRY_BASE_BACKOFF_MS = 250;
+  private readonly SUBSCRIBE_RETRY_MAX_BACKOFF_MS = 4000;
   // Subscribe-latency: time from subscribe issued → first ontrack arrival per publisher
   private subscribeInitiatedAt = new Map<string, number>();
   private subscribeFirstFrameAt = new Map<string, number>();
@@ -120,15 +122,10 @@ export class SfuClientService {
     this.subscribedClientIds.add(publisher.clientId);
     this.armSubscribeStuckWatchdog(publisher.clientId);
     void this.enqueue(() => this.doSubscribe(publisher)).catch(() => {
-      const attempts = (this.subscribeRetryAttempts.get(publisher.clientId) ?? 0) + 1;
-      this.subscribeRetryAttempts.set(publisher.clientId, attempts);
-      if (attempts > this.SUBSCRIBE_RETRY_CAP) {
-        console.warn(`[SFU] subscribe permanently stopped for ${publisher.clientId} after ${attempts} attempts — guard stays set until cfSessionId changes`);
-        return; // guard stays set, no more retries
-      }
-      const backoffMs = Math.min(250 * Math.pow(2, attempts - 1), 4000);
+      const retry = this.nextSubscribeRetry(publisher.clientId, false);
+      if (!retry.shouldRetry) return;
       this.subscribedClientIds.delete(publisher.clientId);
-      setTimeout(() => this.subscribeRetryVersion.update((v) => v + 1), backoffMs);
+      setTimeout(() => this.subscribeRetryVersion.update((v) => v + 1), retry.backoffMs);
     });
   }
 
@@ -137,7 +134,8 @@ export class SfuClientService {
     const initiatedAt = this.subscribeInitiatedAt.get(publisherClientId) ?? Date.now();
     const timer = setTimeout(() => {
       this.subscribeStuckTimers.delete(publisherClientId);
-      if (this.subscribeFirstFrameAt.has(publisherClientId)) return;
+      const retry = this.nextSubscribeRetry(publisherClientId, this.subscribeFirstFrameAt.has(publisherClientId));
+      if (!retry.shouldRetry) return;
       console.warn('[sfu] subscribe stuck >10s — no ontrack from publisher', {
         publisherClientId,
         initiatedAtMs: initiatedAt,
@@ -145,10 +143,38 @@ export class SfuClientService {
         subscribedClientIds: [...this.subscribedClientIds],
         pcConnectionState: this.pc?.connectionState ?? null,
         pcIceConnectionState: this.pc?.iceConnectionState ?? null,
-        retryAttempts: this.subscribeRetryAttempts.get(publisherClientId) ?? 0,
+        retryAttempts: retry.nextAttempts,
+        retryBackoffMs: retry.backoffMs,
       });
+      this.clearPublisherSubscriptionStateForRetry(publisherClientId);
+      setTimeout(() => this.subscribeRetryVersion.update((v) => v + 1), retry.backoffMs);
     }, this.SUBSCRIBE_STUCK_THRESHOLD_MS);
     this.subscribeStuckTimers.set(publisherClientId, timer);
+  }
+
+  private nextSubscribeRetry(
+    publisherClientId: string,
+    hasFirstFrame: boolean,
+  ): { shouldRetry: boolean; nextAttempts: number; backoffMs: number; capped: boolean } {
+    const retry = planSubscribeRetry({
+      currentAttempts: this.subscribeRetryAttempts.get(publisherClientId) ?? 0,
+      cap: this.SUBSCRIBE_RETRY_CAP,
+      hasFirstFrame,
+      baseBackoffMs: this.SUBSCRIBE_RETRY_BASE_BACKOFF_MS,
+      maxBackoffMs: this.SUBSCRIBE_RETRY_MAX_BACKOFF_MS,
+    });
+
+    if (retry.reason === 'healthy') {
+      return { shouldRetry: false, nextAttempts: retry.nextAttempts, backoffMs: 0, capped: false };
+    }
+
+    this.subscribeRetryAttempts.set(publisherClientId, retry.nextAttempts);
+    if (retry.capped) {
+      console.warn(`[SFU] subscribe permanently stopped for ${publisherClientId} after ${retry.nextAttempts} attempts — guard stays set until cfSessionId changes`);
+      return { shouldRetry: false, nextAttempts: retry.nextAttempts, backoffMs: 0, capped: true };
+    }
+
+    return { shouldRetry: true, nextAttempts: retry.nextAttempts, backoffMs: retry.backoffMs ?? 0, capped: false };
   }
 
   private disarmSubscribeStuckWatchdog(publisherClientId: string): void {
@@ -479,6 +505,7 @@ export class SfuClientService {
   private processOntrack(event: RTCTrackEvent, entry: SubscribedTrackEntry): void {
     if (!this.subscribeFirstFrameAt.has(entry.publisherClientId)) {
       this.subscribeFirstFrameAt.set(entry.publisherClientId, Date.now());
+      this.subscribeRetryAttempts.delete(entry.publisherClientId);
       this.disarmSubscribeStuckWatchdog(entry.publisherClientId);
     }
     if (entry.kind === 'screen') {
@@ -665,6 +692,40 @@ export class SfuClientService {
       }
     }
     void this.updateCameraLayer().catch(() => undefined);
+  }
+
+  private clearPublisherSubscriptionStateForRetry(clientId: string): void {
+    const mids = new Set<string>();
+    for (const [mid, entry] of this.midToEntry) {
+      if (entry.publisherClientId === clientId) mids.add(mid);
+    }
+    for (const [mid, entry] of this.subscribedTracks()) {
+      if (entry.publisherClientId === clientId) mids.add(mid);
+    }
+
+    for (const mid of mids) {
+      this.midToEntry.delete(mid);
+      this.pendingOntrack.delete(mid);
+    }
+
+    const nextSubscribed = new Map(this.subscribedTracks());
+    for (const [mid, entry] of nextSubscribed) {
+      if (entry.publisherClientId === clientId) nextSubscribed.delete(mid);
+    }
+    if (nextSubscribed.size !== this.subscribedTracks().size) {
+      this.subscribedTracks.set(nextSubscribed);
+    }
+
+    const nextStreams = new Map(this.remoteStreams());
+    if (nextStreams.delete(clientId)) this.remoteStreams.set(nextStreams);
+
+    const nextScreenStreams = new Map(this.remoteScreenStreams());
+    if (nextScreenStreams.delete(clientId)) this.remoteScreenStreams.set(nextScreenStreams);
+
+    this.subscribedClientIds.delete(clientId);
+    this.subscribeInitiatedAt.delete(clientId);
+    this.subscribeFirstFrameAt.delete(clientId);
+    this.disarmSubscribeStuckWatchdog(clientId);
   }
 
   private subscribeNewRemoteTracks(publisher: import('./sfu-roster-utils.js').RemotePublisher, previousTracks: { trackName: string; kind: string }[]): void {
@@ -1118,7 +1179,6 @@ export class SfuClientService {
 
   private async doSubscribe(publisher: import('./sfu-roster-utils.js').RemotePublisher): Promise<void> {
     await this.doSubscribeTracks(publisher, publisher.tracks);
-    this.subscribeRetryAttempts.delete(publisher.clientId);
   }
 
   private async doSubscribeTracks(

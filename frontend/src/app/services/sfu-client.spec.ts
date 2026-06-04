@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   applyPresenceUpdate,
   applyRosterSnapshot,
+  planSubscribeRetry,
   removeFromRoster,
   selectNewRemoteTracks,
   shouldRegisterFirstAddedLocalTrack,
@@ -114,6 +115,41 @@ function makeTransceivers(entries: { mid: string; receiverKind: string }[]): RTC
 {
   assert.equal(shouldRegisterFirstAddedLocalTrack([], 'audio', false), false, 'null audio sender must not register');
   assert.equal(shouldRegisterFirstAddedLocalTrack([], 'video', false), false, 'null video sender must not register');
+}
+
+// planSubscribeRetry — stuck subscribe with no first frame retries with bounded backoff
+{
+  const retry = planSubscribeRetry({ currentAttempts: 0, cap: 7, hasFirstFrame: false, baseBackoffMs: 250, maxBackoffMs: 4000 });
+  assert.equal(retry.shouldRetry, true, 'stuck subscribe should retry when no first frame arrived');
+  assert.equal(retry.nextAttempts, 1, 'first stuck retry should record attempt 1');
+  assert.equal(retry.backoffMs, 250, 'first stuck retry should use base backoff');
+  assert.equal(retry.capped, false, 'first stuck retry should not be capped');
+}
+
+// planSubscribeRetry — cap is respected at the final allowed retry
+{
+  const retry = planSubscribeRetry({ currentAttempts: 6, cap: 7, hasFirstFrame: false, baseBackoffMs: 250, maxBackoffMs: 4000 });
+  assert.equal(retry.shouldRetry, true, 'attempt 7 is the last allowed retry');
+  assert.equal(retry.nextAttempts, 7, 'attempt count should advance to the cap');
+  assert.equal(retry.backoffMs, 4000, 'backoff should be capped at maxBackoffMs');
+}
+
+// planSubscribeRetry — healthy first-frame path does not retry
+{
+  const retry = planSubscribeRetry({ currentAttempts: 3, cap: 7, hasFirstFrame: true, baseBackoffMs: 250, maxBackoffMs: 4000 });
+  assert.equal(retry.shouldRetry, false, 'healthy first frame must not schedule retry');
+  assert.equal(retry.nextAttempts, 3, 'healthy path must not increment retry attempts');
+  assert.equal(retry.backoffMs, null, 'healthy path has no backoff');
+  assert.equal(retry.reason, 'healthy', 'healthy path should be identified explicitly');
+}
+
+// planSubscribeRetry — capped subscribe does not retry or create a storm
+{
+  const retry = planSubscribeRetry({ currentAttempts: 7, cap: 7, hasFirstFrame: false, baseBackoffMs: 250, maxBackoffMs: 4000 });
+  assert.equal(retry.shouldRetry, false, 'capped subscribe must stop retrying');
+  assert.equal(retry.nextAttempts, 8, 'capped attempt should still be recorded for logging');
+  assert.equal(retry.backoffMs, null, 'capped subscribe must not schedule a backoff');
+  assert.equal(retry.capped, true, 'capped subscribe should report capped');
 }
 
 // selectNewRemoteTracks — partial subscribe covers added audio/video/screen and skips existing names
