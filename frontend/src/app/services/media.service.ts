@@ -5,6 +5,7 @@ import {
   acquireAudio,
   acquireVideo,
   createMediaAcquisitionQueue,
+  type MediaAcquireStage,
 } from './media-acquisition';
 import { normalizeMediaError, type MediaError } from './media-errors';
 import { resolveMediaToggleAction } from './media-toggle';
@@ -44,10 +45,15 @@ type PreflightOptions = {
   facingMode?: 'user' | 'environment';
 };
 
+export function micOnFromTrack(track: Pick<MediaStreamTrack, 'enabled' | 'readyState'> | null | undefined): boolean {
+  return !!track && track.readyState === 'live' && track.enabled;
+}
+
 @Injectable({ providedIn: 'root' })
 export class MediaService {
   private readonly viewport = inject(ViewportService);
   private readonly acquisitionQueue = createMediaAcquisitionQueue((constraints) => navigator.mediaDevices.getUserMedia(constraints));
+  private readonly audioAcquireStages = new WeakMap<MediaStreamTrack, Exclude<MediaAcquireStage, 'none'>>();
 
   readonly localStream = signal<MediaStream | null>(null);
   readonly screenStream = signal<MediaStream | null>(null);
@@ -100,6 +106,7 @@ export class MediaService {
       ...(audio ? [audio.track] : []),
       ...(video ? [video.track] : []),
     ]);
+    if (audio) this.audioAcquireStages.set(audio.track, audio.stage);
     if (constraints.audio && stream.getAudioTracks().length === 0) throw normalizeMediaError(new Error('No microphone track acquired'));
     return this.commitAcquiredLocalStream(stream, {
       audio: audio?.constraints ?? false,
@@ -133,6 +140,7 @@ export class MediaService {
           return null;
         })
       : null;
+    this.audioAcquireStages.set(audio.track, audio.stage);
     return this.commitAcquiredLocalStream(new MediaStream([
       audio.track,
       ...(video ? [video.track] : []),
@@ -144,8 +152,7 @@ export class MediaService {
 
   async replaceAudioTrack(deviceId: string | undefined, onAudioTrackChanged: (track: MediaStreamTrack) => Promise<void>): Promise<MediaStreamTrack | null> {
     const stream = this.localStream();
-    if (!stream) return null;
-    const oldTrack = stream.getAudioTracks()[0] ?? null;
+    const oldTrack = stream?.getAudioTracks()[0] ?? null;
     const acquired = await acquireAudio(this.acquisitionQueue, {
       deviceId,
       baseConstraints: this.audioConstraints(true) as MediaTrackConstraints,
@@ -154,20 +161,26 @@ export class MediaService {
     });
     registerDebugTracks(acquired.stream);
     const nextTrack = acquired.track;
+    this.audioAcquireStages.set(nextTrack, acquired.stage);
     this.verifyAudioProcessing(nextTrack);
-    stream.addTrack(nextTrack);
+    if (!stream) {
+      this.localStream.set(acquired.stream);
+    } else {
+      stream.addTrack(nextTrack);
+    }
     try {
       await onAudioTrackChanged(nextTrack);
     } catch (err) {
-      stream.removeTrack(nextTrack);
+      if (!stream) this.localStream.set(null);
+      else stream.removeTrack(nextTrack);
       stopStreamTracks(acquired.stream);
       throw err;
     }
-    if (oldTrack) {
+    if (oldTrack && stream) {
       stream.removeTrack(oldTrack);
       oldTrack.stop();
     }
-    this.micOn.set(nextTrack.enabled);
+    this.micOn.set(micOnFromTrack(nextTrack));
     this.startMicLevel(nextTrack);
     return nextTrack;
   }
@@ -330,6 +343,7 @@ export class MediaService {
     });
     registerDebugTracks(acquired.stream);
     const nextTrack = acquired.track;
+    this.audioAcquireStages.set(nextTrack, acquired.stage);
     this.verifyAudioProcessing(nextTrack);
     if (!stream) {
       this.localStream.set(acquired.stream);
@@ -344,7 +358,7 @@ export class MediaService {
       stopStreamTracks(acquired.stream);
       throw err;
     }
-    this.micOn.set(nextTrack.enabled);
+    this.micOn.set(micOnFromTrack(nextTrack));
     this.startMicLevel(nextTrack);
     return true;
   }
@@ -358,6 +372,10 @@ export class MediaService {
     track.enabled = false;
     this.micOn.set(false);
     return false;
+  }
+
+  audioAcquireStage(track: MediaStreamTrack | null | undefined): Exclude<MediaAcquireStage, 'none'> | undefined {
+    return track ? this.audioAcquireStages.get(track) : undefined;
   }
 
   async toggleCamera(

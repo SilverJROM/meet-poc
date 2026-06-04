@@ -31,7 +31,7 @@ import {
 } from '../../services/mic-energy';
 import { computeEffectiveDiagnosticsEnabled, readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
 import { isGenericAudioDeviceId, resolveSelectedAudioId } from '../../services/device-selection';
-import { resolvedAcquiredDeviceId } from '../../services/media-acquisition';
+import { resolvedAcquiredDeviceId, type MediaAcquireStage } from '../../services/media-acquisition';
 import { localAudioRecoveryTerminalMessage } from '../../services/local-media-recovery';
 import { permissionBlockHint } from '../../services/media-toggle';
 import { IceConfigService, type TurnHealthResult } from '../../services/ice-config.service';
@@ -53,7 +53,13 @@ import { ViewportService } from '../../services/viewport.service';
 import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.service';
 import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
 import { planInitialPublishRetry } from '../../services/sfu-roster-utils';
-import { shouldPromptGuestPassword, shouldSubmitChat } from './room-decisions';
+import {
+  shouldAcquireMicTrackForToggle,
+  shouldClearVideoPinAfterRefresh,
+  shouldPromptGuestPassword,
+  shouldSubmitChat,
+  storedDeviceAfterSelectionAttempt,
+} from './room-decisions';
 import { decideRoomLifecycleLeave } from './room-lifecycle';
 import { recordPeerResumed, syncRecorderPeerStreams } from './room-recording';
 
@@ -946,27 +952,66 @@ export class RoomPage implements OnDestroy {
   }
 
   async changeAudioDevice(deviceId: string): Promise<void> {
+    const previousSelectedId = this.selectedAudioId();
+    const previousStoredId = readStoredDevice(DEVICE_STORAGE.audioInput);
     this.selectedAudioId.set(deviceId);
-    storeDevice(DEVICE_STORAGE.audioInput, deviceId);
+    let acquired = false;
     if (this.state() === 'in-call') {
-      await this.replaceInCallAudio(deviceId);
+      acquired = await this.replaceInCallAudio(deviceId);
+      if (!acquired) {
+        this.selectedAudioId.set(previousSelectedId);
+        storeDevice(
+          DEVICE_STORAGE.audioInput,
+          storedDeviceAfterSelectionAttempt({ attemptSucceeded: false, previousStoredId, acquiredDeviceId: deviceId }),
+        );
+      }
       return;
     }
     // B5 — clear the prior device's self-test verdict so it can't bleed onto the
     // newly selected mic; reacquireLobbyStream re-arms the poller on a fresh window.
     this.lobbySelfTestFlag.set(false);
-    await this.reacquireLobbyStream();
+    acquired = await this.reacquireLobbyStream();
+    if (!acquired) {
+      this.selectedAudioId.set(previousSelectedId);
+      storeDevice(
+        DEVICE_STORAGE.audioInput,
+        storedDeviceAfterSelectionAttempt({ attemptSucceeded: false, previousStoredId, acquiredDeviceId: deviceId }),
+      );
+    }
   }
 
   async changeVideoDevice(deviceId: string): Promise<void> {
+    const previousSelectedId = this.selectedVideoId();
+    const previousStoredId = readStoredDevice(DEVICE_STORAGE.videoInput);
+    const previousPinned = this.videoDevicePinned();
     this.selectedVideoId.set(deviceId);
     this.videoDevicePinned.set(!!deviceId);
-    storeDevice(DEVICE_STORAGE.videoInput, deviceId);
+    let acquired = false;
     if (this.state() === 'in-call') {
-      await this.replaceInCallVideo(deviceId);
+      acquired = await this.replaceInCallVideo(deviceId);
+      if (!acquired) {
+        this.selectedVideoId.set(previousSelectedId);
+        this.videoDevicePinned.set(previousPinned);
+        storeDevice(
+          DEVICE_STORAGE.videoInput,
+          storedDeviceAfterSelectionAttempt({ attemptSucceeded: false, previousStoredId, acquiredDeviceId: deviceId }),
+        );
+      }
       return;
     }
-    await this.reacquireLobbyStream();
+    if (!this.cameraRequested()) {
+      storeDevice(DEVICE_STORAGE.videoInput, deviceId);
+      return;
+    }
+    acquired = await this.reacquireLobbyStream();
+    if (!acquired) {
+      this.selectedVideoId.set(previousSelectedId);
+      this.videoDevicePinned.set(previousPinned);
+      storeDevice(
+        DEVICE_STORAGE.videoInput,
+        storedDeviceAfterSelectionAttempt({ attemptSucceeded: false, previousStoredId, acquiredDeviceId: deviceId }),
+      );
+    }
   }
 
   async changeAudioOutputDevice(deviceId: string): Promise<void> {
@@ -1040,6 +1085,18 @@ export class RoomPage implements OnDestroy {
   async toggleMic(): Promise<void> {
     try {
       const requestedAudioDeviceId = this.selectedAudioId();
+      const currentTrack = this.media.localStream()?.getAudioTracks()[0] ?? null;
+      if (shouldAcquireMicTrackForToggle({
+        trackExists: !!currentTrack,
+        trackReadyState: currentTrack?.readyState,
+      })) {
+        const acquired = await this.replaceInCallAudio(requestedAudioDeviceId);
+        if (acquired) {
+          this.actionNotice.set(null);
+          this.broadcastMediaState(this.media.micOn(), this.media.cameraOn());
+        }
+        return;
+      }
       const mic = await this.media.toggleMic(
         async (track) => {
           await this.replaceSfuAudioTrackAndAnnounce(track);
@@ -2138,8 +2195,8 @@ export class RoomPage implements OnDestroy {
     }
   }
 
-  private async reacquireLobbyStream(): Promise<void> {
-    if (this.state() !== 'lobby') return;
+  private async reacquireLobbyStream(): Promise<boolean> {
+    if (this.state() !== 'lobby') return false;
     this.clearPreflightTimer();
     this.devicePermissionIntro.set(false);
     this.deviceDialogBusy.set(true);
@@ -2164,9 +2221,11 @@ export class RoomPage implements OnDestroy {
       this.syncSelectedAudioIdToTrack(stream.getAudioTracks()[0], requestedAudioDeviceId);
       if (this.cameraRequested() && requestedVideoDeviceId) this.syncSelectedVideoIdToTrack(stream.getVideoTracks()[0], requestedVideoDeviceId);
       await this.ensureSelectedAudioDevice('lobby-reacquire');
+      return true;
     } catch (err) {
       const recovered = await this.handleLobbyMediaError(err, this.cameraRequested());
       if (!recovered) this.deviceDialogError.set((err as MediaError).message || 'Device change failed');
+      return recovered;
     } finally {
       this.deviceDialogBusy.set(false);
     }
@@ -2273,7 +2332,11 @@ export class RoomPage implements OnDestroy {
     if (!this.selectedAudioId() || !devices.audioInputs.some((device) => device.deviceId === this.selectedAudioId())) {
       this.selectedAudioId.set(preferredDeviceId(DEVICE_STORAGE.audioInput, devices.audioInputs, this.selectedAudioId()));
     }
-    if (!this.selectedVideoId() || !devices.videoInputs.some((device) => device.deviceId === this.selectedVideoId())) {
+    if (!this.selectedVideoId() || shouldClearVideoPinAfterRefresh({
+      selectedDeviceId: this.selectedVideoId(),
+      availableDeviceIds: devices.videoInputs.map((device) => device.deviceId),
+    })) {
+      if (this.selectedVideoId()) this.videoDevicePinned.set(false);
       this.selectedVideoId.set(preferredDeviceId(DEVICE_STORAGE.videoInput, devices.videoInputs, this.selectedVideoId()));
     }
     if (!this.selectedAudioOutputId() || !devices.audioOutputs.some((device) => device.deviceId === this.selectedAudioOutputId())) {
@@ -2421,7 +2484,7 @@ export class RoomPage implements OnDestroy {
     this.uninstallMobileVisibilityPause();
   }
 
-  private async replaceInCallAudio(deviceId: string): Promise<void> {
+  private async replaceInCallAudio(deviceId: string): Promise<boolean> {
     this.deviceDialogBusy.set(true);
     this.deviceDialogError.set(null);
     try {
@@ -2432,9 +2495,11 @@ export class RoomPage implements OnDestroy {
         this.syncSelectedAudioIdToTrack(track, deviceId);
         this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([track]));
         this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([track])));
-        this.broadcastMediaState(track.enabled, this.media.cameraOn());
+        this.broadcastMediaState(this.media.micOn(), this.media.cameraOn());
         this.queueDiagnosticsLog('state-change');
+        return true;
       }
+      return false;
     } catch (err) {
       if (deviceId) {
         try {
@@ -2445,23 +2510,24 @@ export class RoomPage implements OnDestroy {
             this.syncSelectedAudioIdToTrack(fallbackTrack);
             this.attachLocalTrackFailureHandlers(this.media.localStream() ?? new MediaStream([fallbackTrack]));
             this.micLevel.set(this.media.getMicLevel(this.media.localStream() ?? new MediaStream([fallbackTrack])));
-            this.broadcastMediaState(fallbackTrack.enabled, this.media.cameraOn());
+            this.broadcastMediaState(this.media.micOn(), this.media.cameraOn());
             this.queueDiagnosticsLog('state-change', 'selected microphone unavailable; using default audio');
             this.deviceDialogError.set('Selected microphone is unavailable. Using the system default microphone.');
-            return;
+            return true;
           }
         } catch (fallbackErr) {
           this.deviceDialogError.set(`Microphone switch failed: ${fallbackErr instanceof Error ? fallbackErr.message : 'unknown error'}`);
-          return;
+          return false;
         }
       }
       this.deviceDialogError.set(`Microphone switch failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+      return false;
     } finally {
       this.deviceDialogBusy.set(false);
     }
   }
 
-  private async replaceInCallVideo(deviceId: string): Promise<void> {
+  private async replaceInCallVideo(deviceId: string): Promise<boolean> {
     this.deviceDialogBusy.set(true);
     this.deviceDialogError.set(null);
     try {
@@ -2474,23 +2540,35 @@ export class RoomPage implements OnDestroy {
         if (deviceId) this.syncSelectedVideoIdToTrack(track, deviceId);
         this.broadcastMediaState(this.media.micOn(), true);
         this.queueDiagnosticsLog('state-change');
+        return true;
       }
+      return false;
     } catch (err) {
       this.deviceDialogError.set(`Camera switch failed: ${err instanceof Error ? err.message : 'unknown error'}`);
+      return false;
     } finally {
       this.deviceDialogBusy.set(false);
     }
   }
 
-  private syncSelectedAudioIdToTrack(track: MediaStreamTrack | null | undefined, requestedDeviceId = this.selectedAudioId()): void {
+  private syncSelectedAudioIdToTrack(
+    track: MediaStreamTrack | null | undefined,
+    requestedDeviceId = this.selectedAudioId(),
+    acquiredStage = this.media.audioAcquireStage(track),
+  ): void {
     const trackReportedId = audioTrackDeviceId(track);
+    const stage: Exclude<MediaAcquireStage, 'none'> = acquiredStage ?? (requestedDeviceId && trackReportedId === requestedDeviceId ? 'exact' : 'default');
     const resolvedId = resolvedAcquiredDeviceId({
       requestedDeviceId,
       acquiredDeviceId: trackReportedId,
-      stage: requestedDeviceId && trackReportedId === requestedDeviceId ? 'exact' : 'default',
+      stage,
     });
+    const fallbackChosenId =
+      requestedDeviceId && stage !== 'exact' && trackReportedId !== requestedDeviceId
+        ? (!isGenericAudioDeviceId(trackReportedId) ? trackReportedId : '')
+        : resolvedId || this.selectedAudioId();
     const next = resolveSelectedAudioId({
-      chosenId: resolvedId || this.selectedAudioId(),
+      chosenId: fallbackChosenId,
       trackReportedId,
       enumeratedIds: this.audioInputs().map((d) => d.deviceId),
       storedId: readStoredDevice(DEVICE_STORAGE.audioInput),

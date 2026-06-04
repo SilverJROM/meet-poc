@@ -167,6 +167,30 @@ import {
   );
 }
 
+// U-9 / A12 — a wrong in-call mic id follows the shared acquireAudio ladder.
+{
+  const calls: MediaStreamConstraints[] = [];
+  const getUserMedia: GetUserMediaFn = async (constraints) => {
+    calls.push(constraints);
+    const audio = constraints.audio as MediaTrackConstraints;
+    if (JSON.stringify(audio.deviceId) === JSON.stringify({ exact: 'dead-mic' })) {
+      throw Object.assign(new Error('wrong mic'), { name: 'OverconstrainedError' });
+    }
+    return fakeStream('audio');
+  };
+  const queue = createMediaAcquisitionQueue(getUserMedia);
+
+  const acquired = await acquireAudio(queue, { deviceId: 'dead-mic', baseConstraints: { echoCancellation: { ideal: true } } });
+
+  assert.strictEqual(acquired.stage, 'ideal', 'A12: exact failure retries through ideal before succeeding');
+  assert.deepStrictEqual(
+    calls.map((constraints) => (constraints.audio as MediaTrackConstraints).deviceId),
+    [{ exact: 'dead-mic' }, { ideal: 'dead-mic' }],
+    'A12: wrong id uses exact→ideal through the shared acquireAudio ladder',
+  );
+  assert.strictEqual(acquired.track.readyState, 'live', 'A12: fallback acquisition returns a live mic track');
+}
+
 function fakeStream(kind: MediaAcquireKind): MediaStream {
   const track = {
     readyState: 'live',

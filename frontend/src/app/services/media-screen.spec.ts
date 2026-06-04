@@ -3,7 +3,7 @@ import { createEnvironmentInjector, runInInjectionContext } from '@angular/core'
 import { MediaService } from './media.service.js';
 import { ViewportService } from './viewport.service.js';
 
-type FakeTrack = MediaStreamTrack & { stopCount: number; emitEnded: () => void };
+type FakeTrack = MediaStreamTrack & { stopCount: number; emitEnded: () => void; endedListeners: EventListener[] };
 
 function createMediaService(): MediaService {
   const injector = createEnvironmentInjector([
@@ -38,15 +38,23 @@ function fakeScreenStream(): { stream: MediaStream; track: FakeTrack } {
   const track = {
     readyState: 'live',
     stopCount: 0,
+    endedListeners: [],
     contentHint: '',
     onended: null,
     stop(): void {
       this.readyState = 'ended';
       this.stopCount += 1;
     },
+    addEventListener(type: string, listener: EventListener): void {
+      if (type === 'ended') this.endedListeners.push(listener);
+    },
+    removeEventListener(type: string, listener: EventListener): void {
+      if (type === 'ended') this.endedListeners = this.endedListeners.filter((candidate) => candidate !== listener);
+    },
     emitEnded(): void {
       this.readyState = 'ended';
       this.onended?.(new Event('ended'));
+      for (const listener of this.endedListeners) listener(new Event('ended'));
     },
   } as FakeTrack;
   const stream = {
@@ -132,6 +140,24 @@ async function flush(): Promise<void> {
   assert.equal(media.screenOn(), true, 'failed close keeps screen state on');
   assert.equal(media.screenStream(), screen.stream, 'failed close keeps screen stream');
   assert.equal(screen.track.readyState, 'live', 'failed close keeps screen track live');
+}
+
+// LEAK5 — debug registry drops ended tracks and never keeps old ended tracks when registering a new stream.
+{
+  const first = fakeScreenStream();
+  const second = fakeScreenStream();
+  installDisplayMedia([first.stream, second.stream]);
+  const media = createMediaService();
+
+  await media.toggleScreen(async () => {});
+  assert.deepEqual(window.__activeTracks, [first.track], 'first screen track is registered for debug inspection');
+
+  first.track.emitEnded();
+  await flush();
+  assert.deepEqual(window.__activeTracks, [], 'ended screen track is pruned from the debug registry');
+
+  await media.toggleScreen(async () => {});
+  assert.deepEqual(window.__activeTracks, [second.track], 'registering a new stream does not retain the prior ended track');
 }
 
 console.log('media-screen: all assertions passed');
