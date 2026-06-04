@@ -44,6 +44,28 @@ type MetadataUploadResponse = {
 
 const MIN_SEGMENT_MS = 250;
 
+export type ResolvedRecordingMime = {
+  mimeType: string;
+  extension: string;
+};
+
+export function resolveRecordingMime(actualMime: string | null | undefined, fallbackMime = 'audio/webm', fallbackExtension = 'webm'): ResolvedRecordingMime {
+  const fallback = (fallbackMime || 'audio/webm').trim() || 'audio/webm';
+  const mimeType = (actualMime || fallback).trim() || fallback;
+  const extension = extensionForMime(mimeType) || extensionForMime(fallback) || fallbackExtension || 'webm';
+  return { mimeType, extension };
+}
+
+function extensionForMime(mimeType: string | null | undefined): string | null {
+  const normalized = (mimeType || '').toLowerCase();
+  const base = normalized.split(';', 1)[0].trim();
+  if (base.includes('webm')) return 'webm';
+  if (base.includes('ogg')) return 'ogg';
+  if (base.includes('mp4') || normalized.includes('mp4a')) return 'mp4';
+  if (base.includes('aac')) return 'aac';
+  return null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class RecorderService {
   private readonly platform = inject(PlatformService);
@@ -73,6 +95,9 @@ export class RecorderService {
   private participants = new Map<string, ParticipantMetadata>();
   private segments: SpeakerSegment[] = [];
   private openSegment: SpeakerSegment | null = null;
+  private stopInFlight = false;
+  private finalized = false;
+  private pendingStopResolve: ((blob: Blob) => void) | null = null;
 
   constructor() {
     effect(() => {
@@ -96,6 +121,9 @@ export class RecorderService {
     this.sourceFor = new Map();
     this.sourceCount.set(0);
     this.chunks = [];
+    this.stopInFlight = false;
+    this.finalized = false;
+    this.pendingStopResolve = null;
     this.lastUpload.set(null);
     this.lastMetadataUpload.set(null);
     this.metadataWarning.set(null);
@@ -116,9 +144,8 @@ export class RecorderService {
     const selected = this.pickMime();
     this.mimeType = selected.mimeType || 'audio/webm';
     this.extension = selected.extension;
-    this.lastRecordingMime.set(selected.mimeType || null);
-    this.lastRecordingExtension.set(selected.extension);
     this.recorder = new MediaRecorder(dest.stream, selected.mimeType ? { mimeType: selected.mimeType } : undefined);
+    this.updateRecordingMime(this.recorder.mimeType);
     this.recorder.ondataavailable = (event) => {
       if (event.data.size > 0) this.chunks.push(event.data);
     };
@@ -155,29 +182,41 @@ export class RecorderService {
 
   async stop(): Promise<Blob> {
     const recorder = this.recorder;
-    if (!recorder || recorder.state === 'inactive') return new Blob([], { type: this.mimeType });
+    if (!recorder || recorder.state === 'inactive') return new Blob([], { type: this.updateRecordingMime(recorder?.mimeType).mimeType });
     this.closeOpenSegment(Date.now());
     this.recordingDurationMs = this.relativeMs(Date.now());
+    this.stopInFlight = true;
     const stopped = new Promise<Blob>((resolve) => {
+      this.pendingStopResolve = resolve;
       recorder.onstop = () => {
-        const blob = new Blob(this.chunks, { type: this.mimeType });
-        this.cleanupAudioGraph();
-        this.isRecording.set(false);
-        resolve(blob);
+        if (this.finalized) return;
+        const blob = this.createRecordingBlob(recorder);
+        this.finalizeRecording(blob);
       };
     });
-    recorder.stop();
+    try {
+      recorder.stop();
+    } catch (err) {
+      this.stopInFlight = false;
+      this.pendingStopResolve = null;
+      throw err;
+    }
     return stopped;
   }
 
   async upload(blob: Blob, roomId: string): Promise<RecordingResponse> {
+    const output = resolveRecordingMime(blob.type, this.mimeType, this.extension);
+    this.mimeType = output.mimeType;
+    this.extension = output.extension;
+    this.lastRecordingMime.set(output.mimeType);
+    this.lastRecordingExtension.set(output.extension);
     this.isUploading.set(true);
     try {
       const res = await fetch('/upload', {
         method: 'POST',
         headers: {
-          'Content-Type': blob.type || 'audio/webm',
-          'X-Ext': this.extension,
+          'Content-Type': output.mimeType,
+          'X-Ext': output.extension,
           'X-Room': roomId,
         },
         body: blob,
@@ -193,13 +232,18 @@ export class RecorderService {
   }
 
   discard(): void {
-    if (this.recorder?.state === 'recording') {
-      this.recorder.stop();
+    const recorder = this.recorder;
+    const blob = new Blob([], { type: this.updateRecordingMime(recorder?.mimeType).mimeType });
+    if (recorder?.state === 'recording' && !this.stopInFlight) {
+      recorder.onstop = () => undefined;
+      try {
+        recorder.stop();
+      } catch {
+        // Discard still tears down local state if the browser already stopped the recorder.
+      }
     }
-    this.cleanupAudioGraph();
-    this.isRecording.set(false);
+    this.finalizeRecording(blob, { resetMetadata: true });
     this.isUploading.set(false);
-    this.resetMetadata();
   }
 
   notifyParticipantJoined(participant: ParticipantSnapshot): void {
@@ -228,7 +272,10 @@ export class RecorderService {
   private addStream(clientId: string, stream: MediaStream): void {
     if (!this.ctx || !this.dest) return;
     if (this.sourceFor.has(clientId)) this.removePeerStream(clientId);
-    if (stream.getAudioTracks().length === 0) return;
+    if (stream.getAudioTracks().length === 0) {
+      console.warn('recording stream skipped: no audio tracks', { clientId });
+      return;
+    }
     try {
       const source = this.ctx.createMediaStreamSource(stream);
       source.connect(this.dest);
@@ -237,6 +284,32 @@ export class RecorderService {
     } catch (err) {
       console.warn('recording mix source failed', err);
     }
+  }
+
+  private createRecordingBlob(recorder: MediaRecorder | null): Blob {
+    return new Blob(this.chunks, { type: this.updateRecordingMime(recorder?.mimeType).mimeType });
+  }
+
+  private updateRecordingMime(actualMime: string | null | undefined): ResolvedRecordingMime {
+    const output = resolveRecordingMime(actualMime, this.mimeType, this.extension);
+    this.mimeType = output.mimeType;
+    this.extension = output.extension;
+    this.lastRecordingMime.set(output.mimeType);
+    this.lastRecordingExtension.set(output.extension);
+    return output;
+  }
+
+  private finalizeRecording(blob: Blob, options: { resetMetadata?: boolean } = {}): void {
+    if (!this.finalized) {
+      this.finalized = true;
+      this.cleanupAudioGraph();
+      this.isRecording.set(false);
+      if (options.resetMetadata) this.resetMetadata();
+    }
+    this.stopInFlight = false;
+    const resolve = this.pendingStopResolve;
+    this.pendingStopResolve = null;
+    resolve?.(blob);
   }
 
   private cleanupAudioGraph(): void {

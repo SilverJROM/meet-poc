@@ -1339,10 +1339,19 @@ export class RoomPage implements OnDestroy {
         this.status.set('Recording (audio mix: you + admitted peers).');
         return;
       }
-      const blob = await this.recorder.stop();
+      const blob = await withTimeout(this.recorder.stop(), 8000, null);
       this.ws.send({ type: 'recording-state', state: 'stopped' });
+      if (!blob) {
+        this.recorder.discard();
+        this.status.set('Recording stopped, but the browser did not finish the file.');
+        return;
+      }
       this.status.set(`Uploading recording (${Math.round(blob.size / 1024)} KB)...`);
-      const upload = await this.recorder.upload(blob, this.roomId);
+      const upload = await withTimeout(this.recorder.upload(blob, this.roomId), 8000, null);
+      if (!upload) {
+        this.status.set('Recording stopped, but upload timed out.');
+        return;
+      }
       this.status.set(`Recording saved: ${upload.file}`);
     } catch (err) {
       this.status.set(`Recording failed: ${err instanceof Error ? err.message : 'unknown error'}`);
