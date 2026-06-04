@@ -338,6 +338,11 @@ export type DiagnosticsPayload = {
   clientKey: string;
   clientName: string;
   createdAt: number;
+  platform?: 'ios' | 'android' | 'mobile' | 'desktop';
+  userAgent?: string;
+  selectedAudioDeviceId?: string;
+  selectedVideoDeviceId?: string;
+  lastGumError?: { name: string; message: string } | null;
   wsStatus: string;
   wsReconnectAttempts: number;
   wsHealth: DiagnosticsWsHealth;

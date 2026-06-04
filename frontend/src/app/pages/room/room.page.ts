@@ -58,6 +58,7 @@ import {
   shouldAcquireMicTrackForToggle,
   shouldClearVideoPinAfterRefresh,
   shouldPromptGuestPassword,
+  shouldRearmLobbySelfTest,
   shouldSubmitChat,
   storedDeviceAfterSelectionAttempt,
 } from './room-decisions';
@@ -491,6 +492,7 @@ export class RoomPage implements OnDestroy {
   private videoRecoveryInFlight = false;
   private remoteAudioInteractionRecoveryInstalled = false;
   private lastSfuVideoTrack: MediaStreamTrack | null = null;
+  private readonly lastGumError = signal<DiagnosticsPayload['lastGumError']>(null);
   private initialPublishRunId = 0;
   private joinAnywayWithStunFallback = false;
   private readonly forceRelayDiagnostic = signal<TurnHealthResult | null>(null);
@@ -1145,6 +1147,7 @@ export class RoomPage implements OnDestroy {
   }
 
   private handleInCallMediaPermission(err: unknown, kind: 'audio' | 'video'): void {
+    this.recordLastGumError(err);
     const hint = permissionBlockHint(kind, err);
     if (hint) {
       this.actionNotice.set(hint);
@@ -2321,6 +2324,7 @@ export class RoomPage implements OnDestroy {
 
   private async handleLobbyMediaError(err: unknown, videoRequested: boolean): Promise<boolean> {
     const mediaError = err as MediaError;
+    this.recordLastGumError(mediaError);
     if (videoRequested) {
       try {
         const stream = await this.media.preflight({ audio: true, video: false, audioDeviceId: this.selectedAudioId() || undefined });
@@ -2334,6 +2338,7 @@ export class RoomPage implements OnDestroy {
         await this.refreshDevices();
         return true;
       } catch (fallbackErr) {
+        this.recordLastGumError(fallbackErr);
         this.permissionError.set(toLobbyError(fallbackErr as MediaError));
         this.error.set((fallbackErr as MediaError).message || 'Media access failed');
         return false;
@@ -2449,6 +2454,7 @@ export class RoomPage implements OnDestroy {
     this.recorder.discard();
     this.backgroundEffects.dispose();
     this.lastSfuVideoTrack = null;
+    this.lastGumError.set(null);
     this.initialPublishRunId += 1;
     this.initialPublishRetrying.set(false);
     this.initialPublishFailureNotice.set(null);
@@ -2522,6 +2528,7 @@ export class RoomPage implements OnDestroy {
       }
       return false;
     } catch (err) {
+      this.recordLastGumError(err);
       if (deviceId) {
         try {
           const fallbackTrack = await this.media.replaceAudioTrack(undefined, async (nextTrack) => {
@@ -2537,6 +2544,7 @@ export class RoomPage implements OnDestroy {
             return true;
           }
         } catch (fallbackErr) {
+          this.recordLastGumError(fallbackErr);
           this.deviceDialogError.set(`Microphone switch failed: ${fallbackErr instanceof Error ? fallbackErr.message : 'unknown error'}`);
           return false;
         }
@@ -2565,6 +2573,7 @@ export class RoomPage implements OnDestroy {
       }
       return false;
     } catch (err) {
+      this.recordLastGumError(err);
       this.deviceDialogError.set(`Camera switch failed: ${err instanceof Error ? err.message : 'unknown error'}`);
       return false;
     } finally {
@@ -2657,10 +2666,20 @@ export class RoomPage implements OnDestroy {
     });
     const remoteAudioUnlock = this.remoteAudio.unlockAndPlayRemoteSinks(this.selectedAudioOutputId() || undefined);
     await micPreviewUnlock;
+    this.rearmLobbySelfTestAfterAudioUnlock();
     const allPlayable = await remoteAudioUnlock;
     if (this.state() === 'in-call') this.remoteAudioBlocked.set(!allPlayable);
     else if (showPromptOnFailure && !allPlayable) this.remoteAudioBlocked.set(true);
     return allPlayable;
+  }
+
+  private rearmLobbySelfTestAfterAudioUnlock(): void {
+    if (!shouldRearmLobbySelfTest({
+      inLobby: this.state() === 'lobby',
+      audioActivated: this.media.audioContextActivated(),
+      alreadyRunning: !!this.lobbySelfTestTimer,
+    })) return;
+    this.startLobbySelfTest();
   }
 
   private async recoverRemoteAudio(reason: 'effect' | 'interaction' | 'visibility' | 'keepalive'): Promise<boolean> {
@@ -3484,6 +3503,11 @@ export class RoomPage implements OnDestroy {
       clientKey: readClientKey(),
       clientName: this.displayName().trim() || 'Anon',
       createdAt: Date.now(),
+      platform: this.diagnosticsPlatform(),
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+      selectedAudioDeviceId: this.selectedAudioId(),
+      selectedVideoDeviceId: this.selectedVideoId(),
+      lastGumError: this.lastGumError(),
       wsStatus: this.ws.status(),
       wsReconnectAttempts: this.ws.reconnectAttempts(),
       wsHealth: this.ws.diagnosticsSnapshot(),
@@ -3500,6 +3524,18 @@ export class RoomPage implements OnDestroy {
     if (sfuDiagnostics) payload.sfuDiagnostics = sfuDiagnostics;
     if (error) payload.error = error;
     return payload;
+  }
+
+  private diagnosticsPlatform(): DiagnosticsPayload['platform'] {
+    if (this.platform.isIOS()) return 'ios';
+    if (this.platform.isAndroid()) return 'android';
+    if (this.viewport.isMobile()) return 'mobile';
+    return 'desktop';
+  }
+
+  private recordLastGumError(err: unknown): void {
+    const gumError = diagnosticsGumError(err);
+    if (gumError) this.lastGumError.set(gumError);
   }
 
   private showRelayUnavailableWarning(): void {
@@ -3683,6 +3719,18 @@ function toLobbyError(error: MediaError): LobbyError {
   if (error.code === 'no-devices') return { kind: 'no-devices' };
   if (error.code === 'in-use') return { kind: 'in-use' };
   return { kind: 'unknown', message: error.message || 'Media access failed' };
+}
+
+function diagnosticsGumError(error: unknown): DiagnosticsPayload['lastGumError'] {
+  const value = error as { code?: unknown; name?: unknown; message?: unknown };
+  const name = typeof value?.code === 'string'
+    ? value.code
+    : typeof value?.name === 'string' && value.name
+      ? value.name
+      : 'MediaError';
+  const message = typeof value?.message === 'string' && value.message ? value.message : String(error || '');
+  if (!message) return null;
+  return { name, message };
 }
 
 function delay(ms: number): Promise<void> {

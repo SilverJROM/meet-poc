@@ -4,6 +4,7 @@ import {
   shouldAcquireMicTrackForToggle,
   shouldClearVideoPinAfterRefresh,
   shouldPromptGuestPassword,
+  shouldRearmLobbySelfTest,
   shouldSubmitChat,
   storedDeviceAfterSelectionAttempt,
 } from './room-decisions';
@@ -76,6 +77,27 @@ assert.strictEqual(
   shouldAcquireMicTrackForToggle({ trackExists: true, trackReadyState: 'live' }),
   false,
   'A12: live audio track keeps the existing media.toggleMic fast path',
+);
+
+assert.strictEqual(
+  shouldRearmLobbySelfTest({ inLobby: true, audioActivated: true, alreadyRunning: false }),
+  true,
+  'ERR6: lobby audio unlock re-arms the self-test when no poller is active',
+);
+assert.strictEqual(
+  shouldRearmLobbySelfTest({ inLobby: true, audioActivated: true, alreadyRunning: true }),
+  false,
+  'ERR6: active poller guard prevents duplicate lobby self-test intervals',
+);
+assert.strictEqual(
+  shouldRearmLobbySelfTest({ inLobby: true, audioActivated: false, alreadyRunning: false }),
+  false,
+  'ERR6: self-test stays parked until mic preview audio is actually activated',
+);
+assert.strictEqual(
+  shouldRearmLobbySelfTest({ inLobby: false, audioActivated: true, alreadyRunning: false }),
+  false,
+  'ERR6: non-lobby gestures do not start the lobby self-test',
 );
 
 assert.strictEqual(

@@ -41,6 +41,10 @@ export function shouldAcquireMicTrackForToggle(input: { trackExists: boolean; tr
   return !input.trackExists || input.trackReadyState !== 'live';
 }
 
+export function shouldRearmLobbySelfTest(input: { inLobby: boolean; audioActivated: boolean; alreadyRunning: boolean }): boolean {
+  return input.inLobby && input.audioActivated && !input.alreadyRunning;
+}
+
 export type LocalTrackFailureRecoveryAction = 'ignore' | 'debounce-mute' | 'recover-ended';
 
 export function decideLocalTrackFailureRecovery(input: {
