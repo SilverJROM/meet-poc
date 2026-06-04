@@ -71,9 +71,9 @@ async function joinOwner(url: string, cookie: string, roomId: string): Promise<J
   return { ws, clientId: String(admitted.clientId), participantId: String(admitted.participantId) };
 }
 
-async function joinAndAdmitGuest(owner: WebSocket, url: string, roomId: string, name: string): Promise<JoinedPeer> {
+async function joinAndAdmitGuest(owner: WebSocket, url: string, roomId: string, name: string, clientKey?: string): Promise<JoinedPeer> {
   const ws = await connectWs(url);
-  ws.send(JSON.stringify({ type: 'join', room: roomId, name }));
+  ws.send(JSON.stringify({ type: 'join', room: roomId, name, ...(clientKey ? { clientKey } : {}) }));
   const knocking = await nextMessage(ws, (msg) => msg.type === 'knocking');
   await nextMessage(owner, (msg) => msg.type === 'knock' && msg.clientId === knocking.clientId);
   owner.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
@@ -194,6 +194,37 @@ describe('signaling host authority', () => {
     expect(guest2PeerLeft).toEqual(ownerPeerLeft);
 
     await closeAndWait(guest2.ws);
+    await closeAndWait(owner.ws);
+    await closeServer(server);
+  });
+
+  it('S2.8b requires knock and re-admit when a host-removed peer rejoins with the same clientKey', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Removed client key', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await joinOwner(url, ownerCookie, room.id);
+    const guest = await joinAndAdmitGuest(owner.ws, url, room.id, 'Guest One', 'removed-client-key');
+    const other = await joinAndAdmitGuest(owner.ws, url, room.id, 'Guest Two');
+
+    const ownerPeerLeftPromise = nextMessage(owner.ws, (msg) => msg.type === 'peer-left' && msg.clientId === guest.clientId);
+    owner.ws.send(JSON.stringify({ type: 'remove-peer', clientId: guest.clientId }));
+    await nextMessage(guest.ws, (msg) => msg.type === 'peer-removed');
+    await waitForClose(guest.ws);
+    await ownerPeerLeftPromise;
+
+    const returned = await connectWs(url);
+    returned.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest One', clientKey: 'removed-client-key' }));
+    const returnedKnocking = await nextMessage(returned, (msg) => msg.type === 'knocking');
+    const ownerKnock = await nextMessage(owner.ws, (msg) => msg.type === 'knock' && msg.clientId === returnedKnocking.clientId);
+
+    expect(returnedKnocking).toMatchObject({ type: 'knocking', roomTitle: 'Removed client key' });
+    expect(ownerKnock).toEqual({ type: 'knock', clientId: returnedKnocking.clientId, name: 'Guest One' });
+
+    await closeAndWait(returned);
+    await closeAndWait(other.ws);
     await closeAndWait(owner.ws);
     await closeServer(server);
   });

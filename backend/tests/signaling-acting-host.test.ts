@@ -1,11 +1,11 @@
 import { WebSocket } from 'ws';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
 import { createRoom, setRoomAccess } from '../src/modules/rooms/store.js';
 import { getHostClientId } from '../src/modules/signaling/index.js';
 import { createTestDb } from './helpers.js';
-import { closeServer, closeWs, connectWs, nextMessage, startWsServer } from './signaling-helpers.js';
+import { closeServer, closeWs, connectWs, dropWs, nextMessage, startWsServer } from './signaling-helpers.js';
 
 type JoinedPeer = {
   ws: WebSocket;
@@ -39,6 +39,10 @@ async function joinAndAdmitByHost(host: WebSocket, url: string, roomId: string, 
 }
 
 describe('signaling acting host handoff', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('admits the first open-room guest as acting host and lets them admit later guests', async () => {
     const db = createTestDb();
     seedUser(db);
@@ -121,6 +125,52 @@ describe('signaling acting host handoff', () => {
 
     closeWs(guestC);
     closeWs(nextHost.ws);
+    await closeServer(server);
+  });
+
+  it('promotes an admitted guest after the owner disconnects and reconnect grace expires', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Owner grace promotion', 'jrom@silverjrom.app', db);
+    setRoomAccess(room.id, { isOpen: true }, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+
+    const owner = await joinOwner(url, ownerCookie, room.id);
+    const guest = await joinAndAdmitByHost(owner.ws, url, room.id, 'Guest A');
+    expect(getHostClientId(room.id, db)).toBe(owner.clientId);
+
+    vi.useFakeTimers();
+    const ownerReconnectingPromise = nextMessage(guest.ws, (msg) => msg.type === 'peer-reconnecting' && msg.clientId === owner.clientId);
+    dropWs(owner.ws);
+    await ownerReconnectingPromise;
+    expect(getHostClientId(room.id, db)).toBeNull();
+
+    const pending = await connectWs(url);
+    pending.send(JSON.stringify({ type: 'join', room: room.id, name: 'Guest B' }));
+    const knocking = await nextMessage(pending, (msg) => msg.type === 'knocking');
+
+    const guestMessages: Record<string, unknown>[] = [];
+    const collectGuestMessage = (raw: WebSocket.RawData) => {
+      guestMessages.push(JSON.parse(String(raw)) as Record<string, unknown>);
+    };
+    guest.ws.on('message', collectGuestMessage);
+    await vi.advanceTimersByTimeAsync(120_001);
+    guest.ws.off('message', collectGuestMessage);
+    const ownerLeft = guestMessages.find((msg) => msg.type === 'peer-left' && msg.clientId === owner.clientId);
+    const promotion = guestMessages.find((msg) => msg.type === 'host-role' && msg.clientId === guest.clientId);
+
+    expect(ownerLeft).toEqual({ type: 'peer-left', clientId: owner.clientId, participantId: owner.participantId });
+    expect(promotion).toEqual({ type: 'host-role', clientId: guest.clientId, isHost: true });
+    expect(getHostClientId(room.id, db)).toBe(guest.clientId);
+
+    guest.ws.send(JSON.stringify({ type: 'admit', clientId: knocking.clientId }));
+    const admitted = await nextMessage(pending, (msg) => msg.type === 'admitted');
+    expect(admitted).toMatchObject({ type: 'admitted', clientId: knocking.clientId, hostClientId: guest.clientId });
+
+    vi.useRealTimers();
+    closeWs(pending);
+    closeWs(guest.ws);
     await closeServer(server);
   });
 });

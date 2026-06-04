@@ -55,7 +55,6 @@ type LiveRoom = {
   pendingShareRequest: ShareRequestEntry | null;
   shareGrants: Set<string>;
   actingHostClientId: string | null;
-  ownerHasJoined: boolean;
 };
 
 type ClientIdentity = {
@@ -166,7 +165,6 @@ function getOrCreateLiveRoom(roomId: string): LiveRoom {
       pendingShareRequest: null,
       shareGrants: new Set(),
       actingHostClientId: null,
-      ownerHasJoined: false,
     };
     liveRooms.set(roomId, live);
   }
@@ -196,8 +194,16 @@ function getAdmittedOwnerClientId(live: LiveRoom, roomId: string, database: Data
   return null;
 }
 
+function hasOwnerPresentOrReconnecting(live: LiveRoom, roomId: string, database: Database.Database): boolean {
+  if (getAdmittedOwnerClientId(live, roomId, database)) return true;
+  for (const [, peer] of live.reconnecting) {
+    if (isOwnerOf(roomId, peer.userEmail, database)) return true;
+  }
+  return false;
+}
+
 function getActingHostClientId(live: LiveRoom, roomId: string, database: Database.Database): string | null {
-  if (!live.actingHostClientId || live.ownerHasJoined) return null;
+  if (!live.actingHostClientId || hasOwnerPresentOrReconnecting(live, roomId, database)) return null;
   const peer = live.admitted.get(live.actingHostClientId);
   if (!peer || isOwnerOf(roomId, peer.userEmail, database)) return null;
   return live.actingHostClientId;
@@ -225,7 +231,7 @@ function setActingHostClientId(live: LiveRoom, nextClientId: string | null): voi
 }
 
 function promoteNextActingHost(roomId: string, live: LiveRoom, database: Database.Database): void {
-  if (live.ownerHasJoined || getAdmittedOwnerClientId(live, roomId, database)) {
+  if (hasOwnerPresentOrReconnecting(live, roomId, database)) {
     setActingHostClientId(live, null);
     return;
   }
@@ -535,11 +541,13 @@ function expireReconnectingPeer(roomId: string, clientId: string, database: Data
   if (!live) return;
   const reconnecting = live.reconnecting.get(clientId);
   if (!reconnecting) return;
+  const wasOwner = isOwnerOf(roomId, reconnecting.userEmail, database);
   cleanupReconnectState(live, clientId);
   for (const [, peer] of live.admitted) {
     send(peer.ws, { type: 'peer-left', clientId, participantId: reconnecting.participantId });
   }
   console.log(`[room ${roomId}] EXPIRED ${reconnecting.name} (${clientId})  admitted=${live.admitted.size}`);
+  if (wasOwner) promoteNextActingHost(roomId, live, database);
   maybeCloseEmptyRoom(roomId, live, reconnecting.isHost ? 'host-disconnect-empty' : 'last-peer-left', database);
 }
 
@@ -568,12 +576,13 @@ function startReconnectGrace(roomId: string, clientId: string, entry: PeerEntry,
   }
 }
 
-function removeAdmittedPeer(roomId: string, clientId: string, live: LiveRoom, database: Database.Database): void {
+function removeAdmittedPeer(roomId: string, clientId: string, live: LiveRoom, database: Database.Database, options: { revokeIdentity?: boolean } = {}): void {
   cleanupReconnectState(live, clientId);
   const entry = live.admitted.get(clientId);
   if (!entry) return;
   const isHost = isOwnerOf(roomId, entry.userEmail, database);
   const wasActingHost = live.actingHostClientId === clientId;
+  if (options.revokeIdentity) revokeClientIdentity(live, entry);
   live.admitted.delete(clientId);
   if (wasActingHost) live.actingHostClientId = null;
   live.sfuPresence.delete(clientId);
@@ -584,7 +593,7 @@ function removeAdmittedPeer(roomId: string, clientId: string, live: LiveRoom, da
     send(peer.ws, { type: 'peer-left', clientId, participantId: entry.participantId });
   }
   console.log(`[room ${roomId}] - ${entry.name} (${clientId})  admitted=${live.admitted.size}`);
-  if (wasActingHost) promoteNextActingHost(roomId, live, database);
+  if (wasActingHost || isHost) promoteNextActingHost(roomId, live, database);
   maybeCloseEmptyRoom(roomId, live, isHost ? 'host-disconnect-empty' : 'last-peer-left', database);
 }
 
@@ -688,7 +697,6 @@ function closeRoomForHost(roomId: string, live: LiveRoom, database: Database.Dat
   live.shareGrants.clear();
   live.pendingShareRequest = null;
   live.actingHostClientId = null;
-  live.ownerHasJoined = false;
   live.currentSessionId = null;
   liveRooms.delete(roomId);
 
@@ -966,7 +974,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
           !canResume &&
           !owner &&
           room.isOpen &&
-          !live.ownerHasJoined &&
+          !hasOwnerPresentOrReconnecting(live, roomId, database) &&
           !getEffectiveHostClientId(live, roomId, database) &&
           live.admitted.size === 0;
         if (owner || canResume || shouldActAsFirstOpenRoomHost) {
@@ -977,7 +985,6 @@ export function attachSignaling(server: http.Server, database: Database.Database
           rememberClientIdentity(live, clientKey, participantId, myName, true);
           live.admitted.set(clientId, entry);
           if (owner) {
-            live.ownerHasJoined = true;
             setActingHostClientId(live, null);
           } else if (shouldActAsFirstOpenRoomHost) {
             live.actingHostClientId = clientId;
@@ -1285,7 +1292,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const target = live.admitted.get(targetId);
         if (!target) return;
         send(target.ws, { type: 'peer-removed', reason: 'removed by host' });
-        removeAdmittedPeer(currentRoom, targetId, live, database);
+        removeAdmittedPeer(currentRoom, targetId, live, database, { revokeIdentity: true });
         try {
           target.ws.close();
         } catch {
@@ -1299,9 +1306,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const live = liveRooms.get(currentRoom);
         if (!live) return;
         if (state === 'admitted') {
-          const leaving = live.admitted.get(clientId);
-          if (leaving) revokeClientIdentity(live, leaving);
-          removeAdmittedPeer(currentRoom, clientId, live, database);
+          removeAdmittedPeer(currentRoom, clientId, live, database, { revokeIdentity: true });
         } else if (state === 'pending') {
           live.pending.delete(clientId);
           state = 'idle';
