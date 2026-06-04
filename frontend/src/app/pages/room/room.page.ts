@@ -48,6 +48,7 @@ import { RoomsService } from '../../services/rooms.service';
 import { ViewportService } from '../../services/viewport.service';
 import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.service';
 import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
+import { planInitialPublishRetry } from '../../services/sfu-roster-utils';
 
 const DIAGNOSTICS_LOG_INTERVAL_MS = 7_500;
 const DIAGNOSTICS_EVENT_THROTTLE_MS = 2_000;
@@ -69,6 +70,9 @@ const MIC_SILENCE_WATCHDOG_POLL_MS = 1_000;
 const MIC_SILENCE_WATCHDOG_WINDOW = 6;
 const REMOTE_AUDIO_KEEPALIVE_MS = 15_000;
 const REMOTE_VOICE_WATCHDOG_POLL_MS = 1_500;
+const INITIAL_PUBLISH_RETRY_CAP = 3;
+const INITIAL_PUBLISH_RETRY_BASE_BACKOFF_MS = 500;
+const INITIAL_PUBLISH_RETRY_MAX_BACKOFF_MS = 2000;
 // B5 — lobby self-test poller (R8): mirrors the in-call watchdog ~1s cadence on a
 // SEPARATE lobbySelfTestFlag, reading the SAME classifyMicCapture verdict off the
 // lobby capture window so a mic that publishes silence cannot show a false pass.
@@ -94,6 +98,13 @@ type RemoteVoiceWatchdogPeerState = {
   samples: VoiceRecoverySample[];
   attemptsThisWindow: number;
 };
+
+class InitialPublishPermanentError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'InitialPublishPermanentError';
+  }
+}
 
 // Identity fields tracked per remote peer via signaling messages.
 // Streams are merged in from sfuClient in the peers computed.
@@ -409,6 +420,8 @@ export class RoomPage implements OnDestroy {
   readonly recordingStartedAt = signal<number | null>(null);
   readonly currentSessionId = signal<string | null>(null);
   readonly actionNotice = signal<string | null>(null);
+  readonly initialPublishFailureNotice = signal<string | null>(null);
+  readonly initialPublishRetrying = signal(false);
   private readonly callStartMs = signal<number | null>(null);
   private readonly clockTick = signal(0);
   private clockInterval: ReturnType<typeof setInterval> | null = null;
@@ -449,6 +462,7 @@ export class RoomPage implements OnDestroy {
   private videoRecoveryInFlight = false;
   private remoteAudioInteractionRecoveryInstalled = false;
   private lastSfuVideoTrack: MediaStreamTrack | null = null;
+  private initialPublishRunId = 0;
   // B2a one-shot guard: the post-publish capture-energy gate runs at most once
   // per call. Reset in cleanupCall() so a fresh join re-arms it.
   private initialCaptureEnergyChecked = false;
@@ -1361,6 +1375,33 @@ export class RoomPage implements OnDestroy {
     await this.directLeave(false);
   }
 
+  async retryInitialPublish(): Promise<void> {
+    if (this.initialPublishRetrying()) return;
+    if (this.state() !== 'in-call' || this.sfuClient.localPublishState()?.status === 'published') {
+      this.initialPublishFailureNotice.set(null);
+      return;
+    }
+    const participantId = this.myParticipantId();
+    const sessionId = this.currentSessionId();
+    if (!participantId || !sessionId) {
+      this.initialPublishFailureNotice.set('Audio/video could not start because this call session is no longer available. Rejoin the call to recover.');
+      return;
+    }
+    await this.publishInitialSfuWithRetry(participantId, sessionId);
+  }
+
+  async rejoinAfterInitialPublishFailure(): Promise<void> {
+    if (this.state() !== 'in-call') return;
+    this.initialPublishRunId += 1;
+    this.initialPublishFailureNotice.set(null);
+    this.initialPublishRetrying.set(false);
+    this.cleanupCall(true);
+    this.state.set('lobby');
+    this.status.set('Rejoining...');
+    await this.startLobbyPreflight();
+    await this.join();
+  }
+
   private async directLeave(sendLeaveMessage: boolean): Promise<void> {
     this.cleanupCall(sendLeaveMessage);
     await this.router.navigate([this.auth.user() ? '/app/rooms' : '/']);
@@ -1372,6 +1413,112 @@ export class RoomPage implements OnDestroy {
     this.cleanupCall();
     this.sfuClient.destroy();
     delete window.__meetDebug;
+  }
+
+  private async publishInitialSfuWithRetry(participantId: string, sessionId: string): Promise<void> {
+    if (this.state() !== 'in-call' || this.sfuClient.localPublishState()?.status === 'published') return;
+
+    const runId = ++this.initialPublishRunId;
+    this.initialPublishRetrying.set(true);
+    this.initialPublishFailureNotice.set(null);
+    this.actionNotice.set(null);
+
+    try {
+      for (let attempt = 1; attempt <= INITIAL_PUBLISH_RETRY_CAP; attempt += 1) {
+        if (runId !== this.initialPublishRunId || this.state() !== 'in-call') return;
+        try {
+          await this.publishSfuOnceAfterAdmit(participantId, sessionId);
+          if (runId !== this.initialPublishRunId || this.state() !== 'in-call') return;
+          this.initialPublishFailureNotice.set(null);
+          return;
+        } catch (err) {
+          const retryableFailure = this.isRetryableInitialPublishFailure(err);
+          const retry = planInitialPublishRetry({
+            published: false,
+            failedAttempt: attempt,
+            cap: INITIAL_PUBLISH_RETRY_CAP,
+            retryableFailure,
+            baseBackoffMs: INITIAL_PUBLISH_RETRY_BASE_BACKOFF_MS,
+            maxBackoffMs: INITIAL_PUBLISH_RETRY_MAX_BACKOFF_MS,
+          });
+
+          this.resetFailedInitialPublishAttempt();
+          if (!retry.shouldRetry) {
+            console.error('[sfu-client] initial publish failed permanently', err);
+            this.status.set('Audio/video did not start.');
+            this.actionNotice.set(null);
+            this.initialPublishFailureNotice.set(this.initialPublishFailureMessage(retry.reason));
+            return;
+          }
+
+          console.warn('[sfu-client] initial publish failed; retrying', {
+            attempt,
+            nextAttempt: retry.nextAttempt,
+            backoffMs: retry.backoffMs,
+            err,
+          });
+          this.status.set(`Audio/video publish failed. Retrying (${retry.nextAttempt}/${INITIAL_PUBLISH_RETRY_CAP})...`);
+          await delay(retry.backoffMs ?? 0);
+        }
+      }
+    } finally {
+      if (runId === this.initialPublishRunId) this.initialPublishRetrying.set(false);
+    }
+  }
+
+  private async publishSfuOnceAfterAdmit(participantId: string, sessionId: string): Promise<void> {
+    const publishStream = await this.initialPublishStream();
+    await this.sfuClient.publish({ clientKey: readClientKey(), participantId, sessionId, localStream: publishStream });
+    this.lastSfuVideoTrack = publishStream.getVideoTracks()[0] ?? null;
+    const state = this.sfuClient.localPublishState();
+    if (state?.status !== 'published') throw new Error('[sfu] publish did not reach published state');
+    try {
+      this.announceSfuPublishState();
+    } catch (err) {
+      console.warn('[sfu-client] publish succeeded but announce failed', err);
+    }
+    // B2a: one-shot capture-energy gate — proves the published audio
+    // track actually carries energy; recovers once on a silent-but-live mic.
+    void this.verifyInitialCaptureEnergy();
+  }
+
+  private async initialPublishStream(): Promise<MediaStream> {
+    const deadline = Date.now() + 1500;
+    let stream = this.media.localStream();
+    while (!stream?.getAudioTracks().some((t) => t.readyState !== 'ended') && Date.now() < deadline) {
+      await delay(100);
+      stream = this.media.localStream();
+    }
+    if (!stream?.getAudioTracks().some((t) => t.readyState !== 'ended')) {
+      console.warn('[sfu] publish proceeding without live audio track — mic may be unavailable');
+    }
+    const publishStream = this.effectiveLocalStream() ?? stream;
+    if (!publishStream?.getTracks().some((t) => t.readyState !== 'ended')) {
+      throw new InitialPublishPermanentError('[sfu] cannot publish without any live local media track');
+    }
+    return publishStream;
+  }
+
+  private isRetryableInitialPublishFailure(err: unknown): boolean {
+    if (err instanceof InitialPublishPermanentError) return false;
+    const status = (err as { status?: unknown } | null)?.status;
+    if (typeof status === 'number') {
+      if (status === 0 || status === 408 || status === 409 || status === 425 || status === 429 || status >= 500) return true;
+      if (status >= 400) return false;
+    }
+    const message = err instanceof Error ? err.message : String(err ?? '');
+    if (/no live local media track|cannot publish without|permission denied|notallowed|not found|no track/i.test(message)) return false;
+    return true;
+  }
+
+  private initialPublishFailureMessage(reason: 'published' | 'retryable' | 'capped' | 'permanent'): string {
+    if (reason === 'permanent') return 'Audio/video could not start from the current device state. Retry after checking your device, or rejoin the call.';
+    return 'Audio/video could not start after several retries. Retry audio/video, or rejoin the call.';
+  }
+
+  private resetFailedInitialPublishAttempt(): void {
+    if (this.sfuClient.localPublishState()?.status === 'published') return;
+    this.sfuClient.resetFailedPublishAttempt();
   }
 
   private async handleMessage(msg: SignalingMessage): Promise<void> {
@@ -1467,34 +1614,14 @@ export class RoomPage implements OnDestroy {
       if (msg.participantId && msg.sessionId) {
         const participantId = msg.participantId;
         const sessionId = msg.sessionId;
-        void (async () => {
-          const deadline = Date.now() + 1500;
-          let stream = this.media.localStream();
-          while (!stream?.getAudioTracks().some((t) => t.readyState !== 'ended') && Date.now() < deadline) {
-            await new Promise<void>((r) => setTimeout(r, 100));
-            stream = this.media.localStream();
-          }
-          if (!stream?.getAudioTracks().some((t) => t.readyState !== 'ended')) {
-            console.warn('[sfu] publish proceeding without live audio track — mic may be unavailable');
-          }
-          const publishStream = this.effectiveLocalStream() ?? stream;
-          await this.sfuClient.publish({ clientKey: readClientKey(), participantId, sessionId, localStream: publishStream });
-          this.lastSfuVideoTrack = publishStream?.getVideoTracks()[0] ?? null;
-          const state = this.sfuClient.localPublishState();
-          if (state?.status === 'published') {
-            this.ws.send({
-              type: 'sfu-publish',
-              cfSessionId: state.cfSessionId,
-              tracks: state.tracks.filter((t) => t.status === 'live').map((t) => ({ trackName: t.trackName, kind: t.kind })),
-            });
-            // B2a: one-shot capture-energy gate — proves the published audio
-            // track actually carries energy; recovers once on a silent-but-live mic.
-            void this.verifyInitialCaptureEnergy();
-          }
-        })().catch((err: unknown) => {
-          console.error('[sfu-client] publish failed', err);
-          this.actionNotice.set('Unable to start your audio/video. Please refresh the page.');
-        });
+        if (wasInCall) {
+          void this.publishSfuOnceAfterAdmit(participantId, sessionId).catch((err: unknown) => {
+            console.error('[sfu-client] publish failed', err);
+            this.actionNotice.set('Unable to start your audio/video. Please refresh the page.');
+          });
+        } else {
+          void this.publishInitialSfuWithRetry(participantId, sessionId);
+        }
       }
       this.startDiagnosticsLogger();
       this.startMicSilenceWatchdog();
@@ -2129,6 +2256,9 @@ export class RoomPage implements OnDestroy {
     this.recorder.discard();
     this.backgroundEffects.dispose();
     this.lastSfuVideoTrack = null;
+    this.initialPublishRunId += 1;
+    this.initialPublishRetrying.set(false);
+    this.initialPublishFailureNotice.set(null);
     this.initialCaptureEnergyChecked = false;
     this.micSweepInProgress = false;
     this.micSweepDoneForEpisode = false;

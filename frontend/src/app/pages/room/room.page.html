@@ -203,6 +203,15 @@
           <button type="button" (click)="actionNotice.set(null)">Dismiss</button>
         </div>
       }
+      @if (initialPublishFailureNotice()) {
+        <div class="device-notice" role="status">
+          <span>{{ initialPublishFailureNotice() }}</span>
+          <button type="button" [disabled]="initialPublishRetrying()" (click)="retryInitialPublish()">
+            {{ initialPublishRetrying() ? 'Retrying...' : 'Retry audio/video' }}
+          </button>
+          <button type="button" [disabled]="initialPublishRetrying()" (click)="rejoinAfterInitialPublishFailure()">Rejoin</button>
+        </div>
+      }
       @if (remoteAudioBlocked()) {
         <div class="audio-unblock-notice" role="status">
           <span>Tap to enable audio</span>

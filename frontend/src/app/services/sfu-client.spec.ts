@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   applyPresenceUpdate,
   applyRosterSnapshot,
+  planInitialPublishRetry,
   planSubscribeRetry,
   removeFromRoster,
   selectNewRemoteTracks,
@@ -150,6 +151,47 @@ function makeTransceivers(entries: { mid: string; receiverKind: string }[]): RTC
   assert.equal(retry.nextAttempts, 8, 'capped attempt should still be recorded for logging');
   assert.equal(retry.backoffMs, null, 'capped subscribe must not schedule a backoff');
   assert.equal(retry.capped, true, 'capped subscribe should report capped');
+}
+
+// planInitialPublishRetry — success does not retry and is the only announce path
+{
+  const retry = planInitialPublishRetry({ published: true, failedAttempt: 0, cap: 3, retryableFailure: true, baseBackoffMs: 500, maxBackoffMs: 2000 });
+  assert.equal(retry.outcome, 'success');
+  assert.equal(retry.shouldRetry, false, 'successful publish must not retry');
+  assert.equal(retry.shouldAnnounce, true, 'successful publish is allowed to announce');
+  assert.equal(retry.backoffMs, null, 'successful publish has no backoff');
+}
+
+// planInitialPublishRetry — retryable failures retry until cap
+{
+  const first = planInitialPublishRetry({ published: false, failedAttempt: 1, cap: 3, retryableFailure: true, baseBackoffMs: 500, maxBackoffMs: 2000 });
+  const second = planInitialPublishRetry({ published: false, failedAttempt: 2, cap: 3, retryableFailure: true, baseBackoffMs: 500, maxBackoffMs: 2000 });
+  assert.equal(first.shouldRetry, true, 'first retryable failure should retry');
+  assert.equal(first.nextAttempt, 2, 'first retry advances to attempt 2');
+  assert.equal(first.backoffMs, 500, 'first retry uses base backoff');
+  assert.equal(first.shouldAnnounce, false, 'intermediate retry must not announce');
+  assert.equal(second.shouldRetry, true, 'second retryable failure should retry');
+  assert.equal(second.nextAttempt, 3, 'second retry advances to final attempt');
+  assert.equal(second.backoffMs, 1000, 'second retry doubles backoff');
+  assert.equal(second.shouldAnnounce, false, 'second intermediate retry must not announce');
+}
+
+// planInitialPublishRetry — capped failure moves to after-cap state
+{
+  const retry = planInitialPublishRetry({ published: false, failedAttempt: 3, cap: 3, retryableFailure: true, baseBackoffMs: 500, maxBackoffMs: 2000 });
+  assert.equal(retry.outcome, 'after-cap', 'cap should surface after-cap state');
+  assert.equal(retry.shouldRetry, false, 'capped publish must not retry');
+  assert.equal(retry.shouldAnnounce, false, 'capped publish must not announce');
+  assert.equal(retry.reason, 'capped', 'capped publish should report capped reason');
+}
+
+// planInitialPublishRetry — permanent failure goes straight to after-cap state
+{
+  const retry = planInitialPublishRetry({ published: false, failedAttempt: 1, cap: 3, retryableFailure: false, baseBackoffMs: 500, maxBackoffMs: 2000 });
+  assert.equal(retry.outcome, 'after-cap', 'permanent failure should surface action state immediately');
+  assert.equal(retry.shouldRetry, false, 'permanent failure must not burn retries');
+  assert.equal(retry.shouldAnnounce, false, 'permanent failure must not announce');
+  assert.equal(retry.reason, 'permanent', 'permanent failure should report permanent reason');
 }
 
 // selectNewRemoteTracks — partial subscribe covers added audio/video/screen and skips existing names

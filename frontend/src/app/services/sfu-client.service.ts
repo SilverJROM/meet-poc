@@ -542,6 +542,21 @@ export class SfuClientService {
     return this.videoSender?.getParameters().encodings ?? [];
   }
 
+  resetFailedPublishAttempt(): void {
+    if (this.localPublishState()?.status === 'published') return;
+    if (this.pc) {
+      this.pc.close();
+      this.pc = null;
+    }
+    this.audioSender = null;
+    this.videoSender = null;
+    this.screenSender = null;
+    this.callerCreds = null;
+    this.localPublishState.set(null);
+    this.setPublishPhase(null);
+    this.opQueue = Promise.resolve();
+  }
+
   updateCameraLayer(): Promise<void> {
     return this.enqueue(() => this.doUpdateCameraLayer());
   }

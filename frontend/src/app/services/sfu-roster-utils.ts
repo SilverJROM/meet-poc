@@ -24,6 +24,15 @@ export interface SubscribeRetryPlan {
   reason: 'healthy' | 'retry' | 'capped';
 }
 
+export interface InitialPublishRetryPlan {
+  outcome: 'success' | 'retry' | 'after-cap';
+  shouldRetry: boolean;
+  shouldAnnounce: boolean;
+  nextAttempt: number | null;
+  backoffMs: number | null;
+  reason: 'published' | 'retryable' | 'capped' | 'permanent';
+}
+
 export function planSubscribeRetry(params: {
   currentAttempts: number;
   cap: number;
@@ -45,6 +54,32 @@ export function planSubscribeRetry(params: {
   const maxBackoffMs = params.maxBackoffMs ?? 4000;
   const backoffMs = Math.min(baseBackoffMs * Math.pow(2, nextAttempts - 1), maxBackoffMs);
   return { shouldRetry: true, nextAttempts, backoffMs, capped: false, reason: 'retry' };
+}
+
+export function planInitialPublishRetry(params: {
+  published: boolean;
+  failedAttempt: number;
+  cap: number;
+  retryableFailure: boolean;
+  baseBackoffMs?: number;
+  maxBackoffMs?: number;
+}): InitialPublishRetryPlan {
+  if (params.published) {
+    return { outcome: 'success', shouldRetry: false, shouldAnnounce: true, nextAttempt: null, backoffMs: null, reason: 'published' };
+  }
+
+  const failedAttempt = Math.max(1, Math.floor(params.failedAttempt));
+  if (!params.retryableFailure) {
+    return { outcome: 'after-cap', shouldRetry: false, shouldAnnounce: false, nextAttempt: null, backoffMs: null, reason: 'permanent' };
+  }
+  if (failedAttempt >= params.cap) {
+    return { outcome: 'after-cap', shouldRetry: false, shouldAnnounce: false, nextAttempt: null, backoffMs: null, reason: 'capped' };
+  }
+
+  const baseBackoffMs = params.baseBackoffMs ?? 500;
+  const maxBackoffMs = params.maxBackoffMs ?? 2000;
+  const backoffMs = Math.min(baseBackoffMs * Math.pow(2, failedAttempt - 1), maxBackoffMs);
+  return { outcome: 'retry', shouldRetry: true, shouldAnnounce: false, nextAttempt: failedAttempt + 1, backoffMs, reason: 'retryable' };
 }
 
 export function shouldRegisterFirstAddedLocalTrack(tracks: PublishedTrackLike[], kind: 'audio' | 'video', hasLiveSenderTrack: boolean): boolean {
