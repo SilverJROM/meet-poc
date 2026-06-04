@@ -53,6 +53,7 @@ import { ViewportService } from '../../services/viewport.service';
 import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.service';
 import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
 import { planInitialPublishRetry } from '../../services/sfu-roster-utils';
+import { shouldPromptGuestPassword, shouldSubmitChat } from './room-decisions';
 import { decideRoomLifecycleLeave } from './room-lifecycle';
 import { recordPeerResumed, syncRecorderPeerStreams } from './room-recording';
 
@@ -178,6 +179,8 @@ export class RoomPage implements OnDestroy {
   readonly passwordDraft = signal('');
   readonly passwordError = signal<string | null>(null);
   readonly passwordBusy = signal(false);
+  private readonly joinRoutePasswordRequired = signal(false);
+  private readonly joinRouteIsOwner = signal(false);
   private verifiedRoomPassword: string | null = null;
   readonly nameError = signal<string | null>(null);
   readonly microphoneRequested = signal(true);
@@ -731,6 +734,8 @@ export class RoomPage implements OnDestroy {
       this.roomSlug.set(info.slug ?? this.roomId);
       this.roomTitle.set(info.title ?? 'Untitled room');
       this.roomOpen.set(!!info.isOpen);
+      this.joinRoutePasswordRequired.set(!!info.passwordRequired);
+      this.joinRouteIsOwner.set(!!info.isOwner);
       this.state.set('lobby');
       // A password verified on the /join page is stashed by slug — pick it up
       // so we join without re-prompting (works for both guest + signed-in paths).
@@ -776,6 +781,18 @@ export class RoomPage implements OnDestroy {
     this.nameError.set(null);
     this.guestNameError.set(null);
     this.guestNameOverlayOpen.set(false);
+    if (
+      shouldPromptGuestPassword({
+        passwordRequired: this.joinRoutePasswordRequired(),
+        isOwner: this.joinRouteIsOwner(),
+        verifiedPassword: this.verifiedRoomPassword,
+      })
+    ) {
+      this.passwordDraft.set('');
+      this.passwordError.set(null);
+      this.passwordPromptOpen.set(true);
+      return;
+    }
     this.prepareLobbyDeviceCheck();
   }
 
@@ -1322,6 +1339,11 @@ export class RoomPage implements OnDestroy {
   chatRecipientName(id: string): string {
     if (id === CHAT_EVERYONE_THREAD) return 'Everyone';
     return this.peers().find((peer) => peer.id === id)?.name || this.chatRecipientNames().get(id) || 'Peer';
+  }
+
+  handleChatEnter(event: Event): void {
+    if (!shouldSubmitChat(event as KeyboardEvent)) return;
+    this.sendChat(event);
   }
 
   sendChat(event?: Event): void {

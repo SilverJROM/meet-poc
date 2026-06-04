@@ -67,9 +67,9 @@
 
             <label>
               <span>Camera</span>
-              <select class="device-select camera-select" [value]="selectedVideoId()" [disabled]="busy()" (change)="onVideoChange($event)">
+              <select class="device-select camera-select" [disabled]="busy()" (change)="onVideoChange($event)">
                 @for (device of videoInputs(); track device.deviceId) {
-                  <option [value]="device.deviceId">{{ device.label || 'Camera' }}</option>
+                  <option [value]="device.deviceId" [selected]="device.deviceId === selectedVideoId()">{{ device.label || 'Camera' }}</option>
                 }
               </select>
             </label>
@@ -78,16 +78,15 @@
               <span>Speakers</span>
               <select
                 class="device-select speaker-select"
-                [value]="selectedAudioOutputId()"
                 [disabled]="busy() || !canSelectAudioOutput()"
                 [title]="canSelectAudioOutput() ? 'Choose speaker output' : 'Audio output switching requires Chrome support'"
                 (change)="onAudioOutputChange($event)"
               >
                 @if (audioOutputs().length === 0) {
-                  <option value="">System default</option>
+                  <option value="" [selected]="!selectedAudioOutputId()">System default</option>
                 }
                 @for (device of audioOutputs(); track device.deviceId) {
-                  <option [value]="device.deviceId">{{ device.label || 'Speaker' }}</option>
+                  <option [value]="device.deviceId" [selected]="device.deviceId === selectedAudioOutputId()">{{ device.label || 'Speaker' }}</option>
                 }
               </select>
             </label>
