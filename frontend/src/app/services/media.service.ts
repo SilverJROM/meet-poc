@@ -579,10 +579,24 @@ declare global {
   }
 }
 
+const DEBUG_TRACK_REGISTRY_CAP = 64;
+
 function registerDebugTracks(stream: MediaStream): void {
   const tracks = stream.getTracks();
   if (tracks.length === 0) return;
-  window.__activeTracks = [...(window.__activeTracks ?? []), ...tracks];
+  pruneDebugTracks();
+  for (const track of tracks) {
+    track.addEventListener?.('ended', pruneDebugTracks, { once: true });
+  }
+  window.__activeTracks = [...(window.__activeTracks ?? []), ...tracks]
+    .filter((track, index, all) => track.readyState !== 'ended' && all.indexOf(track) === index)
+    .slice(-DEBUG_TRACK_REGISTRY_CAP);
+}
+
+function pruneDebugTracks(): void {
+  const activeTracks = window.__activeTracks;
+  if (!activeTracks) return;
+  window.__activeTracks = activeTracks.filter((track, index, all) => track.readyState !== 'ended' && all.indexOf(track) === index).slice(-DEBUG_TRACK_REGISTRY_CAP);
 }
 
 function stopTracksNotInStream(previous: MediaStream | null, next: MediaStream): void {

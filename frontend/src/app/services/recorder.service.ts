@@ -215,7 +215,9 @@ export class RecorderService {
   }
 
   private addStream(clientId: string, stream: MediaStream): void {
-    if (!this.ctx || !this.dest || this.sourceFor.has(clientId) || stream.getAudioTracks().length === 0) return;
+    if (!this.ctx || !this.dest) return;
+    if (this.sourceFor.has(clientId)) this.removePeerStream(clientId);
+    if (stream.getAudioTracks().length === 0) return;
     try {
       const source = this.ctx.createMediaStreamSource(stream);
       source.connect(this.dest);

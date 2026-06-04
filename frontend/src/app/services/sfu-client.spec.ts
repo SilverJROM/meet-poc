@@ -1,4 +1,10 @@
 import assert from 'node:assert/strict';
+import '@angular/compiler';
+import { HttpClient } from '@angular/common/http';
+import { createEnvironmentInjector, runInInjectionContext } from '@angular/core';
+import { SfuClientService } from './sfu-client.service.js';
+import { IceConfigService } from './ice-config.service.js';
+import { ViewportService } from './viewport.service.js';
 import {
   applyPresenceUpdate,
   applyRosterSnapshot,
@@ -18,6 +24,42 @@ function makePublisher(clientId: string, revision: number): RemotePublisher {
 
 function makeTransceivers(entries: { mid: string; receiverKind: string }[]): RTCRtpTransceiver[] {
   return entries.map((entry) => ({ mid: entry.mid, receiver: { track: { kind: entry.receiverKind } } })) as unknown as RTCRtpTransceiver[];
+}
+
+function createSfuClient(): SfuClientService {
+  const injector = createEnvironmentInjector([
+    { provide: HttpClient, useValue: {} },
+    { provide: IceConfigService, useValue: { getIceServers: async () => [] } },
+    { provide: ViewportService, useValue: { isMobile: () => false } },
+  ]);
+  return runInInjectionContext(injector, () => new SfuClientService());
+}
+
+function withFakeTimers(run: (timers: { active: boolean; callback: () => void }[]) => void): void {
+  const originalSetTimeout = globalThis.setTimeout;
+  const originalClearTimeout = globalThis.clearTimeout;
+  const timers: { id: number; active: boolean; callback: () => void }[] = [];
+  Object.defineProperty(globalThis, 'setTimeout', {
+    configurable: true,
+    value: (callback: () => void) => {
+      const timer = { id: timers.length + 1, active: true, callback };
+      timers.push(timer);
+      return timer.id;
+    },
+  });
+  Object.defineProperty(globalThis, 'clearTimeout', {
+    configurable: true,
+    value: (id: number) => {
+      const timer = timers.find((entry) => entry.id === id);
+      if (timer) timer.active = false;
+    },
+  });
+  try {
+    run(timers);
+  } finally {
+    Object.defineProperty(globalThis, 'setTimeout', { configurable: true, value: originalSetTimeout });
+    Object.defineProperty(globalThis, 'clearTimeout', { configurable: true, value: originalClearTimeout });
+  }
 }
 
 // applyPresenceUpdate — applies a newer revision
@@ -152,6 +194,36 @@ function makeTransceivers(entries: { mid: string; receiverKind: string }[]): RTC
   assert.equal(retry.nextAttempts, 8, 'capped attempt should still be recorded for logging');
   assert.equal(retry.backoffMs, null, 'capped subscribe must not schedule a backoff');
   assert.equal(retry.capped, true, 'capped subscribe should report capped');
+}
+
+// LEAK4 — tracked subscribe backoff timers are cleared in every subscribe-teardown path and cannot fire after cleanup.
+{
+  withFakeTimers((timers) => {
+    for (const methodName of ['clearLocalTransportSessionState', 'closeLiveTracksForExit', 'destroy'] as const) {
+      const sfu = createSfuClient();
+      const privateSfu = sfu as unknown as {
+        scheduleSubscribeRetryBackoff: (backoffMs: number) => void;
+        subscribeBackoffTimers: Set<unknown>;
+        clearLocalTransportSessionState: () => void;
+        closeLiveTracksForExit: () => void;
+        destroy: () => void;
+      };
+      const beforeScheduleCount = timers.length;
+      privateSfu.scheduleSubscribeRetryBackoff(250);
+      privateSfu.scheduleSubscribeRetryBackoff(500);
+      assert.equal(privateSfu.subscribeBackoffTimers.size, 2, `${methodName} setup tracks two pending retry backoffs`);
+
+      privateSfu[methodName]();
+
+      assert.equal(privateSfu.subscribeBackoffTimers.size, 0, `${methodName} clears all pending retry backoffs`);
+      const versionAfterCleanup = sfu.subscribeRetryVersion();
+      for (const timer of timers.slice(beforeScheduleCount)) {
+        if (timer.active) timer.callback();
+      }
+      assert.equal(sfu.subscribeRetryVersion(), versionAfterCleanup, `${methodName} leaves no active backoff callback to bump retry version`);
+      assert.equal(timers.slice(beforeScheduleCount).every((timer) => !timer.active), true, `${methodName} clearTimeouts every tracked backoff`);
+    }
+  });
 }
 
 // planInitialPublishRetry — success does not retry and is the only announce path

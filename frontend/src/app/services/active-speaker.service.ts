@@ -118,6 +118,7 @@ export class ActiveSpeakerService {
     if (!stream) return;
     const track = stream.getAudioTracks()[0];
     if (!track) return;
+    if (this.analyzers.has(peer.id)) this.remove(peer.id);
     try {
       const context = this.ensureContext();
       if (context.state === 'suspended') void context.resume().catch(() => undefined);

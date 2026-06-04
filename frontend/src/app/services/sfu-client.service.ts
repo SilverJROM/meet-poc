@@ -104,6 +104,7 @@ export class SfuClientService {
   private subscribeInitiatedAt = new Map<string, number>();
   private subscribeFirstFrameAt = new Map<string, number>();
   private subscribeStuckTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private subscribeBackoffTimers = new Set<ReturnType<typeof setTimeout>>();
   private readonly SUBSCRIBE_STUCK_THRESHOLD_MS = 10_000;
   private previousConnectionQualityPackets: { packetsReceived: number; packetsLost: number } | null = null;
   private adaptiveCameraRidCandidate: AdaptiveCameraRidCap = null;
@@ -157,7 +158,7 @@ export class SfuClientService {
       const retry = this.nextSubscribeRetry(publisher.clientId, false);
       if (!retry.shouldRetry) return;
       this.subscribedClientIds.delete(publisher.clientId);
-      setTimeout(() => this.subscribeRetryVersion.update((v) => v + 1), retry.backoffMs);
+      this.scheduleSubscribeRetryBackoff(retry.backoffMs);
     });
   }
 
@@ -179,9 +180,17 @@ export class SfuClientService {
         retryBackoffMs: retry.backoffMs,
       });
       this.clearPublisherSubscriptionStateForRetry(publisherClientId);
-      setTimeout(() => this.subscribeRetryVersion.update((v) => v + 1), retry.backoffMs);
+      this.scheduleSubscribeRetryBackoff(retry.backoffMs);
     }, this.SUBSCRIBE_STUCK_THRESHOLD_MS);
     this.subscribeStuckTimers.set(publisherClientId, timer);
+  }
+
+  private scheduleSubscribeRetryBackoff(backoffMs: number): void {
+    const timer = setTimeout(() => {
+      this.subscribeBackoffTimers.delete(timer);
+      this.subscribeRetryVersion.update((v) => v + 1);
+    }, backoffMs);
+    this.subscribeBackoffTimers.add(timer);
   }
 
   private nextSubscribeRetry(
@@ -220,6 +229,11 @@ export class SfuClientService {
   private clearAllSubscribeStuckWatchdogs(): void {
     for (const timer of this.subscribeStuckTimers.values()) clearTimeout(timer);
     this.subscribeStuckTimers.clear();
+  }
+
+  private clearAllSubscribeBackoffTimers(): void {
+    for (const timer of this.subscribeBackoffTimers) clearTimeout(timer);
+    this.subscribeBackoffTimers.clear();
   }
 
   replaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
@@ -381,6 +395,7 @@ export class SfuClientService {
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
+    this.clearAllSubscribeBackoffTimers();
     this.resetConnectionQuality();
     this.opQueue = Promise.resolve();
     this.localPublishState.set(null);
@@ -1223,6 +1238,7 @@ export class SfuClientService {
     this.opQueue = Promise.resolve();
     this.pendingOntrack.clear();
     this.clearAllSubscribeStuckWatchdogs();
+    this.clearAllSubscribeBackoffTimers();
     this.resetConnectionQuality();
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
@@ -1260,6 +1276,7 @@ export class SfuClientService {
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
+    this.clearAllSubscribeBackoffTimers();
     this.resetConnectionQuality();
     this.resetTransportRecoveryState(true);
     this.localPublishState.set(null);
