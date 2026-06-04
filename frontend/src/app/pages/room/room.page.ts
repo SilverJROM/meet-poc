@@ -38,6 +38,9 @@ import { PlatformService } from '../../services/platform.service';
 import { PeerState } from '../../services/peer-state';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
 import {
+  AUDIO_OUTPUT_DEVICE_STORAGE_KEY,
+  applyMediaElementSinkWithDefaultFallback,
+  clearStoredAudioOutputDeviceId,
   decideVoiceRecovery,
   RemoteAudioService,
   VOICE_RECOVERY_SAMPLE_WINDOW,
@@ -653,7 +656,14 @@ export class RoomPage implements OnDestroy {
       this.peers();
       if (this.state() !== 'in-call' || !deviceId) return;
       window.setTimeout(() => {
-        void this.applySpeakerDevice(deviceId).catch((err) => console.debug('[devices] speaker routing refresh failed', err));
+        void this.applySpeakerDevice(deviceId)
+          .then((applied) => {
+            if (!applied && this.selectedAudioOutputId() === deviceId) {
+              this.selectedAudioOutputId.set('');
+              storeDevice(DEVICE_STORAGE.audioOutput, '');
+            }
+          })
+          .catch((err) => console.debug('[devices] speaker routing refresh failed', err));
       }, 0);
     });
     // SFU subscribe: react to remotePublishers changes, but only after local publish is done.
@@ -938,9 +948,18 @@ export class RoomPage implements OnDestroy {
   }
 
   async changeAudioOutputDevice(deviceId: string): Promise<void> {
-    this.selectedAudioOutputId.set(deviceId);
-    storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
-    await this.applySpeakerDevice(deviceId);
+    this.deviceDialogError.set(null);
+    const applied = await this.applySpeakerDevice(deviceId);
+    if (applied) {
+      this.selectedAudioOutputId.set(deviceId);
+      storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
+      return;
+    }
+
+    this.selectedAudioOutputId.set('');
+    storeDevice(DEVICE_STORAGE.audioOutput, '');
+    await this.applySpeakerDevice('');
+    if (deviceId) this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
   }
 
   handleRemoteAudioBlocked(): void {
@@ -2455,15 +2474,18 @@ export class RoomPage implements OnDestroy {
     }
   }
 
-  private async applySpeakerDevice(deviceId: string): Promise<void> {
+  private async applySpeakerDevice(deviceId: string): Promise<boolean> {
     const mediaElements = Array.from(document.querySelectorAll('video, audio')) as HTMLMediaElement[];
-    await Promise.all(
-      mediaElements.map(async (element) => {
-        const withSink = element as HTMLMediaElement & { setSinkId?: (sinkId: string) => Promise<void> };
-        if (withSink.setSinkId) await withSink.setSinkId(deviceId);
-      }),
+    const mediaApplied = await Promise.all(
+      mediaElements.map((element) =>
+        applyMediaElementSinkWithDefaultFallback(element, deviceId, {
+          onSelectedSinkFailure: clearStoredAudioOutputDeviceId,
+          label: 'room-media',
+        }),
+      ),
     );
-    await this.remoteAudio.applyOutputDevice(deviceId);
+    const remoteApplied = await this.remoteAudio.applyOutputDevice(deviceId);
+    return mediaApplied.every(Boolean) && remoteApplied;
   }
 
   private async unlockAudioFromGesture(showPromptOnFailure: boolean): Promise<boolean> {
@@ -3467,7 +3489,7 @@ function isDisplayMediaPermissionError(err: unknown): boolean {
 
 const DEVICE_STORAGE = {
   audioInput: 'meet-poc.device.audioInput',
-  audioOutput: 'meet-poc.device.audioOutput',
+  audioOutput: AUDIO_OUTPUT_DEVICE_STORAGE_KEY,
   videoInput: 'meet-poc.device.videoInput',
 } as const;
 

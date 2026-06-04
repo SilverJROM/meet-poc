@@ -39,6 +39,7 @@ export type RemoteAudioDebugSnapshot = {
 };
 
 const VOLUME_STORAGE_KEY = 'meet-poc:volume:value';
+export const AUDIO_OUTPUT_DEVICE_STORAGE_KEY = 'meet-poc.device.audioOutput';
 const DEFAULT_VOLUME = 1;
 const MAX_VOLUME = 1.3;
 export const VOICE_RECOVERY_SAMPLE_WINDOW = 4;
@@ -68,6 +69,48 @@ export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRec
   if (input.attemptsThisWindow === 1) return 'kickstart';
   if (input.attemptsThisWindow === 2) return 'replay';
   return 'rebuild';
+}
+
+export type ApplySinkIdOptions = {
+  onSelectedSinkFailure?: (deviceId: string, err: unknown) => void;
+  label?: string;
+};
+
+export async function applyMediaElementSinkWithDefaultFallback(
+  element: HTMLMediaElement | null,
+  deviceId: string | undefined,
+  options: ApplySinkIdOptions = {},
+): Promise<boolean> {
+  if (!element || deviceId === undefined) return true;
+  const withSink = element as HTMLMediaElement & { setSinkId?: (sinkId: string) => Promise<void> };
+  if (!withSink.setSinkId) return true;
+
+  try {
+    await withSink.setSinkId(deviceId);
+    return true;
+  } catch (err) {
+    console.debug('[media] audio output sink routing failed; falling back to default speaker', {
+      deviceId,
+      label: options.label,
+      err,
+    });
+    if (deviceId) options.onSelectedSinkFailure?.(deviceId, err);
+    if (deviceId === '') return false;
+    try {
+      await withSink.setSinkId('');
+    } catch (fallbackErr) {
+      console.debug('[media] default audio output sink fallback failed', { label: options.label, fallbackErr });
+    }
+    return false;
+  }
+}
+
+export function clearStoredAudioOutputDeviceId(): void {
+  try {
+    window.localStorage.removeItem(AUDIO_OUTPUT_DEVICE_STORAGE_KEY);
+  } catch {
+    // Best effort only.
+  }
 }
 
 @Injectable({ providedIn: 'root' })
@@ -232,10 +275,11 @@ export class RemoteAudioService {
     });
   }
 
-  async applyOutputDevice(deviceId: string): Promise<void> {
-    if (!this.mixerEnabled()) return;
-    await this.applySinkId(this.outputElement, deviceId);
-    await Promise.all([...this.sources.values()].map((source) => this.applySinkId(source.kickstartElement, deviceId)));
+  async applyOutputDevice(deviceId: string): Promise<boolean> {
+    if (!this.mixerEnabled()) return true;
+    const outputApplied = await this.applySinkId(this.outputElement, deviceId);
+    const kickstartApplied = await Promise.all([...this.sources.values()].map((source) => this.applySinkId(source.kickstartElement, deviceId)));
+    return outputApplied && kickstartApplied.every(Boolean);
   }
 
   async recoverPlayback(deviceId?: string): Promise<boolean> {
@@ -562,10 +606,11 @@ export class RemoteAudioService {
     this.keepaliveGain = null;
   }
 
-  private async applySinkId(element: HTMLMediaElement | null, deviceId?: string): Promise<void> {
-    if (!element || !deviceId) return;
-    const withSink = element as HTMLMediaElement & { setSinkId?: (sinkId: string) => Promise<void> };
-    if (withSink.setSinkId) await withSink.setSinkId(deviceId);
+  private async applySinkId(element: HTMLMediaElement | null, deviceId?: string): Promise<boolean> {
+    return applyMediaElementSinkWithDefaultFallback(element, deviceId, {
+      onSelectedSinkFailure: clearStoredAudioOutputDeviceId,
+      label: 'remote-audio',
+    });
   }
 }
 
