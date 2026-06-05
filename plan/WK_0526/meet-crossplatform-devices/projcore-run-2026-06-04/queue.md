@@ -1,0 +1,42 @@
+# queue.md — meet-crossplatform-devices (BATCH list, ~63 findings → 22 batches)
+
+- [DONE] INV1: Investigate why the app is not universal (12-round 6-model fan-out, 63 findings, validated)
+- [DONE] REQ1: Agree the requirements + priorities (ARCH-0 + 12 goal-blockers + P1 + P2)
+- [DONE] B01: Build the unified media engine so devices behave the same everywhere (ARCH-0/META1)
+- [DONE] B02: Make camera/mic open on any device, not just where settings were saved (A1/A2/A10 deviceId ladder, all paths)
+- [DONE] B03: Always get audio even if the camera is missing or blocked (A4/D2/A11 mic-first, camera-separate)
+- [DONE] B04: Never drop a working mic/camera while switching devices (A3 acquire-before-destroy)
+- [DONE] B05: Let people join with no camera and even no mic (listen-only) (A5)
+- [DONE] B06: When someone turns their mic on later, others actually hear them (B3 announce first audio)
+- [DONE] B07: (A6 mid-call camera announce — closed by B06)
+- [DONE] B08: Retry a stuck subscription so remote audio is never permanently lost (B5)
+- [DONE] B09: If publishing fails on join, retry instead of leaving them silent (PUB1)
+- [DONE] B10: When the host ends the call, fully release everyone's camera/mic (LEAK1/N1)
+- [DONE] B11: Recover audio automatically after a network change/drop (B2 ICE recovery + C2)
+- [DONE] B12: Survive backgrounding the app on a phone without breaking the call (C1/N3)
+- [DONE] B13: Never let a bad speaker choice kill playback (C3/ERR1/C4)
+- [DONE] B14: Make mic-recovery + errors robust and honest (ERR3/ERR4/ERR5)
+- [DONE] B15: Don't block legitimate users from joining (BK1/BK2) — b38d2b3, 3-agent SOLID
+- [DONE] B16: Work on restrictive/corporate networks (B1/N2/B7/B6 relay) — 4085b43, SOLID
+- [DONE] B17: Stop resource leaks across long/repeated calls (LEAK2/3/4/5) — 243cd6f, 3-agent SOLID
+- [DONE] B18: Fix recording: no silent mobile recordings or lost reconnect audio (REC1/2/3) — 7d84b1c, 3-agent SOLID
+- [DONE] B19: Make multi-party (3-5) track subscription correct + safe (SFU-S1/2/3/4) — 8b4ae24, 3-agent SOLID
+- [DONE] B20: Polish the join/in-call UX to Zoom/Meet feel (UX1/UX2/D1/CMP1; R9-S1/2 already done by B14) — 67438cf
+- [DONE] B21: tiny sweep (14 fixed across B21a-d; 6 already-fixed) — all sub-batches committed
+- [DONE] B21a: Acquisition tinies (A8/A9/A12/TINY3) — 066c220, solo SOLID
+- [DONE] B21b: Race/handler hardening (TINY2/4/6/ERR9) — a70ec19, solo SOLID
+- [DONE] B21c: Recorder tail (REC4/5/6/8) — c417f1f, 3-agent SOLID
+- [DONE] B21d: Diagnostics (ERR6/ERR7) — fa89e1e, solo SOLID
+- [DONE] TESTH1: rooms/sessions/waiting-room expectations refreshed — folded into LEAN1 82b7857
+- [DONE] LEAN1: TS1/TS2/TS3 + dead code + TESTH1 green (3-agent) — 82b7857, tsc 0, behavior-preserving SOLID
+- [DONE] TESTH2: auth-login + migrate-from-json expectations refreshed — backend fully green (166 pass)
+- [DONE] RETEST1: frontend tsc0+25specs+build, backend 166 pass, DEV fe+be redeployed (login 200, TURN ok)
+- [DONE] POSTFIX1: 6-round fan-out — R1 clean(4 over-claims dismissed)/R2→S-MIDCALL/R3→double-subscribe/R4+R5+R6 clean. ZERO goal-blocking.
+- [DONE] FIX3: doSubscribeTracks idempotent — no doubled audio on muted-join unmute — 716af7e, 3-agent (opus 2nd) SOLID
+- [DONE] FIX2: mid-call subscribe retry (S-MIDCALL goal-blocking) — 0a0608e, 3-agent (opus 2nd) SOLID
+- [DONE] FIX1: REC1-iOS recorder ctx resume + REC2 source-churn guard — 1c07bc3, 3-agent SOLID
+- [DONE] HANDBACK1: HANDBACK.md written; zero goal-blocking; real-device list + listen-only decision surfaced; DEV green+deployed
+- [DONE] FIX4: international relay re-fetch on transport recovery + margins verified + teardown hygiene — 3-agent validated PASS
+- [PROCESSING] FIX5: international call diagnostics — capture+surface egress IP, send-side loss, audio-liveness, RTT intl-hint (owner-only)
+
+Notes: per-batch JIT req/plan->agree->implement->validate (verifier!=fixer; 3-agent on SFU/transport/leak/recorder). ARCH-0 first; every P0 routed through it. Build roster = opus + codex 5.5. Handback gate: ZERO goal-blocking.

@@ -28,11 +28,25 @@ function makeTransceivers(entries: { mid: string; receiverKind: string }[]): RTC
   return entries.map((entry) => ({ mid: entry.mid, receiver: { track: { kind: entry.receiverKind } } })) as unknown as RTCRtpTransceiver[];
 }
 
-function createSfuClient(http: Partial<HttpClient> = {}): SfuClientService {
+type IceConfigDouble = {
+  getIceServers?: () => Promise<RTCIceServer[]>;
+  forceRefresh?: () => Promise<RTCIceServer[]>;
+  relayUnavailable?: () => boolean;
+};
+
+function createSfuClient(http: Partial<HttpClient> = {}, iceConfig: IceConfigDouble = {}): SfuClientService {
   const injector = createEnvironmentInjector(
     [
       { provide: HttpClient, useValue: http },
-      { provide: IceConfigService, useValue: { getIceServers: async () => [] } },
+      {
+        provide: IceConfigService,
+        useValue: {
+          getIceServers: async () => [],
+          forceRefresh: async () => [],
+          relayUnavailable: () => false,
+          ...iceConfig,
+        },
+      },
       { provide: ViewportService, useValue: { isMobile: () => false } },
     ],
     undefined as unknown as EnvironmentInjector,
@@ -186,6 +200,75 @@ async function flushSfuQueue(sfu: SfuClientService): Promise<void> {
   await Promise.resolve();
   await privateSfu.opQueue;
   await Promise.resolve();
+}
+
+async function withPublishPeerConnectionRecorder(run: (configs: RTCConfiguration[]) => Promise<void>): Promise<RTCConfiguration[]> {
+  const originalPeerConnection = globalThis.RTCPeerConnection;
+  const configs: RTCConfiguration[] = [];
+
+  const makePublishPc = (): RTCPeerConnection => {
+    const transceivers: RTCRtpTransceiver[] = [];
+    const pc = {
+      connectionState: 'new',
+      iceConnectionState: 'new',
+      signalingState: 'stable',
+      localDescription: null as RTCSessionDescriptionInit | null,
+      oniceconnectionstatechange: null,
+      onconnectionstatechange: null,
+      ontrack: null,
+      addTransceiver(trackOrKind: MediaStreamTrack | string): RTCRtpTransceiver {
+        const track = typeof trackOrKind === 'string' ? null : trackOrKind;
+        const transceiver = {
+          mid: String(transceivers.length),
+          sender: { track },
+          receiver: { track: { kind: typeof trackOrKind === 'string' ? trackOrKind : trackOrKind.kind } },
+        } as unknown as RTCRtpTransceiver;
+        transceivers.push(transceiver);
+        return transceiver;
+      },
+      async createOffer(): Promise<RTCSessionDescriptionInit> {
+        return { type: 'offer', sdp: 'offer-sdp' };
+      },
+      async setLocalDescription(desc: RTCSessionDescriptionInit): Promise<void> {
+        this.localDescription = desc;
+      },
+      async setRemoteDescription(): Promise<void> {},
+      getTransceivers(): RTCRtpTransceiver[] {
+        return transceivers;
+      },
+      close(): void {},
+    };
+    return pc as unknown as RTCPeerConnection;
+  };
+
+  const FakePeerConnection = function (this: RTCPeerConnection, config?: RTCConfiguration) {
+    configs.push(config ?? {});
+    return makePublishPc();
+  } as unknown as typeof RTCPeerConnection;
+
+  Object.defineProperty(globalThis, 'RTCPeerConnection', { configurable: true, value: FakePeerConnection });
+  try {
+    await run(configs);
+  } finally {
+    Object.defineProperty(globalThis, 'RTCPeerConnection', { configurable: true, value: originalPeerConnection });
+  }
+
+  return configs;
+}
+
+async function runFullRepublishRecovery(iceConfig: IceConfigDouble): Promise<RTCConfiguration[]> {
+  const http = {
+    post: (url: string) => {
+      if (url === '/api/sfu/session') return of({ sessionId: 'cf-session' });
+      if (url === '/api/sfu/tracks') return of({ sessionDescription: { type: 'answer', sdp: 'answer-sdp' } });
+      throw new Error(`unexpected POST ${url}`);
+    },
+  } as unknown as Partial<HttpClient>;
+  const sfu = createSfuClient(http, iceConfig);
+  sfu.setTransportRecoveryHandler(() => sfu.publish({ clientKey: 'ck', participantId: 'local-p', sessionId: 'room-1', localStream: null }));
+  const privateSfu = sfu as unknown as { recoverTransport: (reason: string) => Promise<void> };
+
+  return withPublishPeerConnectionRecorder(() => privateSfu.recoverTransport('failed'));
 }
 
 // applyPresenceUpdate — applies a newer revision
@@ -824,6 +907,87 @@ async function flushSfuQueue(sfu: SfuClientService): Promise<void> {
   assert.equal(capped.action, 'capped', 'recovery stops after cap');
   assert.equal(capped.nextAttempts, 4, 'capped attempt is recorded for diagnostics');
   assert.equal(capped.backoffMs, null, 'capped recovery must not schedule backoff');
+}
+
+// transport recovery full republish — prior STUN-only resolution force-refreshes and uses relay-capable ICE servers
+{
+  const relayServers: RTCIceServer[] = [{ urls: 'turn:turn.example.test:3478?transport=udp', username: 'u', credential: 'p' }];
+  let forceRefreshCalls = 0;
+  let getIceServersCalls = 0;
+  const configs = await runFullRepublishRecovery({
+    relayUnavailable: () => true,
+    async forceRefresh(): Promise<RTCIceServer[]> {
+      forceRefreshCalls += 1;
+      return relayServers;
+    },
+    async getIceServers(): Promise<RTCIceServer[]> {
+      getIceServersCalls += 1;
+      return [{ urls: 'stun:stun.example.test:19302' }];
+    },
+  });
+
+  assert.equal(forceRefreshCalls, 1, 'STUN-only prior resolution should force-refresh once before full republish');
+  assert.equal(getIceServersCalls, 0, 'recovery republish should consume the forced ICE result without a second fetch');
+  assert.deepEqual(configs[0]?.iceServers, relayServers, 'recovery PC should use the refreshed relay-capable ICE servers');
+}
+
+// transport recovery full republish — prior relay-capable resolution does not redundantly force-refresh
+{
+  const relayServers: RTCIceServer[] = [{ urls: 'turns:turn.example.test:443?transport=tcp', username: 'u', credential: 'p' }];
+  let forceRefreshCalls = 0;
+  let getIceServersCalls = 0;
+  const configs = await runFullRepublishRecovery({
+    relayUnavailable: () => false,
+    async forceRefresh(): Promise<RTCIceServer[]> {
+      forceRefreshCalls += 1;
+      return relayServers;
+    },
+    async getIceServers(): Promise<RTCIceServer[]> {
+      getIceServersCalls += 1;
+      return relayServers;
+    },
+  });
+
+  assert.equal(forceRefreshCalls, 0, 'relay-capable prior resolution should skip redundant force-refresh');
+  assert.equal(getIceServersCalls, 1, 'normal recovery publish should use the existing ICE config source');
+  assert.deepEqual(configs[0]?.iceServers, relayServers, 'recovery PC should still use relay-capable ICE servers');
+}
+
+// transport recovery full republish — refetch still STUN-only proceeds without hard block
+{
+  const stunServers: RTCIceServer[] = [{ urls: 'stun:stun.example.test:19302' }];
+  let forceRefreshCalls = 0;
+  let getIceServersCalls = 0;
+  const configs = await runFullRepublishRecovery({
+    relayUnavailable: () => true,
+    async forceRefresh(): Promise<RTCIceServer[]> {
+      forceRefreshCalls += 1;
+      return stunServers;
+    },
+    async getIceServers(): Promise<RTCIceServer[]> {
+      getIceServersCalls += 1;
+      return [{ urls: 'turn:unexpected.example.test:3478', username: 'u', credential: 'p' }];
+    },
+  });
+
+  assert.equal(forceRefreshCalls, 1, 'STUN-only prior resolution should still force-refresh once');
+  assert.equal(getIceServersCalls, 0, 'STUN fallback from the forced refresh should not trigger an extra fetch loop');
+  assert.deepEqual(configs[0]?.iceServers, stunServers, 'recovery PC should proceed with STUN fallback when relay is still unavailable');
+}
+
+// transport recovery full republish — teardown clears any pending one-shot recovery ICE source
+{
+  for (const methodName of ['closeLiveTracksForExit', 'destroy'] as const) {
+    const sfu = createSfuClient();
+    const privateSfu = sfu as unknown as {
+      recoveryPublishIceServers: RTCIceServer[] | null;
+      closeLiveTracksForExit: () => void;
+      destroy: () => void;
+    };
+    privateSfu.recoveryPublishIceServers = [{ urls: 'turn:stale.example.test:3478', username: 'u', credential: 'p' }];
+    privateSfu[methodName]();
+    assert.equal(privateSfu.recoveryPublishIceServers, null, `${methodName} clears pending recovery ICE source`);
+  }
 }
 
 // selectNewRemoteTracks — partial subscribe covers added audio/video/screen and skips existing names

@@ -119,6 +119,7 @@ export class SfuClientService {
   private transportRecoveryScheduled = false;
   private transportRecoveryInFlight = false;
   private currentIceTransportPolicy: RTCIceTransportPolicy = 'all';
+  private recoveryPublishIceServers: RTCIceServer[] | null = null;
 
   enqueue<T>(op: () => Promise<T>): Promise<T> {
     const result = this.opQueue.then(() => op());
@@ -533,6 +534,9 @@ export class SfuClientService {
       console.warn('[sfu] ICE restart recovery failed; resetting SFU transport for full republish', err);
     }
 
+    if (this.iceConfigService.relayUnavailable()) {
+      this.recoveryPublishIceServers = await this.iceConfigService.forceRefresh();
+    }
     this.resetForTransportRecovery();
     const handler = this.transportRecoveryHandler;
     if (!handler) throw new Error('[sfu] no full-republish handler registered for transport recovery');
@@ -1401,6 +1405,7 @@ export class SfuClientService {
     this.localPublishState.set(null);
     this.setPublishPhase(null);
     this.opQueue = Promise.resolve();
+    this.recoveryPublishIceServers = null;
     this.pendingOntrack.clear();
     this.clearAllSubscribeStuckWatchdogs();
     this.clearAllSubscribeBackoffTimers();
@@ -1449,6 +1454,7 @@ export class SfuClientService {
     this.localPublishState.set(null);
     this.setPublishPhase(null);
     this.opQueue = Promise.resolve();
+    this.recoveryPublishIceServers = null;
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
     this.remoteScreenStreams.set(new Map());
@@ -1464,7 +1470,7 @@ export class SfuClientService {
 
     try {
       this.setPublishPhase('ice-config');
-      const iceServers = await this.iceConfigService.getIceServers();
+      const iceServers = await this.consumePublishIceServers();
       this.currentIceTransportPolicy = 'all';
       this.setPublishPhase('pc-create');
       this.pc = new RTCPeerConnection({ iceServers, iceTransportPolicy: this.currentIceTransportPolicy });
@@ -1555,6 +1561,12 @@ export class SfuClientService {
       this.localPublishState.set({ cfSessionId: '', status: 'error', tracks: [], error: String(err) });
       throw err;
     }
+  }
+
+  private async consumePublishIceServers(): Promise<RTCIceServer[]> {
+    const recoveryIceServers = this.recoveryPublishIceServers;
+    this.recoveryPublishIceServers = null;
+    return recoveryIceServers ?? this.iceConfigService.getIceServers();
   }
 
   private async doSubscribe(publisher: import('./sfu-roster-utils.js').RemotePublisher): Promise<void> {
