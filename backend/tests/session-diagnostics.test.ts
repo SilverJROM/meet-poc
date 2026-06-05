@@ -126,16 +126,39 @@ describe('meeting session diagnostics API', () => {
       .send(samplePayload({ clientId: 'never-admitted', participantId: 'never-participant', clientKey: 'never-key' }))
       .expect(403);
 
+    const sfuDiagnostics = {
+      cfSessionId: 'cf-session',
+      connectionState: 'connected',
+      iceConnectionState: 'connected',
+      rttMs: 182,
+      localCandidateType: 'srflx',
+      remoteCandidateType: 'host',
+      selectedCandidatePair: {
+        id: 'pair',
+        state: 'succeeded',
+        selected: true,
+        nominated: true,
+        local: { id: 'local', candidateType: 'srflx', protocol: 'udp', address: '203.0.113.10', port: 49000 },
+        remote: { id: 'remote', candidateType: 'host', protocol: 'udp', address: '198.51.100.20', port: 3478 },
+        availableOutgoingBitrate: 1_750_000,
+        availableIncomingBitrate: 2_250_000,
+        bytesSent: 123_456,
+        bytesReceived: 654_321,
+      },
+      outboundTracks: [{ trackName: 'local-audio', kind: 'audio', rid: null, remoteFractionLost: 0.025, remoteRoundTripTimeMs: 191, remoteJitterMs: 6 }],
+      inboundTracks: [{ publisherClientId: 'remote-a', trackName: 'remote-audio', kind: 'audio', rid: null, audioLevel: 0.31, jitter: 0.007 }],
+      subscribeLatencies: [],
+    };
     const created = await request(server)
       .post(`/api/meeting-sessions/${sessionId}/diagnostics`)
       .set('Cookie', ownerCookie)
-      .send(samplePayload({ clientId: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId }))
+      .send(samplePayload({ clientId: ownerAdmitted.clientId, participantId: ownerAdmitted.participantId, sfuDiagnostics }))
       .expect(200);
     expect(created.body.entry).toMatchObject({
       sessionId,
       kind: 'sample',
       relayUsed: true,
-      candidateTypes: ['relay'],
+      candidateTypes: ['host', 'relay', 'srflx'],
       peerCount: 1,
     });
 
@@ -146,7 +169,7 @@ describe('meeting session diagnostics API', () => {
       roomTitle: 'Diagnostics room',
       diagnosticCount: 1,
       relayUsed: true,
-      candidateTypes: ['relay'],
+      candidateTypes: ['host', 'relay', 'srflx'],
     });
 
     const detail = await request(server).get(`/api/meeting-sessions/${sessionId}/diagnostics`).set('Cookie', ownerCookie).expect(200);
@@ -165,6 +188,7 @@ describe('meeting session diagnostics API', () => {
       trackReadyState: 'live',
       trackMuted: false,
     });
+    expect(detail.body.entries[0].payload.sfuDiagnostics).toMatchObject(sfuDiagnostics);
     await request(server).get(`/api/meeting-sessions/${sessionId}/diagnostics`).set('Cookie', otherCookie).expect(404);
     await request(server).get(`/api/meeting-sessions/${sessionId}/diagnostics.json`).set('Cookie', ownerCookie).expect(200);
     closeWs(owner);

@@ -138,6 +138,12 @@ export type DiagnosticsCandidatePair = {
   nominated: boolean;
   local: DiagnosticsCandidateInfo | null;
   remote: DiagnosticsCandidateInfo | null;
+  availableOutgoingBitrate?: number | null;
+  availableIncomingBitrate?: number | null;
+  currentRoundTripTime?: number | null;
+  totalRoundTripTime?: number | null;
+  bytesSent?: number | null;
+  bytesReceived?: number | null;
 };
 
 export type DiagnosticsTransition = {
@@ -262,6 +268,9 @@ export type SfuOutboundTrackStats = {
   framesEncoded: number | null;
   framesSent: number | null;
   qualityLimitationReason: string | null;
+  remoteRoundTripTimeMs?: number | null;
+  remoteFractionLost?: number | null;
+  remoteJitterMs?: number | null;
 };
 
 export type SfuInboundTrackStats = {
@@ -277,6 +286,10 @@ export type SfuInboundTrackStats = {
   jitterBufferDelay: number | null;
   jitterBufferEmittedCount: number | null;
   concealedSamples: number | null;
+  audioLevel?: number | null;
+  jitter?: number | null;
+  nackCount?: number | null;
+  pliCount?: number | null;
 };
 
 export type SfuSubscribeLatency = {

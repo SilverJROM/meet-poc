@@ -28,6 +28,10 @@ function makeTransceivers(entries: { mid: string; receiverKind: string }[]): RTC
   return entries.map((entry) => ({ mid: entry.mid, receiver: { track: { kind: entry.receiverKind } } })) as unknown as RTCRtpTransceiver[];
 }
 
+function statsReportOf(...entries: Array<Record<string, unknown> & { id: string }>): RTCStatsReport {
+  return new Map(entries.map((entry) => [entry.id, entry])) as unknown as RTCStatsReport;
+}
+
 type IceConfigDouble = {
   getIceServers?: () => Promise<RTCIceServer[]>;
   forceRefresh?: () => Promise<RTCIceServer[]>;
@@ -269,6 +273,38 @@ async function runFullRepublishRecovery(iceConfig: IceConfigDouble): Promise<RTC
   const privateSfu = sfu as unknown as { recoverTransport: (reason: string) => Promise<void> };
 
   return withPublishPeerConnectionRecorder(() => privateSfu.recoverTransport('failed'));
+}
+
+async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ diagnostics: Awaited<ReturnType<SfuClientService['collectDiagnostics']>>; getStatsCalls: number }> {
+  const sfu = createSfuClient();
+  let getStatsCalls = 0;
+  const pc = {
+    connectionState: 'connected',
+    iceConnectionState: 'connected',
+    async getStats(): Promise<RTCStatsReport> {
+      getStatsCalls += 1;
+      return stats;
+    },
+  } as unknown as RTCPeerConnection;
+  const privateSfu = sfu as unknown as {
+    pc: RTCPeerConnection;
+    callerCreds: { clientKey: string; participantId: string; sessionId: string };
+    midToEntry: Map<string, SubscribedTrackEntry>;
+  };
+  privateSfu.pc = pc;
+  privateSfu.callerCreds = { clientKey: 'ck', participantId: 'local-p', sessionId: 'room-1' };
+  privateSfu.midToEntry.set('1', { publisherClientId: 'remote-a', trackName: 'remote-audio', kind: 'audio', mid: '1' });
+  privateSfu.midToEntry.set('2', { publisherClientId: 'remote-v', trackName: 'remote-video', kind: 'video', mid: '2' });
+  sfu.localPublishState.set({
+    cfSessionId: 'cf-local',
+    status: 'published',
+    tracks: [
+      { trackName: 'local-audio', kind: 'audio', mid: '0', status: 'live' },
+      { trackName: 'local-video', kind: 'video', mid: '3', status: 'live' },
+    ],
+  });
+  const diagnostics = await sfu.collectDiagnostics();
+  return { diagnostics, getStatsCalls };
 }
 
 // applyPresenceUpdate — applies a newer revision
@@ -988,6 +1024,136 @@ async function runFullRepublishRecovery(iceConfig: IceConfigDouble): Promise<RTC
     privateSfu[methodName]();
     assert.equal(privateSfu.recoveryPublishIceServers, null, `${methodName} clears pending recovery ICE source`);
   }
+}
+
+// collectDiagnostics — international stats are parsed from one getStats report and null-safe when absent
+{
+  const { diagnostics, getStatsCalls } = await collectDiagnosticsFromStats(
+    statsReportOf(
+      {
+        id: 'pair-1',
+        type: 'candidate-pair',
+        nominated: true,
+        state: 'succeeded',
+        localCandidateId: 'local-cand',
+        remoteCandidateId: 'remote-cand',
+        currentRoundTripTime: 0.182,
+        totalRoundTripTime: 3.2,
+        availableOutgoingBitrate: 1_750_000,
+        availableIncomingBitrate: 2_250_000,
+        bytesSent: 123_456,
+        bytesReceived: 654_321,
+      },
+      { id: 'local-cand', type: 'local-candidate', candidateType: 'srflx', protocol: 'udp', address: '203.0.113.10', port: 49000 },
+      { id: 'remote-cand', type: 'remote-candidate', candidateType: 'host', protocol: 'udp', address: '198.51.100.20', port: 3478 },
+      {
+        id: 'out-audio',
+        type: 'outbound-rtp',
+        kind: 'audio',
+        mid: '0',
+        ssrc: 111,
+        bytesSent: 12_000,
+        packetsSent: 120,
+      },
+      {
+        id: 'out-video',
+        type: 'outbound-rtp',
+        kind: 'video',
+        mid: '3',
+        ssrc: 222,
+        bytesSent: 88_000,
+        packetsSent: 880,
+        framesEncoded: 42,
+        framesSent: 41,
+      },
+      {
+        id: 'remote-in-audio',
+        type: 'remote-inbound-rtp',
+        kind: 'audio',
+        localId: 'out-audio',
+        ssrc: 111,
+        roundTripTime: 0.191,
+        fractionLost: 0.025,
+        jitter: 0.006,
+      },
+      {
+        id: 'remote-in-video',
+        type: 'remote-inbound-rtp',
+        kind: 'video',
+        ssrc: 222,
+        roundTripTime: 0.215,
+        fractionLost: 0.05,
+        jitter: 0.012,
+      },
+      {
+        id: 'in-audio',
+        type: 'inbound-rtp',
+        kind: 'audio',
+        mid: '1',
+        bytesReceived: 34_000,
+        packetsReceived: 340,
+        packetsLost: 2,
+        jitter: 0.007,
+        audioLevel: 0.31,
+        jitterBufferDelay: 0.08,
+        jitterBufferEmittedCount: 40,
+        concealedSamples: 12,
+      },
+      {
+        id: 'in-video',
+        type: 'inbound-rtp',
+        kind: 'video',
+        mid: '2',
+        bytesReceived: 134_000,
+        packetsReceived: 1340,
+        packetsLost: 4,
+        framesDecoded: 67,
+        framesReceived: 69,
+        nackCount: 3,
+        pliCount: 1,
+      },
+    ),
+  );
+
+  assert.equal(getStatsCalls, 1, 'collectDiagnostics must use exactly one getStats call');
+  assert.equal(diagnostics?.selectedCandidatePair?.availableOutgoingBitrate, 1_750_000);
+  assert.equal(diagnostics?.selectedCandidatePair?.availableIncomingBitrate, 2_250_000);
+  assert.equal(diagnostics?.selectedCandidatePair?.currentRoundTripTime, 0.182);
+  assert.equal(diagnostics?.selectedCandidatePair?.totalRoundTripTime, 3.2);
+  assert.equal(diagnostics?.selectedCandidatePair?.bytesSent, 123_456);
+  assert.equal(diagnostics?.selectedCandidatePair?.bytesReceived, 654_321);
+  assert.equal(diagnostics?.rttMs, 182);
+  assert.equal(diagnostics?.selectedCandidatePair?.local?.address, '203.0.113.10');
+  assert.equal(diagnostics?.selectedCandidatePair?.remote?.address, '198.51.100.20');
+
+  const audioOut = diagnostics?.outboundTracks.find((track) => track.kind === 'audio');
+  const videoOut = diagnostics?.outboundTracks.find((track) => track.kind === 'video');
+  assert.equal(audioOut?.remoteRoundTripTimeMs, 191, 'remote-inbound localId matches outbound audio');
+  assert.equal(audioOut?.remoteFractionLost, 0.025);
+  assert.equal(audioOut?.remoteJitterMs, 6);
+  assert.equal(videoOut?.remoteRoundTripTimeMs, 215, 'remote-inbound ssrc+kind fallback matches outbound video');
+  assert.equal(videoOut?.remoteFractionLost, 0.05);
+  assert.equal(videoOut?.remoteJitterMs, 12);
+
+  const audioIn = diagnostics?.inboundTracks.find((track) => track.kind === 'audio');
+  const videoIn = diagnostics?.inboundTracks.find((track) => track.kind === 'video');
+  assert.equal(audioIn?.audioLevel, 0.31, 'inbound audio liveness is captured');
+  assert.equal(audioIn?.jitter, 0.007);
+  assert.equal(videoIn?.nackCount, 3);
+  assert.equal(videoIn?.pliCount, 1);
+
+  const missing = await collectDiagnosticsFromStats(
+    statsReportOf(
+      { id: 'pair-min', type: 'candidate-pair', nominated: true, state: 'succeeded' },
+      { id: 'out-min', type: 'outbound-rtp', kind: 'audio', mid: '0', ssrc: 333 },
+      { id: 'in-min', type: 'inbound-rtp', kind: 'audio', mid: '1' },
+    ),
+  );
+  assert.equal(missing.getStatsCalls, 1, 'missing-stat path still uses one getStats call');
+  assert.equal(missing.diagnostics?.selectedCandidatePair?.availableOutgoingBitrate, null);
+  assert.equal(missing.diagnostics?.outboundTracks[0]?.remoteFractionLost, null);
+  assert.equal(missing.diagnostics?.inboundTracks[0]?.audioLevel, null);
+  assert.equal(missing.diagnostics?.inboundTracks[0]?.jitter, null);
 }
 
 // selectNewRemoteTracks — partial subscribe covers added audio/video/screen and skips existing names

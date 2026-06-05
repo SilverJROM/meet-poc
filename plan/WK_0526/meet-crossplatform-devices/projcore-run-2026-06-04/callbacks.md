@@ -78,3 +78,5 @@
 [projcore callback] batch-fix4 PROPOSED refetch ICE config only when prior resolution was relay-unavailable/STUN-only before full-republish recovery; margins adequate; waiting for APPROVED-PLAN
 [projcore callback] batch-fix4 DONE implemented relay-unavailable-only ICE forceRefresh before full-republish recovery; focused specs, tsc app/spec, ng build, DEV restart, and smoke checks pass; no commit
 [projcore callback] batch-fix4 DONE addendum cleared pending recovery ICE source on closeLiveTracksForExit/destroy; sfu-client spec, tsc app/spec, ng build, and DEV restart pass; no commit
+[projcore callback] batch-fix5 PROPOSED add single-getStats international metrics capture plus owner-only diagnostics network-path readout; skip geo; backend raw payload confirmed; waiting for APPROVED-PLAN
+[projcore callback] batch-fix5 DONE added single-getStats intl stats capture and owner diagnostics network-path readout; focused specs/backend round-trip, tsc app/spec, ng build, DEV restart, and smoke checks pass; no commit

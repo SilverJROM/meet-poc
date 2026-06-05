@@ -157,6 +157,45 @@ p,
   font-size: 13px;
 }
 
+.network-path-block {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--page-bg);
+  padding: 12px;
+}
+
+.network-path-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.network-path-grid.compact {
+  grid-template-columns: repeat(5, minmax(140px, 1fr));
+  margin-top: 6px;
+}
+
+.network-path-grid > div,
+.network-path-grid > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.network-path-grid > div {
+  display: grid;
+  gap: 4px;
+}
+
+.network-path-grid strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
 .remote-audio-health {
   display: grid;
   gap: 8px;
@@ -278,7 +317,9 @@ p,
   .diagnostics-layout,
   .latest-grid,
   .peer-row,
-  .remote-audio-row {
+  .remote-audio-row,
+  .network-path-grid,
+  .network-path-grid.compact {
     grid-template-columns: 1fr;
   }
 

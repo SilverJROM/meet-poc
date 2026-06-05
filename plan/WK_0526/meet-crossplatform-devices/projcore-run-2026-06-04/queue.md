@@ -37,6 +37,6 @@
 - [DONE] FIX1: REC1-iOS recorder ctx resume + REC2 source-churn guard — 1c07bc3, 3-agent SOLID
 - [DONE] HANDBACK1: HANDBACK.md written; zero goal-blocking; real-device list + listen-only decision surfaced; DEV green+deployed
 - [DONE] FIX4: international relay re-fetch on transport recovery + margins verified + teardown hygiene — 3-agent validated PASS
-- [PROCESSING] FIX5: international call diagnostics — capture+surface egress IP, send-side loss, audio-liveness, RTT intl-hint (owner-only)
+- [DONE] FIX5: international call diagnostics — egress IP, loss, audio-liveness, RTT intl-hint (owner-only, validated PASS)
 
 Notes: per-batch JIT req/plan->agree->implement->validate (verifier!=fixer; 3-agent on SFU/transport/leak/recorder). ARCH-0 first; every P0 routed through it. Build roster = opus + codex 5.5. Handback gate: ZERO goal-blocking.

@@ -22,6 +22,57 @@ import {
   RemoteAudioHealth,
 } from '../../services/remote-audio-health';
 
+export type NetworkPathRow = {
+  label: string;
+  value: string;
+};
+
+export function rttPathHint(rttMs: number | null | undefined): string {
+  if (rttMs === null || rttMs === undefined) return 'RTT n/a';
+  if (rttMs < 80) return 'local edge';
+  if (rttMs >= 150) return 'long-haul intl';
+  return 'regional';
+}
+
+export function formatNetworkPathRows(diag: SfuDiagnosticsSnapshot | null | undefined): NetworkPathRow[] {
+  const pair = diag?.selectedCandidatePair ?? null;
+  const quality = diag?.connectionQuality ?? null;
+  const concealedSamples = sumNumbers((diag?.inboundTracks ?? []).map((track) => track.concealedSamples));
+  const bytesUp = pair?.bytesSent ?? sumNumbers((diag?.outboundTracks ?? []).map((track) => track.bytesSent));
+  const bytesDown = pair?.bytesReceived ?? sumNumbers((diag?.inboundTracks ?? []).map((track) => track.bytesReceived));
+  const remoteFractionLost = maxNumber((diag?.outboundTracks ?? []).map((track) => track.remoteFractionLost));
+  const remoteRttMs = maxNumber((diag?.outboundTracks ?? []).map((track) => track.remoteRoundTripTimeMs));
+  const remoteJitterMs = maxNumber((diag?.outboundTracks ?? []).map((track) => track.remoteJitterMs));
+  const inboundAudioLevel = maxNumber((diag?.inboundTracks ?? []).filter((track) => track.kind === 'audio').map((track) => track.audioLevel));
+  const micLevel = diag?.outboundAudioSource?.audioLevel ?? null;
+  const micEnergy = diag?.outboundAudioSource?.totalAudioEnergy ?? null;
+
+  return [
+    { label: 'Egress IP', value: endpointLabel(pair?.local ?? null) },
+    { label: 'CF edge IP', value: endpointLabel(pair?.remote ?? null) },
+    { label: 'RTT', value: `${msLabel(diag?.rttMs ?? null)} · ${rttPathHint(diag?.rttMs)}` },
+    {
+      label: 'Band / route / relay',
+      value: `${quality?.band ?? 'n/a'} · ${quality?.route ?? 'n/a'} · TURN ${quality?.relayUsed === true ? 'yes' : quality?.relayUsed === false ? 'no' : 'n/a'}`,
+    },
+    {
+      label: 'Loss / jitter',
+      value: `loss ${pctLabel(quality?.packetLossPct ?? null)} · send loss ${fractionPctLabel(remoteFractionLost)} · jitter ${msLabel(quality?.jitterMs ?? null)} · remote jitter ${msLabel(remoteJitterMs)}`,
+    },
+    { label: 'Concealment', value: concealedSamples === null ? 'concealed n/a' : `concealed ${concealedSamples}` },
+    {
+      label: 'Bandwidth',
+      value: `up ${kbpsFromBpsLabel(pair?.availableOutgoingBitrate ?? null)} · down ${kbpsFromBpsLabel(pair?.availableIncomingBitrate ?? null)}`,
+    },
+    { label: 'Bytes', value: `up ${bytesLabel(bytesUp)} · down ${bytesLabel(bytesDown)}` },
+    { label: 'Far-end uplink RTT', value: msLabel(remoteRttMs) },
+    {
+      label: 'Audio liveness',
+      value: `mic level ${decimalLabel(micLevel, 3)} · mic energy ${decimalLabel(micEnergy, 6)} · inbound level ${decimalLabel(inboundAudioLevel, 3)}`,
+    },
+  ];
+}
+
 @Component({
   selector: 'app-diagnostics-page',
   standalone: true,
@@ -312,6 +363,10 @@ export class DiagnosticsPage {
     return `${client} · ${latency}`;
   }
 
+  internationalNetworkRows(diag: SfuDiagnosticsSnapshot | null | undefined): NetworkPathRow[] {
+    return formatNetworkPathRows(diag);
+  }
+
   // --- R7: per-remote-publisher inbound AUDIO health ---
 
   // Map publisherClientId -> latest participant name from the diagnostics
@@ -399,4 +454,56 @@ export class DiagnosticsPage {
     if (value === false) return 'off';
     return 'n/a';
   }
+}
+
+function endpointLabel(candidate: { address?: string | null; port?: number | null; candidateType?: string | null; protocol?: string | null } | null): string {
+  if (!candidate?.address) return 'n/a';
+  const port = candidate.port === null || candidate.port === undefined ? '' : `:${candidate.port}`;
+  const candidateType = candidate.candidateType ?? 'type n/a';
+  const protocol = candidate.protocol ?? 'protocol n/a';
+  return `${candidate.address}${port} · ${candidateType}/${protocol}`;
+}
+
+function msLabel(value: number | null | undefined): string {
+  return value === null || value === undefined ? 'n/a' : `${Math.round(value)}ms`;
+}
+
+function pctLabel(value: number | null | undefined): string {
+  return value === null || value === undefined ? 'n/a' : `${value.toFixed(1)}%`;
+}
+
+function fractionPctLabel(value: number | null | undefined): string {
+  return value === null || value === undefined ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+}
+
+function kbpsFromBpsLabel(value: number | null | undefined): string {
+  return value === null || value === undefined ? 'n/a' : `${Math.round(value / 1000)} kbps`;
+}
+
+function bytesLabel(value: number | null | undefined): string {
+  return value === null || value === undefined ? 'n/a' : `${Math.round(value).toLocaleString()} B`;
+}
+
+function decimalLabel(value: number | null | undefined, digits: number): string {
+  return value === null || value === undefined ? 'n/a' : value.toFixed(digits);
+}
+
+function sumNumbers(values: Array<number | null | undefined>): number | null {
+  let total = 0;
+  let found = false;
+  for (const value of values) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    total += value;
+    found = true;
+  }
+  return found ? total : null;
+}
+
+function maxNumber(values: Array<number | null | undefined>): number | null {
+  let max: number | null = null;
+  for (const value of values) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    max = max === null ? value : Math.max(max, value);
+  }
+  return max;
 }

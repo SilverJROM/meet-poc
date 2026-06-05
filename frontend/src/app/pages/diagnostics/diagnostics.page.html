@@ -95,6 +95,20 @@
               </div>
             </div>
 
+            @if (sfuDiag(latest); as sfu) {
+              <div class="network-path-block" aria-label="International network path latest">
+                <span class="label">International / Network path</span>
+                <div class="network-path-grid">
+                  @for (row of internationalNetworkRows(sfu); track row.label) {
+                    <div>
+                      <span class="label">{{ row.label }}</span>
+                      <strong>{{ row.value }}</strong>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
             @if (remoteAudioRows(latest).length) {
               <div class="remote-audio-health" aria-label="Remote audio health">
                 <span class="label">Remote audio health</span>
@@ -150,6 +164,12 @@
                   <div class="sfu-diag-section">
                     <span class="label">SFU transport</span>
                     <span>{{ sfuTransportSummary(sfu) }}</span>
+                    <span class="label">International / Network path</span>
+                    <div class="network-path-grid compact">
+                      @for (row of internationalNetworkRows(sfu); track row.label) {
+                        <span><strong>{{ row.label }}</strong> {{ row.value }}</span>
+                      }
+                    </div>
                     @if (sfu.outboundTracks.length) {
                       <span class="label">Publish (outbound)</span>
                       @for (track of sfu.outboundTracks; track track.trackName) {

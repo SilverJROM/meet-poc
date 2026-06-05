@@ -672,6 +672,12 @@ export class SfuClientService {
           remote: remoteCand
             ? { id: remoteCand.id ?? null, candidateType: remoteCand.candidateType ?? null, protocol: remoteCand.protocol ?? null, address: remoteCand.address ?? null, port: remoteCand.port ?? null }
             : null,
+          availableOutgoingBitrate: numberOrNull(stat.availableOutgoingBitrate),
+          availableIncomingBitrate: numberOrNull(stat.availableIncomingBitrate),
+          currentRoundTripTime: numberOrNull(stat.currentRoundTripTime),
+          totalRoundTripTime: numberOrNull(stat.totalRoundTripTime),
+          bytesSent: numberOrNull(stat.bytesSent),
+          bytesReceived: numberOrNull(stat.bytesReceived),
         };
         break;
       }
@@ -680,20 +686,43 @@ export class SfuClientService {
     // --- Outbound (publish) per track ---
     const outboundTracks: SfuOutboundTrackStats[] = [];
     const localTracksByMid = new Map(publishState.tracks.map((t) => [t.mid, t]));
+    const outboundTrackIndexById = new Map<string, number>();
+    const outboundTrackIndexBySsrcKind = new Map<string, number>();
 
     for (const stat of stats.values()) {
       if (stat.type !== 'outbound-rtp') continue;
       const publishTrack = stat.mid ? localTracksByMid.get(stat.mid) : null;
-      outboundTracks.push({
+      const track: SfuOutboundTrackStats = {
         trackName: publishTrack?.trackName ?? `${stat.kind ?? 'unknown'}:${stat.rid ?? stat.ssrc ?? '?'}`,
         kind: publishTrack?.kind ?? stat.kind ?? 'unknown',
         rid: stat.rid ?? null,
-        bytesSent: stat.bytesSent ?? null,
-        packetsSent: stat.packetsSent ?? null,
-        framesEncoded: stat.framesEncoded ?? null,
-        framesSent: stat.framesSent ?? null,
+        bytesSent: numberOrNull(stat.bytesSent),
+        packetsSent: numberOrNull(stat.packetsSent),
+        framesEncoded: numberOrNull(stat.framesEncoded),
+        framesSent: numberOrNull(stat.framesSent),
         qualityLimitationReason: stat.qualityLimitationReason ?? null,
-      });
+        remoteRoundTripTimeMs: null,
+        remoteFractionLost: null,
+        remoteJitterMs: null,
+      };
+      const index = outboundTracks.push(track) - 1;
+      if (typeof stat.id === 'string') outboundTrackIndexById.set(stat.id, index);
+      const ssrcKey = ssrcKindKey(stat.ssrc, stat.kind);
+      if (ssrcKey) outboundTrackIndexBySsrcKind.set(ssrcKey, index);
+    }
+
+    for (const stat of stats.values()) {
+      if (stat.type !== 'remote-inbound-rtp') continue;
+      const localIdIndex = typeof stat.localId === 'string' ? outboundTrackIndexById.get(stat.localId) : undefined;
+      const ssrcIndex = outboundTrackIndexBySsrcKind.get(ssrcKindKey(stat.ssrc, stat.kind) ?? '');
+      const index = localIdIndex ?? ssrcIndex;
+      if (index === undefined) continue;
+      outboundTracks[index] = {
+        ...outboundTracks[index],
+        remoteRoundTripTimeMs: secondsToMsOrNull(stat.roundTripTime),
+        remoteFractionLost: numberOrNull(stat.fractionLost),
+        remoteJitterMs: secondsToMsOrNull(stat.jitter),
+      };
     }
 
     // --- Inbound (subscribe) per remote track ---
@@ -709,14 +738,18 @@ export class SfuClientService {
         trackName: entry.trackName,
         kind: entry.kind,
         rid: stat.rid ?? null,
-        bytesReceived: stat.bytesReceived ?? null,
-        packetsReceived: stat.packetsReceived ?? null,
-        packetsLost: stat.packetsLost ?? null,
-        framesDecoded: stat.framesDecoded ?? null,
-        framesReceived: stat.framesReceived ?? null,
-        jitterBufferDelay: stat.jitterBufferDelay ?? null,
-        jitterBufferEmittedCount: stat.jitterBufferEmittedCount ?? null,
-        concealedSamples: stat.concealedSamples ?? null,
+        bytesReceived: numberOrNull(stat.bytesReceived),
+        packetsReceived: numberOrNull(stat.packetsReceived),
+        packetsLost: numberOrNull(stat.packetsLost),
+        framesDecoded: numberOrNull(stat.framesDecoded),
+        framesReceived: numberOrNull(stat.framesReceived),
+        jitterBufferDelay: numberOrNull(stat.jitterBufferDelay),
+        jitterBufferEmittedCount: numberOrNull(stat.jitterBufferEmittedCount),
+        concealedSamples: numberOrNull(stat.concealedSamples),
+        audioLevel: numberOrNull(stat.audioLevel),
+        jitter: numberOrNull(stat.jitter),
+        nackCount: numberOrNull(stat.nackCount),
+        pliCount: numberOrNull(stat.pliCount),
       });
     }
 
@@ -1749,6 +1782,21 @@ async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): P
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function secondsToMsOrNull(value: unknown): number | null {
+  const seconds = numberOrNull(value);
+  return seconds === null ? null : Math.round(seconds * 1000);
+}
+
+function ssrcKindKey(ssrc: unknown, kind: unknown): string | null {
+  if (ssrc === null || ssrc === undefined) return null;
+  if (typeof kind !== 'string' || !kind) return null;
+  return `${String(ssrc)}:${kind}`;
 }
 
 function applyAdaptiveCameraRidCap(baseRid: SfuCameraRid, cap: AdaptiveCameraRidCap): SfuCameraRid {
