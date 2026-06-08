@@ -1,0 +1,439 @@
+{
+  "generatedAt": "2026-06-08T10:13:31.391Z",
+  "source": "Generated once from data/meet-poc.sqlite meeting_session_diagnostics payload_json; replay specs do not read the DB.",
+  "t2Deferred": [
+    "R1 setSinkId-before-play first-frame acoustic proof",
+    "R4 autoplay no-gesture real browser",
+    "R5 Android/page backgrounding",
+    "R6 MediaRecorder background frame-gap",
+    "R13 simulcast/RID fallback"
+  ],
+  "historical": {
+    "H1": {
+      "sessionPrefix": "11ee886f",
+      "signature": "inbound-audio-recv-no-audioLevel/energy",
+      "frames": [
+        {
+          "createdAt": 1780878330329,
+          "publisherClientId": "0066d017c1c3b02c",
+          "trackName": "5429774b-db98-4004-8135-795329f4eec4:1780878329496:audio:dd2486e7-03a6-4e6f-8a40-78cade05330d",
+          "bytesReceived": 2762,
+          "packetsReceived": 38,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 0,
+          "concealedSamples": 0,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1780878337871,
+          "publisherClientId": "0066d017c1c3b02c",
+          "trackName": "5429774b-db98-4004-8135-795329f4eec4:1780878329496:audio:dd2486e7-03a6-4e6f-8a40-78cade05330d",
+          "bytesReceived": 24746,
+          "packetsReceived": 414,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 0,
+          "concealedSamples": 0,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1780878345349,
+          "publisherClientId": "0066d017c1c3b02c",
+          "trackName": "5429774b-db98-4004-8135-795329f4eec4:1780878329496:audio:dd2486e7-03a6-4e6f-8a40-78cade05330d",
+          "bytesReceived": 45793,
+          "packetsReceived": 788,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 0,
+          "concealedSamples": 0,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1780878352854,
+          "publisherClientId": "0066d017c1c3b02c",
+          "trackName": "5429774b-db98-4004-8135-795329f4eec4:1780878329496:audio:dd2486e7-03a6-4e6f-8a40-78cade05330d",
+          "bytesReceived": 62910,
+          "packetsReceived": 1162,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 0,
+          "concealedSamples": 0,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        }
+      ]
+    },
+    "H2": {
+      "sessionPrefix": "2579eb8f",
+      "signature": "inbound-audio-high-concealment",
+      "frames": [
+        {
+          "createdAt": 1779976838785,
+          "publisherClientId": "8fbc8e975c9ebbb1",
+          "trackName": "4fbc4612-806e-40db-9c44-e7b6050a3478:1779976832918:audio:f83d5c9a-1c5b-41e9-9938-05b2634af126",
+          "bytesReceived": 6908,
+          "packetsReceived": 89,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 85440,
+          "concealedSamples": 0,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1779976843143,
+          "publisherClientId": "8fbc8e975c9ebbb1",
+          "trackName": "4fbc4612-806e-40db-9c44-e7b6050a3478:1779976832918:audio:f83d5c9a-1c5b-41e9-9938-05b2634af126",
+          "bytesReceived": 6908,
+          "packetsReceived": 89,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 85440,
+          "concealedSamples": 208934,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1779976850643,
+          "publisherClientId": "8fbc8e975c9ebbb1",
+          "trackName": "4fbc4612-806e-40db-9c44-e7b6050a3478:1779976832918:audio:f83d5c9a-1c5b-41e9-9938-05b2634af126",
+          "bytesReceived": 6908,
+          "packetsReceived": 89,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 85440,
+          "concealedSamples": 568934,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        }
+      ]
+    },
+    "H3": {
+      "sessionPrefix": "2b124519",
+      "signature": "inbound-audio-packet-loss",
+      "frames": [
+        {
+          "createdAt": 1779953221861,
+          "publisherClientId": "a5b3f17ac6d90e4f",
+          "trackName": "c75cf0f7-bddf-4014-8bdd-7e7dbdfe6f52:1779953215606:audio:5af745a0-4be7-4c9a-b9c1-4846b43b7079",
+          "bytesReceived": 11167,
+          "packetsReceived": 226,
+          "packetsLost": 3,
+          "jitterBufferEmittedCount": 0,
+          "concealedSamples": 0,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1779953224297,
+          "publisherClientId": "a5b3f17ac6d90e4f",
+          "trackName": "c75cf0f7-bddf-4014-8bdd-7e7dbdfe6f52:1779953215606:audio:5af745a0-4be7-4c9a-b9c1-4846b43b7079",
+          "bytesReceived": 17437,
+          "packetsReceived": 348,
+          "packetsLost": 3,
+          "jitterBufferEmittedCount": 0,
+          "concealedSamples": 0,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1779953231797,
+          "publisherClientId": "a5b3f17ac6d90e4f",
+          "trackName": "c75cf0f7-bddf-4014-8bdd-7e7dbdfe6f52:1779953215606:audio:5af745a0-4be7-4c9a-b9c1-4846b43b7079",
+          "bytesReceived": 43828,
+          "packetsReceived": 722,
+          "packetsLost": 4,
+          "jitterBufferEmittedCount": 0,
+          "concealedSamples": 0,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1779953239297,
+          "publisherClientId": "a5b3f17ac6d90e4f",
+          "trackName": "c75cf0f7-bddf-4014-8bdd-7e7dbdfe6f52:1779953215606:audio:5af745a0-4be7-4c9a-b9c1-4846b43b7079",
+          "bytesReceived": 69447,
+          "packetsReceived": 1093,
+          "packetsLost": 8,
+          "jitterBufferEmittedCount": 0,
+          "concealedSamples": 0,
+          "audioLevel": null,
+          "totalAudioEnergy": null
+        }
+      ]
+    },
+    "H4": {
+      "sessionPrefix": "0794bbad",
+      "signature": "relay-path-used",
+      "frame": {
+        "createdAt": 1780003214811,
+        "connectionState": "connected",
+        "iceConnectionState": "connected",
+        "localCandidateType": "relay",
+        "remoteCandidateType": "host",
+        "rttMs": 16
+      }
+    },
+    "H5": {
+      "sessionPrefix": "01ec650a",
+      "signature": "subscribe-stuck-no-firstframe",
+      "observedAt": 1780573997882,
+      "ageMs": 116567,
+      "latency": {
+        "publisherClientId": "9fde4769dc787b7e",
+        "initiatedAtMs": 1780573881315,
+        "firstFrameAtMs": null,
+        "latencyMs": null
+      }
+    },
+    "H6": {
+      "sessionPrefix": "35f6324a",
+      "signature": "ws-reconnect/disconnect",
+      "wsHealth": {
+        "status": "connected",
+        "disconnectCount": 2,
+        "reconnectAttempts": 2,
+        "cycles": 2
+      },
+      "observedAt": 1779976018785
+    },
+    "H7": {
+      "sessionPrefix": "11ee886f",
+      "signature": "one-inbound-audio-at-a-time",
+      "publishers": [
+        "0066d017c1c3b02c",
+        "4565b67c68a2cfe3"
+      ],
+      "framesByPublisher": {
+        "0066d017c1c3b02c": [
+          {
+            "createdAt": 1780878330329,
+            "publisherClientId": "0066d017c1c3b02c",
+            "trackName": "5429774b-db98-4004-8135-795329f4eec4:1780878329496:audio:dd2486e7-03a6-4e6f-8a40-78cade05330d",
+            "bytesReceived": 2762,
+            "packetsReceived": 38,
+            "packetsLost": 0,
+            "jitterBufferEmittedCount": 0,
+            "concealedSamples": 0,
+            "audioLevel": null,
+            "totalAudioEnergy": null
+          },
+          {
+            "createdAt": 1780878337871,
+            "publisherClientId": "0066d017c1c3b02c",
+            "trackName": "5429774b-db98-4004-8135-795329f4eec4:1780878329496:audio:dd2486e7-03a6-4e6f-8a40-78cade05330d",
+            "bytesReceived": 24746,
+            "packetsReceived": 414,
+            "packetsLost": 0,
+            "jitterBufferEmittedCount": 0,
+            "concealedSamples": 0,
+            "audioLevel": null,
+            "totalAudioEnergy": null
+          },
+          {
+            "createdAt": 1780878345349,
+            "publisherClientId": "0066d017c1c3b02c",
+            "trackName": "5429774b-db98-4004-8135-795329f4eec4:1780878329496:audio:dd2486e7-03a6-4e6f-8a40-78cade05330d",
+            "bytesReceived": 45793,
+            "packetsReceived": 788,
+            "packetsLost": 0,
+            "jitterBufferEmittedCount": 0,
+            "concealedSamples": 0,
+            "audioLevel": null,
+            "totalAudioEnergy": null
+          },
+          {
+            "createdAt": 1780878352854,
+            "publisherClientId": "0066d017c1c3b02c",
+            "trackName": "5429774b-db98-4004-8135-795329f4eec4:1780878329496:audio:dd2486e7-03a6-4e6f-8a40-78cade05330d",
+            "bytesReceived": 62910,
+            "packetsReceived": 1162,
+            "packetsLost": 0,
+            "jitterBufferEmittedCount": 0,
+            "concealedSamples": 0,
+            "audioLevel": null,
+            "totalAudioEnergy": null
+          }
+        ],
+        "4565b67c68a2cfe3": [
+          {
+            "createdAt": 1780878416133,
+            "publisherClientId": "4565b67c68a2cfe3",
+            "trackName": "5bd47c7c-c2fe-4be5-9812-d99852c25f26:1780878411299:audio:09e814ba-a84b-44a2-870e-3fae102867ca",
+            "bytesReceived": 831,
+            "packetsReceived": 9,
+            "packetsLost": 0,
+            "jitterBufferEmittedCount": 0,
+            "concealedSamples": 0,
+            "audioLevel": null,
+            "totalAudioEnergy": null
+          },
+          {
+            "createdAt": 1780878420462,
+            "publisherClientId": "4565b67c68a2cfe3",
+            "trackName": "5bd47c7c-c2fe-4be5-9812-d99852c25f26:1780878411299:audio:09e814ba-a84b-44a2-870e-3fae102867ca",
+            "bytesReceived": 11106,
+            "packetsReceived": 223,
+            "packetsLost": 0,
+            "jitterBufferEmittedCount": 0,
+            "concealedSamples": 0,
+            "audioLevel": null,
+            "totalAudioEnergy": null
+          },
+          {
+            "createdAt": 1780878423683,
+            "publisherClientId": "4565b67c68a2cfe3",
+            "trackName": "5bd47c7c-c2fe-4be5-9812-d99852c25f26:1780878411299:audio:09e814ba-a84b-44a2-870e-3fae102867ca",
+            "bytesReceived": 16938,
+            "packetsReceived": 385,
+            "packetsLost": 0,
+            "jitterBufferEmittedCount": 0,
+            "concealedSamples": 0,
+            "audioLevel": null,
+            "totalAudioEnergy": null
+          },
+          {
+            "createdAt": 1780878427118,
+            "publisherClientId": "4565b67c68a2cfe3",
+            "trackName": "5bd47c7c-c2fe-4be5-9812-d99852c25f26:1780878411299:audio:09e814ba-a84b-44a2-870e-3fae102867ca",
+            "bytesReceived": 21834,
+            "packetsReceived": 521,
+            "packetsLost": 0,
+            "jitterBufferEmittedCount": 0,
+            "concealedSamples": 0,
+            "audioLevel": null,
+            "totalAudioEnergy": null
+          }
+        ]
+      }
+    },
+    "H8": {
+      "sessionPrefix": "11ee886f",
+      "signature": "high-RTT-intl>=150ms",
+      "frame": {
+        "createdAt": 1780878307961,
+        "lastHeartbeatRttMs": 152,
+        "connectionState": "connected",
+        "iceConnectionState": "connected"
+      }
+    },
+    "H9": {
+      "sessionPrefix": "01ec650a",
+      "signature": "outbound-audio-0bytes",
+      "frames": [
+        {
+          "createdAt": 1780573882711,
+          "bytesSent": 0,
+          "packetsSent": 0,
+          "outboundAudioLevel": 0.002410962248603778,
+          "outboundAudioEnergy": 0.0005311238553392341,
+          "micSilent": true,
+          "connectionState": "connecting",
+          "iceConnectionState": "checking"
+        },
+        {
+          "createdAt": 1780573887105,
+          "bytesSent": 0,
+          "packetsSent": 0,
+          "outboundAudioLevel": 0.001892147587511826,
+          "outboundAudioEnergy": 0.0010240675716365769,
+          "micSilent": true,
+          "connectionState": "connecting",
+          "iceConnectionState": "checking"
+        },
+        {
+          "createdAt": 1780573887354,
+          "bytesSent": 0,
+          "packetsSent": 0,
+          "outboundAudioLevel": 0.0016174810022278512,
+          "outboundAudioEnergy": 0.0010248493622084657,
+          "micSilent": true,
+          "connectionState": "connecting",
+          "iceConnectionState": "checking"
+        },
+        {
+          "createdAt": 1780573893357,
+          "bytesSent": 0,
+          "packetsSent": 0,
+          "outboundAudioLevel": 0.004089480269783624,
+          "outboundAudioEnergy": 0.13443441081709473,
+          "micSilent": true,
+          "connectionState": "connecting",
+          "iceConnectionState": "checking"
+        }
+      ]
+    },
+    "H10": {
+      "sessionPrefix": "01ec650a",
+      "signature": "pc-state failed/failed",
+      "frame": {
+        "createdAt": 1780573899119,
+        "connectionState": "failed",
+        "iceConnectionState": "failed"
+      }
+    },
+    "H11": {
+      "sessionPrefix": "0467a8c7",
+      "signature": "publish-error",
+      "frame": {
+        "createdAt": 1780053910082,
+        "connectionState": "new",
+        "iceConnectionState": "new",
+        "publishPhase": "cf-session",
+        "publishStatus": "error",
+        "publishError": "Error: POST /api/sfu/session timed out after 6000ms"
+      }
+    },
+    "H12": {
+      "sessionPrefix": "11ee886f",
+      "signature": "inbound-audio-audioLevel-0",
+      "frames": [
+        {
+          "createdAt": 1780878336996,
+          "publisherClientId": "9d5a688135762e03",
+          "trackName": "c933e511-c69f-4ef6-b9e5-a9256ed92b13:1780878277698:audio:ebc0a10f-6161-4856-b7fb-11a98801cd66",
+          "bytesReceived": 5332,
+          "packetsReceived": 77,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 71040,
+          "concealedSamples": 1929,
+          "audioLevel": 0,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1780878344496,
+          "publisherClientId": "9d5a688135762e03",
+          "trackName": "c933e511-c69f-4ef6-b9e5-a9256ed92b13:1780878277698:audio:ebc0a10f-6161-4856-b7fb-11a98801cd66",
+          "bytesReceived": 32659,
+          "packetsReceived": 452,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 431040,
+          "concealedSamples": 1929,
+          "audioLevel": 0,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1780878351996,
+          "publisherClientId": "9d5a688135762e03",
+          "trackName": "c933e511-c69f-4ef6-b9e5-a9256ed92b13:1780878277698:audio:ebc0a10f-6161-4856-b7fb-11a98801cd66",
+          "bytesReceived": 59698,
+          "packetsReceived": 827,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 790080,
+          "concealedSamples": 1929,
+          "audioLevel": 0,
+          "totalAudioEnergy": null
+        },
+        {
+          "createdAt": 1780878359495,
+          "publisherClientId": "9d5a688135762e03",
+          "trackName": "c933e511-c69f-4ef6-b9e5-a9256ed92b13:1780878277698:audio:ebc0a10f-6161-4856-b7fb-11a98801cd66",
+          "bytesReceived": 87727,
+          "packetsReceived": 1202,
+          "packetsLost": 0,
+          "jitterBufferEmittedCount": 1150080,
+          "concealedSamples": 1929,
+          "audioLevel": 0,
+          "totalAudioEnergy": null
+        }
+      ]
+    }
+  }
+}

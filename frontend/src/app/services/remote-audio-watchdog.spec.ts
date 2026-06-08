@@ -59,16 +59,42 @@ function samples(values: Array<[number, number]>, energy: 'active' | 'silent' = 
   assert.strictEqual(action, 'none', 'bytes-flat legitimate silence ⇒ none');
 }
 
-// CR-FIX-2 — silent RTP/CN can carry bytes with flat emitted count, but windowed
-// audioLevel/totalAudioEnergy at silence must suppress the recovery latch.
+// PHASE-D — null energy is unmeasurable on Chrome 113+ inbound stats and must
+// not suppress a bytes-climbing/emitted-flat stall.
 {
   const fixture = samples([
     [1_000, 10],
     [2_000, 10],
     [3_000, 10],
     [4_000, 10],
-  ], 'silent');
-  assert.strictEqual(sampleWindowHasVoiceEnergy(fixture), false, 'silent window has no real audio evidence');
+  ]).map((sample) => ({ ...sample, audioLevel: null, totalAudioEnergy: null }));
+  assert.strictEqual(sampleWindowHasVoiceEnergy(fixture), false, 'null-energy window has no direct voice-energy evidence');
+  assert.strictEqual(decideVoiceRecovery({ samples: fixture, attemptsThisWindow: 0, mutedAll: false }), 'resume');
+}
+
+// PHASE-D — audioLevel=0 with null totalAudioEnergy is also unmeasurable for
+// the stall decision; bytes up + emitted flat remains actionable.
+{
+  const fixture = samples([
+    [1_000, 10],
+    [2_000, 10],
+    [3_000, 10],
+    [4_000, 10],
+  ]).map((sample) => ({ ...sample, audioLevel: 0, totalAudioEnergy: null }));
+  assert.strictEqual(sampleWindowHasVoiceEnergy(fixture), false, 'zero-level/null-energy window has no direct voice-energy evidence');
+  assert.strictEqual(decideVoiceRecovery({ samples: fixture, attemptsThisWindow: 0, mutedAll: false }), 'resume');
+}
+
+// CR-FIX-2 — measurable finite silence can still suppress a false recovery, but
+// plain null/zero energy cannot override the bytes-climbing stall discriminator.
+{
+  const fixture: VoiceRecoverySample[] = [
+    { bytes: 1_000, emitted: 10, audioLevel: 0.0001, totalAudioEnergy: 0.5 },
+    { bytes: 2_000, emitted: 10, audioLevel: 0.0001, totalAudioEnergy: 0.5 },
+    { bytes: 3_000, emitted: 10, audioLevel: 0.0001, totalAudioEnergy: 0.5 },
+    { bytes: 4_000, emitted: 10, audioLevel: 0.0001, totalAudioEnergy: 0.5 },
+  ];
+  assert.strictEqual(sampleWindowHasVoiceEnergy(fixture), false, 'measured low-energy window has no voice energy');
   assert.strictEqual(decideVoiceRecovery({ samples: fixture, attemptsThisWindow: 0, mutedAll: false }), 'none');
 }
 

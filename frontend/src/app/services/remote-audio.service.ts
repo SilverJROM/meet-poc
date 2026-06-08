@@ -74,17 +74,9 @@ export const VOICE_RECOVERY_MIN_TOTAL_AUDIO_ENERGY_DELTA = 0.000001;
 export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRecoveryAction {
   if (input.mutedAll) return 'none';
   if (input.attemptsThisWindow >= VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW) return 'none';
-  if (input.samples.length < VOICE_RECOVERY_SAMPLE_WINDOW) return 'none';
-
-  const first = input.samples[0];
-  const last = input.samples[input.samples.length - 1];
-  if (!sampleUsable(first) || !sampleUsable(last)) return 'none';
-
-  const bytesDelta = last.bytes - first.bytes;
-  const emittedDelta = last.emitted - first.emitted;
-  if (bytesDelta <= VOICE_RECOVERY_MIN_BYTES_DELTA) return 'none';
-  if (emittedDelta > VOICE_RECOVERY_MAX_EMITTED_DELTA) return 'none';
-  if (!sampleWindowHasVoiceEnergy(input.samples)) return 'none';
+  if (!sampleWindowHasBytesArrivingEmissionStall(input.samples) && !sampleWindowHasZeroLevelNullEnergyReceiving(input.samples)) return 'none';
+  if (sampleWindowHasInvalidVoiceEnergy(input.samples)) return 'none';
+  if (sampleWindowHasMeasuredSilence(input.samples)) return 'none';
 
   if (input.attemptsThisWindow === 0) return 'resume';
   if (input.attemptsThisWindow === 1) return 'kickstart';
@@ -94,15 +86,9 @@ export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRec
 
 export function voiceRecoveryWindowExhaustedWhileStalled(input: VoiceRecoveryDecisionInput): boolean {
   if (input.mutedAll || input.attemptsThisWindow < VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW) return false;
-  if (input.samples.length < VOICE_RECOVERY_SAMPLE_WINDOW) return false;
-  const first = input.samples[0];
-  const last = input.samples[input.samples.length - 1];
-  if (!sampleUsable(first) || !sampleUsable(last)) return false;
-  return (
-    last.bytes - first.bytes > VOICE_RECOVERY_MIN_BYTES_DELTA &&
-    last.emitted - first.emitted <= VOICE_RECOVERY_MAX_EMITTED_DELTA &&
-    sampleWindowHasVoiceEnergy(input.samples)
-  );
+  if (!sampleWindowHasBytesArrivingEmissionStall(input.samples) && !sampleWindowHasZeroLevelNullEnergyReceiving(input.samples)) return false;
+  if (sampleWindowHasInvalidVoiceEnergy(input.samples)) return false;
+  return !sampleWindowHasMeasuredSilence(input.samples);
 }
 
 export function sampleWindowHasVoiceEnergy(samples: VoiceRecoverySample[]): boolean {
@@ -121,6 +107,58 @@ export function sampleWindowHasVoiceEnergy(samples: VoiceRecoverySample[]): bool
   if (highestAudioLevel > VOICE_RECOVERY_MIN_AUDIO_LEVEL) return true;
   if (finiteEnergySamples.length < 2) return false;
   return finiteEnergySamples[finiteEnergySamples.length - 1] - finiteEnergySamples[0] > VOICE_RECOVERY_MIN_TOTAL_AUDIO_ENERGY_DELTA;
+}
+
+function sampleWindowHasBytesArrivingEmissionStall(samples: VoiceRecoverySample[]): boolean {
+  if (samples.length < VOICE_RECOVERY_SAMPLE_WINDOW) return false;
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  if (!sampleUsable(first) || !sampleUsable(last)) return false;
+  return (
+    last.bytes - first.bytes > VOICE_RECOVERY_MIN_BYTES_DELTA &&
+    last.emitted - first.emitted <= VOICE_RECOVERY_MAX_EMITTED_DELTA
+  );
+}
+
+function sampleWindowHasZeroLevelNullEnergyReceiving(samples: VoiceRecoverySample[]): boolean {
+  if (samples.length < VOICE_RECOVERY_SAMPLE_WINDOW) return false;
+  const first = samples[0];
+  const last = samples[samples.length - 1];
+  if (!sampleUsable(first) || !sampleUsable(last)) return false;
+  if (last.bytes - first.bytes <= VOICE_RECOVERY_MIN_BYTES_DELTA) return false;
+  return samples.every((sample) => sample.audioLevel === 0 && sample.totalAudioEnergy === null);
+}
+
+function sampleWindowHasInvalidVoiceEnergy(samples: VoiceRecoverySample[]): boolean {
+  return samples.some((sample) => {
+    const level = sample.audioLevel;
+    if (typeof level === 'number' && (!Number.isFinite(level) || level < 0)) return true;
+    const energy = sample.totalAudioEnergy;
+    return typeof energy === 'number' && (!Number.isFinite(energy) || energy < 0);
+  });
+}
+
+function sampleWindowHasMeasuredSilence(samples: VoiceRecoverySample[]): boolean {
+  const finitePositiveLevels: number[] = [];
+  const finitePositiveEnergySamples: number[] = [];
+  for (const sample of samples) {
+    const level = sample.audioLevel;
+    if (typeof level === 'number' && Number.isFinite(level) && level > 0) {
+      finitePositiveLevels.push(level);
+    }
+    const energy = sample.totalAudioEnergy;
+    if (typeof energy === 'number' && Number.isFinite(energy) && energy > 0) {
+      finitePositiveEnergySamples.push(energy);
+    }
+  }
+  const hasMeasuredLowLevel =
+    finitePositiveLevels.length === samples.length &&
+    finitePositiveLevels.every((level) => level <= VOICE_RECOVERY_MIN_AUDIO_LEVEL);
+  if (!hasMeasuredLowLevel || finitePositiveEnergySamples.length < 2) return false;
+  return (
+    finitePositiveEnergySamples[finitePositiveEnergySamples.length - 1] - finitePositiveEnergySamples[0] <=
+    VOICE_RECOVERY_MIN_TOTAL_AUDIO_ENERGY_DELTA
+  );
 }
 
 export type ApplySinkIdOptions = {

@@ -20,16 +20,28 @@ function track(over: Partial<RemoteAudioInboundStats>): RemoteAudioInboundStats 
   };
 }
 
-// RAH-1 — silent: high concealment ratio (0.7) classifies 'silent'
+// RAH-1 — emitting audio remains ok even with high concealment; ratio is diagnostic.
 {
   const result = classifyRemoteAudioHealth(
     track({ concealedSamples: 70000, jitterBufferEmittedCount: 30000 }),
   );
-  assert.strictEqual(result, 'silent', 'RAH-1: ratio 0.7, total 100000 ⇒ silent');
+  assert.strictEqual(result, 'ok', 'RAH-1: positive emitted count ⇒ ok despite ratio 0.7');
   assert.strictEqual(
     concealmentRatio(track({ concealedSamples: 70000, jitterBufferEmittedCount: 30000 })),
     0.7,
     'RAH-1: concealmentRatio = 0.7',
+  );
+}
+
+// PHASE-D-H2 — high concealment with positive emitted count is degraded but emitting, not silent/broken.
+{
+  const result = classifyRemoteAudioHealth(
+    track({ concealedSamples: 568934, jitterBufferEmittedCount: 85440 }),
+  );
+  assert.strictEqual(result, 'ok', 'PHASE-D-H2: high concealment plus positive emitted count ⇒ ok');
+  assert.ok(
+    (concealmentRatio(track({ concealedSamples: 568934, jitterBufferEmittedCount: 85440 })) ?? 0) > 0.5,
+    'PHASE-D-H2: concealment ratio remains available as diagnostic data',
   );
 }
 
@@ -91,7 +103,7 @@ function track(over: Partial<RemoteAudioInboundStats>): RemoteAudioInboundStats 
 
 // RAH-7 — hardener: silent + sourceMicSilent===true ⇒ 'silent' AND "silent at source" label [D2]
 {
-  const silentFixture = track({ concealedSamples: 70000, jitterBufferEmittedCount: 30000 });
+  const silentFixture = track({ concealedSamples: 70000, jitterBufferEmittedCount: 0 });
   const verdict = classifyRemoteAudioHealth(silentFixture, true);
   assert.strictEqual(verdict, 'silent', 'RAH-7: verdict stays silent (hardener does not change it)');
   const label = remoteAudioBadgeLabel(verdict, true);
@@ -113,12 +125,12 @@ function track(over: Partial<RemoteAudioInboundStats>): RemoteAudioInboundStats 
   assert.strictEqual(label, '', 'RAH-8: ok verdict ⇒ no badge label');
 }
 
-// RAH-9 — boundary: ratio exactly at the 0.5 threshold ⇒ 'silent' (>= inclusive) + constants
+// RAH-9 — positive emitted count wins over high/boundary concealment; constants remain stable.
 {
   const atBoundary = classifyRemoteAudioHealth(
     track({ concealedSamples: 50000, jitterBufferEmittedCount: 50000 }),
   );
-  assert.strictEqual(atBoundary, 'silent', 'RAH-9: ratio exactly 0.5 ⇒ silent (inclusive >=)');
+  assert.strictEqual(atBoundary, 'ok', 'RAH-9: positive emitted count at ratio boundary ⇒ ok');
   const justUnder = classifyRemoteAudioHealth(
     track({ concealedSamples: 49999, jitterBufferEmittedCount: 50001 }),
   );

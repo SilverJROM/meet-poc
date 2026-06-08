@@ -204,3 +204,40 @@ Verification:
 - `npm test -w backend -- session-diagnostics` = 0
 - `npm test -w backend -- admin-diagnostics-killswitch sessions-api sessions-lifecycle sessions-ttl` = 0
 - `cd frontend && npx tsc --noEmit` = 0
+
+## PHASE-C — regression telemetry replay harness
+
+Built the Phase C T1/static replay harness:
+- `frontend/src/app/services/fixtures/remote-audio-telemetry-replay.json` — static JSON fixture generated once from `data/meet-poc.sqlite`; specs do not read the DB at runtime.
+- `frontend/src/app/services/remote-audio-telemetry-replay.spec.ts` — tsx replay coverage for H1-H12 plus R2/R3/R7/R8/R9/R10/R11/R12. T2-only R1/R4/R5/R6/R13 are marked deferred in fixture metadata per the Phase C brief.
+
+Recorded real app/catalog mismatches in `plan/WK_0526/meet-crossplatform-devices/regression-coverage-2026-06-08/issues/ISSUES.md`:
+- `PHASE-C-H1-NULL-ENERGY-NO-RECOVERY`
+- `PHASE-C-H2-HIGH-CONCEALMENT-FALSE-SILENT`
+- `PHASE-C-H12-ZERO-LEVEL-NO-RECOVERY`
+
+Verification:
+- `cd frontend && npx tsc --noEmit` = 0
+- `cd frontend && npx tsx src/app/services/remote-audio-telemetry-replay.spec.ts` = 1, expected Phase C bug exposure: H1/H2/H12 fail and are recorded in `issues/ISSUES.md`
+
+## PHASE-D — remote voice watchdog replay regression fixes
+
+Fixed the three Phase C telemetry replay regressions:
+- `frontend/src/app/services/remote-audio.service.ts` now drives voice recovery from bytes arriving while emitted samples are stalled; null/zero inbound energy no longer suppresses that stall verdict.
+- The CR-fix-2 false-positive guard is preserved through the bytes discriminator: bytes-flat/DTX windows still do not recover, invalid energy is rejected, and measured finite silence can still suppress a false recovery.
+- `frontend/src/app/pages/room/room-decisions.ts` no longer clears a watchdog window solely because energy is unavailable, so valid bytes-up/emitted-flat stalls can recover or remain latched.
+- `frontend/src/app/services/remote-audio-health.ts` treats high concealment with positive `jitterBufferEmittedCount` as degraded-but-emitting (`ok`) rather than `silent`.
+
+Added/updated tests:
+- H1 null-energy bytes-climbing/emitted-flat replay now recovers.
+- H12 sustained `audioLevel=0`/null-energy receiving replay now recovers.
+- H2 high-concealment/positive-emitted replay remains diagnostic-only, not `silent`.
+- Bytes-flat/DTX, invalid-energy, measured-silence, and emitted-advanced protections remain covered.
+
+Verification:
+- `cd frontend && npx tsc --noEmit` = 0
+- `cd frontend && npx tsx src/app/services/remote-audio-telemetry-replay.spec.ts` = 0
+- `cd frontend && npx tsx src/app/services/remote-audio.service.spec.ts` = 0
+- `cd frontend && npx tsx src/app/services/remote-audio-watchdog.spec.ts` = 0
+- `cd frontend && npx tsx src/app/services/remote-audio-health.spec.ts` = 0
+- `cd frontend && npx tsx src/app/pages/room/room-decisions.spec.ts` = 0

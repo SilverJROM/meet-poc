@@ -1,6 +1,5 @@
 import {
   decideVoiceRecovery,
-  sampleWindowHasVoiceEnergy,
   voiceRecoveryWindowExhaustedWhileStalled,
   VOICE_RECOVERY_SAMPLE_WINDOW,
   type VoiceRecoverySample,
@@ -114,9 +113,6 @@ export function decideRemoteVoiceWatchdogAction(input: {
       })
     ) {
       return { kind: 'mark-stalled', nextSamples: samples, nextAttemptsThisWindow: input.attemptsThisWindow };
-    }
-    if (samples.length >= VOICE_RECOVERY_SAMPLE_WINDOW && !sampleWindowHasVoiceEnergy(samples)) {
-      return { kind: 'clear', deletePeer: false, nextSamples: [input.sample], nextAttemptsThisWindow: 0 };
     }
     return { kind: 'hold', nextSamples: samples, nextAttemptsThisWindow: input.attemptsThisWindow };
   }

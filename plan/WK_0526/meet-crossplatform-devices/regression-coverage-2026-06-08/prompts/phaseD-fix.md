@@ -1,0 +1,14 @@
+# PHASE D — Fix the 3 telemetry-replay regressions. Delicate: don't re-introduce CR-fix-2's false-positive.
+You are the IMPLEMENTER (codex). Verifier!=fixer (codex-validator + projcore). 
+## FIRST tool call = callback: printf '[projcore callback] PHASE-D STATUS: PROPOSED %s\n' "$(date -u +%FT%TZ)" >> <abs>/callbacks.md ; plan → wait APPROVED-PLAN → fix → DONE.
+## The 3 issues (../issues/ISSUES.md), all in the remote-voice watchdog / health classifier:
+1. **H1 null-energy no-recovery** + **H12 audioLevel=0 no-recovery** (root: same). The watchdog's energy-gate (`sampleWindowHasVoiceEnergy`, added CR-fix-2/4) SUPPRESSES the stall verdict when inbound `audioLevel`/`totalAudioEnergy` is null or 0. But those are null on Chrome 113+ (moved to media-playout) — i.e. the EXACT JROM-call shape (bytes climbing, emitted flat, energy null/0). So a post-play stall with null/0 energy → NO recovery/banner → silent-no-banner re-opens. 
+   FIX: the stall decision must be driven by the RELIABLE signal — **bytesReceived climbing + jitterBufferEmittedCount flat** (audio arriving but not emitted = stalled) — and treat energy as a REFINEMENT, not a hard gate. Specifically: if inbound energy is null/unmeasurable, DO NOT use it to suppress; fall to the bytes-up/emitted-flat verdict (optionally cross-check media-playout energy which we now capture). 
+   CRITICAL CONSTRAINT — do NOT re-introduce the CR-fix-2 false-positive: a LEGITIMATELY SILENT participant (bytes FLAT, or DTX) must STILL NOT trigger recovery/banner. The discriminator is BYTES: bytes-flat → not stalled (silent/DTX); bytes-climbing + emitted-flat → stalled (regardless of energy null/0). Verify the existing silent-participant + R8 opus-DTX tests STILL PASS.
+2. **H2 concealment-false-silent**: `classifyRemoteAudioHealth` can return 'silent'/broken purely from a high concealment ratio while `jitterBufferEmittedCount` is POSITIVE (audio emitting). FIX: high concealment with positive emitted = degraded-but-emitting, NOT silent/broken. Capture concealment as a diagnostic signal, don't flip the health verdict to broken when emitting.
+## ACCEPTANCE (all must hold):
+- The 3 failing replay scenarios (H1/H2/H12) now PASS.
+- The OTHER 9 historical replays (H3-H11) + R1-R13 STILL PASS.
+- The EXISTING remote-audio.service.spec + watchdog spec (CR-fix-2 non-sticky, silent-participant no-false-banner, R8 DTX) STILL PASS — no false-positive regression.
+## Constraints: minimal surgical change to the decision logic (remote-audio.service.ts watchdog/health fns + room-decisions.ts decideRemoteVoiceWatchdogAction if needed); RUN `cd frontend && npx tsc --noEmit`=0 + the telemetry-replay spec + remote-audio.service.spec + remote-audio-watchdog.spec via npx tsx (ALL green). Append PHASE-D to changes.md. NO commit.
+Reply STATUS: PROPOSED + how you keep the false-positive protection (bytes-based discriminator) while restoring null/0-energy recovery + the H2 classifier fix. Wait for APPROVED-PLAN.

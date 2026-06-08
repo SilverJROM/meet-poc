@@ -6,9 +6,8 @@
 // health verdict so a silent remote is visible at a glance instead of buried
 // in JSON.
 //
-// D1 (locked): concealmentRatio is the SOLE programmatic verdict driver.
-// bytesReceived / packetsReceived are DISPLAY corroboration only and never
-// participate in the verdict.
+// D1 (locked): concealmentRatio is diagnostic. It must not turn positive
+// jitter-buffer emission into a broken/silent verdict.
 
 export type RemoteAudioHealth = 'ok' | 'silent' | 'unknown';
 
@@ -57,6 +56,7 @@ export function classifyRemoteAudioHealth(
   const emittedTotal = concealed + emitted;
   // Below the floor (this also covers the 0+0 divide-by-zero case ⇒ 'unknown').
   if (emittedTotal < SILENT_REMOTE_MIN_EMITTED_SAMPLES) return 'unknown';
+  if (emitted > 0) return 'ok';
   const ratio = concealed / emittedTotal;
   return ratio >= SILENT_REMOTE_CONCEALMENT_RATIO ? 'silent' : 'ok';
 }
