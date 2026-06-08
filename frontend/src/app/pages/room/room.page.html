@@ -218,6 +218,12 @@
           <button type="button" [disabled]="initialPublishRetrying()" (click)="rejoinAfterInitialPublishFailure()">Rejoin</button>
         </div>
       }
+      @if (selectedSpeakerUnavailable()) {
+        <div class="device-notice" role="status">
+          <span>Selected speaker unavailable. Using system default.</span>
+          <button type="button" (click)="openInCallDeviceDialog()">Switch speaker</button>
+        </div>
+      }
       @if (remoteAudioBlocked()) {
         <div class="audio-unblock-notice" role="status">
           <span>Tap to enable audio</span>
@@ -225,9 +231,6 @@
             <button type="button" (click)="enableRemoteAudio()">Enable audio</button>
           </div>
         </div>
-      }
-      @if (remoteAudioMixerEnabled()) {
-        <audio #remoteAudioMixer class="remote-audio-mixer" data-remote-audio-mixer autoplay playsinline></audio>
       }
       @if (screenShareHelp()) {
         <div class="screen-share-help" role="alert" aria-label="Screen share permission help">
@@ -250,12 +253,10 @@
               [peer]="presenter"
               [displayStream]="shareStream()"
               [forceVideo]="true"
-              [remoteAudioEnabled]="!remoteAudioMixerEnabled()"
               [raisedHand]="raisedHands().has(presenter.id)"
               [reactions]="tileReactions(presenter.id)"
               variant="share-main"
               [speaking]="activeSpeaker.activePeerId() === presenter.id"
-              (remoteAudioBlocked)="handleRemoteAudioBlocked()"
             />
           </div>
           <aside class="share-strip" [class.collapsed]="shareStripCollapsed()" aria-label="Participants during screen share">
@@ -270,7 +271,7 @@
             @if (!shareStripCollapsed()) {
               <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
                 @for (peer of orderedStripPeers(); track peer.participantId) {
-                  <app-tile [peer]="peer" [displayStream]="peer.isLocal ? effectiveLocalStream() : null" variant="strip" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
+                  <app-tile [peer]="peer" [displayStream]="peer.isLocal ? effectiveLocalStream() : null" variant="strip" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" />
                 }
               </div>
             }
@@ -290,11 +291,9 @@
                 [peer]="peer"
                 [displayStream]="peer.isLocal ? effectiveLocalStream() : null"
                 [variant]="peer.isLocal && remoteEmphasisActive() ? 'self-pip' : 'grid'"
-                [remoteAudioEnabled]="!remoteAudioMixerEnabled()"
                 [raisedHand]="raisedHands().has(peer.id)"
                 [reactions]="tileReactions(peer.id)"
                 [speaking]="activeSpeaker.activePeerId() === peer.id"
-                (remoteAudioBlocked)="handleRemoteAudioBlocked()"
               />
             }
           </div>

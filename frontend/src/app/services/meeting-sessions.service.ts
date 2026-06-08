@@ -198,6 +198,8 @@ export type DiagnosticsPeerSample = {
   id: string;
   participantId?: string;
   name: string;
+  advertisedAudioTrackNames?: string[];
+  advertisedSubscribed?: boolean;
   isLocal: boolean;
   isHost: boolean;
   connectionState: string;
@@ -287,9 +289,16 @@ export type SfuInboundTrackStats = {
   jitterBufferEmittedCount: number | null;
   concealedSamples: number | null;
   audioLevel?: number | null;
+  totalAudioEnergy?: number | null;
   jitter?: number | null;
   nackCount?: number | null;
   pliCount?: number | null;
+};
+
+export type SfuMediaPlayoutStats = {
+  audioLevel: number | null;
+  totalAudioEnergy: number | null;
+  totalSamplesDuration: number | null;
 };
 
 export type SfuSubscribeLatency = {
@@ -340,6 +349,29 @@ export type SfuDiagnosticsSnapshot = {
   publishStatus?: 'publishing' | 'published' | 'error' | null;
   publishError?: string | null;
   outboundAudioSource?: { audioLevel: number | null; totalAudioEnergy: number | null } | null;
+  mediaPlayout?: SfuMediaPlayoutStats;
+};
+
+export type RemoteAudioPlayoutDiagnostics = {
+  selectedAudioOutputId: string | null;
+  effectiveSinkId: string | null;
+  usedFallback: boolean;
+  unlocked: boolean;
+  blockedPeerIds: string[];
+  perPublisher: {
+    publisherClientId: string;
+    trackName: string | null;
+    trackId: string | null;
+    paused: boolean;
+    muted: boolean;
+    volume: number;
+    sinkId: string | null;
+    blockedReason: 'autoplay' | 'sink-failed' | 'paused' | 'voice-stalled' | 'playback-unsupported' | null;
+    sinkApplyResult: 'selected' | 'default-fallback' | 'unsupported' | 'failed';
+    sinkApplyTimedOut: boolean;
+    srcObjectAttached: boolean;
+    readyState: string | null;
+  }[];
 };
 
 export type DiagnosticsPayload = {
@@ -348,12 +380,12 @@ export type DiagnosticsPayload = {
   roomTitle: string;
   clientId: string | null;
   participantId: string | null;
-  clientKey: string;
   clientName: string;
   createdAt: number;
   platform?: 'ios' | 'android' | 'mobile' | 'desktop';
   userAgent?: string;
   selectedAudioDeviceId?: string;
+  selectedAudioOutputId?: string;
   selectedVideoDeviceId?: string;
   lastGumError?: { name: string; message: string } | null;
   wsStatus: string;
@@ -377,7 +409,12 @@ export type DiagnosticsPayload = {
   micSilent: boolean | null;
   peers: DiagnosticsPeerSample[];
   sfuDiagnostics?: SfuDiagnosticsSnapshot;
+  remoteAudioPlayout?: RemoteAudioPlayoutDiagnostics;
   error?: string;
+};
+
+export type DiagnosticsPostPayload = DiagnosticsPayload & {
+  clientKey: string;
 };
 
 export type DiagnosticEntry = {
@@ -432,11 +469,11 @@ export class MeetingSessionsService {
     );
   }
 
-  async appendDiagnostics(sessionId: string, payload: DiagnosticsPayload): Promise<void> {
+  async appendDiagnostics(sessionId: string, payload: DiagnosticsPostPayload): Promise<void> {
     await firstValueFrom(this.http.post(`/api/meeting-sessions/${encodeURIComponent(sessionId)}/diagnostics`, payload));
   }
 
-  sendDiagnosticsBeacon(sessionId: string, payload: DiagnosticsPayload): boolean {
+  sendDiagnosticsBeacon(sessionId: string, payload: DiagnosticsPostPayload): boolean {
     if (!navigator.sendBeacon) return false;
     const body = new Blob([JSON.stringify(payload)], { type: 'application/json' });
     return navigator.sendBeacon(`/api/meeting-sessions/${encodeURIComponent(sessionId)}/diagnostics`, body);

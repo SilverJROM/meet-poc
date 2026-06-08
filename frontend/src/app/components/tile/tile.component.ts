@@ -1,4 +1,4 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, computed, effect, input, output, viewChild } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, computed, effect, input, viewChild } from '@angular/core';
 import { addIcons } from 'ionicons';
 import { micOffOutline } from 'ionicons/icons';
 import { PeerState } from '../../services/peer-state';
@@ -20,10 +20,8 @@ export class TileComponent {
   readonly variant = input<'grid' | 'strip' | 'share-main' | 'self-pip'>('grid');
   readonly displayStream = input<MediaStream | null>(null);
   readonly forceVideo = input(false);
-  readonly remoteAudioEnabled = input(true);
   readonly raisedHand = input(false);
   readonly reactions = input<TileReaction[]>([]);
-  readonly remoteAudioBlocked = output<void>();
   readonly initials = computed(() => toInitials(this.peer().name));
   readonly videoStream = computed(() => this.displayStream() ?? this.peer().stream);
   readonly showVideo = computed(() => this.forceVideo() || (!this.peer().screenOn && this.peer().camEnabled && !!this.videoStream()?.getVideoTracks()?.length));
@@ -36,7 +34,6 @@ export class TileComponent {
     return `linear-gradient(135deg, hsl(${hue}, 48%, 24%), hsl(${(hue + 34) % 360}, 42%, 34%))`;
   });
   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
-  private readonly remoteAudio = viewChild<ElementRef<HTMLAudioElement>>('remoteAudio');
 
   reactionEmoji(kind: TileReaction['kind']): string {
     if (kind === 'thumbs-up') return '👍';
@@ -52,18 +49,6 @@ export class TileComponent {
         video.muted = true;
         video.srcObject = this.videoStream();
       }
-    });
-    effect(() => {
-      const audio = this.remoteAudio()?.nativeElement;
-      const stream = this.peer().isLocal || !this.remoteAudioEnabled() ? null : this.peer().stream;
-      if (!audio) return;
-      if (audio.srcObject !== stream) audio.srcObject = stream;
-      audio.muted = false;
-      if (!stream) return;
-      void audio.play().catch((err) => {
-        console.debug('[media] remote audio autoplay blocked', err);
-        this.remoteAudioBlocked.emit();
-      });
     });
   }
 }

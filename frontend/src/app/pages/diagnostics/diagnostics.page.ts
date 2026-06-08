@@ -7,8 +7,10 @@ import {
   DiagnosticSessionSummary,
   DiagnosticsDetailResponse,
   DiagnosticsPeerSample,
+  RemoteAudioPlayoutDiagnostics,
   DiagnosticsTrackInfo,
   MeetingSessionsService,
+  SfuMediaPlayoutStats,
   SfuDiagnosticsSnapshot,
   SfuInboundTrackStats,
   SfuOutboundTrackStats,
@@ -25,6 +27,28 @@ import {
 export type NetworkPathRow = {
   label: string;
   value: string;
+};
+
+export type RemoteAudioPlayoutRow = {
+  publisherClientId: string;
+  publisherLabel: string;
+  trackId: string;
+  paused: string;
+  muted: string;
+  volume: string;
+  sink: string;
+  blockedReason: string;
+  sinkApply: string;
+  srcObject: string;
+  readyState: string;
+  audioLevel: string;
+  totalAudioEnergy: string;
+};
+
+export type CallWideMediaPlayoutRow = {
+  audioLevel: string;
+  totalAudioEnergy: string;
+  totalSamplesDuration: string;
 };
 
 export function rttPathHint(rttMs: number | null | undefined): string {
@@ -71,6 +95,61 @@ export function formatNetworkPathRows(diag: SfuDiagnosticsSnapshot | null | unde
       value: `mic level ${decimalLabel(micLevel, 3)} · mic energy ${decimalLabel(micEnergy, 6)} · inbound level ${decimalLabel(inboundAudioLevel, 3)}`,
     },
   ];
+}
+
+export function redactedAudioOutputLabel(sinkId: string | null | undefined, selectedAudioOutputId: string | null | undefined): string {
+  if (sinkId === null || sinkId === undefined) return 'sink n/a';
+  if (selectedAudioOutputId !== null && selectedAudioOutputId !== undefined && sinkId === selectedAudioOutputId) return 'selected';
+  if (sinkId === '') return 'default';
+  return `id#${shortHash(sinkId)}`;
+}
+
+export function redactedEffectiveAudioOutputLabel(playout: RemoteAudioPlayoutDiagnostics | null | undefined): string {
+  if (!playout) return 'sink n/a';
+  if (playout.usedFallback) return 'default fallback';
+  return redactedAudioOutputLabel(playout.effectiveSinkId, playout.selectedAudioOutputId);
+}
+
+export function buildRemoteAudioPlayoutRows(
+  playout: RemoteAudioPlayoutDiagnostics | null | undefined,
+  inboundTracks: SfuInboundTrackStats[] = [],
+  publisherName: (publisherClientId: string) => string = (publisherClientId) => publisherClientId.slice(0, 8),
+): RemoteAudioPlayoutRow[] {
+  return (playout?.perPublisher ?? []).map((publisher) => {
+    const inbound = inboundTracks.find(
+      (track) =>
+        track.kind === 'audio' &&
+        track.publisherClientId === publisher.publisherClientId &&
+        !!publisher.trackName &&
+        track.trackName === publisher.trackName,
+    ) ?? inboundTracks.find((track) => track.kind === 'audio' && track.publisherClientId === publisher.publisherClientId);
+    return {
+      publisherClientId: publisher.publisherClientId,
+      publisherLabel: publisherName(publisher.publisherClientId),
+      trackId: publisher.trackId ?? 'track n/a',
+      paused: publisher.paused ? 'paused yes' : 'paused no',
+      muted: publisher.muted ? 'muted yes' : 'muted no',
+      volume: `vol ${decimalLabel(publisher.volume, 2)}`,
+      sink: playout?.usedFallback && publisher.sinkId === ''
+        ? redactedEffectiveAudioOutputLabel(playout)
+        : redactedAudioOutputLabel(publisher.sinkId, playout?.selectedAudioOutputId ?? null),
+      blockedReason: publisher.blockedReason ?? 'not blocked',
+      sinkApply: `${publisher.sinkApplyResult}${publisher.sinkApplyTimedOut ? ' timed out' : ''}`,
+      srcObject: publisher.srcObjectAttached ? 'src attached' : 'src missing',
+      readyState: publisher.readyState ?? 'state n/a',
+      audioLevel: `level ${decimalLabel(inbound?.audioLevel, 3)}`,
+      totalAudioEnergy: `energy ${decimalLabel(inbound?.totalAudioEnergy, 6)}`,
+    };
+  });
+}
+
+export function buildCallWideMediaPlayoutRow(mediaPlayout: SfuMediaPlayoutStats | null | undefined): CallWideMediaPlayoutRow | null {
+  if (!mediaPlayout) return null;
+  return {
+    audioLevel: `level ${decimalLabel(mediaPlayout.audioLevel, 3)}`,
+    totalAudioEnergy: `energy ${decimalLabel(mediaPlayout.totalAudioEnergy, 6)}`,
+    totalSamplesDuration: `samples ${decimalLabel(mediaPlayout.totalSamplesDuration, 3)}s`,
+  };
 }
 
 @Component({
@@ -449,6 +528,18 @@ export class DiagnosticsPage {
       }));
   }
 
+  remoteAudioPlayoutRows(entry: DiagnosticEntry): RemoteAudioPlayoutRow[] {
+    return buildRemoteAudioPlayoutRows(
+      entry.payload.remoteAudioPlayout ?? null,
+      entry.payload.sfuDiagnostics?.inboundTracks ?? [],
+      (publisherClientId) => this.publisherName(publisherClientId),
+    );
+  }
+
+  callWideMediaPlayoutRow(entry: DiagnosticEntry): CallWideMediaPlayoutRow | null {
+    return buildCallWideMediaPlayoutRow(entry.payload.sfuDiagnostics?.mediaPlayout ?? null);
+  }
+
   private booleanSetting(value: boolean | null | undefined): string {
     if (value === true) return 'on';
     if (value === false) return 'off';
@@ -486,6 +577,15 @@ function bytesLabel(value: number | null | undefined): string {
 
 function decimalLabel(value: number | null | undefined, digits: number): string {
   return value === null || value === undefined ? 'n/a' : value.toFixed(digits);
+}
+
+function shortHash(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0').slice(0, 6);
 }
 
 function sumNumbers(values: Array<number | null | undefined>): number | null {

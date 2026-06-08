@@ -68,6 +68,17 @@ type SfuCameraRid = 'h' | 'm' | 'l';
 type AdaptiveCameraRidCap = SfuCameraRid | null;
 const ADAPTIVE_CAMERA_RID_HYSTERESIS_SAMPLES = 3;
 const CAMERA_RID_RANK: Record<SfuCameraRid, number> = { l: 0, m: 1, h: 2 };
+const LIVE_MID_CONFLICT_RENEGOTIATION_CAP = 2;
+
+class LiveMidConflictError extends Error {
+  constructor(
+    readonly mid: string,
+    readonly existing: SubscribedTrackEntry,
+    readonly incoming: SubscribedTrackEntry,
+  ) {
+    super(`[sfu] subscribe mid conflict for live publisher on mid ${mid}`);
+  }
+}
 
 @Injectable({ providedIn: 'root' })
 export class SfuClientService {
@@ -80,6 +91,7 @@ export class SfuClientService {
   readonly remotePublishers = signal<Map<string, import('./sfu-roster-utils.js').RemotePublisher>>(new Map());
   readonly remoteStreams = signal<Map<string, MediaStream>>(new Map());
   readonly remoteScreenStreams = signal<Map<string, MediaStream>>(new Map());
+  readonly remoteTrackNames = signal<Map<string, Map<string, string>>>(new Map());
   readonly subscribedTracks = signal<Map<string, SubscribedTrackEntry>>(new Map());
   readonly connectionQuality = signal<SfuConnectionQuality | null>(null);
   // Bumped on doSubscribe failure so the subscription effect re-fires for a retry
@@ -96,6 +108,7 @@ export class SfuClientService {
   private subscribedClientIds = new Set<string>();
   private midToEntry = new Map<string, SubscribedTrackEntry>();
   private pendingOntrack = new Map<string, RTCTrackEvent>();
+  private subscribeMidConflictWarnings = new Set<string>();
   private subscribeRetryAttempts = new Map<string, number>();
   private readonly SUBSCRIBE_RETRY_CAP = 7;
   private readonly SUBSCRIBE_RETRY_BASE_BACKOFF_MS = 250;
@@ -107,6 +120,8 @@ export class SfuClientService {
   private subscribeBackoffTimers = new Set<ReturnType<typeof setTimeout>>();
   private midCallSubscribeRetryAttempts = new Map<string, number>();
   private midCallSubscribeRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private liveMidConflictRetryAttempts = new Map<string, number>();
+  private liveMidConflictRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly SUBSCRIBE_STUCK_THRESHOLD_MS = 10_000;
   private previousConnectionQualityPackets: { packetsReceived: number; packetsLost: number } | null = null;
   private adaptiveCameraRidCandidate: AdaptiveCameraRidCap = null;
@@ -157,7 +172,11 @@ export class SfuClientService {
     // Mark before enqueue to prevent double-subscribe
     this.subscribedClientIds.add(publisher.clientId);
     this.armSubscribeStuckWatchdog(publisher.clientId);
-    void this.enqueue(() => this.doSubscribe(publisher)).catch(() => {
+    void this.enqueue(() => this.doSubscribe(publisher)).catch((err) => {
+      if (err instanceof LiveMidConflictError) {
+        this.scheduleLiveMidConflictRenegotiationRetry(publisher, publisher.tracks, 'initial-subscribe', err);
+        return;
+      }
       const retry = this.nextSubscribeRetry(publisher.clientId, false);
       if (!retry.shouldRetry) return;
       this.subscribedClientIds.delete(publisher.clientId);
@@ -239,6 +258,98 @@ export class SfuClientService {
     this.subscribeBackoffTimers.clear();
   }
 
+  private liveMidConflictRetryKey(
+    publisher: import('./sfu-roster-utils.js').RemotePublisher,
+    tracks: { trackName: string; kind: string }[],
+  ): string {
+    return `${publisher.clientId}\u0000${publisher.cfSessionId}\u0000${tracks.map((track) => track.trackName).sort().join('\u0001')}`;
+  }
+
+  private clearLiveMidConflictRetryKey(key: string): void {
+    const timer = this.liveMidConflictRetryTimers.get(key);
+    if (timer) clearTimeout(timer);
+    this.liveMidConflictRetryTimers.delete(key);
+    this.liveMidConflictRetryAttempts.delete(key);
+  }
+
+  private clearLiveMidConflictRetryState(clientId?: string): void {
+    const keys = new Set([...this.liveMidConflictRetryAttempts.keys(), ...this.liveMidConflictRetryTimers.keys()]);
+    for (const key of keys) {
+      if (clientId === undefined || key.startsWith(`${clientId}\u0000`)) this.clearLiveMidConflictRetryKey(key);
+    }
+  }
+
+  private scheduleLiveMidConflictRenegotiationRetry(
+    publisher: import('./sfu-roster-utils.js').RemotePublisher,
+    tracks: { trackName: string; kind: string }[],
+    source: 'initial-subscribe' | 'mid-call-subscribe',
+    err: LiveMidConflictError,
+  ): void {
+    const missingTracks = this.missingAdvertisedRemoteTracks(publisher, new Set(tracks.map((track) => track.trackName)));
+    if (!missingTracks.length) return;
+
+    const key = this.liveMidConflictRetryKey(publisher, missingTracks);
+    if (this.liveMidConflictRetryTimers.has(key)) return;
+    const nextAttempts = (this.liveMidConflictRetryAttempts.get(key) ?? 0) + 1;
+    this.liveMidConflictRetryAttempts.set(key, nextAttempts);
+    if (nextAttempts > LIVE_MID_CONFLICT_RENEGOTIATION_CAP) {
+      console.warn('[SFU] live mid conflict renegotiation retry capped without permanent-stop; awaiting fresh roster/publisher state', {
+        publisherClientId: publisher.clientId,
+        publisherCfSessionId: publisher.cfSessionId,
+        trackNames: missingTracks.map((track) => track.trackName),
+        source,
+        retryAttempts: nextAttempts - 1,
+        conflictMid: err.mid,
+      });
+      if (source === 'initial-subscribe') this.subscribedClientIds.delete(publisher.clientId);
+      return;
+    }
+
+    console.warn('[SFU] live mid conflict forcing renegotiating subscribe retry', {
+      publisherClientId: publisher.clientId,
+      publisherCfSessionId: publisher.cfSessionId,
+      trackNames: missingTracks.map((track) => track.trackName),
+      source,
+      retryAttempt: nextAttempts,
+      conflictMid: err.mid,
+      existingPublisherClientId: err.existing.publisherClientId,
+      incomingPublisherClientId: err.incoming.publisherClientId,
+    });
+
+    const timer = setTimeout(() => {
+      this.liveMidConflictRetryTimers.delete(key);
+      const current = this.remotePublishers().get(publisher.clientId);
+      if (!current || current.cfSessionId !== publisher.cfSessionId) {
+        this.clearLiveMidConflictRetryKey(key);
+        return;
+      }
+      const currentMissingTracks = this.missingAdvertisedRemoteTracks(current, new Set(missingTracks.map((track) => track.trackName)));
+      if (!currentMissingTracks.length) {
+        this.clearLiveMidConflictRetryKey(key);
+        return;
+      }
+
+      void this.enqueue(() => this.doSubscribeTracks(current, currentMissingTracks, { forceRenegotiation: true }))
+        .then(() => this.clearLiveMidConflictRetryKey(key))
+        .catch((retryErr) => {
+          if (retryErr instanceof LiveMidConflictError) {
+            this.scheduleLiveMidConflictRenegotiationRetry(current, currentMissingTracks, source, retryErr);
+            return;
+          }
+          this.clearLiveMidConflictRetryKey(key);
+          if (source === 'mid-call-subscribe') {
+            this.scheduleMidCallSubscribeRetry(current, currentMissingTracks, retryErr);
+            return;
+          }
+          const retry = this.nextSubscribeRetry(current.clientId, false);
+          if (!retry.shouldRetry) return;
+          this.subscribedClientIds.delete(current.clientId);
+          this.scheduleSubscribeRetryBackoff(retry.backoffMs);
+        });
+    }, this.SUBSCRIBE_RETRY_BASE_BACKOFF_MS);
+    this.liveMidConflictRetryTimers.set(key, timer);
+  }
+
   private midCallSubscribeRetryKey(clientId: string, cfSessionId: string, trackName: string): string {
     return `${clientId}\u0000${cfSessionId}\u0000${trackName}`;
   }
@@ -260,12 +371,14 @@ export class SfuClientService {
     for (const key of keys) {
       if (key.startsWith(prefix)) this.clearMidCallSubscribeRetryKey(key);
     }
+    this.clearLiveMidConflictRetryState(clientId);
   }
 
   private clearAllMidCallSubscribeRetryState(): void {
     for (const timer of this.midCallSubscribeRetryTimers.values()) clearTimeout(timer);
     this.midCallSubscribeRetryTimers.clear();
     this.midCallSubscribeRetryAttempts.clear();
+    this.clearLiveMidConflictRetryState();
   }
 
   replaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
@@ -423,6 +536,7 @@ export class SfuClientService {
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
     this.pendingOntrack.clear();
+    this.subscribeMidConflictWarnings.clear();
     this.subscribeRetryAttempts.clear();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
@@ -435,6 +549,7 @@ export class SfuClientService {
     this.setPublishPhase(null);
     this.remoteStreams.set(new Map());
     this.remoteScreenStreams.set(new Map());
+    this.remoteTrackNames.set(new Map());
     this.subscribedTracks.set(new Map());
     this.subscribeRetryVersion.update((v) => v + 1);
   }
@@ -747,9 +862,26 @@ export class SfuClientService {
         jitterBufferEmittedCount: numberOrNull(stat.jitterBufferEmittedCount),
         concealedSamples: numberOrNull(stat.concealedSamples),
         audioLevel: numberOrNull(stat.audioLevel),
+        totalAudioEnergy: numberOrNull(stat.totalAudioEnergy),
         jitter: numberOrNull(stat.jitter),
         nackCount: numberOrNull(stat.nackCount),
         pliCount: numberOrNull(stat.pliCount),
+      });
+    }
+
+    let mediaPlayout:
+      | {
+          audioLevel: number | null;
+          totalAudioEnergy: number | null;
+          totalSamplesDuration: number | null;
+        }
+      | undefined;
+    for (const stat of stats.values()) {
+      if (stat.type !== 'media-playout') continue;
+      mediaPlayout = mergeMediaPlayout(mediaPlayout, {
+        audioLevel: numberOrNull(stat.audioLevel),
+        totalAudioEnergy: numberOrNull(stat.totalAudioEnergy),
+        totalSamplesDuration: numberOrNull(stat.totalSamplesDuration),
       });
     }
 
@@ -778,6 +910,7 @@ export class SfuClientService {
       inboundTracks,
       subscribeLatencies,
       outboundAudioSource,
+      ...(mediaPlayout ? { mediaPlayout } : {}),
       connectionQuality: this.connectionQuality(),
       ...partial,
     } as SfuDiagnosticsWithPublishDebug;
@@ -826,6 +959,24 @@ export class SfuClientService {
       stream.addTrack(event.track);
       this.remoteStreams.set(next);
     }
+    this.registerRemoteTrackName(entry.publisherClientId, event.track, entry.trackName);
+  }
+
+  private registerRemoteTrackName(publisherClientId: string, track: MediaStreamTrack, trackName: string): void {
+    const trackId = track.id;
+    if (!trackId) return;
+    const next = cloneTrackNameMap(this.remoteTrackNames());
+    const publisherTracks = next.get(publisherClientId) ?? new Map<string, string>();
+    publisherTracks.set(trackId, trackName);
+    next.set(publisherClientId, publisherTracks);
+    this.remoteTrackNames.set(next);
+  }
+
+  private restorePublisherTrackNames(clientId: string, snapshot: Map<string, string> | null): void {
+    const next = cloneTrackNameMap(this.remoteTrackNames());
+    if (snapshot) next.set(clientId, new Map(snapshot));
+    else next.delete(clientId);
+    this.remoteTrackNames.set(next);
   }
 
   private flushPendingOntrack(): void {
@@ -990,6 +1141,7 @@ export class SfuClientService {
     const nextStreams = new Map(this.remoteStreams());
     nextStreams.delete(clientId);
     this.remoteStreams.set(nextStreams);
+    this.restorePublisherTrackNames(clientId, null);
 
     const nextScreenStreams = new Map(this.remoteScreenStreams());
     if (nextScreenStreams.has(clientId)) {
@@ -1014,6 +1166,7 @@ export class SfuClientService {
   }
 
   private clearPublisherSubscriptionStateForRetry(clientId: string): void {
+    this.clearLiveMidConflictRetryState(clientId);
     const mids = new Set<string>();
     for (const [mid, entry] of this.midToEntry) {
       if (entry.publisherClientId === clientId) mids.add(mid);
@@ -1037,6 +1190,7 @@ export class SfuClientService {
 
     const nextStreams = new Map(this.remoteStreams());
     if (nextStreams.delete(clientId)) this.remoteStreams.set(nextStreams);
+    this.restorePublisherTrackNames(clientId, null);
 
     const nextScreenStreams = new Map(this.remoteScreenStreams());
     if (nextScreenStreams.delete(clientId)) this.remoteScreenStreams.set(nextScreenStreams);
@@ -1102,6 +1256,10 @@ export class SfuClientService {
     tracks: { trackName: string; kind: string }[],
     err: unknown,
   ): void {
+    if (err instanceof LiveMidConflictError) {
+      this.scheduleLiveMidConflictRenegotiationRetry(publisher, tracks, 'mid-call-subscribe', err);
+      return;
+    }
     for (const track of tracks) {
       if (this.isTrackSubscribed(publisher.clientId, track.trackName)) {
         this.clearMidCallSubscribeRetryKey(this.midCallSubscribeRetryKey(publisher.clientId, publisher.cfSessionId, track.trackName));
@@ -1440,6 +1598,7 @@ export class SfuClientService {
     this.opQueue = Promise.resolve();
     this.recoveryPublishIceServers = null;
     this.pendingOntrack.clear();
+    this.subscribeMidConflictWarnings.clear();
     this.clearAllSubscribeStuckWatchdogs();
     this.clearAllSubscribeBackoffTimers();
     this.clearAllMidCallSubscribeRetryState();
@@ -1453,6 +1612,7 @@ export class SfuClientService {
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
     this.remoteScreenStreams.set(new Map());
+    this.remoteTrackNames.set(new Map());
     this.subscribedTracks.set(new Map());
     this.audioSender = null;
     this.videoSender = null;
@@ -1476,6 +1636,7 @@ export class SfuClientService {
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
     this.pendingOntrack.clear();
+    this.subscribeMidConflictWarnings.clear();
     this.subscribeRetryAttempts.clear();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
@@ -1491,6 +1652,7 @@ export class SfuClientService {
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
     this.remoteScreenStreams.set(new Map());
+    this.remoteTrackNames.set(new Map());
     this.subscribedTracks.set(new Map());
   }
 
@@ -1609,6 +1771,7 @@ export class SfuClientService {
   private async doSubscribeTracks(
     publisher: import('./sfu-roster-utils.js').RemotePublisher,
     tracks: { trackName: string; kind: string }[],
+    options: { forceRenegotiation?: boolean } = {},
   ): Promise<void> {
     const creds = this.callerCreds;
     const publishState = this.localPublishState();
@@ -1651,6 +1814,7 @@ export class SfuClientService {
             }
             return base;
           }),
+          forceRenegotiation: options.forceRenegotiation === true,
         }),
       ),
       SFU_HTTP_TIMEOUT_MS,
@@ -1671,6 +1835,9 @@ export class SfuClientService {
     }
 
     const subscribedBefore = new Map(this.subscribedTracks());
+    const publisherRemoteStreamBefore = clonePublisherStream(this.remoteStreams(), publisher.clientId);
+    const publisherRemoteScreenStreamBefore = clonePublisherStream(this.remoteScreenStreams(), publisher.clientId);
+    const publisherTrackNamesBefore = clonePublisherTrackNames(this.remoteTrackNames(), publisher.clientId);
     const nextSubscribed = new Map(subscribedBefore);
     const touchedMidEntries = new Map<string, { hadEntry: boolean; entry: SubscribedTrackEntry | null }>();
     const firstFrameSnapshot = this.subscribeFirstFrameAt.has(publisher.clientId)
@@ -1688,6 +1855,35 @@ export class SfuClientService {
       });
     };
 
+    const bindSubscribedMid = (mid: string, entry: SubscribedTrackEntry): void => {
+      const existing = this.midToEntry.get(mid);
+      if (
+        existing &&
+        (existing.publisherClientId !== entry.publisherClientId || existing.trackName !== entry.trackName)
+      ) {
+        if (this.remotePublishers().has(existing.publisherClientId)) {
+          const warnKey = `${mid}|${existing.publisherClientId}|${existing.trackName}|${entry.publisherClientId}|${entry.trackName}`;
+          if (!this.subscribeMidConflictWarnings.has(warnKey)) {
+            this.subscribeMidConflictWarnings.add(warnKey);
+            console.warn('[SFU] subscribe mid conflict with live publisher', {
+              mid,
+              existingPublisherClientId: existing.publisherClientId,
+              incomingPublisherClientId: entry.publisherClientId,
+              existingTrackName: existing.trackName,
+              incomingTrackName: entry.trackName,
+            });
+          }
+          throw new LiveMidConflictError(mid, existing, entry);
+        }
+        rememberTouchedMid(mid);
+      } else {
+        rememberTouchedMid(mid);
+      }
+
+      this.midToEntry.set(mid, entry);
+      nextSubscribed.set(mid, entry);
+    };
+
     const rollbackSubscribeMutation = async (): Promise<void> => {
       for (const [mid, previous] of touchedMidEntries) {
         if (previous.hadEntry && previous.entry) {
@@ -1696,7 +1892,23 @@ export class SfuClientService {
           this.midToEntry.delete(mid);
         }
       }
-      this.subscribedTracks.set(subscribedBefore);
+      const nextSubscribed = new Map(this.subscribedTracks());
+      for (const [mid, previous] of touchedMidEntries) {
+        if (previous.hadEntry && previous.entry) {
+          nextSubscribed.set(mid, previous.entry);
+        } else {
+          nextSubscribed.delete(mid);
+        }
+      }
+      for (const [mid, entry] of subscribedBefore) {
+        if (entry.publisherClientId === publisher.clientId && tracksToSubscribe.some((track) => track.trackName === entry.trackName)) {
+          nextSubscribed.set(mid, entry);
+        }
+      }
+      this.subscribedTracks.set(nextSubscribed);
+      restorePublisherStream(this.remoteStreams, publisher.clientId, publisherRemoteStreamBefore);
+      restorePublisherStream(this.remoteScreenStreams, publisher.clientId, publisherRemoteScreenStreamBefore);
+      this.restorePublisherTrackNames(publisher.clientId, publisherTrackNamesBefore);
       if (firstFrameSnapshot.hadValue) {
         this.subscribeFirstFrameAt.set(publisher.clientId, firstFrameSnapshot.value);
       } else {
@@ -1724,12 +1936,8 @@ export class SfuClientService {
         const reconciled = reconcileSubscribedMids(responseTracks, newTransceiverMids, transceivers, kindMap, publisher.clientId);
         for (const r of reconciled) {
           const entry: SubscribedTrackEntry = { publisherClientId: r.publisherClientId, trackName: r.trackName, kind: r.kind, mid: r.realMid };
-          rememberTouchedMid(r.realMid);
-          this.midToEntry.set(r.realMid, entry);
-          nextSubscribed.set(r.realMid, entry);
+          bindSubscribedMid(r.realMid, entry);
         }
-        this.flushPendingOntrack();
-
         const answer = await this.pc.createAnswer();
         await this.pc.setLocalDescription(answer);
 
@@ -1744,14 +1952,13 @@ export class SfuClientService {
           SFU_HTTP_TIMEOUT_MS,
           'PUT /api/sfu/renegotiate',
         );
+        this.flushPendingOntrack();
       } else {
         // No renegotiation — CF mids should be valid (non-empty) in this path
         for (const rt of responseTracks) {
           if (!rt.mid) continue;
           const entry: SubscribedTrackEntry = { publisherClientId: publisher.clientId, trackName: rt.trackName, kind: kindMap.get(rt.trackName) ?? 'unknown', mid: rt.mid };
-          rememberTouchedMid(rt.mid);
-          this.midToEntry.set(rt.mid, entry);
-          nextSubscribed.set(rt.mid, entry);
+          bindSubscribedMid(rt.mid, entry);
         }
         this.flushPendingOntrack();
       }
@@ -1791,6 +1998,56 @@ function numberOrNull(value: unknown): number | null {
 function secondsToMsOrNull(value: unknown): number | null {
   const seconds = numberOrNull(value);
   return seconds === null ? null : Math.round(seconds * 1000);
+}
+
+function mergeMediaPlayout<T extends { audioLevel: number | null; totalAudioEnergy: number | null; totalSamplesDuration: number | null }>(
+  current: T | undefined,
+  next: T,
+): T {
+  if (!current) return next;
+  return {
+    audioLevel: maxNullable(current.audioLevel, next.audioLevel),
+    totalAudioEnergy: sumNullable(current.totalAudioEnergy, next.totalAudioEnergy),
+    totalSamplesDuration: sumNullable(current.totalSamplesDuration, next.totalSamplesDuration),
+  } as T;
+}
+
+function clonePublisherStream(streams: Map<string, MediaStream>, clientId: string): MediaStream | null {
+  const stream = streams.get(clientId);
+  if (!stream) return null;
+  const clone = new MediaStream();
+  for (const track of stream.getTracks()) clone.addTrack(track);
+  return clone;
+}
+
+function restorePublisherStream(streamSignal: { (): Map<string, MediaStream>; set(value: Map<string, MediaStream>): void }, clientId: string, stream: MediaStream | null): void {
+  const next = new Map(streamSignal());
+  if (stream) next.set(clientId, stream);
+  else next.delete(clientId);
+  streamSignal.set(next);
+}
+
+function clonePublisherTrackNames(trackNames: Map<string, Map<string, string>>, clientId: string): Map<string, string> | null {
+  const publisherTracks = trackNames.get(clientId);
+  return publisherTracks ? new Map(publisherTracks) : null;
+}
+
+function cloneTrackNameMap(trackNames: Map<string, Map<string, string>>): Map<string, Map<string, string>> {
+  const clone = new Map<string, Map<string, string>>();
+  for (const [clientId, publisherTracks] of trackNames) clone.set(clientId, new Map(publisherTracks));
+  return clone;
+}
+
+function maxNullable(left: number | null, right: number | null): number | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return Math.max(left, right);
+}
+
+function sumNullable(left: number | null, right: number | null): number | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return left + right;
 }
 
 function ssrcKindKey(ssrc: unknown, kind: unknown): string | null {

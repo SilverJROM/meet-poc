@@ -18,7 +18,7 @@ import { AuthService } from '../../services/auth.service';
 import { BackgroundEffectsService } from '../../services/background-effects.service';
 import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
-import type { DiagnosticsPayload, SfuConnectionQuality, SfuDiagnosticsSnapshot, SfuInboundTrackStats } from '../../services/meeting-sessions.service';
+import type { DiagnosticsPayload, DiagnosticsPeerSample, DiagnosticsPostPayload, DiagnosticsTrackInfo, SfuConnectionQuality, SfuDiagnosticsSnapshot, SfuInboundTrackStats } from '../../services/meeting-sessions.service';
 import {
   classifyMicCapture,
   deriveOutboundAudioFields,
@@ -41,11 +41,10 @@ import { ParticipantSnapshot, RecorderService } from '../../services/recorder.se
 import {
   AUDIO_OUTPUT_DEVICE_STORAGE_KEY,
   applyMediaElementSinkWithDefaultFallback,
-  clearStoredAudioOutputDeviceId,
-  decideVoiceRecovery,
+  combineSinkApplyResults,
   RemoteAudioService,
-  VOICE_RECOVERY_SAMPLE_WINDOW,
   type RemoteAudioDebugSnapshot,
+  type SinkApplyResult,
   type VoiceRecoverySample,
 } from '../../services/remote-audio.service';
 import { RoomsService } from '../../services/rooms.service';
@@ -55,7 +54,9 @@ import { SfuClientService, type LocalPublishState } from '../../services/sfu-cli
 import { planInitialPublishRetry } from '../../services/sfu-roster-utils';
 import {
   decideLocalTrackFailureRecovery,
+  decideRemoteVoiceWatchdogAction,
   shouldAcquireMicTrackForToggle,
+  shouldReconcileAudioOutputAfterRefresh,
   shouldClearVideoPinAfterRefresh,
   shouldPromptGuestPassword,
   shouldRearmLobbySelfTest,
@@ -217,9 +218,9 @@ export class RoomPage implements OnDestroy {
   readonly inCallDeviceDialogOpen = signal(false);
   readonly deviceDialogBusy = signal(false);
   readonly deviceDialogError = signal<string | null>(null);
+  readonly selectedSpeakerUnavailable = signal(false);
   readonly canSelectAudioOutput = signal(canSetSinkId());
   readonly canFlipCamera = computed(() => this.viewport.isMobile() && (this.state() === 'in-call' ? this.media.cameraOn() : this.cameraRequested()));
-  readonly remoteAudioMixerEnabled = computed(() => true);
   readonly permissionError = signal<LobbyError | null>(null);
   readonly hasBlockingLobbyError = computed(() => {
     const error = this.permissionError();
@@ -507,7 +508,6 @@ export class RoomPage implements OnDestroy {
   private micSweepDoneForEpisode = false;
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
   private readonly chatMessageList = viewChild<ElementRef<HTMLElement>>('chatMessageList');
-  private readonly remoteAudioMixer = viewChild<ElementRef<HTMLAudioElement>>('remoteAudioMixer');
   readonly formattedElapsed = computed(() => {
     this.clockTick();
     const start = this.callStartMs();
@@ -629,40 +629,20 @@ export class RoomPage implements OnDestroy {
       this.activeSpeaker.observe(this.peers());
     });
     effect(() => {
-      this.remoteAudio.attachOutputElement(this.remoteAudioMixer()?.nativeElement ?? null);
+      this.remoteAudio.setInCallActive(this.state() === 'in-call');
+      this.remoteAudio.syncPeers(this.peers(), this.sfuClient.remoteTrackNames());
     });
     effect(() => {
-      this.remoteAudio.syncPeers(this.peers());
-      if (this.state() !== 'in-call') return;
-      window.setTimeout(() => {
-        void this.unlockAudioFromGesture(false).catch((err) => console.debug('[media] remote audio sync failed', err));
-      }, 0);
-    });
-    // B1 / NS2+NS3: honest playability re-evaluation, reactive + AUTHORITATIVE.
-    // Tracks the live mixer contextState + outputPlaying + source-count signals. When
-    // remote-audio sources exist and the mixer is NOT genuinely playing them (context
-    // not 'running' OR output not playing) — the suspended-with-sources reality that
-    // the non-gesture setTimeout re-unlock can NOT resume — surface the
-    // remoteAudioBlocked banner; once playout settles (running + outputPlaying) the
-    // banner clears. Gating clear on outputPlaying (an element-event signal, not a
-    // transient .paused read) avoids both the false-clear during a resume transition
-    // and the stuck-banner-after-recovery race.
-    effect(() => {
-      const contextState = this.remoteAudio.contextState();
-      const outputPlaying = this.remoteAudio.outputPlaying();
       this.remoteAudio.sourcesVersion();
-      const hasSources = this.remoteAudio.debugSnapshot().mixedPeerIds.length > 0;
       this.peers();
       if (this.state() !== 'in-call') return;
-      if (!this.remoteAudioMixerEnabled() || !hasSources) return;
-      const playing = contextState === 'running' && outputPlaying;
-      this.remoteAudioBlocked.set(!playing);
+      this.remoteAudioBlocked.set(this.remoteAudio.remoteAudioBlocked());
     });
     effect(() => {
       const state = this.state();
-      const contextState = this.remoteAudio.contextState();
       this.remoteAudio.sourcesVersion();
       const hasSources = this.remoteAudio.hasSources();
+      const blocked = this.remoteAudio.remoteAudioBlocked();
       if (state !== 'in-call') {
         this.stopRemoteAudioKeepalive();
         this.stopRemoteVoiceWatchdog();
@@ -671,9 +651,9 @@ export class RoomPage implements OnDestroy {
       }
       this.startRemoteAudioKeepalive();
       this.startRemoteVoiceWatchdog();
-      if (contextState !== 'running') this.installRemoteAudioInteractionRecovery();
+      if (blocked) this.installRemoteAudioInteractionRecovery();
       else this.uninstallRemoteAudioInteractionRecovery();
-      if (contextState !== 'running' || hasSources) {
+      if (blocked || hasSources) {
         window.setTimeout(() => {
           void this.recoverRemoteAudio('effect').catch((err) => console.debug('[media] remote audio effect recovery failed', err));
         }, 0);
@@ -688,11 +668,11 @@ export class RoomPage implements OnDestroy {
       if (this.state() !== 'in-call' || !deviceId) return;
       window.setTimeout(() => {
         void this.applySpeakerDevice(deviceId)
-          .then((applied) => {
-            if (!applied && this.selectedAudioOutputId() === deviceId) {
-              this.selectedAudioOutputId.set('');
-              storeDevice(DEVICE_STORAGE.audioOutput, '');
-            }
+          .then((result) => {
+            if (this.selectedAudioOutputId() !== deviceId) return;
+            this.selectedSpeakerUnavailable.set(result === 'default-fallback' || result === 'failed');
+            if (result === 'selected' || result === 'unsupported') this.deviceDialogError.set(null);
+            if (result === 'failed') this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
           })
           .catch((err) => console.debug('[devices] speaker routing refresh failed', err));
       }, 0);
@@ -1029,21 +1009,20 @@ export class RoomPage implements OnDestroy {
 
   async changeAudioOutputDevice(deviceId: string): Promise<void> {
     this.deviceDialogError.set(null);
-    const applied = await this.applySpeakerDevice(deviceId);
-    if (applied) {
-      this.selectedAudioOutputId.set(deviceId);
-      storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
+    const result = await this.applySpeakerDevice(deviceId);
+    this.selectedAudioOutputId.set(deviceId);
+    storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
+    if (result !== 'failed') {
+      this.selectedSpeakerUnavailable.set(result === 'default-fallback');
+      if (result === 'default-fallback' && deviceId) {
+        this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
+      }
       return;
     }
 
-    this.selectedAudioOutputId.set('');
-    storeDevice(DEVICE_STORAGE.audioOutput, '');
     await this.applySpeakerDevice('');
+    this.selectedSpeakerUnavailable.set(!!deviceId);
     if (deviceId) this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
-  }
-
-  handleRemoteAudioBlocked(): void {
-    if (this.state() === 'in-call') this.remoteAudioBlocked.set(true);
   }
 
   async enableRemoteAudio(): Promise<void> {
@@ -2190,6 +2169,7 @@ export class RoomPage implements OnDestroy {
     this.deviceDialogError.set(null);
     this.permissionError.set(null);
     this.setupWarning.set(null);
+    this.selectedSpeakerUnavailable.set(false);
     this.relayUnavailableWarning.set(false);
     this.error.set(null);
     try {
@@ -2364,8 +2344,19 @@ export class RoomPage implements OnDestroy {
       if (this.selectedVideoId()) this.videoDevicePinned.set(false);
       this.selectedVideoId.set(preferredDeviceId(DEVICE_STORAGE.videoInput, devices.videoInputs, this.selectedVideoId()));
     }
-    if (!this.selectedAudioOutputId() || !devices.audioOutputs.some((device) => device.deviceId === this.selectedAudioOutputId())) {
-      this.selectedAudioOutputId.set(preferredDeviceId(DEVICE_STORAGE.audioOutput, devices.audioOutputs, this.selectedAudioOutputId()));
+    const selectedOutputId = this.selectedAudioOutputId();
+    const selectedOutputMissing = shouldReconcileAudioOutputAfterRefresh({
+      selectedDeviceId: selectedOutputId,
+      availableDeviceIds: devices.audioOutputs.map((device) => device.deviceId),
+    });
+    if (!selectedOutputId || selectedOutputMissing) {
+      const fallbackOutputId = preferredDeviceId(DEVICE_STORAGE.audioOutput, devices.audioOutputs, selectedOutputMissing ? '' : selectedOutputId);
+      this.selectedAudioOutputId.set(fallbackOutputId);
+      if (selectedOutputMissing) {
+        storeDevice(DEVICE_STORAGE.audioOutput, fallbackOutputId);
+        this.selectedSpeakerUnavailable.set(devices.audioOutputs.length > 0);
+        if (devices.audioOutputs.length > 0) this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
+      }
     }
   }
 
@@ -2458,6 +2449,7 @@ export class RoomPage implements OnDestroy {
     this.initialPublishRunId += 1;
     this.initialPublishRetrying.set(false);
     this.initialPublishFailureNotice.set(null);
+    this.selectedSpeakerUnavailable.set(false);
     this.initialCaptureEnergyChecked = false;
     this.micSweepInProgress = false;
     this.micSweepDoneForEpisode = false;
@@ -2639,23 +2631,27 @@ export class RoomPage implements OnDestroy {
     try {
       await this.refreshDevices();
       if (this.state() === 'lobby' || this.state() === 'in-call') await this.ensureSelectedAudioDevice('devicechange');
+      if (this.state() === 'in-call' && this.selectedAudioOutputId()) {
+        const result = await this.applySpeakerDevice(this.selectedAudioOutputId());
+        this.selectedSpeakerUnavailable.set(result === 'default-fallback' || result === 'failed');
+        if (result === 'selected' || result === 'unsupported') this.deviceDialogError.set(null);
+      }
     } catch (err) {
       console.debug('[devices] devicechange handling failed', err);
     }
   }
 
-  private async applySpeakerDevice(deviceId: string): Promise<boolean> {
-    const mediaElements = Array.from(document.querySelectorAll('video, audio')) as HTMLMediaElement[];
+  private async applySpeakerDevice(deviceId: string): Promise<SinkApplyResult> {
+    const mediaElements = Array.from(document.querySelectorAll('video, audio:not([data-remote-audio])')) as HTMLMediaElement[];
     const mediaApplied = await Promise.all(
       mediaElements.map((element) =>
         applyMediaElementSinkWithDefaultFallback(element, deviceId, {
-          onSelectedSinkFailure: clearStoredAudioOutputDeviceId,
           label: 'room-media',
         }),
       ),
     );
     const remoteApplied = await this.remoteAudio.applyOutputDevice(deviceId);
-    return mediaApplied.every(Boolean) && remoteApplied;
+    return combineSinkApplyResults([...mediaApplied, remoteApplied]);
   }
 
   private async unlockAudioFromGesture(showPromptOnFailure: boolean): Promise<boolean> {
@@ -2684,8 +2680,8 @@ export class RoomPage implements OnDestroy {
 
   private async recoverRemoteAudio(reason: 'effect' | 'interaction' | 'visibility' | 'keepalive'): Promise<boolean> {
     const allPlayable = await this.remoteAudio.recoverPlayback(this.selectedAudioOutputId() || undefined);
-    if (this.state() === 'in-call') this.remoteAudioBlocked.set(!allPlayable && this.remoteAudio.hasSources());
-    if (this.remoteAudio.contextState() !== 'running') this.installRemoteAudioInteractionRecovery();
+    if (this.state() === 'in-call') this.remoteAudioBlocked.set(this.remoteAudio.remoteAudioBlocked());
+    if (this.remoteAudio.remoteAudioBlocked()) this.installRemoteAudioInteractionRecovery();
     if (reason !== 'keepalive') console.debug('[media] remote audio recovery attempted', reason, { allPlayable });
     return allPlayable;
   }
@@ -2731,6 +2727,7 @@ export class RoomPage implements OnDestroy {
     this.remoteVoiceWatchdogInFlight = true;
     try {
       if (this.remoteAudio.mutedAll()) {
+        this.remoteAudio.clearVoiceStalls();
         this.remoteVoiceWatchdogPeers.clear();
         return;
       }
@@ -2743,7 +2740,10 @@ export class RoomPage implements OnDestroy {
       const activePeerIds = new Set(inboundAudio.map((track) => track.publisherClientId));
 
       for (const peerId of [...this.remoteVoiceWatchdogPeers.keys()]) {
-        if (!activePeerIds.has(peerId)) this.remoteVoiceWatchdogPeers.delete(peerId);
+        if (!activePeerIds.has(peerId)) {
+          this.remoteAudio.clearVoiceStalls([peerId]);
+          this.remoteVoiceWatchdogPeers.delete(peerId);
+        }
       }
 
       for (const track of inboundAudio) {
@@ -2758,42 +2758,61 @@ export class RoomPage implements OnDestroy {
 
   private async observeRemoteVoiceTrack(track: SfuInboundTrackStats & { publisherClientId: string }): Promise<void> {
     const sample = remoteVoiceSample(track);
-    if (!sample) {
-      this.remoteVoiceWatchdogPeers.delete(track.publisherClientId);
-      return;
-    }
-
     const state = this.remoteVoiceWatchdogPeers.get(track.publisherClientId) ?? {
       samples: [],
       attemptsThisWindow: 0,
     };
-    state.samples.push(sample);
-    if (state.samples.length > VOICE_RECOVERY_SAMPLE_WINDOW) state.samples.shift();
-
-    if (remoteVoiceEmittedClimbed(state.samples)) {
-      this.remoteVoiceWatchdogPeers.set(track.publisherClientId, { samples: [sample], attemptsThisWindow: 0 });
-      return;
-    }
-
-    if (state.samples.length >= VOICE_RECOVERY_SAMPLE_WINDOW && !remoteVoiceBytesClimbed(state.samples)) {
-      this.remoteVoiceWatchdogPeers.set(track.publisherClientId, { samples: [sample], attemptsThisWindow: 0 });
-      return;
-    }
-
-    const action = decideVoiceRecovery({
-      samples: state.samples,
+    const decision = decideRemoteVoiceWatchdogAction({
+      previousSamples: state.samples,
       attemptsThisWindow: state.attemptsThisWindow,
+      sample,
       mutedAll: this.remoteAudio.mutedAll(),
     });
 
-    if (action === 'none') {
-      this.remoteVoiceWatchdogPeers.set(track.publisherClientId, state);
-      return;
+    switch (decision.kind) {
+      case 'clear':
+        this.remoteAudio.clearVoiceStalls([track.publisherClientId]);
+        if (decision.deletePeer) {
+          this.remoteVoiceWatchdogPeers.delete(track.publisherClientId);
+        } else {
+          this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
+            samples: decision.nextSamples,
+            attemptsThisWindow: decision.nextAttemptsThisWindow,
+          });
+        }
+        return;
+      case 'note-emission-advanced':
+        this.remoteAudio.noteVoiceEmissionAdvanced(track.publisherClientId);
+        this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
+          samples: decision.nextSamples,
+          attemptsThisWindow: decision.nextAttemptsThisWindow,
+        });
+        return;
+      case 'mark-stalled':
+        this.remoteAudio.markVoiceStalled(track.publisherClientId);
+        console.warn('[media] remote voice watchdog recovery window exhausted; keeping stalled banner latched', {
+          publisherClientId: track.publisherClientId,
+          attemptsThisWindow: state.attemptsThisWindow,
+        });
+        this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
+          samples: decision.nextSamples,
+          attemptsThisWindow: decision.nextAttemptsThisWindow,
+        });
+        return;
+      case 'hold':
+        this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
+          samples: decision.nextSamples,
+          attemptsThisWindow: decision.nextAttemptsThisWindow,
+        });
+        return;
+      case 'recover':
+        this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
+          samples: decision.nextSamples,
+          attemptsThisWindow: decision.nextAttemptsThisWindow,
+        });
+        await this.remoteAudio.recoverVoicePlayout(track.publisherClientId, decision.recoveryAction, this.selectedAudioOutputId() || undefined);
+        return;
     }
-
-    state.attemptsThisWindow += 1;
-    this.remoteVoiceWatchdogPeers.set(track.publisherClientId, { samples: [sample], attemptsThisWindow: state.attemptsThisWindow });
-    await this.remoteAudio.recoverVoicePlayout(track.publisherClientId, action, this.selectedAudioOutputId() || undefined);
   }
 
   private installRemoteAudioInteractionRecovery(): void {
@@ -3488,14 +3507,14 @@ export class RoomPage implements OnDestroy {
     }
   }
 
-  private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string, sfuDiagnostics?: SfuDiagnosticsSnapshot): DiagnosticsPayload {
+  private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string, sfuDiagnostics?: SfuDiagnosticsSnapshot): DiagnosticsPostPayload {
     const audioTrack = this.media.localStream()?.getAudioTracks()[0] ?? null;
     const micFields = deriveOutboundAudioFields({
       audioSource: sfuDiagnostics?.outboundAudioSource ?? null,
       hasLiveAudioTrack: !!audioTrack && audioTrack.readyState === 'live',
       micEnabled: audioTrack?.enabled ?? false,
     });
-    const payload: DiagnosticsPayload = {
+    const payload: DiagnosticsPostPayload = {
       kind,
       roomId: this.roomId,
       roomTitle: this.roomTitle(),
@@ -3507,6 +3526,7 @@ export class RoomPage implements OnDestroy {
       platform: this.diagnosticsPlatform(),
       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
       selectedAudioDeviceId: this.selectedAudioId(),
+      selectedAudioOutputId: this.selectedAudioOutputId(),
       selectedVideoDeviceId: this.selectedVideoId(),
       lastGumError: this.lastGumError(),
       wsStatus: this.ws.status(),
@@ -3520,11 +3540,85 @@ export class RoomPage implements OnDestroy {
       outboundAudioLevel: micFields.outboundAudioLevel,
       outboundAudioEnergy: micFields.outboundAudioEnergy,
       micSilent: micFields.micSilent,
-      peers: [],
+      peers: this.advertisedRemotePublisherDiagnostics(),
+      remoteAudioPlayout: this.remoteAudio.playoutDiagnostics(),
     };
     if (sfuDiagnostics) payload.sfuDiagnostics = sfuDiagnostics;
     if (error) payload.error = error;
     return payload;
+  }
+
+  private advertisedRemotePublisherDiagnostics(): DiagnosticsPeerSample[] {
+    const identities = this.peerIdentities();
+    const subscribedEntries = [...this.sfuClient.subscribedTracks().values()];
+    return [...this.sfuClient.remotePublishers().values()].map((publisher) => {
+      const identity = identities.get(publisher.clientId);
+      const advertisedAudioTrackNames = publisher.tracks.filter((track) => track.kind === 'audio').map((track) => track.trackName);
+      const advertisedSubscribed = advertisedAudioTrackNames.length > 0 && advertisedAudioTrackNames.every((trackName) =>
+        subscribedEntries.some((entry) => entry.publisherClientId === publisher.clientId && entry.trackName === trackName),
+      );
+      return {
+        id: publisher.clientId,
+        participantId: publisher.participantId,
+        name: identity?.name ?? publisher.clientId.slice(0, 8),
+        advertisedAudioTrackNames,
+        advertisedSubscribed,
+        isLocal: false,
+        isHost: identity?.isHost ?? false,
+        connectionState: advertisedSubscribed ? 'subscribed' : 'advertised',
+        iceConnectionState: 'n/a',
+        iceGatheringState: 'n/a',
+        signalingState: 'n/a',
+        selectedCandidateType: null,
+        candidatePair: null,
+        candidatePairCount: 0,
+        nominatedPairChanges: 0,
+        iceRelayGathered: { local: false, remote: false },
+        iceRestart: {
+          fired: false,
+          attempts: 0,
+          lastAttemptAt: null,
+          lastOutcome: null,
+          lastTimeToRecoverMs: null,
+          terminalFailed: false,
+          autoRecoveryOutcome: null,
+        },
+        negotiation: {
+          negotiationNeededCount: 0,
+          offerSentCount: 0,
+          answerSentCount: 0,
+          offerReceivedCount: 0,
+          answerReceivedCount: 0,
+          lastNegotiationNeededOfferSent: null,
+          makingOffer: false,
+          ignoreOffer: false,
+          glareIgnoredCount: 0,
+          rollbackCount: 0,
+        },
+        transceivers: [],
+        transitionTimeline: [],
+        relayUsed: false,
+        quality: advertisedSubscribed ? 'subscribed' : 'advertised-not-subscribed',
+        packetLossPct: null,
+        jitterMs: null,
+        rttMs: null,
+        availableOutgoingBitrateKbps: null,
+        audioOnlyReason: advertisedAudioTrackNames.length ? null : 'no advertised audio',
+        micEnabled: advertisedAudioTrackNames.length > 0,
+        camEnabled: publisher.tracks.some((track) => track.kind === 'video'),
+        screenOn: publisher.tracks.some((track) => track.kind === 'screen'),
+        diagnosticLabels: [
+          `advertised-audio:${advertisedAudioTrackNames.length ? advertisedAudioTrackNames.join(',') : 'none'}`,
+          advertisedSubscribed ? 'sfu-subscribed' : 'sfu-not-subscribed',
+        ],
+        outboundAudio: emptyDiagnosticsTrackInfo('audio'),
+        inboundAudio: emptyDiagnosticsInboundAudio(),
+        outboundVideo: emptyDiagnosticsTrackInfo('video'),
+        inboundVideo: undefined,
+        reconnecting: identity?.reconnecting ?? false,
+        updatedAt: Date.now(),
+      };
+    });
   }
 
   private diagnosticsPlatform(): DiagnosticsPayload['platform'] {
@@ -3780,6 +3874,39 @@ function readClientKey(): string {
   }
 }
 
+function emptyDiagnosticsTrackInfo(kind: 'audio' | 'video'): DiagnosticsTrackInfo {
+  return {
+    id: null,
+    kind,
+    deviceId: null,
+    label: null,
+    enabled: null,
+    muted: null,
+    readyState: null,
+    source: 'none',
+  };
+}
+
+function emptyDiagnosticsInboundAudio(): DiagnosticsPeerSample['inboundAudio'] {
+  return {
+    packetsReceived: null,
+    packetsLost: null,
+    bytesReceived: null,
+    audioLevel: null,
+    jitterBufferDelay: null,
+    jitterBufferTargetDelay: null,
+    jitterBufferEmittedCount: null,
+    concealedSamples: null,
+    concealmentEvents: null,
+    remoteRoundTripTime: null,
+    remoteFractionLost: null,
+    packetsReceivedDelta: null,
+    packetsActivelyArriving: null,
+    trackReadyState: null,
+    trackMuted: null,
+  };
+}
+
 function readEqualSizeTiles(): boolean {
   try {
     return window.localStorage.getItem(EQUAL_SIZE_TILES_STORAGE_KEY) === '1';
@@ -3903,17 +4030,17 @@ function remoteVoiceSample(track: SfuInboundTrackStats): VoiceRecoverySample | n
   const emitted = track.jitterBufferEmittedCount;
   if (typeof bytes !== 'number' || typeof emitted !== 'number') return null;
   if (!Number.isFinite(bytes) || !Number.isFinite(emitted)) return null;
-  return { bytes, emitted };
+  if (bytes < 0 || emitted < 0) return null;
+  return {
+    bytes,
+    emitted,
+    audioLevel: nonNegativeFiniteOrNull(track.audioLevel),
+    totalAudioEnergy: nonNegativeFiniteOrNull(track.totalAudioEnergy),
+  };
 }
 
-function remoteVoiceEmittedClimbed(samples: VoiceRecoverySample[]): boolean {
-  if (samples.length < 2) return false;
-  return samples[samples.length - 1].emitted > samples[samples.length - 2].emitted;
-}
-
-function remoteVoiceBytesClimbed(samples: VoiceRecoverySample[]): boolean {
-  if (samples.length < 2) return false;
-  return samples[samples.length - 1].bytes > samples[0].bytes;
+function nonNegativeFiniteOrNull(value: number | null | undefined): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
 function selectedCandidatePairType(sfuDiagnostics: SfuDiagnosticsSnapshot | undefined): string | null {

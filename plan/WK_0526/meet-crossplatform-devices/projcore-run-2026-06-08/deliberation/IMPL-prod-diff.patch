@@ -1,0 +1,4286 @@
+diff --git a/backend/src/modules/sessions/store.ts b/backend/src/modules/sessions/store.ts
+index 0665f60..8fcb840 100644
+--- a/backend/src/modules/sessions/store.ts
++++ b/backend/src/modules/sessions/store.ts
+@@ -30,7 +30,6 @@ type SessionRow = {
+ export type DiagnosticsPayload = {
+   kind?: string;
+   createdAt?: number;
+-  clientKey?: string;
+   participantId?: string;
+   peers?: unknown[];
+   forceRelay?: boolean;
+@@ -80,7 +79,6 @@ type DiagnosticEntryRow = {
+   peer_count: number;
+   participant_id: string | null;
+   participant_name: string | null;
+-  participant_client_key: string | null;
+ };
+ 
+ type DiagnosticSummaryRow = SessionRow & {
+@@ -272,6 +270,8 @@ export function appendDiagnosticsEntry(
+   const diagnosticOwnerEmail = session.host_email;
+ 
+   const summary = summarizeDiagnosticsPayload(payload);
++  const participantClientKey = coerceIdentity(payload.clientKey);
++  const { clientKey: _clientKey, ...persistedPayload } = payload;
+   const entry = {
+     id: crypto.randomUUID(),
+     sessionId,
+@@ -279,13 +279,13 @@ export function appendDiagnosticsEntry(
+     ownerEmail: diagnosticOwnerEmail,
+     kind: summary.kind,
+     createdAt: Date.now(),
+-    payloadJson: JSON.stringify(payload),
++    payloadJson: JSON.stringify(persistedPayload),
+     relayUsed: summary.relayUsed ? 1 : 0,
+     candidateTypes: summary.candidateTypes.join(','),
+     peerCount: summary.peerCount,
+     participantId: coerceIdentity(payload.participantId),
+     participantName: coerceIdentity(payload.clientName),
+-    participantClientKey: coerceIdentity(payload.clientKey),
++    participantClientKey,
+   };
+ 
+   const insert = database.transaction(() => {
+@@ -408,7 +408,7 @@ export function getDiagnosticsForSession(
+   const entries = database
+     .prepare(
+       `
+-        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name, d.participant_client_key
++        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name
+         FROM meeting_session_diagnostics d
+         JOIN rooms r ON r.id = d.room_id
+         WHERE d.session_id = ? AND d.owner_email = ?
+@@ -467,7 +467,7 @@ function getDiagnosticsEntry(ownerEmail: string, id: string, database: Database.
+   const row = database
+     .prepare(
+       `
+-        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name, d.participant_client_key
++        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name
+         FROM meeting_session_diagnostics d
+         JOIN rooms r ON r.id = d.room_id
+         WHERE d.id = ? AND d.owner_email = ?
+@@ -539,7 +539,9 @@ function splitCandidateTypes(value: string | null | undefined): string[] {
+ function parsePayload(value: string): DiagnosticsPayload {
+   try {
+     const parsed = JSON.parse(value) as unknown;
+-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as DiagnosticsPayload) : {};
++    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
++    const { clientKey: _clientKey, ...sanitized } = parsed as DiagnosticsPayload;
++    return sanitized;
+   } catch {
+     return {};
+   }
+diff --git a/frontend/src/app/components/controls-bar/controls-bar.component.html b/frontend/src/app/components/controls-bar/controls-bar.component.html
+index c3a0b04..e4ff1c4 100644
+--- a/frontend/src/app/components/controls-bar/controls-bar.component.html
++++ b/frontend/src/app/components/controls-bar/controls-bar.component.html
+@@ -159,7 +159,7 @@
+               class="volume-slider"
+               type="range"
+               min="0"
+-              max="1.3"
++              max="1"
+               step="0.01"
+               [value]="remoteAudio.volume()"
+               aria-label="Speaker volume"
+diff --git a/frontend/src/app/components/controls-bar/controls-bar.component.ts b/frontend/src/app/components/controls-bar/controls-bar.component.ts
+index 4d4750e..1fc1622 100644
+--- a/frontend/src/app/components/controls-bar/controls-bar.component.ts
++++ b/frontend/src/app/components/controls-bar/controls-bar.component.ts
+@@ -69,7 +69,7 @@ export class ControlsBarComponent {
+   readonly settingsPopoverOpen = signal(false);
+   readonly volumeLabel = computed(() => {
+     const percent = Math.round(this.remoteAudio.volume() * 100);
+-    return percent > 100 ? `${percent}% (amp)` : `${percent}%`;
++    return `${percent}%`;
+   });
+ 
+   constructor() {
+diff --git a/frontend/src/app/components/tile/tile.component.html b/frontend/src/app/components/tile/tile.component.html
+index 10cea25..47c03f2 100644
+--- a/frontend/src/app/components/tile/tile.component.html
++++ b/frontend/src/app/components/tile/tile.component.html
+@@ -11,9 +11,6 @@
+   [attr.data-screen-on]="peer().screenOn"
+ >
+   <div class="tile-content">
+-    @if (!peer().isLocal && remoteAudioEnabled()) {
+-      <audio #remoteAudio class="remote-audio-sink" data-remote-audio autoplay playsinline></audio>
+-    }
+     @if (showVideo()) {
+       <video #video autoplay playsinline [muted]="true" [class.is-mirrored-self-view]="isMirroredSelfView()"></video>
+     } @else {
+diff --git a/frontend/src/app/components/tile/tile.component.ts b/frontend/src/app/components/tile/tile.component.ts
+index b7dabfe..340baa6 100644
+--- a/frontend/src/app/components/tile/tile.component.ts
++++ b/frontend/src/app/components/tile/tile.component.ts
+@@ -1,4 +1,4 @@
+-import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, computed, effect, input, output, viewChild } from '@angular/core';
++import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, computed, effect, input, viewChild } from '@angular/core';
+ import { addIcons } from 'ionicons';
+ import { micOffOutline } from 'ionicons/icons';
+ import { PeerState } from '../../services/peer-state';
+@@ -20,10 +20,8 @@ export class TileComponent {
+   readonly variant = input<'grid' | 'strip' | 'share-main' | 'self-pip'>('grid');
+   readonly displayStream = input<MediaStream | null>(null);
+   readonly forceVideo = input(false);
+-  readonly remoteAudioEnabled = input(true);
+   readonly raisedHand = input(false);
+   readonly reactions = input<TileReaction[]>([]);
+-  readonly remoteAudioBlocked = output<void>();
+   readonly initials = computed(() => toInitials(this.peer().name));
+   readonly videoStream = computed(() => this.displayStream() ?? this.peer().stream);
+   readonly showVideo = computed(() => this.forceVideo() || (!this.peer().screenOn && this.peer().camEnabled && !!this.videoStream()?.getVideoTracks()?.length));
+@@ -36,7 +34,6 @@ export class TileComponent {
+     return `linear-gradient(135deg, hsl(${hue}, 48%, 24%), hsl(${(hue + 34) % 360}, 42%, 34%))`;
+   });
+   private readonly video = viewChild<ElementRef<HTMLVideoElement>>('video');
+-  private readonly remoteAudio = viewChild<ElementRef<HTMLAudioElement>>('remoteAudio');
+ 
+   reactionEmoji(kind: TileReaction['kind']): string {
+     if (kind === 'thumbs-up') return '👍';
+@@ -53,17 +50,5 @@ export class TileComponent {
+         video.srcObject = this.videoStream();
+       }
+     });
+-    effect(() => {
+-      const audio = this.remoteAudio()?.nativeElement;
+-      const stream = this.peer().isLocal || !this.remoteAudioEnabled() ? null : this.peer().stream;
+-      if (!audio) return;
+-      if (audio.srcObject !== stream) audio.srcObject = stream;
+-      audio.muted = false;
+-      if (!stream) return;
+-      void audio.play().catch((err) => {
+-        console.debug('[media] remote audio autoplay blocked', err);
+-        this.remoteAudioBlocked.emit();
+-      });
+-    });
+   }
+ }
+diff --git a/frontend/src/app/pages/diagnostics/diagnostics.page.html b/frontend/src/app/pages/diagnostics/diagnostics.page.html
+index 0f7c21f..0ad9191 100644
+--- a/frontend/src/app/pages/diagnostics/diagnostics.page.html
++++ b/frontend/src/app/pages/diagnostics/diagnostics.page.html
+@@ -129,6 +129,37 @@
+                 }
+               </div>
+             }
++
++            @if (remoteAudioPlayoutRows(latest).length) {
++              <div class="remote-audio-health" aria-label="Remote audio playout">
++                <span class="label">Remote audio playout</span>
++                @for (row of remoteAudioPlayoutRows(latest); track row.publisherClientId + row.trackId) {
++                  <div class="remote-audio-row">
++                    <span class="peer-name">{{ row.publisherLabel }}</span>
++                    <span>{{ row.paused }}</span>
++                    <span>{{ row.muted }}</span>
++                    <span>{{ row.volume }}</span>
++                    <span>{{ row.sink }}</span>
++                    <span>{{ row.blockedReason }}</span>
++                    <span>{{ row.sinkApply }}</span>
++                    <span>{{ row.srcObject }}</span>
++                    <span>{{ row.readyState }}</span>
++                    <span>{{ row.audioLevel }}</span>
++                    <span>{{ row.totalAudioEnergy }}</span>
++                  </div>
++                }
++              </div>
++            }
++            @if (callWideMediaPlayoutRow(latest); as row) {
++              <div class="remote-audio-health" aria-label="Call-wide media playout">
++                <span class="label">Call-wide media playout</span>
++                <div class="remote-audio-row">
++                  <span>{{ row.audioLevel }}</span>
++                  <span>{{ row.totalAudioEnergy }}</span>
++                  <span>{{ row.totalSamplesDuration }}</span>
++                </div>
++              </div>
++            }
+           }
+ 
+           <div class="entry-list" aria-label="Diagnostics timeline">
+diff --git a/frontend/src/app/pages/diagnostics/diagnostics.page.spec.ts b/frontend/src/app/pages/diagnostics/diagnostics.page.spec.ts
+index 3683b2c..47851d2 100644
+--- a/frontend/src/app/pages/diagnostics/diagnostics.page.spec.ts
++++ b/frontend/src/app/pages/diagnostics/diagnostics.page.spec.ts
+@@ -1,12 +1,16 @@
+ import assert from 'node:assert/strict';
+ import '@angular/compiler';
+-import { formatNetworkPathRows, rttPathHint } from './diagnostics.page.js';
++import { buildCallWideMediaPlayoutRow, buildRemoteAudioPlayoutRows, formatNetworkPathRows, redactedAudioOutputLabel, rttPathHint } from './diagnostics.page.js';
+ import type { SfuDiagnosticsSnapshot } from '../../services/meeting-sessions.service.js';
+ 
+ assert.equal(rttPathHint(25), 'local edge');
+ assert.equal(rttPathHint(149), 'regional');
+ assert.equal(rttPathHint(150), 'long-haul intl');
+ assert.equal(rttPathHint(null), 'RTT n/a');
++assert.equal(redactedAudioOutputLabel('', 'speaker-raw-id'), 'default');
++assert.equal(redactedAudioOutputLabel('speaker-raw-id', 'speaker-raw-id'), 'selected');
++assert.match(redactedAudioOutputLabel('speaker-raw-id', 'other-speaker'), /^id#[0-9a-f]{6}$/);
++assert.equal(redactedAudioOutputLabel(null, 'speaker-raw-id'), 'sink n/a');
+ 
+ {
+   const rows = formatNetworkPathRows({
+@@ -59,6 +63,7 @@ assert.equal(rttPathHint(null), 'RTT n/a');
+         jitterBufferEmittedCount: null,
+         concealedSamples: 12,
+         audioLevel: 0.31,
++        totalAudioEnergy: 4.25,
+         jitter: 0.007,
+       },
+     ],
+@@ -101,4 +106,138 @@ assert.equal(rttPathHint(null), 'RTT n/a');
+   assert.match(rows.find((row) => row.label === 'Audio liveness')?.value ?? '', /mic level n\/a .* inbound level n\/a/);
+ }
+ 
++{
++  const rows = buildRemoteAudioPlayoutRows(
++    {
++      selectedAudioOutputId: 'speaker-raw-id',
++      effectiveSinkId: 'speaker-raw-id',
++      usedFallback: false,
++      unlocked: true,
++      blockedPeerIds: ['publisher-b'],
++      perPublisher: [
++        {
++          publisherClientId: 'publisher-a',
++          trackName: 'track-a',
++          trackId: 'browser-track-a',
++          paused: false,
++          muted: false,
++          volume: 0.75,
++          sinkId: 'speaker-raw-id',
++          blockedReason: null,
++          sinkApplyResult: 'selected',
++          sinkApplyTimedOut: false,
++          srcObjectAttached: true,
++          readyState: 'live',
++        },
++        {
++          publisherClientId: 'publisher-b',
++          trackName: null,
++          trackId: null,
++          paused: true,
++          muted: true,
++          volume: 0,
++          sinkId: '',
++          blockedReason: 'paused',
++          sinkApplyResult: 'default-fallback',
++          sinkApplyTimedOut: false,
++          srcObjectAttached: false,
++          readyState: null,
++        },
++      ],
++    },
++    [
++      {
++        publisherClientId: 'publisher-a',
++        trackName: 'track-a',
++        kind: 'audio',
++        rid: null,
++        bytesReceived: 1,
++        packetsReceived: 1,
++        packetsLost: 0,
++        framesDecoded: null,
++        framesReceived: null,
++        jitterBufferDelay: null,
++        jitterBufferEmittedCount: null,
++        concealedSamples: null,
++        audioLevel: 0.31,
++        totalAudioEnergy: 4.25,
++      },
++      {
++        publisherClientId: 'publisher-b',
++        trackName: 'publisher-b-audio',
++        kind: 'audio',
++        rid: null,
++        bytesReceived: 1,
++        packetsReceived: 1,
++        packetsLost: 0,
++        framesDecoded: null,
++        framesReceived: null,
++        jitterBufferDelay: null,
++        jitterBufferEmittedCount: null,
++        concealedSamples: null,
++        audioLevel: 0.11,
++        totalAudioEnergy: 1.5,
++      },
++    ],
++    (publisherClientId) => (publisherClientId === 'publisher-a' ? 'Alice' : publisherClientId),
++  );
++
++  assert.equal(rows.length, 2);
++  assert.deepEqual(rows[0], {
++    publisherClientId: 'publisher-a',
++    publisherLabel: 'Alice',
++    trackId: 'browser-track-a',
++    paused: 'paused no',
++    muted: 'muted no',
++    volume: 'vol 0.75',
++    sink: 'selected',
++    blockedReason: 'not blocked',
++    sinkApply: 'selected',
++    srcObject: 'src attached',
++    readyState: 'live',
++    audioLevel: 'level 0.310',
++    totalAudioEnergy: 'energy 4.250000',
++  });
++  assert.equal(rows[1]?.sink, 'default');
++  assert.equal(rows[1]?.paused, 'paused yes');
++  assert.equal(rows[1]?.trackId, 'track n/a');
++  assert.equal(rows[1]?.audioLevel, 'level 0.110', 'publisher row uses publisher inbound level, not call-wide media-playout');
++  assert.equal(rows[1]?.totalAudioEnergy, 'energy 1.500000', 'publisher row uses publisher inbound energy, not call-wide media-playout');
++  assert.deepEqual(buildRemoteAudioPlayoutRows(undefined, []), []);
++  assert.deepEqual(buildCallWideMediaPlayoutRow({ audioLevel: 0.42, totalAudioEnergy: 7.5, totalSamplesDuration: 11.25 }), {
++    audioLevel: 'level 0.420',
++    totalAudioEnergy: 'energy 7.500000',
++    totalSamplesDuration: 'samples 11.250s',
++  });
++  assert.equal(buildCallWideMediaPlayoutRow(undefined), null);
++}
++
++{
++  const rows = buildRemoteAudioPlayoutRows({
++    selectedAudioOutputId: 'speaker-raw-id',
++    effectiveSinkId: '',
++    usedFallback: true,
++    unlocked: true,
++    blockedPeerIds: [],
++    perPublisher: [
++      {
++        publisherClientId: 'publisher-a',
++        trackName: 'track-a',
++        trackId: 'browser-track-a',
++        paused: false,
++        muted: false,
++        volume: 1,
++        sinkId: '',
++        blockedReason: null,
++        sinkApplyResult: 'default-fallback',
++        sinkApplyTimedOut: false,
++        srcObjectAttached: true,
++        readyState: 'live',
++      },
++    ],
++  });
++
++  assert.equal(rows[0]?.sink, 'default fallback', 'diagnostics distinguish selected-speaker fallback from selected success');
++}
++
+ console.log('diagnostics page network path helpers: all assertions passed');
+diff --git a/frontend/src/app/pages/diagnostics/diagnostics.page.ts b/frontend/src/app/pages/diagnostics/diagnostics.page.ts
+index a120f91..29ef115 100644
+--- a/frontend/src/app/pages/diagnostics/diagnostics.page.ts
++++ b/frontend/src/app/pages/diagnostics/diagnostics.page.ts
+@@ -7,8 +7,10 @@ import {
+   DiagnosticSessionSummary,
+   DiagnosticsDetailResponse,
+   DiagnosticsPeerSample,
++  RemoteAudioPlayoutDiagnostics,
+   DiagnosticsTrackInfo,
+   MeetingSessionsService,
++  SfuMediaPlayoutStats,
+   SfuDiagnosticsSnapshot,
+   SfuInboundTrackStats,
+   SfuOutboundTrackStats,
+@@ -27,6 +29,28 @@ export type NetworkPathRow = {
+   value: string;
+ };
+ 
++export type RemoteAudioPlayoutRow = {
++  publisherClientId: string;
++  publisherLabel: string;
++  trackId: string;
++  paused: string;
++  muted: string;
++  volume: string;
++  sink: string;
++  blockedReason: string;
++  sinkApply: string;
++  srcObject: string;
++  readyState: string;
++  audioLevel: string;
++  totalAudioEnergy: string;
++};
++
++export type CallWideMediaPlayoutRow = {
++  audioLevel: string;
++  totalAudioEnergy: string;
++  totalSamplesDuration: string;
++};
++
+ export function rttPathHint(rttMs: number | null | undefined): string {
+   if (rttMs === null || rttMs === undefined) return 'RTT n/a';
+   if (rttMs < 80) return 'local edge';
+@@ -73,6 +97,61 @@ export function formatNetworkPathRows(diag: SfuDiagnosticsSnapshot | null | unde
+   ];
+ }
+ 
++export function redactedAudioOutputLabel(sinkId: string | null | undefined, selectedAudioOutputId: string | null | undefined): string {
++  if (sinkId === null || sinkId === undefined) return 'sink n/a';
++  if (selectedAudioOutputId !== null && selectedAudioOutputId !== undefined && sinkId === selectedAudioOutputId) return 'selected';
++  if (sinkId === '') return 'default';
++  return `id#${shortHash(sinkId)}`;
++}
++
++export function redactedEffectiveAudioOutputLabel(playout: RemoteAudioPlayoutDiagnostics | null | undefined): string {
++  if (!playout) return 'sink n/a';
++  if (playout.usedFallback) return 'default fallback';
++  return redactedAudioOutputLabel(playout.effectiveSinkId, playout.selectedAudioOutputId);
++}
++
++export function buildRemoteAudioPlayoutRows(
++  playout: RemoteAudioPlayoutDiagnostics | null | undefined,
++  inboundTracks: SfuInboundTrackStats[] = [],
++  publisherName: (publisherClientId: string) => string = (publisherClientId) => publisherClientId.slice(0, 8),
++): RemoteAudioPlayoutRow[] {
++  return (playout?.perPublisher ?? []).map((publisher) => {
++    const inbound = inboundTracks.find(
++      (track) =>
++        track.kind === 'audio' &&
++        track.publisherClientId === publisher.publisherClientId &&
++        !!publisher.trackName &&
++        track.trackName === publisher.trackName,
++    ) ?? inboundTracks.find((track) => track.kind === 'audio' && track.publisherClientId === publisher.publisherClientId);
++    return {
++      publisherClientId: publisher.publisherClientId,
++      publisherLabel: publisherName(publisher.publisherClientId),
++      trackId: publisher.trackId ?? 'track n/a',
++      paused: publisher.paused ? 'paused yes' : 'paused no',
++      muted: publisher.muted ? 'muted yes' : 'muted no',
++      volume: `vol ${decimalLabel(publisher.volume, 2)}`,
++      sink: playout?.usedFallback && publisher.sinkId === ''
++        ? redactedEffectiveAudioOutputLabel(playout)
++        : redactedAudioOutputLabel(publisher.sinkId, playout?.selectedAudioOutputId ?? null),
++      blockedReason: publisher.blockedReason ?? 'not blocked',
++      sinkApply: `${publisher.sinkApplyResult}${publisher.sinkApplyTimedOut ? ' timed out' : ''}`,
++      srcObject: publisher.srcObjectAttached ? 'src attached' : 'src missing',
++      readyState: publisher.readyState ?? 'state n/a',
++      audioLevel: `level ${decimalLabel(inbound?.audioLevel, 3)}`,
++      totalAudioEnergy: `energy ${decimalLabel(inbound?.totalAudioEnergy, 6)}`,
++    };
++  });
++}
++
++export function buildCallWideMediaPlayoutRow(mediaPlayout: SfuMediaPlayoutStats | null | undefined): CallWideMediaPlayoutRow | null {
++  if (!mediaPlayout) return null;
++  return {
++    audioLevel: `level ${decimalLabel(mediaPlayout.audioLevel, 3)}`,
++    totalAudioEnergy: `energy ${decimalLabel(mediaPlayout.totalAudioEnergy, 6)}`,
++    totalSamplesDuration: `samples ${decimalLabel(mediaPlayout.totalSamplesDuration, 3)}s`,
++  };
++}
++
+ @Component({
+   selector: 'app-diagnostics-page',
+   standalone: true,
+@@ -449,6 +528,18 @@ export class DiagnosticsPage {
+       }));
+   }
+ 
++  remoteAudioPlayoutRows(entry: DiagnosticEntry): RemoteAudioPlayoutRow[] {
++    return buildRemoteAudioPlayoutRows(
++      entry.payload.remoteAudioPlayout ?? null,
++      entry.payload.sfuDiagnostics?.inboundTracks ?? [],
++      (publisherClientId) => this.publisherName(publisherClientId),
++    );
++  }
++
++  callWideMediaPlayoutRow(entry: DiagnosticEntry): CallWideMediaPlayoutRow | null {
++    return buildCallWideMediaPlayoutRow(entry.payload.sfuDiagnostics?.mediaPlayout ?? null);
++  }
++
+   private booleanSetting(value: boolean | null | undefined): string {
+     if (value === true) return 'on';
+     if (value === false) return 'off';
+@@ -488,6 +579,15 @@ function decimalLabel(value: number | null | undefined, digits: number): string
+   return value === null || value === undefined ? 'n/a' : value.toFixed(digits);
+ }
+ 
++function shortHash(value: string): string {
++  let hash = 0x811c9dc5;
++  for (let index = 0; index < value.length; index += 1) {
++    hash ^= value.charCodeAt(index);
++    hash = Math.imul(hash, 0x01000193);
++  }
++  return (hash >>> 0).toString(16).padStart(8, '0').slice(0, 6);
++}
++
+ function sumNumbers(values: Array<number | null | undefined>): number | null {
+   let total = 0;
+   let found = false;
+diff --git a/frontend/src/app/pages/room/room-decisions.spec.ts b/frontend/src/app/pages/room/room-decisions.spec.ts
+index 5aca06e..ac0e7b8 100644
+--- a/frontend/src/app/pages/room/room-decisions.spec.ts
++++ b/frontend/src/app/pages/room/room-decisions.spec.ts
+@@ -1,14 +1,26 @@
+ import assert from 'node:assert/strict';
++import type { VoiceRecoverySample } from '../../services/remote-audio.service';
+ import {
+   decideLocalTrackFailureRecovery,
++  decideRemoteVoiceWatchdogAction,
+   shouldAcquireMicTrackForToggle,
+   shouldClearVideoPinAfterRefresh,
+   shouldPromptGuestPassword,
++  shouldReconcileAudioOutputAfterRefresh,
+   shouldRearmLobbySelfTest,
+   shouldSubmitChat,
+   storedDeviceAfterSelectionAttempt,
+ } from './room-decisions';
+ 
++function voiceSamples(values: Array<[number, number]>, energy: 'active' | 'silent' = 'active'): VoiceRecoverySample[] {
++  return values.map(([bytes, emitted], index) => ({
++    bytes,
++    emitted,
++    audioLevel: energy === 'active' ? 0.02 : 0,
++    totalAudioEnergy: energy === 'active' ? index * 0.1 : 0,
++  }));
++}
++
+ assert.strictEqual(shouldSubmitChat({ key: 'Enter' }), true, 'plain Enter submits chat');
+ assert.strictEqual(shouldSubmitChat({ key: 'Enter', shiftKey: true }), false, 'Shift+Enter inserts a newline');
+ assert.strictEqual(shouldSubmitChat({ key: 'Enter', isComposing: true }), false, 'IME composition Enter does not submit');
+@@ -63,6 +75,22 @@ assert.strictEqual(
+   'A9: present selected camera keeps the exact pin',
+ );
+ 
++assert.strictEqual(
++  shouldReconcileAudioOutputAfterRefresh({ selectedDeviceId: 'missing-speaker', availableDeviceIds: ['default', 'live-speaker'] }),
++  true,
++  'CR-FIX-4: missing selected speaker is reconciled on refresh',
++);
++assert.strictEqual(
++  shouldReconcileAudioOutputAfterRefresh({ selectedDeviceId: 'live-speaker', availableDeviceIds: ['default', 'live-speaker'] }),
++  false,
++  'CR-FIX-4: present selected speaker is kept on refresh',
++);
++assert.strictEqual(
++  shouldReconcileAudioOutputAfterRefresh({ selectedDeviceId: '', availableDeviceIds: [] }),
++  false,
++  'CR-FIX-4: no selected speaker does not create an unavailable speaker state',
++);
++
+ assert.strictEqual(
+   shouldAcquireMicTrackForToggle({ trackExists: false }),
+   true,
+@@ -134,4 +162,142 @@ assert.strictEqual(
+   'TINY6: enabled live-track mute still schedules persistent-mute recovery',
+ );
+ 
++{
++  const previousSamples = voiceSamples([
++    [1_000, 7],
++    [2_000, 7],
++    [3_000, 7],
++  ]);
++  const sample = voiceSamples([[4_000, 7]])[0];
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples,
++    attemptsThisWindow: 0,
++    sample,
++    mutedAll: false,
++  });
++
++  assert.strictEqual(decision.kind, 'recover', 'CR-FIX-10: bytes-climbing/emitted-flat/voice-energy requests recovery');
++  if (decision.kind === 'recover') {
++    assert.strictEqual(decision.recoveryAction, 'resume');
++    assert.deepStrictEqual(decision.nextSamples, [sample], 'CR-FIX-10: recovery rolls the watchdog window to the latest sample');
++    assert.strictEqual(decision.nextAttemptsThisWindow, 1);
++  }
++}
++
++{
++  const previousSamples = voiceSamples([
++    [1_000, 7],
++    [2_000, 7],
++    [3_000, 7],
++  ]);
++  const sample = voiceSamples([[4_000, 8]])[0];
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples,
++    attemptsThisWindow: 2,
++    sample,
++    mutedAll: false,
++  });
++
++  assert.strictEqual(decision.kind, 'note-emission-advanced', 'CR-FIX-10: emitted climbing clears the voice-stall latch');
++  assert.deepStrictEqual(decision.nextSamples, [sample]);
++  assert.strictEqual(decision.nextAttemptsThisWindow, 0);
++}
++
++{
++  const previousSamples = voiceSamples([
++    [5_000, 7],
++    [5_000, 7],
++    [5_000, 7],
++  ]);
++  const sample = voiceSamples([[5_000, 7]])[0];
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples,
++    attemptsThisWindow: 3,
++    sample,
++    mutedAll: false,
++  });
++
++  assert.strictEqual(decision.kind, 'clear', 'CR-FIX-10: bytes-flat clear path clears the voice-stall latch');
++  if (decision.kind === 'clear') {
++    assert.strictEqual(decision.deletePeer, false);
++    assert.deepStrictEqual(decision.nextSamples, [sample]);
++    assert.strictEqual(decision.nextAttemptsThisWindow, 0);
++  }
++}
++
++{
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples: voiceSamples([[1_000, 7]]),
++    attemptsThisWindow: 1,
++    sample: null,
++    mutedAll: false,
++  });
++
++  assert.strictEqual(decision.kind, 'clear', 'CR-FIX-10: no usable SFU sample clears the voice-stall latch');
++  if (decision.kind === 'clear') assert.strictEqual(decision.deletePeer, true);
++}
++
++{
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples: voiceSamples([[1_000, 7], [2_000, 7], [3_000, 7]]),
++    attemptsThisWindow: 2,
++    sample: voiceSamples([[4_000, 7]])[0],
++    mutedAll: true,
++  });
++
++  assert.strictEqual(decision.kind, 'clear', 'CR-FIX-10: muted-all clears the voice-stall latch');
++  if (decision.kind === 'clear') {
++    assert.strictEqual(decision.deletePeer, false);
++    assert.deepStrictEqual(decision.nextSamples, []);
++    assert.strictEqual(decision.nextAttemptsThisWindow, 0);
++  }
++}
++
++{
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples: voiceSamples([
++      [1_000, 7],
++      [2_000, 7],
++      [3_000, 7],
++    ], 'silent'),
++    attemptsThisWindow: 1,
++    sample: voiceSamples([[4_000, 7]], 'silent')[0],
++    mutedAll: false,
++  });
++
++  assert.strictEqual(decision.kind, 'clear', 'CR-FIX-10: no voice energy clears the voice-stall latch');
++  if (decision.kind === 'clear') assert.strictEqual(decision.deletePeer, false);
++}
++
++{
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples: voiceSamples([
++      [1_000, 7],
++      [2_000, 7],
++      [3_000, 7],
++    ]),
++    attemptsThisWindow: 4,
++    sample: voiceSamples([[4_000, 7]])[0],
++    mutedAll: false,
++  });
++
++  assert.strictEqual(decision.kind, 'mark-stalled', 'CR-FIX-10: exhausted active stall window keeps the banner latched');
++  assert.strictEqual(decision.nextAttemptsThisWindow, 4);
++}
++
++{
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples: [
++      { bytes: -1, emitted: 7, audioLevel: 0.02, totalAudioEnergy: 0 },
++      { bytes: 2_000, emitted: 7, audioLevel: 0.02, totalAudioEnergy: 0.1 },
++      { bytes: 3_000, emitted: 7, audioLevel: 0.02, totalAudioEnergy: 0.2 },
++    ],
++    attemptsThisWindow: 0,
++    sample: { bytes: 4_000, emitted: 7, audioLevel: -0.1, totalAudioEnergy: -1 },
++    mutedAll: false,
++  });
++
++  assert.strictEqual(decision.kind, 'hold', 'CR-FIX-10: negative stats are rejected and cannot create a false stall verdict');
++}
++
+ console.log('room-decisions: all assertions passed');
+diff --git a/frontend/src/app/pages/room/room-decisions.ts b/frontend/src/app/pages/room/room-decisions.ts
+index 31fdcd7..c3b77bf 100644
+--- a/frontend/src/app/pages/room/room-decisions.ts
++++ b/frontend/src/app/pages/room/room-decisions.ts
+@@ -1,3 +1,12 @@
++import {
++  decideVoiceRecovery,
++  sampleWindowHasVoiceEnergy,
++  voiceRecoveryWindowExhaustedWhileStalled,
++  VOICE_RECOVERY_SAMPLE_WINDOW,
++  type VoiceRecoverySample,
++  type VoiceRecoveryStep,
++} from '../../services/remote-audio.service';
++
+ export type ChatSubmitKeyEvent = {
+   key?: string;
+   shiftKey?: boolean;
+@@ -37,6 +46,10 @@ export function shouldClearVideoPinAfterRefresh(input: { selectedDeviceId: strin
+   return !!input.selectedDeviceId && !input.availableDeviceIds.includes(input.selectedDeviceId);
+ }
+ 
++export function shouldReconcileAudioOutputAfterRefresh(input: { selectedDeviceId: string; availableDeviceIds: string[] }): boolean {
++  return !!input.selectedDeviceId && !input.availableDeviceIds.includes(input.selectedDeviceId);
++}
++
+ export function shouldAcquireMicTrackForToggle(input: { trackExists: boolean; trackReadyState?: MediaStreamTrackState }): boolean {
+   return !input.trackExists || input.trackReadyState !== 'live';
+ }
+@@ -58,3 +71,70 @@ export function decideLocalTrackFailureRecovery(input: {
+   if (input.event === 'mute' && input.trackReadyState === 'live') return 'debounce-mute';
+   return 'recover-ended';
+ }
++
++export type RemoteVoiceWatchdogAction =
++  | { kind: 'clear'; deletePeer: boolean; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
++  | { kind: 'note-emission-advanced'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
++  | { kind: 'recover'; recoveryAction: VoiceRecoveryStep; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
++  | { kind: 'mark-stalled'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
++  | { kind: 'hold'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number };
++
++export function decideRemoteVoiceWatchdogAction(input: {
++  previousSamples: VoiceRecoverySample[];
++  attemptsThisWindow: number;
++  sample: VoiceRecoverySample | null;
++  mutedAll: boolean;
++}): RemoteVoiceWatchdogAction {
++  if (input.mutedAll) return { kind: 'clear', deletePeer: false, nextSamples: [], nextAttemptsThisWindow: 0 };
++  if (!input.sample) return { kind: 'clear', deletePeer: true, nextSamples: [], nextAttemptsThisWindow: 0 };
++
++  const samples = [...input.previousSamples, input.sample];
++  if (samples.length > VOICE_RECOVERY_SAMPLE_WINDOW) samples.shift();
++
++  if (remoteVoiceEmittedClimbed(samples)) {
++    return { kind: 'note-emission-advanced', nextSamples: [input.sample], nextAttemptsThisWindow: 0 };
++  }
++
++  if (samples.length >= VOICE_RECOVERY_SAMPLE_WINDOW && !remoteVoiceBytesClimbed(samples)) {
++    return { kind: 'clear', deletePeer: false, nextSamples: [input.sample], nextAttemptsThisWindow: 0 };
++  }
++
++  const action = decideVoiceRecovery({
++    samples,
++    attemptsThisWindow: input.attemptsThisWindow,
++    mutedAll: input.mutedAll,
++  });
++
++  if (action === 'none') {
++    if (
++      voiceRecoveryWindowExhaustedWhileStalled({
++        samples,
++        attemptsThisWindow: input.attemptsThisWindow,
++        mutedAll: input.mutedAll,
++      })
++    ) {
++      return { kind: 'mark-stalled', nextSamples: samples, nextAttemptsThisWindow: input.attemptsThisWindow };
++    }
++    if (samples.length >= VOICE_RECOVERY_SAMPLE_WINDOW && !sampleWindowHasVoiceEnergy(samples)) {
++      return { kind: 'clear', deletePeer: false, nextSamples: [input.sample], nextAttemptsThisWindow: 0 };
++    }
++    return { kind: 'hold', nextSamples: samples, nextAttemptsThisWindow: input.attemptsThisWindow };
++  }
++
++  return {
++    kind: 'recover',
++    recoveryAction: action,
++    nextSamples: [input.sample],
++    nextAttemptsThisWindow: input.attemptsThisWindow + 1,
++  };
++}
++
++function remoteVoiceEmittedClimbed(samples: VoiceRecoverySample[]): boolean {
++  if (samples.length < 2) return false;
++  return samples[samples.length - 1].emitted > samples[samples.length - 2].emitted;
++}
++
++function remoteVoiceBytesClimbed(samples: VoiceRecoverySample[]): boolean {
++  if (samples.length < 2) return false;
++  return samples[samples.length - 1].bytes > samples[0].bytes;
++}
+diff --git a/frontend/src/app/pages/room/room.page.html b/frontend/src/app/pages/room/room.page.html
+index c920a06..ac55a6a 100644
+--- a/frontend/src/app/pages/room/room.page.html
++++ b/frontend/src/app/pages/room/room.page.html
+@@ -218,6 +218,12 @@
+           <button type="button" [disabled]="initialPublishRetrying()" (click)="rejoinAfterInitialPublishFailure()">Rejoin</button>
+         </div>
+       }
++      @if (selectedSpeakerUnavailable()) {
++        <div class="device-notice" role="status">
++          <span>Selected speaker unavailable. Using system default.</span>
++          <button type="button" (click)="openInCallDeviceDialog()">Switch speaker</button>
++        </div>
++      }
+       @if (remoteAudioBlocked()) {
+         <div class="audio-unblock-notice" role="status">
+           <span>Tap to enable audio</span>
+@@ -226,9 +232,6 @@
+           </div>
+         </div>
+       }
+-      @if (remoteAudioMixerEnabled()) {
+-        <audio #remoteAudioMixer class="remote-audio-mixer" data-remote-audio-mixer autoplay playsinline></audio>
+-      }
+       @if (screenShareHelp()) {
+         <div class="screen-share-help" role="alert" aria-label="Screen share permission help">
+           <h2>Screen sharing needs macOS permission</h2>
+@@ -250,12 +253,10 @@
+               [peer]="presenter"
+               [displayStream]="shareStream()"
+               [forceVideo]="true"
+-              [remoteAudioEnabled]="!remoteAudioMixerEnabled()"
+               [raisedHand]="raisedHands().has(presenter.id)"
+               [reactions]="tileReactions(presenter.id)"
+               variant="share-main"
+               [speaking]="activeSpeaker.activePeerId() === presenter.id"
+-              (remoteAudioBlocked)="handleRemoteAudioBlocked()"
+             />
+           </div>
+           <aside class="share-strip" [class.collapsed]="shareStripCollapsed()" aria-label="Participants during screen share">
+@@ -270,7 +271,7 @@
+             @if (!shareStripCollapsed()) {
+               <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
+                 @for (peer of orderedStripPeers(); track peer.participantId) {
+-                  <app-tile [peer]="peer" [displayStream]="peer.isLocal ? effectiveLocalStream() : null" variant="strip" [remoteAudioEnabled]="!remoteAudioMixerEnabled()" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" (remoteAudioBlocked)="handleRemoteAudioBlocked()" />
++                  <app-tile [peer]="peer" [displayStream]="peer.isLocal ? effectiveLocalStream() : null" variant="strip" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" />
+                 }
+               </div>
+             }
+@@ -290,11 +291,9 @@
+                 [peer]="peer"
+                 [displayStream]="peer.isLocal ? effectiveLocalStream() : null"
+                 [variant]="peer.isLocal && remoteEmphasisActive() ? 'self-pip' : 'grid'"
+-                [remoteAudioEnabled]="!remoteAudioMixerEnabled()"
+                 [raisedHand]="raisedHands().has(peer.id)"
+                 [reactions]="tileReactions(peer.id)"
+                 [speaking]="activeSpeaker.activePeerId() === peer.id"
+-                (remoteAudioBlocked)="handleRemoteAudioBlocked()"
+               />
+             }
+           </div>
+diff --git a/frontend/src/app/pages/room/room.page.ts b/frontend/src/app/pages/room/room.page.ts
+index 29f7b95..72ce7c4 100644
+--- a/frontend/src/app/pages/room/room.page.ts
++++ b/frontend/src/app/pages/room/room.page.ts
+@@ -18,7 +18,7 @@ import { AuthService } from '../../services/auth.service';
+ import { BackgroundEffectsService } from '../../services/background-effects.service';
+ import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
+ import { MeetingSessionsService } from '../../services/meeting-sessions.service';
+-import type { DiagnosticsPayload, SfuConnectionQuality, SfuDiagnosticsSnapshot, SfuInboundTrackStats } from '../../services/meeting-sessions.service';
++import type { DiagnosticsPayload, DiagnosticsPeerSample, DiagnosticsPostPayload, DiagnosticsTrackInfo, SfuConnectionQuality, SfuDiagnosticsSnapshot, SfuInboundTrackStats } from '../../services/meeting-sessions.service';
+ import {
+   classifyMicCapture,
+   deriveOutboundAudioFields,
+@@ -41,11 +41,10 @@ import { ParticipantSnapshot, RecorderService } from '../../services/recorder.se
+ import {
+   AUDIO_OUTPUT_DEVICE_STORAGE_KEY,
+   applyMediaElementSinkWithDefaultFallback,
+-  clearStoredAudioOutputDeviceId,
+-  decideVoiceRecovery,
++  combineSinkApplyResults,
+   RemoteAudioService,
+-  VOICE_RECOVERY_SAMPLE_WINDOW,
+   type RemoteAudioDebugSnapshot,
++  type SinkApplyResult,
+   type VoiceRecoverySample,
+ } from '../../services/remote-audio.service';
+ import { RoomsService } from '../../services/rooms.service';
+@@ -55,7 +54,9 @@ import { SfuClientService, type LocalPublishState } from '../../services/sfu-cli
+ import { planInitialPublishRetry } from '../../services/sfu-roster-utils';
+ import {
+   decideLocalTrackFailureRecovery,
++  decideRemoteVoiceWatchdogAction,
+   shouldAcquireMicTrackForToggle,
++  shouldReconcileAudioOutputAfterRefresh,
+   shouldClearVideoPinAfterRefresh,
+   shouldPromptGuestPassword,
+   shouldRearmLobbySelfTest,
+@@ -217,9 +218,9 @@ export class RoomPage implements OnDestroy {
+   readonly inCallDeviceDialogOpen = signal(false);
+   readonly deviceDialogBusy = signal(false);
+   readonly deviceDialogError = signal<string | null>(null);
++  readonly selectedSpeakerUnavailable = signal(false);
+   readonly canSelectAudioOutput = signal(canSetSinkId());
+   readonly canFlipCamera = computed(() => this.viewport.isMobile() && (this.state() === 'in-call' ? this.media.cameraOn() : this.cameraRequested()));
+-  readonly remoteAudioMixerEnabled = computed(() => true);
+   readonly permissionError = signal<LobbyError | null>(null);
+   readonly hasBlockingLobbyError = computed(() => {
+     const error = this.permissionError();
+@@ -507,7 +508,6 @@ export class RoomPage implements OnDestroy {
+   private micSweepDoneForEpisode = false;
+   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
+   private readonly chatMessageList = viewChild<ElementRef<HTMLElement>>('chatMessageList');
+-  private readonly remoteAudioMixer = viewChild<ElementRef<HTMLAudioElement>>('remoteAudioMixer');
+   readonly formattedElapsed = computed(() => {
+     this.clockTick();
+     const start = this.callStartMs();
+@@ -629,40 +629,20 @@ export class RoomPage implements OnDestroy {
+       this.activeSpeaker.observe(this.peers());
+     });
+     effect(() => {
+-      this.remoteAudio.attachOutputElement(this.remoteAudioMixer()?.nativeElement ?? null);
++      this.remoteAudio.setInCallActive(this.state() === 'in-call');
++      this.remoteAudio.syncPeers(this.peers(), this.sfuClient.remoteTrackNames());
+     });
+     effect(() => {
+-      this.remoteAudio.syncPeers(this.peers());
+-      if (this.state() !== 'in-call') return;
+-      window.setTimeout(() => {
+-        void this.unlockAudioFromGesture(false).catch((err) => console.debug('[media] remote audio sync failed', err));
+-      }, 0);
+-    });
+-    // B1 / NS2+NS3: honest playability re-evaluation, reactive + AUTHORITATIVE.
+-    // Tracks the live mixer contextState + outputPlaying + source-count signals. When
+-    // remote-audio sources exist and the mixer is NOT genuinely playing them (context
+-    // not 'running' OR output not playing) — the suspended-with-sources reality that
+-    // the non-gesture setTimeout re-unlock can NOT resume — surface the
+-    // remoteAudioBlocked banner; once playout settles (running + outputPlaying) the
+-    // banner clears. Gating clear on outputPlaying (an element-event signal, not a
+-    // transient .paused read) avoids both the false-clear during a resume transition
+-    // and the stuck-banner-after-recovery race.
+-    effect(() => {
+-      const contextState = this.remoteAudio.contextState();
+-      const outputPlaying = this.remoteAudio.outputPlaying();
+       this.remoteAudio.sourcesVersion();
+-      const hasSources = this.remoteAudio.debugSnapshot().mixedPeerIds.length > 0;
+       this.peers();
+       if (this.state() !== 'in-call') return;
+-      if (!this.remoteAudioMixerEnabled() || !hasSources) return;
+-      const playing = contextState === 'running' && outputPlaying;
+-      this.remoteAudioBlocked.set(!playing);
++      this.remoteAudioBlocked.set(this.remoteAudio.remoteAudioBlocked());
+     });
+     effect(() => {
+       const state = this.state();
+-      const contextState = this.remoteAudio.contextState();
+       this.remoteAudio.sourcesVersion();
+       const hasSources = this.remoteAudio.hasSources();
++      const blocked = this.remoteAudio.remoteAudioBlocked();
+       if (state !== 'in-call') {
+         this.stopRemoteAudioKeepalive();
+         this.stopRemoteVoiceWatchdog();
+@@ -671,9 +651,9 @@ export class RoomPage implements OnDestroy {
+       }
+       this.startRemoteAudioKeepalive();
+       this.startRemoteVoiceWatchdog();
+-      if (contextState !== 'running') this.installRemoteAudioInteractionRecovery();
++      if (blocked) this.installRemoteAudioInteractionRecovery();
+       else this.uninstallRemoteAudioInteractionRecovery();
+-      if (contextState !== 'running' || hasSources) {
++      if (blocked || hasSources) {
+         window.setTimeout(() => {
+           void this.recoverRemoteAudio('effect').catch((err) => console.debug('[media] remote audio effect recovery failed', err));
+         }, 0);
+@@ -688,11 +668,11 @@ export class RoomPage implements OnDestroy {
+       if (this.state() !== 'in-call' || !deviceId) return;
+       window.setTimeout(() => {
+         void this.applySpeakerDevice(deviceId)
+-          .then((applied) => {
+-            if (!applied && this.selectedAudioOutputId() === deviceId) {
+-              this.selectedAudioOutputId.set('');
+-              storeDevice(DEVICE_STORAGE.audioOutput, '');
+-            }
++          .then((result) => {
++            if (this.selectedAudioOutputId() !== deviceId) return;
++            this.selectedSpeakerUnavailable.set(result === 'default-fallback' || result === 'failed');
++            if (result === 'selected' || result === 'unsupported') this.deviceDialogError.set(null);
++            if (result === 'failed') this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
+           })
+           .catch((err) => console.debug('[devices] speaker routing refresh failed', err));
+       }, 0);
+@@ -1029,23 +1009,22 @@ export class RoomPage implements OnDestroy {
+ 
+   async changeAudioOutputDevice(deviceId: string): Promise<void> {
+     this.deviceDialogError.set(null);
+-    const applied = await this.applySpeakerDevice(deviceId);
+-    if (applied) {
+-      this.selectedAudioOutputId.set(deviceId);
+-      storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
++    const result = await this.applySpeakerDevice(deviceId);
++    this.selectedAudioOutputId.set(deviceId);
++    storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
++    if (result !== 'failed') {
++      this.selectedSpeakerUnavailable.set(result === 'default-fallback');
++      if (result === 'default-fallback' && deviceId) {
++        this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
++      }
+       return;
+     }
+ 
+-    this.selectedAudioOutputId.set('');
+-    storeDevice(DEVICE_STORAGE.audioOutput, '');
+     await this.applySpeakerDevice('');
++    this.selectedSpeakerUnavailable.set(!!deviceId);
+     if (deviceId) this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
+   }
+ 
+-  handleRemoteAudioBlocked(): void {
+-    if (this.state() === 'in-call') this.remoteAudioBlocked.set(true);
+-  }
+-
+   async enableRemoteAudio(): Promise<void> {
+     await this.unlockAudioFromGesture(true);
+   }
+@@ -2190,6 +2169,7 @@ export class RoomPage implements OnDestroy {
+     this.deviceDialogError.set(null);
+     this.permissionError.set(null);
+     this.setupWarning.set(null);
++    this.selectedSpeakerUnavailable.set(false);
+     this.relayUnavailableWarning.set(false);
+     this.error.set(null);
+     try {
+@@ -2364,8 +2344,19 @@ export class RoomPage implements OnDestroy {
+       if (this.selectedVideoId()) this.videoDevicePinned.set(false);
+       this.selectedVideoId.set(preferredDeviceId(DEVICE_STORAGE.videoInput, devices.videoInputs, this.selectedVideoId()));
+     }
+-    if (!this.selectedAudioOutputId() || !devices.audioOutputs.some((device) => device.deviceId === this.selectedAudioOutputId())) {
+-      this.selectedAudioOutputId.set(preferredDeviceId(DEVICE_STORAGE.audioOutput, devices.audioOutputs, this.selectedAudioOutputId()));
++    const selectedOutputId = this.selectedAudioOutputId();
++    const selectedOutputMissing = shouldReconcileAudioOutputAfterRefresh({
++      selectedDeviceId: selectedOutputId,
++      availableDeviceIds: devices.audioOutputs.map((device) => device.deviceId),
++    });
++    if (!selectedOutputId || selectedOutputMissing) {
++      const fallbackOutputId = preferredDeviceId(DEVICE_STORAGE.audioOutput, devices.audioOutputs, selectedOutputMissing ? '' : selectedOutputId);
++      this.selectedAudioOutputId.set(fallbackOutputId);
++      if (selectedOutputMissing) {
++        storeDevice(DEVICE_STORAGE.audioOutput, fallbackOutputId);
++        this.selectedSpeakerUnavailable.set(devices.audioOutputs.length > 0);
++        if (devices.audioOutputs.length > 0) this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
++      }
+     }
+   }
+ 
+@@ -2458,6 +2449,7 @@ export class RoomPage implements OnDestroy {
+     this.initialPublishRunId += 1;
+     this.initialPublishRetrying.set(false);
+     this.initialPublishFailureNotice.set(null);
++    this.selectedSpeakerUnavailable.set(false);
+     this.initialCaptureEnergyChecked = false;
+     this.micSweepInProgress = false;
+     this.micSweepDoneForEpisode = false;
+@@ -2639,23 +2631,27 @@ export class RoomPage implements OnDestroy {
+     try {
+       await this.refreshDevices();
+       if (this.state() === 'lobby' || this.state() === 'in-call') await this.ensureSelectedAudioDevice('devicechange');
++      if (this.state() === 'in-call' && this.selectedAudioOutputId()) {
++        const result = await this.applySpeakerDevice(this.selectedAudioOutputId());
++        this.selectedSpeakerUnavailable.set(result === 'default-fallback' || result === 'failed');
++        if (result === 'selected' || result === 'unsupported') this.deviceDialogError.set(null);
++      }
+     } catch (err) {
+       console.debug('[devices] devicechange handling failed', err);
+     }
+   }
+ 
+-  private async applySpeakerDevice(deviceId: string): Promise<boolean> {
+-    const mediaElements = Array.from(document.querySelectorAll('video, audio')) as HTMLMediaElement[];
++  private async applySpeakerDevice(deviceId: string): Promise<SinkApplyResult> {
++    const mediaElements = Array.from(document.querySelectorAll('video, audio:not([data-remote-audio])')) as HTMLMediaElement[];
+     const mediaApplied = await Promise.all(
+       mediaElements.map((element) =>
+         applyMediaElementSinkWithDefaultFallback(element, deviceId, {
+-          onSelectedSinkFailure: clearStoredAudioOutputDeviceId,
+           label: 'room-media',
+         }),
+       ),
+     );
+     const remoteApplied = await this.remoteAudio.applyOutputDevice(deviceId);
+-    return mediaApplied.every(Boolean) && remoteApplied;
++    return combineSinkApplyResults([...mediaApplied, remoteApplied]);
+   }
+ 
+   private async unlockAudioFromGesture(showPromptOnFailure: boolean): Promise<boolean> {
+@@ -2684,8 +2680,8 @@ export class RoomPage implements OnDestroy {
+ 
+   private async recoverRemoteAudio(reason: 'effect' | 'interaction' | 'visibility' | 'keepalive'): Promise<boolean> {
+     const allPlayable = await this.remoteAudio.recoverPlayback(this.selectedAudioOutputId() || undefined);
+-    if (this.state() === 'in-call') this.remoteAudioBlocked.set(!allPlayable && this.remoteAudio.hasSources());
+-    if (this.remoteAudio.contextState() !== 'running') this.installRemoteAudioInteractionRecovery();
++    if (this.state() === 'in-call') this.remoteAudioBlocked.set(this.remoteAudio.remoteAudioBlocked());
++    if (this.remoteAudio.remoteAudioBlocked()) this.installRemoteAudioInteractionRecovery();
+     if (reason !== 'keepalive') console.debug('[media] remote audio recovery attempted', reason, { allPlayable });
+     return allPlayable;
+   }
+@@ -2731,6 +2727,7 @@ export class RoomPage implements OnDestroy {
+     this.remoteVoiceWatchdogInFlight = true;
+     try {
+       if (this.remoteAudio.mutedAll()) {
++        this.remoteAudio.clearVoiceStalls();
+         this.remoteVoiceWatchdogPeers.clear();
+         return;
+       }
+@@ -2743,7 +2740,10 @@ export class RoomPage implements OnDestroy {
+       const activePeerIds = new Set(inboundAudio.map((track) => track.publisherClientId));
+ 
+       for (const peerId of [...this.remoteVoiceWatchdogPeers.keys()]) {
+-        if (!activePeerIds.has(peerId)) this.remoteVoiceWatchdogPeers.delete(peerId);
++        if (!activePeerIds.has(peerId)) {
++          this.remoteAudio.clearVoiceStalls([peerId]);
++          this.remoteVoiceWatchdogPeers.delete(peerId);
++        }
+       }
+ 
+       for (const track of inboundAudio) {
+@@ -2758,42 +2758,61 @@ export class RoomPage implements OnDestroy {
+ 
+   private async observeRemoteVoiceTrack(track: SfuInboundTrackStats & { publisherClientId: string }): Promise<void> {
+     const sample = remoteVoiceSample(track);
+-    if (!sample) {
+-      this.remoteVoiceWatchdogPeers.delete(track.publisherClientId);
+-      return;
+-    }
+-
+     const state = this.remoteVoiceWatchdogPeers.get(track.publisherClientId) ?? {
+       samples: [],
+       attemptsThisWindow: 0,
+     };
+-    state.samples.push(sample);
+-    if (state.samples.length > VOICE_RECOVERY_SAMPLE_WINDOW) state.samples.shift();
+-
+-    if (remoteVoiceEmittedClimbed(state.samples)) {
+-      this.remoteVoiceWatchdogPeers.set(track.publisherClientId, { samples: [sample], attemptsThisWindow: 0 });
+-      return;
+-    }
+-
+-    if (state.samples.length >= VOICE_RECOVERY_SAMPLE_WINDOW && !remoteVoiceBytesClimbed(state.samples)) {
+-      this.remoteVoiceWatchdogPeers.set(track.publisherClientId, { samples: [sample], attemptsThisWindow: 0 });
+-      return;
+-    }
+-
+-    const action = decideVoiceRecovery({
+-      samples: state.samples,
++    const decision = decideRemoteVoiceWatchdogAction({
++      previousSamples: state.samples,
+       attemptsThisWindow: state.attemptsThisWindow,
++      sample,
+       mutedAll: this.remoteAudio.mutedAll(),
+     });
+ 
+-    if (action === 'none') {
+-      this.remoteVoiceWatchdogPeers.set(track.publisherClientId, state);
+-      return;
++    switch (decision.kind) {
++      case 'clear':
++        this.remoteAudio.clearVoiceStalls([track.publisherClientId]);
++        if (decision.deletePeer) {
++          this.remoteVoiceWatchdogPeers.delete(track.publisherClientId);
++        } else {
++          this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
++            samples: decision.nextSamples,
++            attemptsThisWindow: decision.nextAttemptsThisWindow,
++          });
++        }
++        return;
++      case 'note-emission-advanced':
++        this.remoteAudio.noteVoiceEmissionAdvanced(track.publisherClientId);
++        this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
++          samples: decision.nextSamples,
++          attemptsThisWindow: decision.nextAttemptsThisWindow,
++        });
++        return;
++      case 'mark-stalled':
++        this.remoteAudio.markVoiceStalled(track.publisherClientId);
++        console.warn('[media] remote voice watchdog recovery window exhausted; keeping stalled banner latched', {
++          publisherClientId: track.publisherClientId,
++          attemptsThisWindow: state.attemptsThisWindow,
++        });
++        this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
++          samples: decision.nextSamples,
++          attemptsThisWindow: decision.nextAttemptsThisWindow,
++        });
++        return;
++      case 'hold':
++        this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
++          samples: decision.nextSamples,
++          attemptsThisWindow: decision.nextAttemptsThisWindow,
++        });
++        return;
++      case 'recover':
++        this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
++          samples: decision.nextSamples,
++          attemptsThisWindow: decision.nextAttemptsThisWindow,
++        });
++        await this.remoteAudio.recoverVoicePlayout(track.publisherClientId, decision.recoveryAction, this.selectedAudioOutputId() || undefined);
++        return;
+     }
+-
+-    state.attemptsThisWindow += 1;
+-    this.remoteVoiceWatchdogPeers.set(track.publisherClientId, { samples: [sample], attemptsThisWindow: state.attemptsThisWindow });
+-    await this.remoteAudio.recoverVoicePlayout(track.publisherClientId, action, this.selectedAudioOutputId() || undefined);
+   }
+ 
+   private installRemoteAudioInteractionRecovery(): void {
+@@ -3488,14 +3507,14 @@ export class RoomPage implements OnDestroy {
+     }
+   }
+ 
+-  private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string, sfuDiagnostics?: SfuDiagnosticsSnapshot): DiagnosticsPayload {
++  private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string, sfuDiagnostics?: SfuDiagnosticsSnapshot): DiagnosticsPostPayload {
+     const audioTrack = this.media.localStream()?.getAudioTracks()[0] ?? null;
+     const micFields = deriveOutboundAudioFields({
+       audioSource: sfuDiagnostics?.outboundAudioSource ?? null,
+       hasLiveAudioTrack: !!audioTrack && audioTrack.readyState === 'live',
+       micEnabled: audioTrack?.enabled ?? false,
+     });
+-    const payload: DiagnosticsPayload = {
++    const payload: DiagnosticsPostPayload = {
+       kind,
+       roomId: this.roomId,
+       roomTitle: this.roomTitle(),
+@@ -3507,6 +3526,7 @@ export class RoomPage implements OnDestroy {
+       platform: this.diagnosticsPlatform(),
+       userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+       selectedAudioDeviceId: this.selectedAudioId(),
++      selectedAudioOutputId: this.selectedAudioOutputId(),
+       selectedVideoDeviceId: this.selectedVideoId(),
+       lastGumError: this.lastGumError(),
+       wsStatus: this.ws.status(),
+@@ -3520,13 +3540,87 @@ export class RoomPage implements OnDestroy {
+       outboundAudioLevel: micFields.outboundAudioLevel,
+       outboundAudioEnergy: micFields.outboundAudioEnergy,
+       micSilent: micFields.micSilent,
+-      peers: [],
++      peers: this.advertisedRemotePublisherDiagnostics(),
++      remoteAudioPlayout: this.remoteAudio.playoutDiagnostics(),
+     };
+     if (sfuDiagnostics) payload.sfuDiagnostics = sfuDiagnostics;
+     if (error) payload.error = error;
+     return payload;
+   }
+ 
++  private advertisedRemotePublisherDiagnostics(): DiagnosticsPeerSample[] {
++    const identities = this.peerIdentities();
++    const subscribedEntries = [...this.sfuClient.subscribedTracks().values()];
++    return [...this.sfuClient.remotePublishers().values()].map((publisher) => {
++      const identity = identities.get(publisher.clientId);
++      const advertisedAudioTrackNames = publisher.tracks.filter((track) => track.kind === 'audio').map((track) => track.trackName);
++      const advertisedSubscribed = advertisedAudioTrackNames.length > 0 && advertisedAudioTrackNames.every((trackName) =>
++        subscribedEntries.some((entry) => entry.publisherClientId === publisher.clientId && entry.trackName === trackName),
++      );
++      return {
++        id: publisher.clientId,
++        participantId: publisher.participantId,
++        name: identity?.name ?? publisher.clientId.slice(0, 8),
++        advertisedAudioTrackNames,
++        advertisedSubscribed,
++        isLocal: false,
++        isHost: identity?.isHost ?? false,
++        connectionState: advertisedSubscribed ? 'subscribed' : 'advertised',
++        iceConnectionState: 'n/a',
++        iceGatheringState: 'n/a',
++        signalingState: 'n/a',
++        selectedCandidateType: null,
++        candidatePair: null,
++        candidatePairCount: 0,
++        nominatedPairChanges: 0,
++        iceRelayGathered: { local: false, remote: false },
++        iceRestart: {
++          fired: false,
++          attempts: 0,
++          lastAttemptAt: null,
++          lastOutcome: null,
++          lastTimeToRecoverMs: null,
++          terminalFailed: false,
++          autoRecoveryOutcome: null,
++        },
++        negotiation: {
++          negotiationNeededCount: 0,
++          offerSentCount: 0,
++          answerSentCount: 0,
++          offerReceivedCount: 0,
++          answerReceivedCount: 0,
++          lastNegotiationNeededOfferSent: null,
++          makingOffer: false,
++          ignoreOffer: false,
++          glareIgnoredCount: 0,
++          rollbackCount: 0,
++        },
++        transceivers: [],
++        transitionTimeline: [],
++        relayUsed: false,
++        quality: advertisedSubscribed ? 'subscribed' : 'advertised-not-subscribed',
++        packetLossPct: null,
++        jitterMs: null,
++        rttMs: null,
++        availableOutgoingBitrateKbps: null,
++        audioOnlyReason: advertisedAudioTrackNames.length ? null : 'no advertised audio',
++        micEnabled: advertisedAudioTrackNames.length > 0,
++        camEnabled: publisher.tracks.some((track) => track.kind === 'video'),
++        screenOn: publisher.tracks.some((track) => track.kind === 'screen'),
++        diagnosticLabels: [
++          `advertised-audio:${advertisedAudioTrackNames.length ? advertisedAudioTrackNames.join(',') : 'none'}`,
++          advertisedSubscribed ? 'sfu-subscribed' : 'sfu-not-subscribed',
++        ],
++        outboundAudio: emptyDiagnosticsTrackInfo('audio'),
++        inboundAudio: emptyDiagnosticsInboundAudio(),
++        outboundVideo: emptyDiagnosticsTrackInfo('video'),
++        inboundVideo: undefined,
++        reconnecting: identity?.reconnecting ?? false,
++        updatedAt: Date.now(),
++      };
++    });
++  }
++
+   private diagnosticsPlatform(): DiagnosticsPayload['platform'] {
+     if (this.platform.isIOS()) return 'ios';
+     if (this.platform.isAndroid()) return 'android';
+@@ -3780,6 +3874,39 @@ function readClientKey(): string {
+   }
+ }
+ 
++function emptyDiagnosticsTrackInfo(kind: 'audio' | 'video'): DiagnosticsTrackInfo {
++  return {
++    id: null,
++    kind,
++    deviceId: null,
++    label: null,
++    enabled: null,
++    muted: null,
++    readyState: null,
++    source: 'none',
++  };
++}
++
++function emptyDiagnosticsInboundAudio(): DiagnosticsPeerSample['inboundAudio'] {
++  return {
++    packetsReceived: null,
++    packetsLost: null,
++    bytesReceived: null,
++    audioLevel: null,
++    jitterBufferDelay: null,
++    jitterBufferTargetDelay: null,
++    jitterBufferEmittedCount: null,
++    concealedSamples: null,
++    concealmentEvents: null,
++    remoteRoundTripTime: null,
++    remoteFractionLost: null,
++    packetsReceivedDelta: null,
++    packetsActivelyArriving: null,
++    trackReadyState: null,
++    trackMuted: null,
++  };
++}
++
+ function readEqualSizeTiles(): boolean {
+   try {
+     return window.localStorage.getItem(EQUAL_SIZE_TILES_STORAGE_KEY) === '1';
+@@ -3903,17 +4030,17 @@ function remoteVoiceSample(track: SfuInboundTrackStats): VoiceRecoverySample | n
+   const emitted = track.jitterBufferEmittedCount;
+   if (typeof bytes !== 'number' || typeof emitted !== 'number') return null;
+   if (!Number.isFinite(bytes) || !Number.isFinite(emitted)) return null;
+-  return { bytes, emitted };
+-}
+-
+-function remoteVoiceEmittedClimbed(samples: VoiceRecoverySample[]): boolean {
+-  if (samples.length < 2) return false;
+-  return samples[samples.length - 1].emitted > samples[samples.length - 2].emitted;
++  if (bytes < 0 || emitted < 0) return null;
++  return {
++    bytes,
++    emitted,
++    audioLevel: nonNegativeFiniteOrNull(track.audioLevel),
++    totalAudioEnergy: nonNegativeFiniteOrNull(track.totalAudioEnergy),
++  };
+ }
+ 
+-function remoteVoiceBytesClimbed(samples: VoiceRecoverySample[]): boolean {
+-  if (samples.length < 2) return false;
+-  return samples[samples.length - 1].bytes > samples[0].bytes;
++function nonNegativeFiniteOrNull(value: number | null | undefined): number | null {
++  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+ }
+ 
+ function selectedCandidatePairType(sfuDiagnostics: SfuDiagnosticsSnapshot | undefined): string | null {
+diff --git a/frontend/src/app/services/feedback-limiter.spec.ts b/frontend/src/app/services/feedback-limiter.spec.ts
+deleted file mode 100644
+index 849f156..0000000
+--- a/frontend/src/app/services/feedback-limiter.spec.ts
++++ /dev/null
+@@ -1,24 +0,0 @@
+-import assert from 'node:assert/strict';
+-import { FEEDBACK_LIMITER_PARAMS } from './remote-audio.service.js';
+-
+-// B2 RF2-S4 — FEEDBACK_LIMITER_PARAMS are limiter-shaped (brick-wall) + no makeup gain.
+-{
+-  // Exact locked values.
+-  assert.strictEqual(FEEDBACK_LIMITER_PARAMS.threshold, -3, 'threshold -3 dB');
+-  assert.strictEqual(FEEDBACK_LIMITER_PARAMS.knee, 0, 'knee 0 (hard knee)');
+-  assert.strictEqual(FEEDBACK_LIMITER_PARAMS.ratio, 20, 'ratio 20:1');
+-  assert.strictEqual(FEEDBACK_LIMITER_PARAMS.attack, 0.003, 'attack 3 ms');
+-  assert.strictEqual(FEEDBACK_LIMITER_PARAMS.release, 0.25, 'release 250 ms');
+-
+-  // Shape predicates — limiter-shaped, peak-control only.
+-  assert.ok(FEEDBACK_LIMITER_PARAMS.ratio >= 20, 'ratio >= 20 (limiter, not gentle compressor)');
+-  assert.ok(FEEDBACK_LIMITER_PARAMS.threshold <= 0, 'threshold <= 0 dB');
+-  assert.strictEqual(FEEDBACK_LIMITER_PARAMS.knee, 0, 'knee strictly 0');
+-  assert.ok(FEEDBACK_LIMITER_PARAMS.attack > 0, 'attack > 0');
+-  assert.ok(FEEDBACK_LIMITER_PARAMS.release > 0, 'release > 0');
+-
+-  // No makeup-gain field ⇒ 0-in stays 0-out (mute-all silence guard, RF4-S9).
+-  assert.strictEqual('makeupGain' in FEEDBACK_LIMITER_PARAMS, false, 'no makeup gain field');
+-}
+-
+-console.log('feedback-limiter: all assertions passed');
+diff --git a/frontend/src/app/services/meeting-sessions.service.ts b/frontend/src/app/services/meeting-sessions.service.ts
+index a245ff8..070f6a5 100644
+--- a/frontend/src/app/services/meeting-sessions.service.ts
++++ b/frontend/src/app/services/meeting-sessions.service.ts
+@@ -198,6 +198,8 @@ export type DiagnosticsPeerSample = {
+   id: string;
+   participantId?: string;
+   name: string;
++  advertisedAudioTrackNames?: string[];
++  advertisedSubscribed?: boolean;
+   isLocal: boolean;
+   isHost: boolean;
+   connectionState: string;
+@@ -287,11 +289,18 @@ export type SfuInboundTrackStats = {
+   jitterBufferEmittedCount: number | null;
+   concealedSamples: number | null;
+   audioLevel?: number | null;
++  totalAudioEnergy?: number | null;
+   jitter?: number | null;
+   nackCount?: number | null;
+   pliCount?: number | null;
+ };
+ 
++export type SfuMediaPlayoutStats = {
++  audioLevel: number | null;
++  totalAudioEnergy: number | null;
++  totalSamplesDuration: number | null;
++};
++
+ export type SfuSubscribeLatency = {
+   publisherClientId: string;
+   initiatedAtMs: number;
+@@ -340,6 +349,29 @@ export type SfuDiagnosticsSnapshot = {
+   publishStatus?: 'publishing' | 'published' | 'error' | null;
+   publishError?: string | null;
+   outboundAudioSource?: { audioLevel: number | null; totalAudioEnergy: number | null } | null;
++  mediaPlayout?: SfuMediaPlayoutStats;
++};
++
++export type RemoteAudioPlayoutDiagnostics = {
++  selectedAudioOutputId: string | null;
++  effectiveSinkId: string | null;
++  usedFallback: boolean;
++  unlocked: boolean;
++  blockedPeerIds: string[];
++  perPublisher: {
++    publisherClientId: string;
++    trackName: string | null;
++    trackId: string | null;
++    paused: boolean;
++    muted: boolean;
++    volume: number;
++    sinkId: string | null;
++    blockedReason: 'autoplay' | 'sink-failed' | 'paused' | 'voice-stalled' | 'playback-unsupported' | null;
++    sinkApplyResult: 'selected' | 'default-fallback' | 'unsupported' | 'failed';
++    sinkApplyTimedOut: boolean;
++    srcObjectAttached: boolean;
++    readyState: string | null;
++  }[];
+ };
+ 
+ export type DiagnosticsPayload = {
+@@ -348,12 +380,12 @@ export type DiagnosticsPayload = {
+   roomTitle: string;
+   clientId: string | null;
+   participantId: string | null;
+-  clientKey: string;
+   clientName: string;
+   createdAt: number;
+   platform?: 'ios' | 'android' | 'mobile' | 'desktop';
+   userAgent?: string;
+   selectedAudioDeviceId?: string;
++  selectedAudioOutputId?: string;
+   selectedVideoDeviceId?: string;
+   lastGumError?: { name: string; message: string } | null;
+   wsStatus: string;
+@@ -377,9 +409,14 @@ export type DiagnosticsPayload = {
+   micSilent: boolean | null;
+   peers: DiagnosticsPeerSample[];
+   sfuDiagnostics?: SfuDiagnosticsSnapshot;
++  remoteAudioPlayout?: RemoteAudioPlayoutDiagnostics;
+   error?: string;
+ };
+ 
++export type DiagnosticsPostPayload = DiagnosticsPayload & {
++  clientKey: string;
++};
++
+ export type DiagnosticEntry = {
+   id: string;
+   sessionId: string;
+@@ -432,11 +469,11 @@ export class MeetingSessionsService {
+     );
+   }
+ 
+-  async appendDiagnostics(sessionId: string, payload: DiagnosticsPayload): Promise<void> {
++  async appendDiagnostics(sessionId: string, payload: DiagnosticsPostPayload): Promise<void> {
+     await firstValueFrom(this.http.post(`/api/meeting-sessions/${encodeURIComponent(sessionId)}/diagnostics`, payload));
+   }
+ 
+-  sendDiagnosticsBeacon(sessionId: string, payload: DiagnosticsPayload): boolean {
++  sendDiagnosticsBeacon(sessionId: string, payload: DiagnosticsPostPayload): boolean {
+     if (!navigator.sendBeacon) return false;
+     const body = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+     return navigator.sendBeacon(`/api/meeting-sessions/${encodeURIComponent(sessionId)}/diagnostics`, body);
+diff --git a/frontend/src/app/services/remote-audio-watchdog.spec.ts b/frontend/src/app/services/remote-audio-watchdog.spec.ts
+index 57d4f61..63b5984 100644
+--- a/frontend/src/app/services/remote-audio-watchdog.spec.ts
++++ b/frontend/src/app/services/remote-audio-watchdog.spec.ts
+@@ -1,12 +1,19 @@
+ import assert from 'node:assert/strict';
+ import {
+   decideVoiceRecovery,
++  sampleWindowHasVoiceEnergy,
++  voiceRecoveryWindowExhaustedWhileStalled,
+   VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW,
+   type VoiceRecoverySample,
+ } from './remote-audio.service.js';
+ 
+-function samples(values: Array<[number, number]>): VoiceRecoverySample[] {
+-  return values.map(([bytes, emitted]) => ({ bytes, emitted }));
++function samples(values: Array<[number, number]>, energy: 'active' | 'silent' = 'active'): VoiceRecoverySample[] {
++  return values.map(([bytes, emitted], index) => ({
++    bytes,
++    emitted,
++    audioLevel: energy === 'active' ? 0.02 : 0,
++    totalAudioEnergy: energy === 'active' ? index * 0.1 : 0,
++  }));
+ }
+ 
+ // R2-U1 — receiving bytes while emitted stays flat escalates from resume.
+@@ -45,13 +52,46 @@ function samples(values: Array<[number, number]>): VoiceRecoverySample[] {
+       [5_000, 10],
+       [5_000, 10],
+       [5_000, 10],
+-    ]),
++    ], 'silent'),
+     attemptsThisWindow: 0,
+     mutedAll: false,
+   });
+   assert.strictEqual(action, 'none', 'bytes-flat legitimate silence ⇒ none');
+ }
+ 
++// CR-FIX-2 — silent RTP/CN can carry bytes with flat emitted count, but windowed
++// audioLevel/totalAudioEnergy at silence must suppress the recovery latch.
++{
++  const fixture = samples([
++    [1_000, 10],
++    [2_000, 10],
++    [3_000, 10],
++    [4_000, 10],
++  ], 'silent');
++  assert.strictEqual(sampleWindowHasVoiceEnergy(fixture), false, 'silent window has no real audio evidence');
++  assert.strictEqual(decideVoiceRecovery({ samples: fixture, attemptsThisWindow: 0, mutedAll: false }), 'none');
++}
++
++// CR-FIX-4 — negative garbage stats cannot provide usable counters or fake voice energy.
++{
++  const negativeCounters = samples([
++    [-1_000, 0],
++    [2_000, 0],
++    [3_000, 0],
++    [4_000, 0],
++  ]);
++  assert.strictEqual(decideVoiceRecovery({ samples: negativeCounters, attemptsThisWindow: 0, mutedAll: false }), 'none');
++
++  const negativeEnergy: VoiceRecoverySample[] = [
++    { bytes: 1_000, emitted: 0, audioLevel: -0.2, totalAudioEnergy: -10 },
++    { bytes: 2_000, emitted: 0, audioLevel: -0.1, totalAudioEnergy: -5 },
++    { bytes: 3_000, emitted: 0, audioLevel: -0.1, totalAudioEnergy: -1 },
++    { bytes: 4_000, emitted: 0, audioLevel: -0.1, totalAudioEnergy: -0.5 },
++  ];
++  assert.strictEqual(sampleWindowHasVoiceEnergy(negativeEnergy), false, 'negative audioLevel/energy is ignored as invalid');
++  assert.strictEqual(decideVoiceRecovery({ samples: negativeEnergy, attemptsThisWindow: 0, mutedAll: false }), 'none');
++}
++
+ // R2-U4 — mute-all is intentionally silent and must never trigger the ladder.
+ {
+   const action = decideVoiceRecovery({
+@@ -84,17 +124,27 @@ function samples(values: Array<[number, number]>): VoiceRecoverySample[] {
+ 
+ // R2-U6 — attempt cap is respected even if the silent-but-receiving signature remains.
+ {
++  const fixture = samples([
++    [1_000, 0],
++    [2_000, 0],
++    [3_000, 0],
++    [4_000, 0],
++  ]);
+   const action = decideVoiceRecovery({
+-    samples: samples([
+-      [1_000, 0],
+-      [2_000, 0],
+-      [3_000, 0],
+-      [4_000, 0],
+-    ]),
++    samples: fixture,
+     attemptsThisWindow: VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW,
+     mutedAll: false,
+   });
+   assert.strictEqual(action, 'none', 'attempt cap reached ⇒ none');
++  assert.strictEqual(
++    voiceRecoveryWindowExhaustedWhileStalled({
++      samples: fixture,
++      attemptsThisWindow: VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW,
++      mutedAll: false,
++    }),
++    true,
++    'attempt cap with continuing bytes and voice energy keeps the voice-stall latch active',
++  );
+ }
+ 
+ // R2-U7 — fewer than the rolling window size is inconclusive and silent.
+diff --git a/frontend/src/app/services/remote-audio.service.spec.ts b/frontend/src/app/services/remote-audio.service.spec.ts
+index fb0f27f..7d68a6e 100644
+--- a/frontend/src/app/services/remote-audio.service.spec.ts
++++ b/frontend/src/app/services/remote-audio.service.spec.ts
+@@ -3,9 +3,100 @@ import {
+   AUDIO_OUTPUT_DEVICE_STORAGE_KEY,
+   applyMediaElementSinkWithDefaultFallback,
+   clearStoredAudioOutputDeviceId,
++  currentAudioTrack,
+   LatestSinkIdApplier,
++  RemoteAudioService,
++  voiceRecoveryWindowExhaustedWhileStalled,
+ } from './remote-audio.service.js';
+ 
++type Listener = () => void;
++
++class FakeAudioElement {
++  dataset: Record<string, string> = {};
++  style: Record<string, string> = {};
++  srcObject: unknown = null;
++  volume = 1;
++  muted = false;
++  paused = true;
++  sinkId = '';
++  isConnected = false;
++  removed = false;
++  pauseCalled = false;
++  playReject: unknown = null;
++  calls: string[] = [];
++  rejectSinkIds = new Set<string>();
++  readonly attributes = new Set<string>();
++  private readonly listeners = new Map<string, Listener[]>();
++
++  setAttribute(name: string, value: string): void {
++    this.attributes.add(`${name}=${value}`);
++  }
++
++  addEventListener(name: string, listener: Listener): void {
++    this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
++  }
++
++  removeEventListener(name: string, listener: Listener): void {
++    this.listeners.set(name, (this.listeners.get(name) ?? []).filter((current) => current !== listener));
++  }
++
++  async setSinkId(deviceId: string): Promise<void> {
++    this.calls.push(`setSinkId:${deviceId}`);
++    if (this.rejectSinkIds.has(deviceId)) throw new Error(`bad sink ${deviceId}`);
++    this.sinkId = deviceId;
++  }
++
++  async play(): Promise<void> {
++    this.calls.push('play');
++    if (this.playReject) throw this.playReject;
++    this.paused = false;
++    this.dispatch('playing');
++  }
++
++  pause(): void {
++    this.pauseCalled = true;
++    this.paused = true;
++    this.dispatch('pause');
++  }
++
++  remove(): void {
++    this.removed = true;
++    this.isConnected = false;
++  }
++
++  dispatch(name: string): void {
++    for (const listener of this.listeners.get(name) ?? []) listener();
++  }
++}
++
++class FakeTrack {
++  readonly kind = 'audio';
++  readyState: MediaStreamTrackState = 'live';
++  private readonly listeners = new Map<string, Listener[]>();
++
++  constructor(readonly id: string) {}
++
++  addEventListener(name: string, listener: Listener): void {
++    this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
++  }
++
++  removeEventListener(name: string, listener: Listener): void {
++    this.listeners.set(name, (this.listeners.get(name) ?? []).filter((current) => current !== listener));
++  }
++}
++
++class FakeMediaStream {
++  constructor(private tracks: FakeTrack[]) {}
++
++  getAudioTracks(): FakeTrack[] {
++    return this.tracks;
++  }
++
++  replaceAudioTrack(track: FakeTrack): void {
++    this.tracks = [track];
++  }
++}
++
+ class MemoryStorage {
+   private store = new Map<string, string>();
+   getItem(key: string): string | null {
+@@ -27,11 +118,6 @@ type FakeSinkElement = HTMLMediaElement & {
+   setSinkId: (sinkId: string) => Promise<void>;
+ };
+ 
+-const memory = new MemoryStorage();
+-const g = globalThis as unknown as { localStorage: MemoryStorage; window: { localStorage: MemoryStorage } };
+-g.localStorage = memory;
+-g.window = { localStorage: memory };
+-
+ function fakeSinkElement(rejectIds: Set<string>): FakeSinkElement {
+   const element = {
+     calls: [] as string[],
+@@ -59,10 +145,76 @@ async function waitFor(predicate: () => boolean): Promise<void> {
+   }
+ }
+ 
+-// B13-U1: bad selected sink retries only that element on default and clears storage.
++function installFakeDom(options: string | { storedVolume?: string; withoutSinkId?: boolean; playReject?: unknown } = {}): { elements: FakeAudioElement[]; localStorage: Map<string, string> } {
++  const config = typeof options === 'string' ? { storedVolume: options } : options;
++  const elements: FakeAudioElement[] = [];
++  const store = new Map<string, string>();
++  if (config.storedVolume !== undefined) store.set('meet-poc:volume:value', config.storedVolume);
++  const body = {
++    append: (el: FakeAudioElement) => {
++      el.isConnected = true;
++    },
++  };
++  const document = {
++    body,
++    createElement: (tag: string) => {
++      assert.strictEqual(tag, 'audio');
++      const el = new FakeAudioElement();
++      if (config.withoutSinkId) (el as unknown as { setSinkId?: undefined }).setSinkId = undefined;
++      if (config.playReject) el.playReject = config.playReject;
++      elements.push(el);
++      return el;
++    },
++  };
++  const localStorage = {
++    getItem: (key: string) => store.get(key) ?? null,
++    setItem: (key: string, value: string) => {
++      store.set(key, value);
++    },
++    removeItem: (key: string) => {
++      store.delete(key);
++    },
++  };
++  Object.defineProperty(globalThis, 'document', { value: document, configurable: true });
++  Object.defineProperty(globalThis, 'window', { value: { localStorage }, configurable: true });
++  return { elements, localStorage: store };
++}
++
++function endedStream(trackId: string): MediaStream {
++  const track = new FakeTrack(trackId);
++  track.readyState = 'ended';
++  return new FakeMediaStream([track]) as unknown as MediaStream;
++}
++
++function stream(trackId: string): MediaStream {
++  return new FakeMediaStream([new FakeTrack(trackId)]) as unknown as MediaStream;
++}
++
++function peer(id: string, mediaStream: MediaStream): Parameters<RemoteAudioService['syncPeers']>[0][number] {
++  return {
++    id,
++    participantId: id,
++    name: id,
++    stream: mediaStream,
++    pc: null,
++    connectionState: 'connected',
++    isLocal: false,
++    isHost: false,
++    micEnabled: true,
++    camEnabled: false,
++    screenOn: false,
++    reconnecting: false,
++    isMobile: false,
++    quality: 'good',
++    audioOnlyReason: null,
++  };
++}
++
++// B13-U1/B20: bad selected sink retries default and reports the fallback distinctly.
+ {
+-  memory.clear();
++  const memory = new MemoryStorage();
+   memory.setItem(AUDIO_OUTPUT_DEVICE_STORAGE_KEY, 'stale-speaker');
++  Object.defineProperty(globalThis, 'window', { value: { localStorage: memory }, configurable: true });
+   const element = fakeSinkElement(new Set(['stale-speaker']));
+ 
+   const applied = await applyMediaElementSinkWithDefaultFallback(element, 'stale-speaker', {
+@@ -70,15 +222,16 @@ async function waitFor(predicate: () => boolean): Promise<void> {
+     label: 'unit-bad-sink',
+   });
+ 
+-  assert.strictEqual(applied, false, 'bad selected sink reports fallback');
++  assert.strictEqual(applied, 'default-fallback', 'bad selected sink reports default fallback when default succeeds');
+   assert.deepStrictEqual(element.calls, ['stale-speaker', ''], 'bad selected sink retries default output for the same element');
+   assert.strictEqual(memory.getItem(AUDIO_OUTPUT_DEVICE_STORAGE_KEY), null, 'bad selected sink clears stored output id');
+ }
+ 
+ // B13-U2: valid selected sink applies once and remains persisted.
+ {
+-  memory.clear();
++  const memory = new MemoryStorage();
+   memory.setItem(AUDIO_OUTPUT_DEVICE_STORAGE_KEY, 'valid-speaker');
++  Object.defineProperty(globalThis, 'window', { value: { localStorage: memory }, configurable: true });
+   const element = fakeSinkElement(new Set());
+ 
+   const applied = await applyMediaElementSinkWithDefaultFallback(element, 'valid-speaker', {
+@@ -86,14 +239,25 @@ async function waitFor(predicate: () => boolean): Promise<void> {
+     label: 'unit-valid-sink',
+   });
+ 
+-  assert.strictEqual(applied, true, 'valid selected sink reports success');
++  assert.strictEqual(applied, 'selected', 'valid selected sink reports selected output');
+   assert.deepStrictEqual(element.calls, ['valid-speaker'], 'valid selected sink does not fall back to default');
+   assert.strictEqual(memory.getItem(AUDIO_OUTPUT_DEVICE_STORAGE_KEY), 'valid-speaker', 'valid selected sink remains stored');
+ }
+ 
++// CR-FIX-4 — browsers without setSinkId report unsupported, not selected success.
++{
++  const element = {} as HTMLMediaElement;
++
++  const applied = await applyMediaElementSinkWithDefaultFallback(element, 'speaker-without-set-sink-id', {
++    label: 'unit-unsupported-sink',
++  });
++
++  assert.strictEqual(applied, 'unsupported', 'non-default sink on unsupported browser reports unsupported');
++  assert.strictEqual(await applyMediaElementSinkWithDefaultFallback(element, '', { label: 'unit-default-no-sink' }), 'selected');
++}
++
+ // ERR9: concurrent requests for the same element do not overlap and coalesce to the latest sink.
+ {
+-  memory.clear();
+   const firstCall = deferred();
+   const calls: string[] = [];
+   let inFlight = 0;
+@@ -127,4 +291,406 @@ async function waitFor(predicate: () => boolean): Promise<void> {
+   assert.strictEqual(currentSinkId, 'speaker-c', 'latest sink coalescer converges to final chosen output');
+ }
+ 
+-console.log('remote-audio-service: all assertions passed');
++// RA-REG-1 — addPublisher applies setSinkId before service-owned play(), with no autoplay attr.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.applyOutputDevice('speaker-1');
++  await service.addPublisher('client-a', stream('track-a'));
++
++  assert.deepStrictEqual(elements[0].calls, ['setSinkId:speaker-1', 'play'], 'setSinkId must run before play');
++  assert.ok(!elements[0].attributes.has('autoplay='), 'registry element must not set autoplay attr');
++}
++
++// CR-FIX-5 R1 — inbound energy plus selected-sink element playout resolves to audible.
++{
++  installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.applyOutputDevice('speaker-selected');
++  await service.addPublisher('client-a', stream('track-a'), undefined, 'sfu-audio-a');
++
++  const diag = service.playoutDiagnostics();
++  const row = diag.perPublisher[0];
++  assert.strictEqual(row.paused, false, 'playing element is not paused');
++  assert.strictEqual(row.sinkId, 'speaker-selected', 'publisher element plays on selected sink');
++  assert.strictEqual(row.blockedReason, null, 'audible selected-sink publisher has no blocked reason');
++  assert.strictEqual(row.sinkApplyResult, 'selected', 'selected sink application is recorded per publisher');
++  assert.strictEqual(row.sinkApplyTimedOut, false, 'selected sink application did not time out');
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'audible publisher does not raise unblock banner');
++}
++
++// CR-FIX-5 R2 — two publishers remain simultaneously audible; removing A leaves B audible.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  service.setVolume(0.7);
++  await service.applyOutputDevice('speaker-selected');
++  await service.addPublisher('client-a', stream('track-a'), undefined, 'sfu-audio-a');
++  await service.addPublisher('client-b', stream('track-b'), undefined, 'sfu-audio-b');
++
++  let diag = service.playoutDiagnostics();
++  assert.deepStrictEqual(diag.perPublisher.map((row) => row.publisherClientId).sort(), ['client-a', 'client-b'], 'both publishers have registry diagnostics');
++  for (const row of diag.perPublisher) {
++    assert.strictEqual(row.paused, false, `${row.publisherClientId} is playing`);
++    assert.strictEqual(row.blockedReason, null, `${row.publisherClientId} is not blocked`);
++    assert.strictEqual(row.sinkId, 'speaker-selected', `${row.publisherClientId} uses selected sink`);
++    assert.strictEqual(row.volume, 0.7, `${row.publisherClientId} uses current service volume`);
++  }
++  assert.strictEqual(elements.filter((el) => el.isConnected && !el.removed).length, 2, 'both audio elements are connected simultaneously');
++
++  service.removePublisher('client-a');
++  diag = service.playoutDiagnostics();
++  assert.deepStrictEqual(diag.perPublisher.map((row) => row.publisherClientId), ['client-b'], 'removing A leaves B registered');
++  assert.strictEqual(diag.perPublisher[0].paused, false, 'B remains playing after A removal');
++  assert.strictEqual(diag.perPublisher[0].blockedReason, null, 'B remains unblocked after A removal');
++  assert.strictEqual(diag.perPublisher[0].sinkId, 'speaker-selected', 'B keeps selected sink after A removal');
++}
++
++// RA-REG-2 — per-element volume/mute mirrors service state, including mute-all volume=0.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  service.setVolume(0.6);
++  await service.addPublisher('client-a', stream('track-a'));
++  assert.strictEqual(elements[0].volume, 0.6);
++  assert.strictEqual(elements[0].muted, false);
++
++  service.setMutedAll(true);
++  assert.strictEqual(elements[0].volume, 0, 'mute-all forces element volume to 0');
++  assert.strictEqual(elements[0].muted, true);
++
++  service.setMutedAll(false);
++  service.setVolume(1.4);
++  assert.strictEqual(service.volume(), 1);
++  assert.strictEqual(elements[0].volume, 1, 'native playout clamps to 100%');
++  assert.strictEqual(elements[0].muted, false);
++}
++
++// RA-REG-3 — reset clears the registry by pausing, nulling srcObject, and removing every element.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.unlockAndPlayRemoteSinks('speaker-1');
++  await service.addPublisher('client-a', stream('track-a'));
++  await service.addPublisher('client-b', stream('track-b'));
++  assert.strictEqual(service.debugSnapshot().unlocked, true);
++
++  service.reset();
++  assert.strictEqual(service.debugSnapshot().unlocked, false, 'reset clears sticky unlock between calls');
++  assert.strictEqual(service.playoutDiagnostics().selectedAudioOutputId, null, 'reset clears per-call selected sink tracking');
++  assert.strictEqual(service.playoutDiagnostics().effectiveSinkId, null, 'reset clears per-call effective sink tracking');
++  assert.strictEqual(service.playoutDiagnostics().usedFallback, false, 'reset clears per-call fallback tracking');
++  assert.strictEqual(elements.length, 2);
++  for (const el of elements) {
++    assert.strictEqual(el.pauseCalled, true);
++    assert.strictEqual(el.srcObject, null);
++    assert.strictEqual(el.removed, true);
++    assert.strictEqual(el.isConnected, false);
++  }
++}
++
++// RA-REG-3b — reset clears sticky unlock even when no publishers were present.
++{
++  installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.unlockAndPlayRemoteSinks('speaker-1');
++  service.reset();
++  assert.strictEqual(service.debugSnapshot().unlocked, false);
++}
++
++// RA-REG-4 — explicit sticky unlock causes a late publisher to play immediately with no extra gesture.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.unlockAndPlayRemoteSinks('speaker-1');
++  await service.addPublisher('late-client', stream('late-track'));
++
++  assert.deepStrictEqual(elements[0].calls, ['setSinkId:speaker-1', 'play']);
++  assert.strictEqual(service.debugSnapshot().unlocked, true);
++}
++
++// CR-FIX-3 — selected speaker failure that falls back to default is not reported as selected success.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++  elements[0].rejectSinkIds.add('stale-speaker');
++
++  const result = await service.applyOutputDevice('stale-speaker');
++
++  assert.strictEqual(result, 'default-fallback', 'selected sink rejection reports default fallback');
++  assert.deepStrictEqual(elements[0].calls.slice(-2), ['setSinkId:stale-speaker', 'setSinkId:'], 'remote audio retries default sink');
++  assert.strictEqual(service.playoutDiagnostics().selectedAudioOutputId, 'stale-speaker', 'diagnostics keep the user-selected sink');
++  assert.strictEqual(service.playoutDiagnostics().effectiveSinkId, '', 'diagnostics record default as the effective sink');
++  assert.strictEqual(service.playoutDiagnostics().usedFallback, true, 'diagnostics mark fallback use');
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'playing default fallback does not raise the unblock banner');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].blockedReason, null, 'playing default fallback is not a blocked publisher');
++
++  elements[0].rejectSinkIds.delete('stale-speaker');
++  const recovered = await service.applyOutputDevice('stale-speaker');
++
++  assert.strictEqual(recovered, 'selected', 'selected sink success clears fallback status');
++  assert.strictEqual(service.playoutDiagnostics().effectiveSinkId, 'stale-speaker');
++  assert.strictEqual(service.playoutDiagnostics().usedFallback, false);
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].sinkApplyResult, 'selected', 'successful re-apply replaces the stale fallback result');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].sinkApplyTimedOut, false, 'successful re-apply clears stale timeout state');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].blockedReason, null, 'successful re-apply leaves no blocked reason');
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'successful re-apply leaves the aggregate unblocked');
++}
++
++// CR-FIX-6 — selected and default sink failure is the only sink result that blocks; later success self-clears.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++  elements[0].rejectSinkIds.add('broken-speaker');
++  elements[0].rejectSinkIds.add('');
++
++  const failed = await service.applyOutputDevice('broken-speaker');
++
++  assert.strictEqual(failed, 'failed', 'selected plus default sink rejection reports failed');
++  assert.strictEqual(service.remoteAudioBlocked(), true, 'failed sink apply raises the unblock banner');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].blockedReason, 'sink-failed', 'failed sink apply reports sink-failed');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].sinkApplyResult, 'failed', 'failed sink result is recorded');
++
++  elements[0].rejectSinkIds.clear();
++  const recovered = await service.applyOutputDevice('broken-speaker');
++
++  assert.strictEqual(recovered, 'selected', 'later selected sink success is reported');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].sinkApplyResult, 'selected', 'later success replaces stale failed sink result');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].sinkApplyTimedOut, false, 'later success clears stale timed-out state');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].blockedReason, null, 'later success clears stale sink-failed reason');
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'later success clears stale aggregate blocked state');
++}
++
++// CR-FIX-4 — unsupported setSinkId keeps diagnostics honest without marking the selected speaker unavailable.
++{
++  const { elements } = installFakeDom({ withoutSinkId: true });
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++
++  const result = await service.applyOutputDevice('speaker-without-set-sink-id');
++
++  assert.strictEqual(result, 'unsupported');
++  assert.deepStrictEqual(elements[0].calls, ['play'], 'unsupported browser still plays through default output');
++  assert.strictEqual(service.playoutDiagnostics().selectedAudioOutputId, 'speaker-without-set-sink-id');
++  assert.strictEqual(service.playoutDiagnostics().effectiveSinkId, '', 'diagnostics record default output as effective');
++  assert.strictEqual(service.playoutDiagnostics().usedFallback, true, 'diagnostics mark fallback use for unsupported routing');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].blockedReason, null, 'playing unsupported sink routing is not a blocked publisher');
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'playing unsupported sink routing does not raise the unblock banner');
++}
++
++// RA-REG-5 — blocked state is registry-backed: paused/blocked true, replay clears when playing.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++  assert.strictEqual(service.remoteAudioBlocked(), false);
++
++  elements[0].pause();
++  assert.strictEqual(service.remoteAudioBlocked(), true, 'paused registry element surfaces unblock banner state');
++
++  await service.recoverPlayback();
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'successful replay clears blocked state');
++}
++
++// CR-FIX-1 — watchdog voice-stall verdict latches the banner even when the element is unpaused, then clears on emitted advance.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++  assert.strictEqual(elements[0].paused, false);
++  assert.strictEqual(service.remoteAudioBlocked(), false);
++
++  await service.recoverVoicePlayout('client-a', 'replay');
++
++  assert.strictEqual(elements[0].paused, false, 'watchdog replay can leave the element unpaused');
++  assert.strictEqual(service.remoteAudioBlocked(), true, 'voice-stall latch surfaces unblock banner despite unpaused element');
++
++  service.noteVoiceEmissionAdvanced('client-a');
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'emitted-count advance clears voice-stall banner latch');
++
++  await service.recoverVoicePlayout('client-a', 'replay');
++  service.clearVoiceStalls(['client-a']);
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'explicit watchdog reset path clears voice-stall banner latch');
++}
++
++// CR-FIX-10 — bytes-flat watchdog clear path drops an already latched voice-stall banner.
++{
++  installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++  service.markVoiceStalled('client-a');
++  assert.strictEqual(service.remoteAudioBlocked(), true, 'precondition: voice-stall banner is latched');
++
++  service.clearVoiceStalls(['client-a']);
++
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'bytes-flat watchdog clear path clears the latched banner');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].blockedReason, null, 'bytes-flat clear removes voice-stalled diagnostics');
++}
++
++// CR-FIX-10 — no-voice-energy watchdog clear path drops an already latched voice-stall banner.
++{
++  installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++  service.markVoiceStalled('client-a');
++  assert.strictEqual(service.remoteAudioBlocked(), true, 'precondition: voice-stall banner is latched');
++
++  service.clearVoiceStalls(['client-a']);
++
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'no-energy watchdog clear path clears the latched banner');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].blockedReason, null, 'no-energy clear removes voice-stalled diagnostics');
++}
++
++// CR-FIX-10 — mute-all drops any latched voice-stall banner because intentional silence is not a playout fault.
++{
++  installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++  service.markVoiceStalled('client-a');
++  assert.strictEqual(service.remoteAudioBlocked(), true, 'precondition: voice-stall banner is latched');
++
++  service.setMutedAll(true);
++
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'mutedAll clears the latched voice-stall banner');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].blockedReason, null, 'mutedAll removes voice-stalled diagnostics');
++}
++
++// CR-FIX-2 — playout diagnostics carries the SFU trackName separately from browser track.id.
++{
++  installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  const mediaStream = stream('browser-track-a');
++  service.syncPeers(
++    [peer('client-a', mediaStream)],
++    new Map([['client-a', new Map([['browser-track-a', 'sfu-track-a']])]]),
++  );
++  await waitFor(() => service.playoutDiagnostics().perPublisher.length === 1);
++
++  const row = service.playoutDiagnostics().perPublisher[0];
++  assert.strictEqual(row.trackId, 'browser-track-a');
++  assert.strictEqual(row.trackName, 'sfu-track-a');
++}
++
++// CR-FIX-4 — a stream whose only audio track is ended is treated as having no current audio track.
++{
++  assert.strictEqual(currentAudioTrack(endedStream('ended-track')), null, 'all-ended streams have no current audio track');
++}
++
++// CR-FIX-4 — syncPeers removes an existing publisher when the same client now has only ended audio.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  const mediaStream = stream('track-a');
++
++  service.syncPeers([peer('client-a', mediaStream)]);
++  await waitFor(() => elements.length === 1 && elements[0].calls.includes('play'));
++
++  service.syncPeers([peer('client-a', endedStream('track-ended'))]);
++
++  assert.strictEqual(elements[0].removed, true, 'ended-only replacement removes the existing registry element');
++  assert.deepStrictEqual(service.debugSnapshot().registryPeerIds, [], 'ended-only replacement leaves no registered publisher');
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'ended-only removal does not leave the unblock banner latched');
++}
++
++// CR-FIX-4 — unplayable source errors do not show the gesture-unblock banner or replay forever as NotAllowed.
++{
++  installFakeDom({ playReject: { name: 'NotSupportedError' } });
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'NotSupportedError does not set tap-to-enable banner state');
++  assert.strictEqual(service.outputPlaying(), true, 'unsupported playback is bounded out of the blocked/replay lane');
++  assert.strictEqual(service.playoutDiagnostics().perPublisher[0].blockedReason, null, 'unsupported playback failure does not disagree with aggregate blocked state');
++}
++
++// CR-FIX-6 — sink apply resolving after reset does not write stale state back into a removed entry.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++  const sinkApply = deferred();
++  elements[0].setSinkId = async (sinkId: string): Promise<void> => {
++    elements[0].calls.push(`delayedSetSinkId:${sinkId}`);
++    await sinkApply.promise;
++    elements[0].sinkId = sinkId;
++  };
++
++  const applying = service.applyOutputDevice('late-speaker');
++  await waitFor(() => elements[0].calls.includes('delayedSetSinkId:late-speaker'));
++  service.reset();
++  sinkApply.resolve();
++  const result = await applying;
++
++  assert.strictEqual(result, 'selected', 'stale apply resolves without surfacing an error');
++  assert.deepStrictEqual(service.playoutDiagnostics().perPublisher, [], 'reset registry remains empty after stale sink apply resolves');
++  assert.strictEqual(service.playoutDiagnostics().selectedAudioOutputId, null, 'stale sink apply does not restore selected sink after reset');
++  assert.strictEqual(service.playoutDiagnostics().effectiveSinkId, null, 'stale sink apply does not restore effective sink after reset');
++  assert.strictEqual(service.playoutDiagnostics().usedFallback, false, 'stale sink apply does not restore fallback state after reset');
++  assert.strictEqual(service.remoteAudioBlocked(), false, 'stale sink apply cannot relatch aggregate blocked state after reset');
++  assert.strictEqual(elements[0].removed, true, 'reset removed the original publisher element');
++}
++
++// CR-FIX-1 — syncPeers replaces a publisher when the audio track changes on the same MediaStream.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  const firstTrack = new FakeTrack('track-a');
++  const mediaStream = new FakeMediaStream([firstTrack]) as unknown as FakeMediaStream & MediaStream;
++
++  service.syncPeers([peer('client-a', mediaStream)]);
++  await waitFor(() => elements.length === 1 && elements[0].calls.includes('play'));
++
++  mediaStream.replaceAudioTrack(new FakeTrack('track-b'));
++  service.syncPeers([peer('client-a', mediaStream)]);
++  await waitFor(() => elements.length === 2 && elements[1].calls.includes('play'));
++
++  assert.strictEqual(elements[0].removed, true, 'old same-stream audio track element is removed');
++  assert.strictEqual(elements[1].dataset['remoteAudio'], 'client-a');
++  assert.deepStrictEqual(service.debugSnapshot().registryTrackIds, ['track-b'], 'registry follows the replacement audio track');
++}
++
++// RA-REG-6 — re-adding the same publisher leaves exactly one connected element for that client id.
++{
++  const { elements } = installFakeDom();
++  const service = new RemoteAudioService();
++  service.setInCallActive(true);
++  await service.addPublisher('client-a', stream('track-a'));
++  await service.addPublisher('client-a', stream('track-b'));
++
++  const connected = elements.filter((el) => el.isConnected && !el.removed);
++  assert.strictEqual(connected.length, 1);
++  assert.strictEqual(connected[0].dataset['remoteAudio'], 'client-a');
++  assert.strictEqual(elements[0].removed, true, 'old publisher element is removed before replacement lives');
++}
++
++// RA-REG-7 — stored mixer-era >100% volume migrates to native-safe 100%.
++{
++  const { localStorage } = installFakeDom('1.3');
++  const service = new RemoteAudioService();
++  assert.strictEqual(service.volume(), 1);
++  assert.strictEqual(localStorage.get('meet-poc:volume:value'), '1');
++}
++
++console.log('remote-audio.service: all assertions passed');
+diff --git a/frontend/src/app/services/remote-audio.service.ts b/frontend/src/app/services/remote-audio.service.ts
+index 4610c2a..cd75dce 100644
+--- a/frontend/src/app/services/remote-audio.service.ts
++++ b/frontend/src/app/services/remote-audio.service.ts
+@@ -1,27 +1,38 @@
+ import { Injectable, signal } from '@angular/core';
+ import { PeerState } from './peer-state';
+-import { evaluateRemoteAudioPlayability } from './remote-audio-playability';
++import type { RemoteAudioPlayoutDiagnostics } from './meeting-sessions.service';
+ 
+-type RemoteSource = {
++type RemotePublisherEntry = {
+   stream: MediaStream;
+   track: MediaStreamTrack;
+-  source: MediaStreamAudioSourceNode;
+-  kickstartElement: HTMLAudioElement;
++  trackName: string | null;
++  el: HTMLAudioElement;
++  blocked: boolean;
++  playbackFailure: 'unsupported' | 'aborted' | null;
++  voiceStalled: boolean;
++  sinkApplyResult: SinkApplyResult;
++  sinkApplyTimedOut: boolean;
+   onEnded: () => void;
++  onPlaying: () => void;
++  onPaused: () => void;
++  generation: number;
+ };
+ 
+ type SinkIdTargetState = {
+   desiredDeviceId: string;
+-  inFlight: Promise<boolean> | null;
++  inFlight: Promise<SinkApplyResult> | null;
+   rerun: boolean;
+ };
+ 
++export type SinkApplyResult = 'selected' | 'default-fallback' | 'unsupported' | 'failed';
+ export type VoiceRecoveryAction = 'none' | 'resume' | 'kickstart' | 'replay' | 'rebuild';
+ export type VoiceRecoveryStep = Exclude<VoiceRecoveryAction, 'none'>;
+ 
+ export type VoiceRecoverySample = {
+   bytes: number;
+   emitted: number;
++  audioLevel?: number | null;
++  totalAudioEnergy?: number | null;
+ };
+ 
+ export type VoiceRecoveryDecisionInput = {
+@@ -41,21 +52,24 @@ export type RemoteAudioDebugSnapshot = {
+   mixedTrackIds: string[];
+   kickstartCount: number;
+   kickstartPlayingCount: number;
++  registryPeerIds: string[];
++  registryTrackIds: string[];
++  blockedPeerIds: string[];
++  unlocked: boolean;
+   voiceRecoveryCounters: Record<VoiceRecoveryStep, number>;
+ };
+ 
+ const VOLUME_STORAGE_KEY = 'meet-poc:volume:value';
+ export const AUDIO_OUTPUT_DEVICE_STORAGE_KEY = 'meet-poc.device.audioOutput';
+ const DEFAULT_VOLUME = 1;
+-const MAX_VOLUME = 1.3;
++export const MAX_VOLUME = 1;
++const SINK_ID_TIMEOUT_MS = 2_000;
+ export const VOICE_RECOVERY_SAMPLE_WINDOW = 4;
+ export const VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW = 4;
+ export const VOICE_RECOVERY_MIN_BYTES_DELTA = 0;
+ export const VOICE_RECOVERY_MAX_EMITTED_DELTA = 0;
+-
+-// B2 — brick-wall limiter taming runaway same-room feedback peaks. dB / dB / :1 / s / s.
+-// NO makeup gain so mute-all (gain=0) stays silent (0 in ⇒ 0 out through the compressor).
+-export const FEEDBACK_LIMITER_PARAMS = { threshold: -3, knee: 0, ratio: 20, attack: 0.003, release: 0.25 } as const;
++export const VOICE_RECOVERY_MIN_AUDIO_LEVEL = 0.0005;
++export const VOICE_RECOVERY_MIN_TOTAL_AUDIO_ENERGY_DELTA = 0.000001;
+ 
+ export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRecoveryAction {
+   if (input.mutedAll) return 'none';
+@@ -70,6 +84,7 @@ export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRec
+   const emittedDelta = last.emitted - first.emitted;
+   if (bytesDelta <= VOICE_RECOVERY_MIN_BYTES_DELTA) return 'none';
+   if (emittedDelta > VOICE_RECOVERY_MAX_EMITTED_DELTA) return 'none';
++  if (!sampleWindowHasVoiceEnergy(input.samples)) return 'none';
+ 
+   if (input.attemptsThisWindow === 0) return 'resume';
+   if (input.attemptsThisWindow === 1) return 'kickstart';
+@@ -77,6 +92,37 @@ export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRec
+   return 'rebuild';
+ }
+ 
++export function voiceRecoveryWindowExhaustedWhileStalled(input: VoiceRecoveryDecisionInput): boolean {
++  if (input.mutedAll || input.attemptsThisWindow < VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW) return false;
++  if (input.samples.length < VOICE_RECOVERY_SAMPLE_WINDOW) return false;
++  const first = input.samples[0];
++  const last = input.samples[input.samples.length - 1];
++  if (!sampleUsable(first) || !sampleUsable(last)) return false;
++  return (
++    last.bytes - first.bytes > VOICE_RECOVERY_MIN_BYTES_DELTA &&
++    last.emitted - first.emitted <= VOICE_RECOVERY_MAX_EMITTED_DELTA &&
++    sampleWindowHasVoiceEnergy(input.samples)
++  );
++}
++
++export function sampleWindowHasVoiceEnergy(samples: VoiceRecoverySample[]): boolean {
++  let highestAudioLevel = 0;
++  const finiteEnergySamples: number[] = [];
++  for (const sample of samples) {
++    const level = sample.audioLevel;
++    if (typeof level === 'number' && Number.isFinite(level) && level >= 0) {
++      highestAudioLevel = Math.max(highestAudioLevel, level);
++    }
++    const energy = sample.totalAudioEnergy;
++    if (typeof energy === 'number' && Number.isFinite(energy) && energy >= 0) {
++      finiteEnergySamples.push(energy);
++    }
++  }
++  if (highestAudioLevel > VOICE_RECOVERY_MIN_AUDIO_LEVEL) return true;
++  if (finiteEnergySamples.length < 2) return false;
++  return finiteEnergySamples[finiteEnergySamples.length - 1] - finiteEnergySamples[0] > VOICE_RECOVERY_MIN_TOTAL_AUDIO_ENERGY_DELTA;
++}
++
+ export type ApplySinkIdOptions = {
+   onSelectedSinkFailure?: (deviceId: string, err: unknown) => void;
+   label?: string;
+@@ -86,14 +132,14 @@ export async function applyMediaElementSinkWithDefaultFallback(
+   element: HTMLMediaElement | null,
+   deviceId: string | undefined,
+   options: ApplySinkIdOptions = {},
+-): Promise<boolean> {
+-  if (!element || deviceId === undefined) return true;
++): Promise<SinkApplyResult> {
++  if (!element || deviceId === undefined) return 'selected';
+   const withSink = element as HTMLMediaElement & { setSinkId?: (sinkId: string) => Promise<void> };
+-  if (!withSink.setSinkId) return true;
++  if (!withSink.setSinkId) return deviceId ? 'unsupported' : 'selected';
+ 
+   try {
+     await withSink.setSinkId(deviceId);
+-    return true;
++    return 'selected';
+   } catch (err) {
+     console.debug('[media] audio output sink routing failed; falling back to default speaker', {
+       deviceId,
+@@ -101,13 +147,14 @@ export async function applyMediaElementSinkWithDefaultFallback(
+       err,
+     });
+     if (deviceId) options.onSelectedSinkFailure?.(deviceId, err);
+-    if (deviceId === '') return false;
++    if (deviceId === '') return 'failed';
+     try {
+       await withSink.setSinkId('');
++      return 'default-fallback';
+     } catch (fallbackErr) {
+       console.debug('[media] default audio output sink fallback failed', { label: options.label, fallbackErr });
+     }
+-    return false;
++    return 'failed';
+   }
+ }
+ 
+@@ -122,7 +169,7 @@ export function clearStoredAudioOutputDeviceId(): void {
+ export class LatestSinkIdApplier {
+   private readonly targets = new WeakMap<HTMLMediaElement, SinkIdTargetState>();
+ 
+-  apply(element: HTMLMediaElement | null, deviceId: string | undefined, options: ApplySinkIdOptions = {}): Promise<boolean> {
++  apply(element: HTMLMediaElement | null, deviceId: string | undefined, options: ApplySinkIdOptions = {}): Promise<SinkApplyResult> {
+     if (!element || deviceId === undefined) return applyMediaElementSinkWithDefaultFallback(element, deviceId, options);
+     let state = this.targets.get(element);
+     if (!state) {
+@@ -139,9 +186,9 @@ export class LatestSinkIdApplier {
+     return state.inFlight;
+   }
+ 
+-  private async drain(element: HTMLMediaElement, state: SinkIdTargetState, options: ApplySinkIdOptions): Promise<boolean> {
++  private async drain(element: HTMLMediaElement, state: SinkIdTargetState, options: ApplySinkIdOptions): Promise<SinkApplyResult> {
+     try {
+-      let applied = true;
++      let applied: SinkApplyResult = 'selected';
+       while (true) {
+         state.rerun = false;
+         const deviceId = state.desiredDeviceId;
+@@ -160,23 +207,21 @@ export class RemoteAudioService {
+   readonly contextState = signal<AudioContextState | 'none'>('none');
+   readonly mutedAll = signal(false);
+   readonly volume = signal(DEFAULT_VOLUME);
+-  // Bumped whenever a mixer source is added/removed, so reactive consumers (the
+-  // room-page playability effect) re-evaluate the banner on source-add (R1.3 BUG-2).
++  // Bumped whenever registry playout state changes, so reactive consumers re-check
++  // the unblock banner without scanning the DOM.
+   readonly sourcesVersion = signal(0);
+-  // Tracks whether the mixer output element is genuinely playing (play/pause/ended
+-  // element events), so the playability effect clears the banner once playout truly
+-  // settles — not on the transient running-context-but-output-still-pausing window.
++  // Kept for debug compatibility; true only when every registered remote element is playing.
+   readonly outputPlaying = signal(false);
++  readonly remoteAudioBlocked = signal(false);
+ 
+-  private context: AudioContext | null = null;
+-  private gain: GainNode | null = null;
+-  private limiter: DynamicsCompressorNode | null = null;
+-  private destination: MediaStreamAudioDestinationNode | null = null;
+-  private keepaliveOscillator: OscillatorNode | null = null;
+-  private keepaliveGain: GainNode | null = null;
+-  private outputElement: HTMLAudioElement | null = null;
+-  private readonly sources = new Map<string, RemoteSource>();
++  private readonly registry = new Map<string, RemotePublisherEntry>();
+   private readonly sinkIdApplier = new LatestSinkIdApplier();
++  private selectedSinkId: string | undefined;
++  private effectiveSinkId: string | null = null;
++  private usedDefaultSinkFallback = false;
++  private unlocked = false;
++  private inCall = false;
++  private generation = 0;
+   private readonly voiceRecoveryCounters: Record<VoiceRecoveryStep, number> = {
+     resume: 0,
+     kickstart: 0,
+@@ -185,214 +230,123 @@ export class RemoteAudioService {
+   };
+ 
+   constructor() {
+-    this.setVolume(readStoredVolume());
++    this.setVolume(readStoredVolume(), true);
+   }
+ 
+   mixerEnabled(): boolean {
+-    return true;
++    return false;
+   }
+ 
+   setMutedAll(value: boolean): void {
+     this.mutedAll.set(value);
+-    if (this.gain) this.gain.gain.value = value ? 0 : this.volume();
++    if (value) {
++      for (const entry of this.registry.values()) entry.voiceStalled = false;
++    }
++    for (const entry of this.registry.values()) this.applyVolumeState(entry.el);
++    this.refreshBlockedState();
+   }
+ 
+-  setVolume(value: number): void {
++  setVolume(value: number, forcePersist = false): void {
+     const clamped = Math.max(0, Math.min(MAX_VOLUME, Number.isFinite(value) ? value : DEFAULT_VOLUME));
+     this.volume.set(clamped);
+-    persistVolume(clamped);
+-    if (this.gain && !this.mutedAll()) this.gain.gain.value = clamped;
+-  }
+-
+-  attachOutputElement(element: HTMLAudioElement | null): void {
+-    if (this.outputElement && this.outputElement !== element) this.detachOutputListeners(this.outputElement);
+-    this.outputElement = element;
+-    if (!element) {
+-      this.outputPlaying.set(false);
+-      return;
+-    }
+-    this.attachOutputListeners(element);
+-    if (!this.mixerEnabled()) return;
+-    this.bindOutputElement();
+-  }
+-
+-  private readonly onOutputPlay = () => this.outputPlaying.set(!!this.outputElement && !this.outputElement.paused);
+-  private readonly onOutputPause = () => this.outputPlaying.set(false);
+-
+-  private attachOutputListeners(element: HTMLAudioElement): void {
+-    element.addEventListener('playing', this.onOutputPlay);
+-    element.addEventListener('play', this.onOutputPlay);
+-    element.addEventListener('pause', this.onOutputPause);
+-    element.addEventListener('ended', this.onOutputPause);
+-    this.outputPlaying.set(!element.paused);
++    if (forcePersist || clamped !== value) persistVolume(clamped);
++    else persistVolume(clamped);
++    for (const entry of this.registry.values()) this.applyVolumeState(entry.el);
++    this.refreshBlockedState();
+   }
+ 
+-  private detachOutputListeners(element: HTMLAudioElement): void {
+-    element.removeEventListener('playing', this.onOutputPlay);
+-    element.removeEventListener('play', this.onOutputPlay);
+-    element.removeEventListener('pause', this.onOutputPause);
+-    element.removeEventListener('ended', this.onOutputPause);
+-  }
+-
+-  syncPeers(peers: PeerState[]): void {
+-    if (!this.mixerEnabled()) {
+-      this.clearSources();
++  syncPeers(peers: PeerState[], remoteTrackNames: Map<string, Map<string, string>> = new Map()): void {
++    if (!this.inCall) {
++      this.clearRegistry();
+       return;
+     }
+-
+     const remoteAudioPeers = peers
+       .filter((peer) => !peer.isLocal)
+       .map((peer) => ({ id: peer.id, stream: peer.stream, track: currentAudioTrack(peer.stream) }))
+       .filter((peer): peer is { id: string; stream: MediaStream; track: MediaStreamTrack } => !!peer.stream && !!peer.track);
+     const nextIds = new Set(remoteAudioPeers.map((peer) => peer.id));
+ 
+-    for (const id of [...this.sources.keys()]) {
+-      if (!nextIds.has(id)) this.removeSource(id);
++    for (const id of [...this.registry.keys()]) {
++      if (!nextIds.has(id)) this.removePublisher(id);
+     }
+ 
+     for (const peer of remoteAudioPeers) {
+-      const current = this.sources.get(peer.id);
+-      if (current?.stream === peer.stream && current.track === peer.track) continue;
+-      this.removeSource(peer.id);
+-      this.addSource(peer.id, peer.stream, peer.track);
++      const current = this.registry.get(peer.id);
++      const trackName = remoteTrackNames.get(peer.id)?.get(peer.track.id) ?? null;
++      if (current?.stream === peer.stream && current.track === peer.track) {
++        if (current.trackName !== trackName) current.trackName = trackName;
++        continue;
++      }
++      void this.addPublisher(peer.id, peer.stream, peer.track, trackName);
+     }
+-
+-    if (remoteAudioPeers.length > 0) this.bindOutputElement();
+   }
+ 
+   async unlockAndPlayRemoteSinks(deviceId?: string): Promise<boolean> {
+-    if (this.mixerEnabled()) {
+-      this.ensureGraph();
+-      // R1.3 / NS3: kick off resume() SYNCHRONOUSLY within the gesture call stack,
+-      // BEFORE the first await, so the browser's transient user-activation isn't
+-      // lost to a microtask boundary. We capture the promise and await it below to
+-      // refresh contextState; a non-gesture caller (setTimeout(0)) will simply have
+-      // the resume rejected, leaving the context non-running ⇒ honest banner.
+-      const resumePromise =
+-        this.context && this.context.state === 'suspended'
+-          ? this.context.resume().catch((err) => {
+-              console.debug('[media] remote audio context resume rejected (likely non-gesture)', err);
+-            })
+-          : Promise.resolve();
+-      await resumePromise;
+-      if (this.context && this.context.state !== 'closed') this.contextState.set(this.context.state);
+-      await this.applySinkId(this.outputElement, deviceId);
+-    }
++    this.selectedSinkId = deviceId;
++    this.unlocked = true;
++    await this.replayRegistryElements(deviceId, 'gesture');
++    return this.allSinksPlaying();
++  }
+ 
+-    const elements = Array.from(document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio]'));
+-    await Promise.all(
+-      elements.map(async (audio) => {
+-        await this.applySinkId(audio, deviceId);
+-        try {
+-          await audio.play();
+-        } catch (err) {
+-          console.debug('[media] remote audio element still blocked after user gesture', err);
++  async applyOutputDevice(deviceId: string): Promise<SinkApplyResult> {
++    this.selectedSinkId = deviceId;
++    const generation = this.generation;
++    const results = await Promise.all(
++      [...this.registry.entries()].map(async ([id, entry]) => {
++        const sinkApplied = await this.applySinkId(entry.el, deviceId);
++        if (!this.isEntryCurrent(id, entry)) return null;
++        entry.sinkApplyResult = sinkApplied;
++        entry.sinkApplyTimedOut = false;
++        if (sinkApplied === 'failed') {
++          entry.blocked = true;
++        } else if (!entry.el.paused || entry.playbackFailure) {
++          entry.blocked = false;
+         }
++        return sinkApplied;
+       }),
+     );
+-
+-    if (this.mixerEnabled() && this.sources.size > 0) {
+-      const output = this.outputElement;
+-      if (output) {
+-        this.bindOutputElement();
+-        try {
+-          await output.play();
+-        } catch (err) {
+-          console.debug('[media] remote audio mixer still blocked after user gesture', err);
+-        }
+-      }
+-    }
+-    await this.playKickstartElements(deviceId);
+-
+-    // BUG-1 fix: the playability verdict now routes through the pure decision fn,
+-    // which treats a non-'running' context (with sources) as NOT playable — instead
+-    // of the old element.paused-only check that returned true for a suspended context.
+-    const perPeerAllUnpaused = elements.every((audio) => !audio.paused);
+-    return evaluateRemoteAudioPlayability({
+-      mixerEnabled: this.mixerEnabled(),
+-      contextState: this.context?.state ?? 'none',
+-      sourcesCount: this.sources.size,
+-      outputAttached: !!this.outputElement,
+-      outputPaused: this.outputElement?.paused ?? true,
+-      perPeerAllUnpaused,
+-    });
+-  }
+-
+-  async applyOutputDevice(deviceId: string): Promise<boolean> {
+-    if (!this.mixerEnabled()) return true;
+-    const outputApplied = await this.applySinkId(this.outputElement, deviceId);
+-    const kickstartApplied = await Promise.all([...this.sources.values()].map((source) => this.applySinkId(source.kickstartElement, deviceId)));
+-    return outputApplied && kickstartApplied.every(Boolean);
++    const currentResults = results.filter((result): result is SinkApplyResult => result !== null);
++    if (!this.inCall || this.generation !== generation) return combineSinkApplyResults(currentResults);
++    this.updateSinkFallbackState(deviceId, currentResults);
++    this.refreshBlockedState();
++    return combineSinkApplyResults(currentResults);
+   }
+ 
+   async recoverPlayback(deviceId?: string): Promise<boolean> {
+-    if (!this.mixerEnabled()) return this.allSinksPlaying();
+-    this.ensureGraph();
+-    try {
+-      await this.resumeContext();
+-    } catch (err) {
+-      console.debug('[media] remote audio context recovery resume rejected', err);
+-    }
+-    await this.playKickstartElements(deviceId);
+-    const output = this.outputElement;
+-    if (output) {
+-      await this.applySinkId(output, deviceId);
+-      this.bindOutputElement();
+-      try {
+-        await output.play();
+-      } catch (err) {
+-        console.debug('[media] remote audio mixer recovery play rejected', err);
+-      }
+-    }
+-    this.contextState.set(this.context?.state ?? 'none');
++    this.selectedSinkId = deviceId;
++    await this.replayRegistryElements(deviceId, 'recovery');
+     return this.allSinksPlaying();
+   }
+ 
+   async recoverVoicePlayout(peerId: string, step: VoiceRecoveryStep, deviceId?: string): Promise<void> {
+-    if (!this.mixerEnabled()) return;
+     this.voiceRecoveryCounters[step] += 1;
++    this.setVoiceStalled(peerId, true);
+     console.debug('[media] remote voice watchdog remediation', { peerId, step, count: this.voiceRecoveryCounters[step] });
++    await this.replayRegistryElements(deviceId, `voice-${step}`, peerId);
++  }
+ 
+-    if (step === 'resume') {
+-      this.ensureGraph();
+-      try {
+-        await this.resumeContext();
+-      } catch (err) {
+-        console.debug('[media] remote voice watchdog context resume rejected', err);
+-      }
+-      return;
+-    }
+-
+-    if (step === 'kickstart') {
+-      await this.ensureKickstartPlaying(peerId, deviceId);
+-      return;
+-    }
++  noteVoiceEmissionAdvanced(peerId: string): void {
++    this.setVoiceStalled(peerId, false);
++  }
+ 
+-    if (step === 'replay') {
+-      await this.replayMixerOutput(deviceId);
++  clearVoiceStalls(peerIds?: Iterable<string>): void {
++    if (!peerIds) {
++      for (const id of this.registry.keys()) this.setVoiceStalled(id, false);
+       return;
+     }
++    for (const id of peerIds) this.setVoiceStalled(id, false);
++  }
+ 
+-    this.rebuildSource(peerId);
+-    await this.ensureKickstartPlaying(peerId, deviceId);
+-    await this.replayMixerOutput(deviceId);
++  markVoiceStalled(peerId: string): void {
++    this.setVoiceStalled(peerId, true);
+   }
+ 
+   hasSources(): boolean {
+-    return this.sources.size > 0;
++    return this.registry.size > 0;
+   }
+ 
+   allSinksPlaying(): boolean {
+-    const elements = Array.from(document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio]'));
+-    const perPeerAllUnpaused = elements.every((audio) => !audio.paused);
+-    return evaluateRemoteAudioPlayability({
+-      mixerEnabled: this.mixerEnabled(),
+-      contextState: this.context?.state ?? 'none',
+-      sourcesCount: this.sources.size,
+-      outputAttached: !!this.outputElement,
+-      outputPaused: this.outputElement?.paused ?? true,
+-      perPeerAllUnpaused,
+-    });
++    return this.registry.size === 0 || [...this.registry.values()].every((entry) => remoteAudioBlockingReason(entry) === null);
+   }
+ 
+   /**
+@@ -401,269 +355,339 @@ export class RemoteAudioService {
+    * to localhost at the call site (room.page.ts debug object). No-op if no context.
+    */
+   async suspendForTest(): Promise<void> {
+-    if (!this.context || this.context.state !== 'running') return;
+-    await this.context.suspend();
+-    this.contextState.set(this.context.state);
++    this.contextState.set('none');
+   }
+ 
+   /**
+-   * Test-only: mount a REAL MediaStreamAudioSourceNode for a synthetic remote audio
+-   * stream into the live mixer graph, exercising the genuine sources.size > 0
+-   * running-required playability branch end-to-end without depending on a flaky
+-   * cross-context WebRTC peer connection in headless CI. Guarded to localhost at the
+-   * call site (room.page.ts debug object). Mirrors active-speaker's injectDebugStream.
++   * Test-only: mount a synthetic remote stream into the registry without depending
++   * on a flaky cross-context WebRTC peer connection in headless CI.
+    */
+   injectRemoteSourceForTest(id: string, stream: MediaStream): void {
+     const track = stream.getAudioTracks()[0];
+     if (!track) return;
+-    this.removeSource(id);
+-    this.addSource(id, stream, track);
+-    this.bindOutputElement();
++    this.setInCallActive(true);
++    void this.addPublisher(id, stream, track);
+   }
+ 
+   removeRemoteSourceForTest(id: string): void {
+-    this.removeSource(id);
++    this.removePublisher(id);
+   }
+ 
+   debugSnapshot(): RemoteAudioDebugSnapshot {
++    const registryEntries = [...this.registry.entries()];
+     return {
+       mixerEnabled: this.mixerEnabled(),
+-      contextState: this.context?.state ?? 'none',
+-      outputAttached: !!this.outputElement,
+-      outputPaused: this.outputElement?.paused ?? true,
++      contextState: 'none',
++      outputAttached: registryEntries.length > 0,
++      outputPaused: registryEntries.some(([, entry]) => entry.el.paused),
+       mutedAll: this.mutedAll(),
+       volume: this.volume(),
+-      mixedPeerIds: [...this.sources.keys()],
+-      mixedTrackIds: [...this.sources.values()].map((source) => source.track.id),
+-      kickstartCount: this.sources.size,
+-      kickstartPlayingCount: [...this.sources.values()].filter((source) => !source.kickstartElement.paused).length,
++      mixedPeerIds: registryEntries.map(([id]) => id),
++      mixedTrackIds: registryEntries.map(([, entry]) => entry.track.id),
++      kickstartCount: 0,
++      kickstartPlayingCount: 0,
++      registryPeerIds: registryEntries.map(([id]) => id),
++      registryTrackIds: registryEntries.map(([, entry]) => entry.track.id),
++      blockedPeerIds: registryEntries.filter(([, entry]) => remoteAudioBlockingReason(entry) !== null).map(([id]) => id),
++      unlocked: this.unlocked,
+       voiceRecoveryCounters: { ...this.voiceRecoveryCounters },
+     };
+   }
+ 
++  playoutDiagnostics(): RemoteAudioPlayoutDiagnostics {
++    const registryEntries = [...this.registry.entries()];
++    return {
++      selectedAudioOutputId: this.selectedSinkId ?? null,
++      effectiveSinkId: this.effectiveSinkId,
++      usedFallback: this.usedDefaultSinkFallback,
++      unlocked: this.unlocked,
++      blockedPeerIds: registryEntries.filter(([, entry]) => remoteAudioBlockingReason(entry) !== null).map(([id]) => id),
++      perPublisher: registryEntries.map(([publisherClientId, entry]) => {
++        const withSink = entry.el as HTMLAudioElement & { sinkId?: string };
++        return {
++          publisherClientId,
++          trackName: entry.trackName,
++          trackId: entry.track.id ?? null,
++          paused: entry.el.paused,
++          muted: entry.el.muted,
++          volume: entry.el.volume,
++          sinkId: withSink.sinkId ?? null,
++          blockedReason: remoteAudioBlockingReason(entry),
++          sinkApplyResult: entry.sinkApplyResult,
++          sinkApplyTimedOut: entry.sinkApplyTimedOut,
++          srcObjectAttached: entry.el.srcObject !== null,
++          readyState: entry.track.readyState ?? null,
++        };
++      }),
++    };
++  }
++
++  setInCallActive(active: boolean): void {
++    if (this.inCall === active) return;
++    this.inCall = active;
++    this.generation += 1;
++    if (!active) this.clearRegistry();
++  }
++
+   reset(): void {
+-    this.clearSources();
+-    this.outputElement = null;
+-    this.gain?.disconnect();
+-    this.limiter?.disconnect();
+-    this.destination?.disconnect();
+-    this.stopKeepalive();
+-    if (this.context && this.context.state !== 'closed') void this.context.close().catch(() => undefined);
+-    this.context = null;
+-    this.gain = null;
+-    this.limiter = null;
+-    this.destination = null;
++    this.inCall = false;
++    this.generation += 1;
++    this.clearRegistry();
++    this.unlocked = false;
++    this.selectedSinkId = undefined;
++    this.effectiveSinkId = null;
++    this.usedDefaultSinkFallback = false;
+     this.mutedAll.set(false);
+     this.contextState.set('none');
++    this.outputPlaying.set(false);
++    this.remoteAudioBlocked.set(false);
+     this.voiceRecoveryCounters.resume = 0;
+     this.voiceRecoveryCounters.kickstart = 0;
+     this.voiceRecoveryCounters.replay = 0;
+     this.voiceRecoveryCounters.rebuild = 0;
+   }
+ 
+-  private addSource(id: string, stream: MediaStream, track: MediaStreamTrack): void {
+-    try {
+-      const context = this.ensureGraph();
+-      const source = context.createMediaStreamSource(new MediaStream([track]));
+-      source.connect(this.gain!);
+-      const kickstartElement = this.createKickstartElement(id, stream);
+-      const onEnded = () => this.removeSource(id);
+-      track.addEventListener('ended', onEnded, { once: true });
+-      this.sources.set(id, { stream, track, source, kickstartElement, onEnded });
+-      this.sourcesVersion.update((v) => v + 1);
+-      void this.recoverPlayback().catch((err) => console.debug('[media] remote audio source-add recovery failed', err));
+-    } catch (err) {
+-      console.debug('[media] remote audio mixer source failed', err);
++  async addPublisher(id: string, stream: MediaStream, track = currentAudioTrack(stream), trackName: string | null = null): Promise<void> {
++    if (!this.inCall || !track || track.readyState === 'ended') return;
++    this.removePublisher(id);
++    const generation = this.generation;
++    const el = document.createElement('audio');
++    el.dataset['remoteAudio'] = id;
++    el.setAttribute('playsinline', '');
++    el.style.display = 'none';
++    el.setAttribute('aria-hidden', 'true');
++    el.srcObject = stream;
++    this.applyVolumeState(el);
++
++    const onEnded = () => this.removePublisher(id);
++    const onPlaying = () => {
++      const entry = this.registry.get(id);
++      if (!entry || entry.el !== el) return;
++      entry.blocked = false;
++      entry.playbackFailure = null;
++      this.refreshBlockedState();
++    };
++    const onPaused = () => {
++      const entry = this.registry.get(id);
++      if (!entry || entry.el !== el) return;
++      entry.blocked = true;
++      this.refreshBlockedState();
++    };
++    track.addEventListener('ended', onEnded, { once: true });
++    el.addEventListener('playing', onPlaying);
++    el.addEventListener('play', onPlaying);
++    el.addEventListener('pause', onPaused);
++    el.addEventListener('ended', onPaused);
++    el.addEventListener('error', onPaused);
++
++    const entry: RemotePublisherEntry = {
++      stream,
++      track,
++      trackName,
++      el,
++      blocked: true,
++      playbackFailure: null,
++      voiceStalled: false,
++      sinkApplyResult: 'selected',
++      sinkApplyTimedOut: false,
++      onEnded,
++      onPlaying,
++      onPaused,
++      generation,
++    };
++    this.registry.set(id, entry);
++    document.body.append(el);
++    this.refreshBlockedState();
++
++    const sinkApplied = await withTimeout(this.applySinkId(el, this.selectedSinkId), SINK_ID_TIMEOUT_MS);
++    if (!this.isEntryCurrent(id, entry)) {
++      this.destroyRegistryElement(entry);
++      return;
++    }
++    if (sinkApplied === 'timeout') {
++      entry.sinkApplyResult = 'failed';
++      entry.sinkApplyTimedOut = true;
++      entry.blocked = true;
++      console.debug('[media] remote audio sink routing timed out; playing through current/default output', { id });
++    } else {
++      entry.sinkApplyResult = sinkApplied;
++      entry.sinkApplyTimedOut = false;
++      if (sinkApplied === 'failed') {
++        entry.blocked = true;
++        this.refreshBlockedState();
++      } else {
++        this.updateSinkFallbackState(this.selectedSinkId, [sinkApplied]);
++      }
+     }
+-  }
+ 
+-  private removeSource(id: string): void {
+-    const current = this.sources.get(id);
+-    if (!current) return;
+-    current.track.removeEventListener('ended', current.onEnded);
+     try {
+-      current.source.disconnect();
+-    } catch {
+-      // best effort
++      await el.play();
++      if (!this.isEntryCurrent(id, entry)) {
++        this.destroyRegistryElement(entry);
++        return;
++      }
++      entry.blocked = false;
++      entry.playbackFailure = null;
++    } catch (err) {
++      if (!this.isEntryCurrent(id, entry)) {
++        this.destroyRegistryElement(entry);
++        return;
++      }
++      const playbackFailure = classifyPlaybackFailure(err);
++      entry.playbackFailure = playbackFailure;
++      entry.blocked = playbackFailure === null;
++      console.debug('[media] remote audio registry play rejected', { id, unlocked: this.unlocked, err });
+     }
+-    this.destroyKickstartElement(current.kickstartElement);
+-    this.sources.delete(id);
+-    this.sourcesVersion.update((v) => v + 1);
++    this.refreshBlockedState();
+   }
+ 
+-  private rebuildSource(id: string): void {
+-    const current = this.sources.get(id);
+-    if (!current) return;
+-    const { stream, track } = current;
+-    this.removeSource(id);
+-    if (track.readyState === 'ended') return;
+-    this.addSource(id, stream, track);
++  removePublisher(id: string): void {
++    const entry = this.registry.get(id);
++    if (!entry) return;
++    this.registry.delete(id);
++    this.destroyRegistryElement(entry);
++    this.refreshBlockedState();
+   }
+ 
+-  private clearSources(): void {
+-    for (const id of [...this.sources.keys()]) this.removeSource(id);
++  clearRegistry(): void {
++    for (const id of [...this.registry.keys()]) this.removePublisher(id);
++    this.registry.clear();
++    this.refreshBlockedState();
+   }
+ 
+-  private ensureGraph(): AudioContext {
+-    if (!this.context || this.context.state === 'closed') {
+-      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+-      this.context = new AudioContextCtor();
+-      this.context.onstatechange = () => this.contextState.set(this.context?.state ?? 'none');
+-      this.contextState.set(this.context.state);
+-    }
+-    if (!this.gain) {
+-      this.gain = this.context.createGain();
+-      this.gain.gain.value = this.mutedAll() ? 0 : this.volume();
+-    }
+-    if (!this.limiter) {
+-      // Brick-wall limiter downstream of the volume/mute gain: caps runaway same-room
+-      // feedback peaks WITHOUT makeup gain, so gain=0 (mute-all) still yields silence.
+-      this.limiter = this.context.createDynamicsCompressor();
+-      this.limiter.threshold.value = FEEDBACK_LIMITER_PARAMS.threshold;
+-      this.limiter.knee.value = FEEDBACK_LIMITER_PARAMS.knee;
+-      this.limiter.ratio.value = FEEDBACK_LIMITER_PARAMS.ratio;
+-      this.limiter.attack.value = FEEDBACK_LIMITER_PARAMS.attack;
+-      this.limiter.release.value = FEEDBACK_LIMITER_PARAMS.release;
+-    }
+-    if (!this.destination) {
+-      this.destination = this.context.createMediaStreamDestination();
+-      // Chain: source(s) → gain (volume/mute) → limiter (peak cap) → destination.
+-      this.gain.connect(this.limiter);
+-      this.limiter.connect(this.destination);
+-    }
+-    this.ensureKeepalive();
+-    return this.context;
+-  }
+-
+-  private bindOutputElement(): void {
+-    if (!this.outputElement) return;
+-    const context = this.ensureGraph();
+-    if (this.destination && this.outputElement.srcObject !== this.destination.stream) this.outputElement.srcObject = this.destination.stream;
+-    this.outputElement.muted = false;
+-    this.contextState.set(context.state);
+-  }
+-
+-  private async resumeContext(): Promise<void> {
+-    if (!this.context || this.context.state === 'closed') return;
+-    if (this.context.state === 'suspended') await this.context.resume();
+-    this.contextState.set(this.context.state);
+-  }
+-
+-  private createKickstartElement(id: string, stream: MediaStream): HTMLAudioElement {
+-    const audio = document.createElement('audio');
+-    audio.dataset['remoteAudioKickstart'] = id;
+-    audio.autoplay = true;
+-    audio.setAttribute('playsinline', '');
+-    audio.muted = true;
+-    audio.srcObject = stream;
+-    audio.style.display = 'none';
+-    audio.setAttribute('aria-hidden', 'true');
+-    document.body.append(audio);
+-    void audio.play().catch((err) => {
+-      console.debug('[media] remote audio kickstart play rejected', err);
++  private async applySinkId(element: HTMLMediaElement | null, deviceId?: string): Promise<SinkApplyResult> {
++    return this.sinkIdApplier.apply(element, deviceId, {
++      label: 'remote-audio',
+     });
+-    return audio;
+-  }
+-
+-  private destroyKickstartElement(audio: HTMLAudioElement): void {
+-    try {
+-      audio.pause();
+-    } catch {
+-      // best effort
+-    }
+-    audio.srcObject = null;
+-    audio.remove();
+   }
+ 
+-  private async ensureKickstartPlaying(id: string, deviceId?: string): Promise<void> {
+-    const current = this.sources.get(id);
+-    if (!current) return;
+-    if (!current.kickstartElement.isConnected || current.kickstartElement.srcObject !== current.stream) {
+-      this.destroyKickstartElement(current.kickstartElement);
+-      current.kickstartElement = this.createKickstartElement(id, current.stream);
+-    }
+-    current.kickstartElement.muted = true;
+-    await this.applySinkId(current.kickstartElement, deviceId);
+-    try {
+-      await current.kickstartElement.play();
+-    } catch (err) {
+-      console.debug('[media] remote voice watchdog kickstart play rejected', err);
+-    }
++  private updateSinkFallbackState(deviceId: string | undefined, results: SinkApplyResult[]): void {
++    const combined = combineSinkApplyResults(results);
++    if (combined === 'failed') return;
++    const usedFallback = combined === 'default-fallback' || combined === 'unsupported';
++    this.usedDefaultSinkFallback = usedFallback;
++    this.effectiveSinkId = usedFallback ? '' : (deviceId ?? null);
+   }
+ 
+-  private async replayMixerOutput(deviceId?: string): Promise<void> {
+-    const output = this.outputElement;
+-    if (!output) return;
+-    this.bindOutputElement();
+-    await this.applySinkId(output, deviceId);
+-    try {
+-      await output.play();
+-    } catch (err) {
+-      console.debug('[media] remote voice watchdog mixer replay rejected', err);
+-    }
++  private applyVolumeState(el: HTMLAudioElement): void {
++    el.volume = this.mutedAll() ? 0 : Math.min(this.volume(), MAX_VOLUME);
++    el.muted = this.mutedAll();
+   }
+ 
+-  private async playKickstartElements(deviceId?: string): Promise<void> {
++  private async replayRegistryElements(deviceId: string | undefined, reason: string, peerId?: string): Promise<void> {
++    const entries = [...this.registry.entries()].filter(([id]) => !peerId || id === peerId);
+     await Promise.all(
+-      [...this.sources.values()].map(async ({ stream, kickstartElement }) => {
+-        if (kickstartElement.srcObject !== stream) kickstartElement.srcObject = stream;
+-        kickstartElement.muted = true;
+-        await this.applySinkId(kickstartElement, deviceId);
++      entries.map(async ([id, entry]) => {
++        this.applyVolumeState(entry.el);
++        const sinkApplied = await this.applySinkId(entry.el, deviceId);
++        if (!this.isEntryCurrent(id, entry)) return;
++        entry.sinkApplyResult = sinkApplied;
++        entry.sinkApplyTimedOut = false;
++        if (sinkApplied === 'failed') {
++          entry.blocked = true;
++          this.refreshBlockedState();
++        } else {
++          if (!entry.el.paused || entry.playbackFailure) entry.blocked = false;
++          this.updateSinkFallbackState(deviceId, [sinkApplied]);
++        }
+         try {
+-          await kickstartElement.play();
++          await entry.el.play();
++          if (!this.isEntryCurrent(id, entry)) return;
++          entry.blocked = false;
++          entry.playbackFailure = null;
+         } catch (err) {
+-          console.debug('[media] remote audio kickstart still blocked', err);
++          if (!this.isEntryCurrent(id, entry)) return;
++          const playbackFailure = classifyPlaybackFailure(err);
++          entry.playbackFailure = playbackFailure;
++          entry.blocked = playbackFailure === null;
++          console.debug('[media] remote audio registry replay rejected', { id, reason, err });
+         }
++        this.refreshBlockedState();
+       }),
+     );
+   }
+ 
+-  private ensureKeepalive(): void {
+-    if (!this.context || !this.destination || this.keepaliveOscillator) return;
+-    this.keepaliveGain = this.context.createGain();
+-    this.keepaliveGain.gain.value = 0;
+-    this.keepaliveOscillator = this.context.createOscillator();
+-    this.keepaliveOscillator.frequency.value = 20;
+-    this.keepaliveOscillator.connect(this.keepaliveGain);
+-    this.keepaliveGain.connect(this.destination);
+-    try {
+-      this.keepaliveOscillator.start();
+-    } catch {
+-      // best effort
+-    }
++  private isEntryCurrent(id: string, entry: RemotePublisherEntry): boolean {
++    return this.inCall && entry.generation === this.generation && this.registry.get(id) === entry;
+   }
+ 
+-  private stopKeepalive(): void {
+-    try {
+-      this.keepaliveOscillator?.stop();
+-    } catch {
+-      // best effort
+-    }
++  private destroyRegistryElement(entry: RemotePublisherEntry): void {
++    entry.track.removeEventListener('ended', entry.onEnded);
++    entry.el.removeEventListener('playing', entry.onPlaying);
++    entry.el.removeEventListener('play', entry.onPlaying);
++    entry.el.removeEventListener('pause', entry.onPaused);
++    entry.el.removeEventListener('ended', entry.onPaused);
++    entry.el.removeEventListener('error', entry.onPaused);
+     try {
+-      this.keepaliveOscillator?.disconnect();
+-      this.keepaliveGain?.disconnect();
++      entry.el.pause();
+     } catch {
+       // best effort
+     }
+-    this.keepaliveOscillator = null;
+-    this.keepaliveGain = null;
++    entry.el.srcObject = null;
++    entry.el.remove();
+   }
+ 
+-  private async applySinkId(element: HTMLMediaElement | null, deviceId?: string): Promise<boolean> {
+-    return this.sinkIdApplier.apply(element, deviceId, {
+-      onSelectedSinkFailure: clearStoredAudioOutputDeviceId,
+-      label: 'remote-audio',
+-    });
++  private refreshBlockedState(): void {
++    const entries = [...this.registry.values()];
++    const blocked = entries.length > 0 && entries.some((entry) => remoteAudioBlockingReason(entry) !== null);
++    const playing = entries.length > 0 && entries.every((entry) => remoteAudioBlockingReason(entry) === null);
++    const changed = this.remoteAudioBlocked() !== blocked || this.outputPlaying() !== playing;
++    this.remoteAudioBlocked.set(blocked);
++    this.outputPlaying.set(playing);
++    if (changed) this.sourcesVersion.update((v) => v + 1);
+   }
++
++  private setVoiceStalled(peerId: string, stalled: boolean): void {
++    const entry = this.registry.get(peerId);
++    if (!entry || entry.voiceStalled === stalled) return;
++    entry.voiceStalled = stalled;
++    this.refreshBlockedState();
++  }
++}
++
++function remoteAudioBlockingReason(entry: RemotePublisherEntry): RemoteAudioPlayoutDiagnostics['perPublisher'][number]['blockedReason'] {
++  if (entry.sinkApplyTimedOut || entry.sinkApplyResult === 'failed') return 'sink-failed';
++  if (entry.voiceStalled) return 'voice-stalled';
++  if (entry.playbackFailure) return null;
++  if (entry.el.paused) return entry.blocked ? 'autoplay' : 'paused';
++  return null;
+ }
+ 
+-function currentAudioTrack(stream: MediaStream | null): MediaStreamTrack | null {
++export function currentAudioTrack(stream: MediaStream | null): MediaStreamTrack | null {
+   const tracks = stream?.getAudioTracks() ?? [];
+-  return tracks.find((track) => track.readyState !== 'ended') ?? tracks[0] ?? null;
++  return tracks.find((track) => track.readyState !== 'ended') ?? null;
++}
++
++async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | 'timeout'> {
++  let timeoutId: ReturnType<typeof setTimeout> | null = null;
++  try {
++    return await Promise.race<T | 'timeout'>([
++      promise,
++      new Promise<'timeout'>((resolve) => {
++        timeoutId = setTimeout(() => resolve('timeout'), timeoutMs);
++      }),
++    ]);
++  } finally {
++    if (timeoutId) clearTimeout(timeoutId);
++  }
++}
++
++export function combineSinkApplyResults(results: SinkApplyResult[]): SinkApplyResult {
++  if (results.some((result) => result === 'failed')) return 'failed';
++  if (results.some((result) => result === 'default-fallback')) return 'default-fallback';
++  if (results.some((result) => result === 'unsupported')) return 'unsupported';
++  return 'selected';
+ }
+ 
+ function sampleUsable(sample: VoiceRecoverySample | undefined): sample is VoiceRecoverySample {
+-  return !!sample && Number.isFinite(sample.bytes) && Number.isFinite(sample.emitted);
++  return !!sample && Number.isFinite(sample.bytes) && sample.bytes >= 0 && Number.isFinite(sample.emitted) && sample.emitted >= 0;
++}
++
++function classifyPlaybackFailure(err: unknown): 'unsupported' | 'aborted' | null {
++  const name = typeof (err as { name?: unknown } | null)?.name === 'string' ? (err as { name: string }).name : '';
++  if (name === 'NotSupportedError') return 'unsupported';
++  if (name === 'AbortError') return 'aborted';
++  return null;
+ }
+ 
+ function readStoredVolume(): number {
+@@ -684,9 +708,3 @@ function persistVolume(value: number): void {
+     // best effort
+   }
+ }
+-
+-declare global {
+-  interface Window {
+-    webkitAudioContext?: typeof AudioContext;
+-  }
+-}
+diff --git a/frontend/src/app/services/sfu-client.service.ts b/frontend/src/app/services/sfu-client.service.ts
+index 07171db..edc0eb9 100644
+--- a/frontend/src/app/services/sfu-client.service.ts
++++ b/frontend/src/app/services/sfu-client.service.ts
+@@ -68,6 +68,17 @@ type SfuCameraRid = 'h' | 'm' | 'l';
+ type AdaptiveCameraRidCap = SfuCameraRid | null;
+ const ADAPTIVE_CAMERA_RID_HYSTERESIS_SAMPLES = 3;
+ const CAMERA_RID_RANK: Record<SfuCameraRid, number> = { l: 0, m: 1, h: 2 };
++const LIVE_MID_CONFLICT_RENEGOTIATION_CAP = 2;
++
++class LiveMidConflictError extends Error {
++  constructor(
++    readonly mid: string,
++    readonly existing: SubscribedTrackEntry,
++    readonly incoming: SubscribedTrackEntry,
++  ) {
++    super(`[sfu] subscribe mid conflict for live publisher on mid ${mid}`);
++  }
++}
+ 
+ @Injectable({ providedIn: 'root' })
+ export class SfuClientService {
+@@ -80,6 +91,7 @@ export class SfuClientService {
+   readonly remotePublishers = signal<Map<string, import('./sfu-roster-utils.js').RemotePublisher>>(new Map());
+   readonly remoteStreams = signal<Map<string, MediaStream>>(new Map());
+   readonly remoteScreenStreams = signal<Map<string, MediaStream>>(new Map());
++  readonly remoteTrackNames = signal<Map<string, Map<string, string>>>(new Map());
+   readonly subscribedTracks = signal<Map<string, SubscribedTrackEntry>>(new Map());
+   readonly connectionQuality = signal<SfuConnectionQuality | null>(null);
+   // Bumped on doSubscribe failure so the subscription effect re-fires for a retry
+@@ -96,6 +108,7 @@ export class SfuClientService {
+   private subscribedClientIds = new Set<string>();
+   private midToEntry = new Map<string, SubscribedTrackEntry>();
+   private pendingOntrack = new Map<string, RTCTrackEvent>();
++  private subscribeMidConflictWarnings = new Set<string>();
+   private subscribeRetryAttempts = new Map<string, number>();
+   private readonly SUBSCRIBE_RETRY_CAP = 7;
+   private readonly SUBSCRIBE_RETRY_BASE_BACKOFF_MS = 250;
+@@ -107,6 +120,8 @@ export class SfuClientService {
+   private subscribeBackoffTimers = new Set<ReturnType<typeof setTimeout>>();
+   private midCallSubscribeRetryAttempts = new Map<string, number>();
+   private midCallSubscribeRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
++  private liveMidConflictRetryAttempts = new Map<string, number>();
++  private liveMidConflictRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+   private readonly SUBSCRIBE_STUCK_THRESHOLD_MS = 10_000;
+   private previousConnectionQualityPackets: { packetsReceived: number; packetsLost: number } | null = null;
+   private adaptiveCameraRidCandidate: AdaptiveCameraRidCap = null;
+@@ -157,7 +172,11 @@ export class SfuClientService {
+     // Mark before enqueue to prevent double-subscribe
+     this.subscribedClientIds.add(publisher.clientId);
+     this.armSubscribeStuckWatchdog(publisher.clientId);
+-    void this.enqueue(() => this.doSubscribe(publisher)).catch(() => {
++    void this.enqueue(() => this.doSubscribe(publisher)).catch((err) => {
++      if (err instanceof LiveMidConflictError) {
++        this.scheduleLiveMidConflictRenegotiationRetry(publisher, publisher.tracks, 'initial-subscribe', err);
++        return;
++      }
+       const retry = this.nextSubscribeRetry(publisher.clientId, false);
+       if (!retry.shouldRetry) return;
+       this.subscribedClientIds.delete(publisher.clientId);
+@@ -239,6 +258,98 @@ export class SfuClientService {
+     this.subscribeBackoffTimers.clear();
+   }
+ 
++  private liveMidConflictRetryKey(
++    publisher: import('./sfu-roster-utils.js').RemotePublisher,
++    tracks: { trackName: string; kind: string }[],
++  ): string {
++    return `${publisher.clientId}\u0000${publisher.cfSessionId}\u0000${tracks.map((track) => track.trackName).sort().join('\u0001')}`;
++  }
++
++  private clearLiveMidConflictRetryKey(key: string): void {
++    const timer = this.liveMidConflictRetryTimers.get(key);
++    if (timer) clearTimeout(timer);
++    this.liveMidConflictRetryTimers.delete(key);
++    this.liveMidConflictRetryAttempts.delete(key);
++  }
++
++  private clearLiveMidConflictRetryState(clientId?: string): void {
++    const keys = new Set([...this.liveMidConflictRetryAttempts.keys(), ...this.liveMidConflictRetryTimers.keys()]);
++    for (const key of keys) {
++      if (clientId === undefined || key.startsWith(`${clientId}\u0000`)) this.clearLiveMidConflictRetryKey(key);
++    }
++  }
++
++  private scheduleLiveMidConflictRenegotiationRetry(
++    publisher: import('./sfu-roster-utils.js').RemotePublisher,
++    tracks: { trackName: string; kind: string }[],
++    source: 'initial-subscribe' | 'mid-call-subscribe',
++    err: LiveMidConflictError,
++  ): void {
++    const missingTracks = this.missingAdvertisedRemoteTracks(publisher, new Set(tracks.map((track) => track.trackName)));
++    if (!missingTracks.length) return;
++
++    const key = this.liveMidConflictRetryKey(publisher, missingTracks);
++    if (this.liveMidConflictRetryTimers.has(key)) return;
++    const nextAttempts = (this.liveMidConflictRetryAttempts.get(key) ?? 0) + 1;
++    this.liveMidConflictRetryAttempts.set(key, nextAttempts);
++    if (nextAttempts > LIVE_MID_CONFLICT_RENEGOTIATION_CAP) {
++      console.warn('[SFU] live mid conflict renegotiation retry capped without permanent-stop; awaiting fresh roster/publisher state', {
++        publisherClientId: publisher.clientId,
++        publisherCfSessionId: publisher.cfSessionId,
++        trackNames: missingTracks.map((track) => track.trackName),
++        source,
++        retryAttempts: nextAttempts - 1,
++        conflictMid: err.mid,
++      });
++      if (source === 'initial-subscribe') this.subscribedClientIds.delete(publisher.clientId);
++      return;
++    }
++
++    console.warn('[SFU] live mid conflict forcing renegotiating subscribe retry', {
++      publisherClientId: publisher.clientId,
++      publisherCfSessionId: publisher.cfSessionId,
++      trackNames: missingTracks.map((track) => track.trackName),
++      source,
++      retryAttempt: nextAttempts,
++      conflictMid: err.mid,
++      existingPublisherClientId: err.existing.publisherClientId,
++      incomingPublisherClientId: err.incoming.publisherClientId,
++    });
++
++    const timer = setTimeout(() => {
++      this.liveMidConflictRetryTimers.delete(key);
++      const current = this.remotePublishers().get(publisher.clientId);
++      if (!current || current.cfSessionId !== publisher.cfSessionId) {
++        this.clearLiveMidConflictRetryKey(key);
++        return;
++      }
++      const currentMissingTracks = this.missingAdvertisedRemoteTracks(current, new Set(missingTracks.map((track) => track.trackName)));
++      if (!currentMissingTracks.length) {
++        this.clearLiveMidConflictRetryKey(key);
++        return;
++      }
++
++      void this.enqueue(() => this.doSubscribeTracks(current, currentMissingTracks, { forceRenegotiation: true }))
++        .then(() => this.clearLiveMidConflictRetryKey(key))
++        .catch((retryErr) => {
++          if (retryErr instanceof LiveMidConflictError) {
++            this.scheduleLiveMidConflictRenegotiationRetry(current, currentMissingTracks, source, retryErr);
++            return;
++          }
++          this.clearLiveMidConflictRetryKey(key);
++          if (source === 'mid-call-subscribe') {
++            this.scheduleMidCallSubscribeRetry(current, currentMissingTracks, retryErr);
++            return;
++          }
++          const retry = this.nextSubscribeRetry(current.clientId, false);
++          if (!retry.shouldRetry) return;
++          this.subscribedClientIds.delete(current.clientId);
++          this.scheduleSubscribeRetryBackoff(retry.backoffMs);
++        });
++    }, this.SUBSCRIBE_RETRY_BASE_BACKOFF_MS);
++    this.liveMidConflictRetryTimers.set(key, timer);
++  }
++
+   private midCallSubscribeRetryKey(clientId: string, cfSessionId: string, trackName: string): string {
+     return `${clientId}\u0000${cfSessionId}\u0000${trackName}`;
+   }
+@@ -260,12 +371,14 @@ export class SfuClientService {
+     for (const key of keys) {
+       if (key.startsWith(prefix)) this.clearMidCallSubscribeRetryKey(key);
+     }
++    this.clearLiveMidConflictRetryState(clientId);
+   }
+ 
+   private clearAllMidCallSubscribeRetryState(): void {
+     for (const timer of this.midCallSubscribeRetryTimers.values()) clearTimeout(timer);
+     this.midCallSubscribeRetryTimers.clear();
+     this.midCallSubscribeRetryAttempts.clear();
++    this.clearLiveMidConflictRetryState();
+   }
+ 
+   replaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
+@@ -423,6 +536,7 @@ export class SfuClientService {
+     this.subscribedClientIds.clear();
+     this.midToEntry.clear();
+     this.pendingOntrack.clear();
++    this.subscribeMidConflictWarnings.clear();
+     this.subscribeRetryAttempts.clear();
+     this.subscribeInitiatedAt.clear();
+     this.subscribeFirstFrameAt.clear();
+@@ -435,6 +549,7 @@ export class SfuClientService {
+     this.setPublishPhase(null);
+     this.remoteStreams.set(new Map());
+     this.remoteScreenStreams.set(new Map());
++    this.remoteTrackNames.set(new Map());
+     this.subscribedTracks.set(new Map());
+     this.subscribeRetryVersion.update((v) => v + 1);
+   }
+@@ -747,12 +862,29 @@ export class SfuClientService {
+         jitterBufferEmittedCount: numberOrNull(stat.jitterBufferEmittedCount),
+         concealedSamples: numberOrNull(stat.concealedSamples),
+         audioLevel: numberOrNull(stat.audioLevel),
++        totalAudioEnergy: numberOrNull(stat.totalAudioEnergy),
+         jitter: numberOrNull(stat.jitter),
+         nackCount: numberOrNull(stat.nackCount),
+         pliCount: numberOrNull(stat.pliCount),
+       });
+     }
+ 
++    let mediaPlayout:
++      | {
++          audioLevel: number | null;
++          totalAudioEnergy: number | null;
++          totalSamplesDuration: number | null;
++        }
++      | undefined;
++    for (const stat of stats.values()) {
++      if (stat.type !== 'media-playout') continue;
++      mediaPlayout = mergeMediaPlayout(mediaPlayout, {
++        audioLevel: numberOrNull(stat.audioLevel),
++        totalAudioEnergy: numberOrNull(stat.totalAudioEnergy),
++        totalSamplesDuration: numberOrNull(stat.totalSamplesDuration),
++      });
++    }
++
+     // --- Subscribe latencies ---
+     const subscribeLatencies: SfuSubscribeLatency[] = [];
+     for (const [publisherClientId, initiatedAtMs] of this.subscribeInitiatedAt) {
+@@ -778,6 +910,7 @@ export class SfuClientService {
+       inboundTracks,
+       subscribeLatencies,
+       outboundAudioSource,
++      ...(mediaPlayout ? { mediaPlayout } : {}),
+       connectionQuality: this.connectionQuality(),
+       ...partial,
+     } as SfuDiagnosticsWithPublishDebug;
+@@ -826,6 +959,24 @@ export class SfuClientService {
+       stream.addTrack(event.track);
+       this.remoteStreams.set(next);
+     }
++    this.registerRemoteTrackName(entry.publisherClientId, event.track, entry.trackName);
++  }
++
++  private registerRemoteTrackName(publisherClientId: string, track: MediaStreamTrack, trackName: string): void {
++    const trackId = track.id;
++    if (!trackId) return;
++    const next = cloneTrackNameMap(this.remoteTrackNames());
++    const publisherTracks = next.get(publisherClientId) ?? new Map<string, string>();
++    publisherTracks.set(trackId, trackName);
++    next.set(publisherClientId, publisherTracks);
++    this.remoteTrackNames.set(next);
++  }
++
++  private restorePublisherTrackNames(clientId: string, snapshot: Map<string, string> | null): void {
++    const next = cloneTrackNameMap(this.remoteTrackNames());
++    if (snapshot) next.set(clientId, new Map(snapshot));
++    else next.delete(clientId);
++    this.remoteTrackNames.set(next);
+   }
+ 
+   private flushPendingOntrack(): void {
+@@ -990,6 +1141,7 @@ export class SfuClientService {
+     const nextStreams = new Map(this.remoteStreams());
+     nextStreams.delete(clientId);
+     this.remoteStreams.set(nextStreams);
++    this.restorePublisherTrackNames(clientId, null);
+ 
+     const nextScreenStreams = new Map(this.remoteScreenStreams());
+     if (nextScreenStreams.has(clientId)) {
+@@ -1014,6 +1166,7 @@ export class SfuClientService {
+   }
+ 
+   private clearPublisherSubscriptionStateForRetry(clientId: string): void {
++    this.clearLiveMidConflictRetryState(clientId);
+     const mids = new Set<string>();
+     for (const [mid, entry] of this.midToEntry) {
+       if (entry.publisherClientId === clientId) mids.add(mid);
+@@ -1037,6 +1190,7 @@ export class SfuClientService {
+ 
+     const nextStreams = new Map(this.remoteStreams());
+     if (nextStreams.delete(clientId)) this.remoteStreams.set(nextStreams);
++    this.restorePublisherTrackNames(clientId, null);
+ 
+     const nextScreenStreams = new Map(this.remoteScreenStreams());
+     if (nextScreenStreams.delete(clientId)) this.remoteScreenStreams.set(nextScreenStreams);
+@@ -1102,6 +1256,10 @@ export class SfuClientService {
+     tracks: { trackName: string; kind: string }[],
+     err: unknown,
+   ): void {
++    if (err instanceof LiveMidConflictError) {
++      this.scheduleLiveMidConflictRenegotiationRetry(publisher, tracks, 'mid-call-subscribe', err);
++      return;
++    }
+     for (const track of tracks) {
+       if (this.isTrackSubscribed(publisher.clientId, track.trackName)) {
+         this.clearMidCallSubscribeRetryKey(this.midCallSubscribeRetryKey(publisher.clientId, publisher.cfSessionId, track.trackName));
+@@ -1440,6 +1598,7 @@ export class SfuClientService {
+     this.opQueue = Promise.resolve();
+     this.recoveryPublishIceServers = null;
+     this.pendingOntrack.clear();
++    this.subscribeMidConflictWarnings.clear();
+     this.clearAllSubscribeStuckWatchdogs();
+     this.clearAllSubscribeBackoffTimers();
+     this.clearAllMidCallSubscribeRetryState();
+@@ -1453,6 +1612,7 @@ export class SfuClientService {
+     this.remotePublishers.set(new Map());
+     this.remoteStreams.set(new Map());
+     this.remoteScreenStreams.set(new Map());
++    this.remoteTrackNames.set(new Map());
+     this.subscribedTracks.set(new Map());
+     this.audioSender = null;
+     this.videoSender = null;
+@@ -1476,6 +1636,7 @@ export class SfuClientService {
+     this.subscribedClientIds.clear();
+     this.midToEntry.clear();
+     this.pendingOntrack.clear();
++    this.subscribeMidConflictWarnings.clear();
+     this.subscribeRetryAttempts.clear();
+     this.subscribeInitiatedAt.clear();
+     this.subscribeFirstFrameAt.clear();
+@@ -1491,6 +1652,7 @@ export class SfuClientService {
+     this.remotePublishers.set(new Map());
+     this.remoteStreams.set(new Map());
+     this.remoteScreenStreams.set(new Map());
++    this.remoteTrackNames.set(new Map());
+     this.subscribedTracks.set(new Map());
+   }
+ 
+@@ -1609,6 +1771,7 @@ export class SfuClientService {
+   private async doSubscribeTracks(
+     publisher: import('./sfu-roster-utils.js').RemotePublisher,
+     tracks: { trackName: string; kind: string }[],
++    options: { forceRenegotiation?: boolean } = {},
+   ): Promise<void> {
+     const creds = this.callerCreds;
+     const publishState = this.localPublishState();
+@@ -1651,6 +1814,7 @@ export class SfuClientService {
+             }
+             return base;
+           }),
++          forceRenegotiation: options.forceRenegotiation === true,
+         }),
+       ),
+       SFU_HTTP_TIMEOUT_MS,
+@@ -1671,6 +1835,9 @@ export class SfuClientService {
+     }
+ 
+     const subscribedBefore = new Map(this.subscribedTracks());
++    const publisherRemoteStreamBefore = clonePublisherStream(this.remoteStreams(), publisher.clientId);
++    const publisherRemoteScreenStreamBefore = clonePublisherStream(this.remoteScreenStreams(), publisher.clientId);
++    const publisherTrackNamesBefore = clonePublisherTrackNames(this.remoteTrackNames(), publisher.clientId);
+     const nextSubscribed = new Map(subscribedBefore);
+     const touchedMidEntries = new Map<string, { hadEntry: boolean; entry: SubscribedTrackEntry | null }>();
+     const firstFrameSnapshot = this.subscribeFirstFrameAt.has(publisher.clientId)
+@@ -1688,6 +1855,35 @@ export class SfuClientService {
+       });
+     };
+ 
++    const bindSubscribedMid = (mid: string, entry: SubscribedTrackEntry): void => {
++      const existing = this.midToEntry.get(mid);
++      if (
++        existing &&
++        (existing.publisherClientId !== entry.publisherClientId || existing.trackName !== entry.trackName)
++      ) {
++        if (this.remotePublishers().has(existing.publisherClientId)) {
++          const warnKey = `${mid}|${existing.publisherClientId}|${existing.trackName}|${entry.publisherClientId}|${entry.trackName}`;
++          if (!this.subscribeMidConflictWarnings.has(warnKey)) {
++            this.subscribeMidConflictWarnings.add(warnKey);
++            console.warn('[SFU] subscribe mid conflict with live publisher', {
++              mid,
++              existingPublisherClientId: existing.publisherClientId,
++              incomingPublisherClientId: entry.publisherClientId,
++              existingTrackName: existing.trackName,
++              incomingTrackName: entry.trackName,
++            });
++          }
++          throw new LiveMidConflictError(mid, existing, entry);
++        }
++        rememberTouchedMid(mid);
++      } else {
++        rememberTouchedMid(mid);
++      }
++
++      this.midToEntry.set(mid, entry);
++      nextSubscribed.set(mid, entry);
++    };
++
+     const rollbackSubscribeMutation = async (): Promise<void> => {
+       for (const [mid, previous] of touchedMidEntries) {
+         if (previous.hadEntry && previous.entry) {
+@@ -1696,7 +1892,23 @@ export class SfuClientService {
+           this.midToEntry.delete(mid);
+         }
+       }
+-      this.subscribedTracks.set(subscribedBefore);
++      const nextSubscribed = new Map(this.subscribedTracks());
++      for (const [mid, previous] of touchedMidEntries) {
++        if (previous.hadEntry && previous.entry) {
++          nextSubscribed.set(mid, previous.entry);
++        } else {
++          nextSubscribed.delete(mid);
++        }
++      }
++      for (const [mid, entry] of subscribedBefore) {
++        if (entry.publisherClientId === publisher.clientId && tracksToSubscribe.some((track) => track.trackName === entry.trackName)) {
++          nextSubscribed.set(mid, entry);
++        }
++      }
++      this.subscribedTracks.set(nextSubscribed);
++      restorePublisherStream(this.remoteStreams, publisher.clientId, publisherRemoteStreamBefore);
++      restorePublisherStream(this.remoteScreenStreams, publisher.clientId, publisherRemoteScreenStreamBefore);
++      this.restorePublisherTrackNames(publisher.clientId, publisherTrackNamesBefore);
+       if (firstFrameSnapshot.hadValue) {
+         this.subscribeFirstFrameAt.set(publisher.clientId, firstFrameSnapshot.value);
+       } else {
+@@ -1724,12 +1936,8 @@ export class SfuClientService {
+         const reconciled = reconcileSubscribedMids(responseTracks, newTransceiverMids, transceivers, kindMap, publisher.clientId);
+         for (const r of reconciled) {
+           const entry: SubscribedTrackEntry = { publisherClientId: r.publisherClientId, trackName: r.trackName, kind: r.kind, mid: r.realMid };
+-          rememberTouchedMid(r.realMid);
+-          this.midToEntry.set(r.realMid, entry);
+-          nextSubscribed.set(r.realMid, entry);
++          bindSubscribedMid(r.realMid, entry);
+         }
+-        this.flushPendingOntrack();
+-
+         const answer = await this.pc.createAnswer();
+         await this.pc.setLocalDescription(answer);
+ 
+@@ -1744,14 +1952,13 @@ export class SfuClientService {
+           SFU_HTTP_TIMEOUT_MS,
+           'PUT /api/sfu/renegotiate',
+         );
++        this.flushPendingOntrack();
+       } else {
+         // No renegotiation — CF mids should be valid (non-empty) in this path
+         for (const rt of responseTracks) {
+           if (!rt.mid) continue;
+           const entry: SubscribedTrackEntry = { publisherClientId: publisher.clientId, trackName: rt.trackName, kind: kindMap.get(rt.trackName) ?? 'unknown', mid: rt.mid };
+-          rememberTouchedMid(rt.mid);
+-          this.midToEntry.set(rt.mid, entry);
+-          nextSubscribed.set(rt.mid, entry);
++          bindSubscribedMid(rt.mid, entry);
+         }
+         this.flushPendingOntrack();
+       }
+@@ -1793,6 +2000,56 @@ function secondsToMsOrNull(value: unknown): number | null {
+   return seconds === null ? null : Math.round(seconds * 1000);
+ }
+ 
++function mergeMediaPlayout<T extends { audioLevel: number | null; totalAudioEnergy: number | null; totalSamplesDuration: number | null }>(
++  current: T | undefined,
++  next: T,
++): T {
++  if (!current) return next;
++  return {
++    audioLevel: maxNullable(current.audioLevel, next.audioLevel),
++    totalAudioEnergy: sumNullable(current.totalAudioEnergy, next.totalAudioEnergy),
++    totalSamplesDuration: sumNullable(current.totalSamplesDuration, next.totalSamplesDuration),
++  } as T;
++}
++
++function clonePublisherStream(streams: Map<string, MediaStream>, clientId: string): MediaStream | null {
++  const stream = streams.get(clientId);
++  if (!stream) return null;
++  const clone = new MediaStream();
++  for (const track of stream.getTracks()) clone.addTrack(track);
++  return clone;
++}
++
++function restorePublisherStream(streamSignal: { (): Map<string, MediaStream>; set(value: Map<string, MediaStream>): void }, clientId: string, stream: MediaStream | null): void {
++  const next = new Map(streamSignal());
++  if (stream) next.set(clientId, stream);
++  else next.delete(clientId);
++  streamSignal.set(next);
++}
++
++function clonePublisherTrackNames(trackNames: Map<string, Map<string, string>>, clientId: string): Map<string, string> | null {
++  const publisherTracks = trackNames.get(clientId);
++  return publisherTracks ? new Map(publisherTracks) : null;
++}
++
++function cloneTrackNameMap(trackNames: Map<string, Map<string, string>>): Map<string, Map<string, string>> {
++  const clone = new Map<string, Map<string, string>>();
++  for (const [clientId, publisherTracks] of trackNames) clone.set(clientId, new Map(publisherTracks));
++  return clone;
++}
++
++function maxNullable(left: number | null, right: number | null): number | null {
++  if (left === null) return right;
++  if (right === null) return left;
++  return Math.max(left, right);
++}
++
++function sumNullable(left: number | null, right: number | null): number | null {
++  if (left === null) return right;
++  if (right === null) return left;
++  return left + right;
++}
++
+ function ssrcKindKey(ssrc: unknown, kind: unknown): string | null {
+   if (ssrc === null || ssrc === undefined) return null;
+   if (typeof kind !== 'string' || !kind) return null;
+diff --git a/frontend/src/app/services/sfu-client.spec.ts b/frontend/src/app/services/sfu-client.spec.ts
+index 565ab77..f5eff34 100644
+--- a/frontend/src/app/services/sfu-client.spec.ts
++++ b/frontend/src/app/services/sfu-client.spec.ts
+@@ -206,6 +206,26 @@ async function flushSfuQueue(sfu: SfuClientService): Promise<void> {
+   await Promise.resolve();
+ }
+ 
++async function withFakeMediaStream(run: () => Promise<void>): Promise<void> {
++  const originalMediaStream = globalThis.MediaStream;
++  class FakeMediaStream {
++    tracks: MediaStreamTrack[] = [];
++    addTrack(track: MediaStreamTrack): void {
++      this.tracks.push(track);
++    }
++    getTracks(): MediaStreamTrack[] {
++      return this.tracks;
++    }
++  }
++
++  Object.defineProperty(globalThis, 'MediaStream', { configurable: true, value: FakeMediaStream });
++  try {
++    await run();
++  } finally {
++    Object.defineProperty(globalThis, 'MediaStream', { configurable: true, value: originalMediaStream });
++  }
++}
++
+ async function withPublishPeerConnectionRecorder(run: (configs: RTCConfiguration[]) => Promise<void>): Promise<RTCConfiguration[]> {
+   const originalPeerConnection = globalThis.RTCPeerConnection;
+   const configs: RTCConfiguration[] = [];
+@@ -471,6 +491,24 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
+   });
+ }
+ 
++// CR-FIX-3 — live-mid conflict warning keys are cleared in every transport teardown path.
++{
++  for (const methodName of ['clearLocalTransportSessionState', 'closeLiveTracksForExit', 'destroy'] as const) {
++    const sfu = createSfuClient();
++    const privateSfu = sfu as unknown as {
++      subscribeMidConflictWarnings: Set<string>;
++      clearLocalTransportSessionState: () => void;
++      closeLiveTracksForExit: () => void;
++      destroy: () => void;
++    };
++    privateSfu.subscribeMidConflictWarnings.add('mid|alice|audio|bob|audio');
++
++    privateSfu[methodName]();
++
++    assert.equal(privateSfu.subscribeMidConflictWarnings.size, 0, `${methodName} clears subscribe mid conflict warning keys`);
++  }
++}
++
+ // FIX2 — transient mid-call subscribe failure retries directly and eventually commits the missing track.
+ {
+   await withFakeTimersAsync(async (timers) => {
+@@ -1095,10 +1133,19 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
+         packetsLost: 2,
+         jitter: 0.007,
+         audioLevel: 0.31,
++        totalAudioEnergy: 4.25,
+         jitterBufferDelay: 0.08,
+         jitterBufferEmittedCount: 40,
+         concealedSamples: 12,
+       },
++      {
++        id: 'playout-audio',
++        type: 'media-playout',
++        kind: 'audio',
++        audioLevel: 0.42,
++        totalAudioEnergy: 7.5,
++        totalSamplesDuration: 11.25,
++      },
+       {
+         id: 'in-video',
+         type: 'inbound-rtp',
+@@ -1138,9 +1185,15 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
+   const audioIn = diagnostics?.inboundTracks.find((track) => track.kind === 'audio');
+   const videoIn = diagnostics?.inboundTracks.find((track) => track.kind === 'video');
+   assert.equal(audioIn?.audioLevel, 0.31, 'inbound audio liveness is captured');
++  assert.equal(audioIn?.totalAudioEnergy, 4.25, 'legacy inbound audio energy is captured when present');
+   assert.equal(audioIn?.jitter, 0.007);
+   assert.equal(videoIn?.nackCount, 3);
+   assert.equal(videoIn?.pliCount, 1);
++  assert.deepEqual(
++    diagnostics?.mediaPlayout,
++    { audioLevel: 0.42, totalAudioEnergy: 7.5, totalSamplesDuration: 11.25 },
++    'Chrome media-playout audio playout stats are captured',
++  );
+ 
+   const missing = await collectDiagnosticsFromStats(
+     statsReportOf(
+@@ -1153,7 +1206,9 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
+   assert.equal(missing.diagnostics?.selectedCandidatePair?.availableOutgoingBitrate, null);
+   assert.equal(missing.diagnostics?.outboundTracks[0]?.remoteFractionLost, null);
+   assert.equal(missing.diagnostics?.inboundTracks[0]?.audioLevel, null);
++  assert.equal(missing.diagnostics?.inboundTracks[0]?.totalAudioEnergy, null);
+   assert.equal(missing.diagnostics?.inboundTracks[0]?.jitter, null);
++  assert.equal(missing.diagnostics?.mediaPlayout, undefined);
+ }
+ 
+ // selectNewRemoteTracks — partial subscribe covers added audio/video/screen and skips existing names
+@@ -1351,63 +1406,82 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
+ 
+ // SFU-S1 — failed subscribe renegotiate restores touched mid entries, subscribedTracks, retry metadata, and rolls back PC.
+ {
+-  const http = {
+-    post: () =>
+-      of({
+-        requiresImmediateRenegotiation: true,
+-        sessionDescription: { type: 'offer', sdp: 'remote-offer' },
+-        tracks: [
+-          { trackName: 'p-alice:1:audio:a1', mid: '' },
+-          { trackName: 'p-alice:1:video:v1', mid: '' },
++  await withFakeMediaStream(async () => {
++    let sfu!: SfuClientService;
++    const http = {
++      post: () =>
++        of({
++          requiresImmediateRenegotiation: true,
++          sessionDescription: { type: 'offer', sdp: 'remote-offer' },
++          tracks: [
++            { trackName: 'p-alice:1:audio:a1', mid: '' },
++            { trackName: 'p-alice:1:video:v1', mid: '' },
++          ],
++        }),
++      put: () => {
++        const aliceStream = new MediaStream();
++        aliceStream.addTrack({ kind: 'audio', id: 'alice-browser-track' } as MediaStreamTrack);
++        sfu.remoteStreams.set(new Map([['concurrent-alice', aliceStream]]));
++        sfu.remoteTrackNames.set(new Map([['concurrent-alice', new Map([['alice-browser-track', 'alice-audio']])]]));
++        return throwError(() => new Error('renegotiate failed'));
++      },
++    } as unknown as Partial<HttpClient>;
++    sfu = createSfuClient(http);
++    const pc = makeSubscribePc({ renegotiateFails: true });
++    installPublishedSfuState(sfu, pc);
++
++    const privateSfu = sfu as unknown as {
++      doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
++      midToEntry: Map<string, SubscribedTrackEntry>;
++      pendingOntrack: Map<string, RTCTrackEvent>;
++      subscribeRetryAttempts: Map<string, number>;
++      subscribeFirstFrameAt: Map<string, number>;
++    };
++    const priorOverwritten: SubscribedTrackEntry = { publisherClientId: 'old-client', trackName: 'old-audio', kind: 'audio', mid: '2' };
++    const priorUntouched: SubscribedTrackEntry = { publisherClientId: 'other-client', trackName: 'other-video', kind: 'video', mid: '9' };
++    privateSfu.midToEntry.set('2', priorOverwritten);
++    privateSfu.midToEntry.set('9', priorUntouched);
++    privateSfu.pendingOntrack.set('2', { track: { kind: 'audio', id: 'ghost-audio' } } as RTCTrackEvent);
++    sfu.subscribedTracks.set(
++      new Map([
++        ['2', priorOverwritten],
++        ['9', priorUntouched],
++      ]),
++    );
++    privateSfu.subscribeRetryAttempts.set('alice', 3);
++    privateSfu.subscribeFirstFrameAt.set('alice', 1234);
++
++    await assert.rejects(
++      privateSfu.doSubscribeTracks(
++        { clientId: 'alice', participantId: 'p-alice', cfSessionId: 'alice-cf', revision: 1, tracks: [] },
++        [
++          { trackName: 'p-alice:1:audio:a1', kind: 'audio' },
++          { trackName: 'p-alice:1:video:v1', kind: 'video' },
+         ],
+-      }),
+-    put: () => throwError(() => new Error('renegotiate failed')),
+-  } as unknown as Partial<HttpClient>;
+-  const sfu = createSfuClient(http);
+-  const pc = makeSubscribePc({ renegotiateFails: true });
+-  installPublishedSfuState(sfu, pc);
++      ),
++      /renegotiate failed/,
++    );
+ 
+-  const privateSfu = sfu as unknown as {
+-    doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
+-    midToEntry: Map<string, SubscribedTrackEntry>;
+-    subscribeRetryAttempts: Map<string, number>;
+-    subscribeFirstFrameAt: Map<string, number>;
+-  };
+-  const priorOverwritten: SubscribedTrackEntry = { publisherClientId: 'old-client', trackName: 'old-audio', kind: 'audio', mid: '2' };
+-  const priorUntouched: SubscribedTrackEntry = { publisherClientId: 'other-client', trackName: 'other-video', kind: 'video', mid: '9' };
+-  privateSfu.midToEntry.set('2', priorOverwritten);
+-  privateSfu.midToEntry.set('9', priorUntouched);
+-  sfu.subscribedTracks.set(
+-    new Map([
++    assert.deepEqual([...privateSfu.midToEntry.entries()], [
+       ['2', priorOverwritten],
+       ['9', priorUntouched],
+-    ]),
+-  );
+-  privateSfu.subscribeRetryAttempts.set('alice', 3);
+-  privateSfu.subscribeFirstFrameAt.set('alice', 1234);
+-
+-  await assert.rejects(
+-    privateSfu.doSubscribeTracks(
+-      { clientId: 'alice', participantId: 'p-alice', cfSessionId: 'alice-cf', revision: 1, tracks: [] },
+-      [
+-        { trackName: 'p-alice:1:audio:a1', kind: 'audio' },
+-        { trackName: 'p-alice:1:video:v1', kind: 'video' },
+-      ],
+-    ),
+-    /renegotiate failed/,
+-  );
+-
+-  assert.deepEqual([...privateSfu.midToEntry.entries()], [
+-    ['2', priorOverwritten],
+-    ['9', priorUntouched],
+-  ]);
+-  assert.deepEqual([...sfu.subscribedTracks().entries()], [
+-    ['2', priorOverwritten],
+-    ['9', priorUntouched],
+-  ]);
+-  assert.equal(privateSfu.subscribeRetryAttempts.get('alice'), 3, 'failed subscribe restores prior retry attempts');
+-  assert.equal(privateSfu.subscribeFirstFrameAt.get('alice'), 1234, 'failed subscribe restores prior first-frame marker');
+-  assert.equal(pc.rollbackCount, 1, 'failed renegotiate attempts PC rollback');
++    ]);
++    assert.deepEqual([...sfu.subscribedTracks().entries()], [
++      ['2', priorOverwritten],
++      ['9', priorUntouched],
++    ]);
++    assert.equal(sfu.remoteStreams().has('alice'), false, 'failed renegotiate leaves no ghost remote audio stream');
++    assert.equal(sfu.remoteScreenStreams().has('alice'), false, 'failed renegotiate leaves no ghost remote screen stream');
++    assert.equal(sfu.remoteStreams().has('concurrent-alice'), true, 'failed bob/alice rollback preserves unrelated concurrent ontrack stream');
++    assert.equal(
++      sfu.remoteTrackNames().get('concurrent-alice')?.get('alice-browser-track'),
++      'alice-audio',
++      'failed rollback preserves unrelated concurrent trackName metadata',
++    );
++    assert.equal(privateSfu.subscribeRetryAttempts.get('alice'), 3, 'failed subscribe restores prior retry attempts');
++    assert.equal(privateSfu.subscribeFirstFrameAt.get('alice'), 1234, 'failed subscribe restores prior first-frame marker');
++    assert.equal(pc.rollbackCount, 1, 'failed renegotiate attempts PC rollback');
++  });
+ }
+ 
+ // SFU-S1 — successful subscribe renegotiate commits reconciled mids into both maps.
+@@ -1447,6 +1521,215 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
+   assert.equal(pc.rollbackCount, 0, 'successful renegotiate does not roll back');
+ }
+ 
++// IMPL-2 — no-renegotiation subscribe keeps two live publisher audio mids and remote streams side by side.
++{
++  await withFakeMediaStream(async () => {
++    let postCalls = 0;
++    const http = {
++      post: () => {
++        postCalls += 1;
++        return of({
++          tracks: [{ trackName: postCalls === 1 ? 'alice-audio' : 'bob-audio', mid: String(postCalls) }],
++        });
++      },
++    } as unknown as Partial<HttpClient>;
++    const sfu = createSfuClient(http);
++    const pc = makeSingleTrackSubscribePc();
++    installPublishedSfuState(sfu, pc);
++    const privateSfu = sfu as unknown as {
++      doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
++      processOntrack: (event: RTCTrackEvent, entry: SubscribedTrackEntry) => void;
++      midToEntry: Map<string, SubscribedTrackEntry>;
++    };
++    const alice: RemotePublisher = {
++      clientId: 'alice',
++      participantId: 'p-alice',
++      cfSessionId: 'alice-cf',
++      revision: 1,
++      tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
++    };
++    const bob: RemotePublisher = {
++      clientId: 'bob',
++      participantId: 'p-bob',
++      cfSessionId: 'bob-cf',
++      revision: 1,
++      tracks: [{ trackName: 'bob-audio', kind: 'audio' }],
++    };
++    sfu.remotePublishers.set(
++      new Map([
++        ['alice', alice],
++        ['bob', bob],
++      ]),
++    );
++
++    await privateSfu.doSubscribeTracks(alice, alice.tracks);
++    await privateSfu.doSubscribeTracks(bob, bob.tracks);
++    const aliceEntry = privateSfu.midToEntry.get('1')!;
++    const bobEntry = privateSfu.midToEntry.get('2')!;
++    privateSfu.processOntrack({ track: { kind: 'audio' } } as RTCTrackEvent, aliceEntry);
++    privateSfu.processOntrack({ track: { kind: 'audio' } } as RTCTrackEvent, bobEntry);
++
++    assert.equal(aliceEntry.publisherClientId, 'alice', 'alice audio keeps its own mid');
++    assert.equal(bobEntry.publisherClientId, 'bob', 'bob audio keeps its own mid');
++    assert.equal(sfu.subscribedTracks().get('1')?.publisherClientId, 'alice', 'alice remains subscribed');
++    assert.equal(sfu.subscribedTracks().get('2')?.publisherClientId, 'bob', 'bob remains subscribed');
++    assert.equal(sfu.remoteStreams().has('alice'), true, 'alice remote stream is present');
++    assert.equal(sfu.remoteStreams().has('bob'), true, 'bob remote stream is present');
++  });
++}
++
++// CR-FIX-5 — live cross-publisher mid collision forces bounded renegotiation and never burns permanent-stop retry caps.
++{
++  await withFakeTimersAsync(async (timers) => {
++    let warnCalls = 0;
++    const originalWarn = console.warn;
++    console.warn = () => {
++      warnCalls += 1;
++    };
++    try {
++      const postBodies: Array<{ forceRenegotiation?: boolean }> = [];
++      let postCalls = 0;
++      const http = {
++        post: (_url: string, body: { forceRenegotiation?: boolean }) => {
++          postBodies.push(body);
++          postCalls += 1;
++          if (postCalls === 1) {
++            return of({
++              tracks: [{ trackName: 'bob-audio', mid: '1' }],
++            });
++          }
++          return of({
++            requiresImmediateRenegotiation: true,
++            sessionDescription: { type: 'offer', sdp: 'remote-offer' },
++            tracks: [{ trackName: 'bob-audio', mid: '' }],
++          });
++        },
++        put: () => of({}),
++      } as unknown as Partial<HttpClient>;
++      const sfu = createSfuClient(http);
++      const transceivers = [
++        { mid: '0', receiver: { track: { kind: 'audio' } } },
++        { mid: '1', receiver: { track: { kind: 'audio' } } },
++      ];
++      let localDescription: RTCSessionDescriptionInit | null = null;
++      const pc = {
++        connectionState: 'connected',
++        iceConnectionState: 'connected',
++        signalingState: 'stable',
++        get localDescription(): RTCSessionDescriptionInit | null {
++          return localDescription;
++        },
++        getTransceivers(): RTCRtpTransceiver[] {
++          return transceivers as unknown as RTCRtpTransceiver[];
++        },
++        async setRemoteDescription(): Promise<void> {
++          transceivers.push({ mid: '2', receiver: { track: { kind: 'audio' } } });
++        },
++        async createAnswer(): Promise<RTCSessionDescriptionInit> {
++          return { type: 'answer', sdp: 'answer-sdp' };
++        },
++        async setLocalDescription(desc: RTCSessionDescriptionInit): Promise<void> {
++          localDescription = desc;
++        },
++      } as unknown as RTCPeerConnection;
++      installPublishedSfuState(sfu, pc);
++      const privateSfu = sfu as unknown as {
++        midToEntry: Map<string, SubscribedTrackEntry>;
++        subscribedClientIds: Set<string>;
++        subscribeRetryAttempts: Map<string, number>;
++        midCallSubscribeRetryAttempts: Map<string, number>;
++        liveMidConflictRetryAttempts: Map<string, number>;
++        liveMidConflictRetryTimers: Map<string, unknown>;
++      };
++      const alice: RemotePublisher = {
++        clientId: 'alice',
++        participantId: 'p-alice',
++        cfSessionId: 'alice-cf',
++        revision: 1,
++        tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
++      };
++      const bob: RemotePublisher = {
++        clientId: 'bob',
++        participantId: 'p-bob',
++        cfSessionId: 'bob-cf',
++        revision: 1,
++        tracks: [{ trackName: 'bob-audio', kind: 'audio' }],
++      };
++      const aliceEntry: SubscribedTrackEntry = { publisherClientId: 'alice', trackName: 'alice-audio', kind: 'audio', mid: '1' };
++      privateSfu.midToEntry.set('1', aliceEntry);
++      sfu.subscribedTracks.set(new Map([['1', aliceEntry]]));
++      sfu.remotePublishers.set(
++        new Map([
++          ['alice', alice],
++          ['bob', bob],
++        ]),
++      );
++
++      sfu.subscribeIfNeeded(bob);
++      await flushSfuQueue(sfu);
++
++      assert.equal(privateSfu.midToEntry.get('1'), aliceEntry, 'live alice mid mapping is preserved after bob collision');
++      assert.equal(sfu.subscribedTracks().get('1'), aliceEntry, 'live alice subscribed entry is preserved after bob collision');
++      assert.equal(privateSfu.subscribeRetryAttempts.has('bob'), false, 'live mid conflict does not increment permanent-stop subscribe retry attempts');
++      assert.equal(privateSfu.midCallSubscribeRetryAttempts.size, 0, 'live mid conflict does not increment mid-call permanent-stop retry attempts');
++      assert.equal(privateSfu.liveMidConflictRetryTimers.size, 1, 'live mid conflict schedules one idempotent renegotiation retry');
++
++      const retryTimer = timers.filter((timer) => timer.active).at(-1);
++      assert.ok(retryTimer, 'renegotiation retry timer should be active');
++      retryTimer.active = false;
++      retryTimer.callback();
++      await flushSfuQueue(sfu);
++
++      assert.equal(postBodies.length, 2, 'live conflict performs initial subscribe plus one forced renegotiating retry');
++      assert.equal(postBodies[0].forceRenegotiation, false, 'initial subscribe does not force renegotiation');
++      assert.equal(postBodies[1].forceRenegotiation, true, 'retry requests renegotiating subscribe for fresh mids');
++      assert.equal(privateSfu.midToEntry.get('1'), aliceEntry, 'alice keeps original mid after bob converges');
++      assert.equal(privateSfu.midToEntry.get('2')?.publisherClientId, 'bob', 'bob converges on a fresh renegotiated mid');
++      assert.equal(sfu.subscribedTracks().get('2')?.publisherClientId, 'bob', 'bob reaches subscribedTracks after renegotiation');
++      assert.equal(privateSfu.subscribedClientIds.has('bob'), true, 'bob remains subscribed, not permanently stopped');
++      assert.equal(privateSfu.subscribeRetryAttempts.has('bob'), false, 'successful conflict recovery leaves permanent-stop attempts empty');
++      assert.equal(privateSfu.liveMidConflictRetryAttempts.size, 0, 'successful conflict recovery clears conflict retry counter');
++      assert.equal(warnCalls >= 2, true, 'conflict and forced-renegotiation paths warn loudly');
++    } finally {
++      console.warn = originalWarn;
++    }
++  });
++}
++
++// IMPL-2 — stale cross-publisher mid mapping is reclaimed for the current publisher.
++{
++  const http = {
++    post: () =>
++      of({
++        tracks: [{ trackName: 'bob-audio', mid: '1' }],
++      }),
++  } as unknown as Partial<HttpClient>;
++  const sfu = createSfuClient(http);
++  const pc = makeSingleTrackSubscribePc();
++  installPublishedSfuState(sfu, pc);
++  const privateSfu = sfu as unknown as {
++    doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
++    midToEntry: Map<string, SubscribedTrackEntry>;
++  };
++  const bob: RemotePublisher = {
++    clientId: 'bob',
++    participantId: 'p-bob',
++    cfSessionId: 'bob-cf',
++    revision: 1,
++    tracks: [{ trackName: 'bob-audio', kind: 'audio' }],
++  };
++  const staleAliceEntry: SubscribedTrackEntry = { publisherClientId: 'alice', trackName: 'alice-audio', kind: 'audio', mid: '1' };
++  privateSfu.midToEntry.set('1', staleAliceEntry);
++  sfu.subscribedTracks.set(new Map([['1', staleAliceEntry]]));
++  sfu.remotePublishers.set(new Map([['bob', bob]]));
++
++  await privateSfu.doSubscribeTracks(bob, bob.tracks);
++
++  assert.equal(privateSfu.midToEntry.get('1')?.publisherClientId, 'bob', 'stale alice mid is reclaimed for bob');
++  assert.equal(privateSfu.midToEntry.get('1')?.trackName, 'bob-audio', 'reclaimed mid carries bob track name');
++  assert.equal(sfu.subscribedTracks().get('1')?.publisherClientId, 'bob', 'subscribed signal replaces stale alice with bob');
++}
++
+ // SFU-S2 — new cfSessionId for a known clientId evicts stale subscribe state before fresh subscribe.
+ {
+   const sfu = createSfuClient();

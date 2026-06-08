@@ -1,27 +1,38 @@
 import { Injectable, signal } from '@angular/core';
 import { PeerState } from './peer-state';
-import { evaluateRemoteAudioPlayability } from './remote-audio-playability';
+import type { RemoteAudioPlayoutDiagnostics } from './meeting-sessions.service';
 
-type RemoteSource = {
+type RemotePublisherEntry = {
   stream: MediaStream;
   track: MediaStreamTrack;
-  source: MediaStreamAudioSourceNode;
-  kickstartElement: HTMLAudioElement;
+  trackName: string | null;
+  el: HTMLAudioElement;
+  blocked: boolean;
+  playbackFailure: 'unsupported' | 'aborted' | null;
+  voiceStalled: boolean;
+  sinkApplyResult: SinkApplyResult;
+  sinkApplyTimedOut: boolean;
   onEnded: () => void;
+  onPlaying: () => void;
+  onPaused: () => void;
+  generation: number;
 };
 
 type SinkIdTargetState = {
   desiredDeviceId: string;
-  inFlight: Promise<boolean> | null;
+  inFlight: Promise<SinkApplyResult> | null;
   rerun: boolean;
 };
 
+export type SinkApplyResult = 'selected' | 'default-fallback' | 'unsupported' | 'failed';
 export type VoiceRecoveryAction = 'none' | 'resume' | 'kickstart' | 'replay' | 'rebuild';
 export type VoiceRecoveryStep = Exclude<VoiceRecoveryAction, 'none'>;
 
 export type VoiceRecoverySample = {
   bytes: number;
   emitted: number;
+  audioLevel?: number | null;
+  totalAudioEnergy?: number | null;
 };
 
 export type VoiceRecoveryDecisionInput = {
@@ -41,21 +52,24 @@ export type RemoteAudioDebugSnapshot = {
   mixedTrackIds: string[];
   kickstartCount: number;
   kickstartPlayingCount: number;
+  registryPeerIds: string[];
+  registryTrackIds: string[];
+  blockedPeerIds: string[];
+  unlocked: boolean;
   voiceRecoveryCounters: Record<VoiceRecoveryStep, number>;
 };
 
 const VOLUME_STORAGE_KEY = 'meet-poc:volume:value';
 export const AUDIO_OUTPUT_DEVICE_STORAGE_KEY = 'meet-poc.device.audioOutput';
 const DEFAULT_VOLUME = 1;
-const MAX_VOLUME = 1.3;
+export const MAX_VOLUME = 1;
+const SINK_ID_TIMEOUT_MS = 2_000;
 export const VOICE_RECOVERY_SAMPLE_WINDOW = 4;
 export const VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW = 4;
 export const VOICE_RECOVERY_MIN_BYTES_DELTA = 0;
 export const VOICE_RECOVERY_MAX_EMITTED_DELTA = 0;
-
-// B2 — brick-wall limiter taming runaway same-room feedback peaks. dB / dB / :1 / s / s.
-// NO makeup gain so mute-all (gain=0) stays silent (0 in ⇒ 0 out through the compressor).
-export const FEEDBACK_LIMITER_PARAMS = { threshold: -3, knee: 0, ratio: 20, attack: 0.003, release: 0.25 } as const;
+export const VOICE_RECOVERY_MIN_AUDIO_LEVEL = 0.0005;
+export const VOICE_RECOVERY_MIN_TOTAL_AUDIO_ENERGY_DELTA = 0.000001;
 
 export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRecoveryAction {
   if (input.mutedAll) return 'none';
@@ -70,11 +84,43 @@ export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRec
   const emittedDelta = last.emitted - first.emitted;
   if (bytesDelta <= VOICE_RECOVERY_MIN_BYTES_DELTA) return 'none';
   if (emittedDelta > VOICE_RECOVERY_MAX_EMITTED_DELTA) return 'none';
+  if (!sampleWindowHasVoiceEnergy(input.samples)) return 'none';
 
   if (input.attemptsThisWindow === 0) return 'resume';
   if (input.attemptsThisWindow === 1) return 'kickstart';
   if (input.attemptsThisWindow === 2) return 'replay';
   return 'rebuild';
+}
+
+export function voiceRecoveryWindowExhaustedWhileStalled(input: VoiceRecoveryDecisionInput): boolean {
+  if (input.mutedAll || input.attemptsThisWindow < VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW) return false;
+  if (input.samples.length < VOICE_RECOVERY_SAMPLE_WINDOW) return false;
+  const first = input.samples[0];
+  const last = input.samples[input.samples.length - 1];
+  if (!sampleUsable(first) || !sampleUsable(last)) return false;
+  return (
+    last.bytes - first.bytes > VOICE_RECOVERY_MIN_BYTES_DELTA &&
+    last.emitted - first.emitted <= VOICE_RECOVERY_MAX_EMITTED_DELTA &&
+    sampleWindowHasVoiceEnergy(input.samples)
+  );
+}
+
+export function sampleWindowHasVoiceEnergy(samples: VoiceRecoverySample[]): boolean {
+  let highestAudioLevel = 0;
+  const finiteEnergySamples: number[] = [];
+  for (const sample of samples) {
+    const level = sample.audioLevel;
+    if (typeof level === 'number' && Number.isFinite(level) && level >= 0) {
+      highestAudioLevel = Math.max(highestAudioLevel, level);
+    }
+    const energy = sample.totalAudioEnergy;
+    if (typeof energy === 'number' && Number.isFinite(energy) && energy >= 0) {
+      finiteEnergySamples.push(energy);
+    }
+  }
+  if (highestAudioLevel > VOICE_RECOVERY_MIN_AUDIO_LEVEL) return true;
+  if (finiteEnergySamples.length < 2) return false;
+  return finiteEnergySamples[finiteEnergySamples.length - 1] - finiteEnergySamples[0] > VOICE_RECOVERY_MIN_TOTAL_AUDIO_ENERGY_DELTA;
 }
 
 export type ApplySinkIdOptions = {
@@ -86,14 +132,14 @@ export async function applyMediaElementSinkWithDefaultFallback(
   element: HTMLMediaElement | null,
   deviceId: string | undefined,
   options: ApplySinkIdOptions = {},
-): Promise<boolean> {
-  if (!element || deviceId === undefined) return true;
+): Promise<SinkApplyResult> {
+  if (!element || deviceId === undefined) return 'selected';
   const withSink = element as HTMLMediaElement & { setSinkId?: (sinkId: string) => Promise<void> };
-  if (!withSink.setSinkId) return true;
+  if (!withSink.setSinkId) return deviceId ? 'unsupported' : 'selected';
 
   try {
     await withSink.setSinkId(deviceId);
-    return true;
+    return 'selected';
   } catch (err) {
     console.debug('[media] audio output sink routing failed; falling back to default speaker', {
       deviceId,
@@ -101,13 +147,14 @@ export async function applyMediaElementSinkWithDefaultFallback(
       err,
     });
     if (deviceId) options.onSelectedSinkFailure?.(deviceId, err);
-    if (deviceId === '') return false;
+    if (deviceId === '') return 'failed';
     try {
       await withSink.setSinkId('');
+      return 'default-fallback';
     } catch (fallbackErr) {
       console.debug('[media] default audio output sink fallback failed', { label: options.label, fallbackErr });
     }
-    return false;
+    return 'failed';
   }
 }
 
@@ -122,7 +169,7 @@ export function clearStoredAudioOutputDeviceId(): void {
 export class LatestSinkIdApplier {
   private readonly targets = new WeakMap<HTMLMediaElement, SinkIdTargetState>();
 
-  apply(element: HTMLMediaElement | null, deviceId: string | undefined, options: ApplySinkIdOptions = {}): Promise<boolean> {
+  apply(element: HTMLMediaElement | null, deviceId: string | undefined, options: ApplySinkIdOptions = {}): Promise<SinkApplyResult> {
     if (!element || deviceId === undefined) return applyMediaElementSinkWithDefaultFallback(element, deviceId, options);
     let state = this.targets.get(element);
     if (!state) {
@@ -139,9 +186,9 @@ export class LatestSinkIdApplier {
     return state.inFlight;
   }
 
-  private async drain(element: HTMLMediaElement, state: SinkIdTargetState, options: ApplySinkIdOptions): Promise<boolean> {
+  private async drain(element: HTMLMediaElement, state: SinkIdTargetState, options: ApplySinkIdOptions): Promise<SinkApplyResult> {
     try {
-      let applied = true;
+      let applied: SinkApplyResult = 'selected';
       while (true) {
         state.rerun = false;
         const deviceId = state.desiredDeviceId;
@@ -160,23 +207,21 @@ export class RemoteAudioService {
   readonly contextState = signal<AudioContextState | 'none'>('none');
   readonly mutedAll = signal(false);
   readonly volume = signal(DEFAULT_VOLUME);
-  // Bumped whenever a mixer source is added/removed, so reactive consumers (the
-  // room-page playability effect) re-evaluate the banner on source-add (R1.3 BUG-2).
+  // Bumped whenever registry playout state changes, so reactive consumers re-check
+  // the unblock banner without scanning the DOM.
   readonly sourcesVersion = signal(0);
-  // Tracks whether the mixer output element is genuinely playing (play/pause/ended
-  // element events), so the playability effect clears the banner once playout truly
-  // settles — not on the transient running-context-but-output-still-pausing window.
+  // Kept for debug compatibility; true only when every registered remote element is playing.
   readonly outputPlaying = signal(false);
+  readonly remoteAudioBlocked = signal(false);
 
-  private context: AudioContext | null = null;
-  private gain: GainNode | null = null;
-  private limiter: DynamicsCompressorNode | null = null;
-  private destination: MediaStreamAudioDestinationNode | null = null;
-  private keepaliveOscillator: OscillatorNode | null = null;
-  private keepaliveGain: GainNode | null = null;
-  private outputElement: HTMLAudioElement | null = null;
-  private readonly sources = new Map<string, RemoteSource>();
+  private readonly registry = new Map<string, RemotePublisherEntry>();
   private readonly sinkIdApplier = new LatestSinkIdApplier();
+  private selectedSinkId: string | undefined;
+  private effectiveSinkId: string | null = null;
+  private usedDefaultSinkFallback = false;
+  private unlocked = false;
+  private inCall = false;
+  private generation = 0;
   private readonly voiceRecoveryCounters: Record<VoiceRecoveryStep, number> = {
     resume: 0,
     kickstart: 0,
@@ -185,214 +230,123 @@ export class RemoteAudioService {
   };
 
   constructor() {
-    this.setVolume(readStoredVolume());
+    this.setVolume(readStoredVolume(), true);
   }
 
   mixerEnabled(): boolean {
-    return true;
+    return false;
   }
 
   setMutedAll(value: boolean): void {
     this.mutedAll.set(value);
-    if (this.gain) this.gain.gain.value = value ? 0 : this.volume();
+    if (value) {
+      for (const entry of this.registry.values()) entry.voiceStalled = false;
+    }
+    for (const entry of this.registry.values()) this.applyVolumeState(entry.el);
+    this.refreshBlockedState();
   }
 
-  setVolume(value: number): void {
+  setVolume(value: number, forcePersist = false): void {
     const clamped = Math.max(0, Math.min(MAX_VOLUME, Number.isFinite(value) ? value : DEFAULT_VOLUME));
     this.volume.set(clamped);
-    persistVolume(clamped);
-    if (this.gain && !this.mutedAll()) this.gain.gain.value = clamped;
+    if (forcePersist || clamped !== value) persistVolume(clamped);
+    else persistVolume(clamped);
+    for (const entry of this.registry.values()) this.applyVolumeState(entry.el);
+    this.refreshBlockedState();
   }
 
-  attachOutputElement(element: HTMLAudioElement | null): void {
-    if (this.outputElement && this.outputElement !== element) this.detachOutputListeners(this.outputElement);
-    this.outputElement = element;
-    if (!element) {
-      this.outputPlaying.set(false);
+  syncPeers(peers: PeerState[], remoteTrackNames: Map<string, Map<string, string>> = new Map()): void {
+    if (!this.inCall) {
+      this.clearRegistry();
       return;
     }
-    this.attachOutputListeners(element);
-    if (!this.mixerEnabled()) return;
-    this.bindOutputElement();
-  }
-
-  private readonly onOutputPlay = () => this.outputPlaying.set(!!this.outputElement && !this.outputElement.paused);
-  private readonly onOutputPause = () => this.outputPlaying.set(false);
-
-  private attachOutputListeners(element: HTMLAudioElement): void {
-    element.addEventListener('playing', this.onOutputPlay);
-    element.addEventListener('play', this.onOutputPlay);
-    element.addEventListener('pause', this.onOutputPause);
-    element.addEventListener('ended', this.onOutputPause);
-    this.outputPlaying.set(!element.paused);
-  }
-
-  private detachOutputListeners(element: HTMLAudioElement): void {
-    element.removeEventListener('playing', this.onOutputPlay);
-    element.removeEventListener('play', this.onOutputPlay);
-    element.removeEventListener('pause', this.onOutputPause);
-    element.removeEventListener('ended', this.onOutputPause);
-  }
-
-  syncPeers(peers: PeerState[]): void {
-    if (!this.mixerEnabled()) {
-      this.clearSources();
-      return;
-    }
-
     const remoteAudioPeers = peers
       .filter((peer) => !peer.isLocal)
       .map((peer) => ({ id: peer.id, stream: peer.stream, track: currentAudioTrack(peer.stream) }))
       .filter((peer): peer is { id: string; stream: MediaStream; track: MediaStreamTrack } => !!peer.stream && !!peer.track);
     const nextIds = new Set(remoteAudioPeers.map((peer) => peer.id));
 
-    for (const id of [...this.sources.keys()]) {
-      if (!nextIds.has(id)) this.removeSource(id);
+    for (const id of [...this.registry.keys()]) {
+      if (!nextIds.has(id)) this.removePublisher(id);
     }
 
     for (const peer of remoteAudioPeers) {
-      const current = this.sources.get(peer.id);
-      if (current?.stream === peer.stream && current.track === peer.track) continue;
-      this.removeSource(peer.id);
-      this.addSource(peer.id, peer.stream, peer.track);
+      const current = this.registry.get(peer.id);
+      const trackName = remoteTrackNames.get(peer.id)?.get(peer.track.id) ?? null;
+      if (current?.stream === peer.stream && current.track === peer.track) {
+        if (current.trackName !== trackName) current.trackName = trackName;
+        continue;
+      }
+      void this.addPublisher(peer.id, peer.stream, peer.track, trackName);
     }
-
-    if (remoteAudioPeers.length > 0) this.bindOutputElement();
   }
 
   async unlockAndPlayRemoteSinks(deviceId?: string): Promise<boolean> {
-    if (this.mixerEnabled()) {
-      this.ensureGraph();
-      // R1.3 / NS3: kick off resume() SYNCHRONOUSLY within the gesture call stack,
-      // BEFORE the first await, so the browser's transient user-activation isn't
-      // lost to a microtask boundary. We capture the promise and await it below to
-      // refresh contextState; a non-gesture caller (setTimeout(0)) will simply have
-      // the resume rejected, leaving the context non-running ⇒ honest banner.
-      const resumePromise =
-        this.context && this.context.state === 'suspended'
-          ? this.context.resume().catch((err) => {
-              console.debug('[media] remote audio context resume rejected (likely non-gesture)', err);
-            })
-          : Promise.resolve();
-      await resumePromise;
-      if (this.context && this.context.state !== 'closed') this.contextState.set(this.context.state);
-      await this.applySinkId(this.outputElement, deviceId);
-    }
-
-    const elements = Array.from(document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio]'));
-    await Promise.all(
-      elements.map(async (audio) => {
-        await this.applySinkId(audio, deviceId);
-        try {
-          await audio.play();
-        } catch (err) {
-          console.debug('[media] remote audio element still blocked after user gesture', err);
-        }
-      }),
-    );
-
-    if (this.mixerEnabled() && this.sources.size > 0) {
-      const output = this.outputElement;
-      if (output) {
-        this.bindOutputElement();
-        try {
-          await output.play();
-        } catch (err) {
-          console.debug('[media] remote audio mixer still blocked after user gesture', err);
-        }
-      }
-    }
-    await this.playKickstartElements(deviceId);
-
-    // BUG-1 fix: the playability verdict now routes through the pure decision fn,
-    // which treats a non-'running' context (with sources) as NOT playable — instead
-    // of the old element.paused-only check that returned true for a suspended context.
-    const perPeerAllUnpaused = elements.every((audio) => !audio.paused);
-    return evaluateRemoteAudioPlayability({
-      mixerEnabled: this.mixerEnabled(),
-      contextState: this.context?.state ?? 'none',
-      sourcesCount: this.sources.size,
-      outputAttached: !!this.outputElement,
-      outputPaused: this.outputElement?.paused ?? true,
-      perPeerAllUnpaused,
-    });
+    this.selectedSinkId = deviceId;
+    this.unlocked = true;
+    await this.replayRegistryElements(deviceId, 'gesture');
+    return this.allSinksPlaying();
   }
 
-  async applyOutputDevice(deviceId: string): Promise<boolean> {
-    if (!this.mixerEnabled()) return true;
-    const outputApplied = await this.applySinkId(this.outputElement, deviceId);
-    const kickstartApplied = await Promise.all([...this.sources.values()].map((source) => this.applySinkId(source.kickstartElement, deviceId)));
-    return outputApplied && kickstartApplied.every(Boolean);
+  async applyOutputDevice(deviceId: string): Promise<SinkApplyResult> {
+    this.selectedSinkId = deviceId;
+    const generation = this.generation;
+    const results = await Promise.all(
+      [...this.registry.entries()].map(async ([id, entry]) => {
+        const sinkApplied = await this.applySinkId(entry.el, deviceId);
+        if (!this.isEntryCurrent(id, entry)) return null;
+        entry.sinkApplyResult = sinkApplied;
+        entry.sinkApplyTimedOut = false;
+        if (sinkApplied === 'failed') {
+          entry.blocked = true;
+        } else if (!entry.el.paused || entry.playbackFailure) {
+          entry.blocked = false;
+        }
+        return sinkApplied;
+      }),
+    );
+    const currentResults = results.filter((result): result is SinkApplyResult => result !== null);
+    if (!this.inCall || this.generation !== generation) return combineSinkApplyResults(currentResults);
+    this.updateSinkFallbackState(deviceId, currentResults);
+    this.refreshBlockedState();
+    return combineSinkApplyResults(currentResults);
   }
 
   async recoverPlayback(deviceId?: string): Promise<boolean> {
-    if (!this.mixerEnabled()) return this.allSinksPlaying();
-    this.ensureGraph();
-    try {
-      await this.resumeContext();
-    } catch (err) {
-      console.debug('[media] remote audio context recovery resume rejected', err);
-    }
-    await this.playKickstartElements(deviceId);
-    const output = this.outputElement;
-    if (output) {
-      await this.applySinkId(output, deviceId);
-      this.bindOutputElement();
-      try {
-        await output.play();
-      } catch (err) {
-        console.debug('[media] remote audio mixer recovery play rejected', err);
-      }
-    }
-    this.contextState.set(this.context?.state ?? 'none');
+    this.selectedSinkId = deviceId;
+    await this.replayRegistryElements(deviceId, 'recovery');
     return this.allSinksPlaying();
   }
 
   async recoverVoicePlayout(peerId: string, step: VoiceRecoveryStep, deviceId?: string): Promise<void> {
-    if (!this.mixerEnabled()) return;
     this.voiceRecoveryCounters[step] += 1;
+    this.setVoiceStalled(peerId, true);
     console.debug('[media] remote voice watchdog remediation', { peerId, step, count: this.voiceRecoveryCounters[step] });
+    await this.replayRegistryElements(deviceId, `voice-${step}`, peerId);
+  }
 
-    if (step === 'resume') {
-      this.ensureGraph();
-      try {
-        await this.resumeContext();
-      } catch (err) {
-        console.debug('[media] remote voice watchdog context resume rejected', err);
-      }
+  noteVoiceEmissionAdvanced(peerId: string): void {
+    this.setVoiceStalled(peerId, false);
+  }
+
+  clearVoiceStalls(peerIds?: Iterable<string>): void {
+    if (!peerIds) {
+      for (const id of this.registry.keys()) this.setVoiceStalled(id, false);
       return;
     }
+    for (const id of peerIds) this.setVoiceStalled(id, false);
+  }
 
-    if (step === 'kickstart') {
-      await this.ensureKickstartPlaying(peerId, deviceId);
-      return;
-    }
-
-    if (step === 'replay') {
-      await this.replayMixerOutput(deviceId);
-      return;
-    }
-
-    this.rebuildSource(peerId);
-    await this.ensureKickstartPlaying(peerId, deviceId);
-    await this.replayMixerOutput(deviceId);
+  markVoiceStalled(peerId: string): void {
+    this.setVoiceStalled(peerId, true);
   }
 
   hasSources(): boolean {
-    return this.sources.size > 0;
+    return this.registry.size > 0;
   }
 
   allSinksPlaying(): boolean {
-    const elements = Array.from(document.querySelectorAll<HTMLAudioElement>('audio[data-remote-audio]'));
-    const perPeerAllUnpaused = elements.every((audio) => !audio.paused);
-    return evaluateRemoteAudioPlayability({
-      mixerEnabled: this.mixerEnabled(),
-      contextState: this.context?.state ?? 'none',
-      sourcesCount: this.sources.size,
-      outputAttached: !!this.outputElement,
-      outputPaused: this.outputElement?.paused ?? true,
-      perPeerAllUnpaused,
-    });
+    return this.registry.size === 0 || [...this.registry.values()].every((entry) => remoteAudioBlockingReason(entry) === null);
   }
 
   /**
@@ -401,269 +355,339 @@ export class RemoteAudioService {
    * to localhost at the call site (room.page.ts debug object). No-op if no context.
    */
   async suspendForTest(): Promise<void> {
-    if (!this.context || this.context.state !== 'running') return;
-    await this.context.suspend();
-    this.contextState.set(this.context.state);
+    this.contextState.set('none');
   }
 
   /**
-   * Test-only: mount a REAL MediaStreamAudioSourceNode for a synthetic remote audio
-   * stream into the live mixer graph, exercising the genuine sources.size > 0
-   * running-required playability branch end-to-end without depending on a flaky
-   * cross-context WebRTC peer connection in headless CI. Guarded to localhost at the
-   * call site (room.page.ts debug object). Mirrors active-speaker's injectDebugStream.
+   * Test-only: mount a synthetic remote stream into the registry without depending
+   * on a flaky cross-context WebRTC peer connection in headless CI.
    */
   injectRemoteSourceForTest(id: string, stream: MediaStream): void {
     const track = stream.getAudioTracks()[0];
     if (!track) return;
-    this.removeSource(id);
-    this.addSource(id, stream, track);
-    this.bindOutputElement();
+    this.setInCallActive(true);
+    void this.addPublisher(id, stream, track);
   }
 
   removeRemoteSourceForTest(id: string): void {
-    this.removeSource(id);
+    this.removePublisher(id);
   }
 
   debugSnapshot(): RemoteAudioDebugSnapshot {
+    const registryEntries = [...this.registry.entries()];
     return {
       mixerEnabled: this.mixerEnabled(),
-      contextState: this.context?.state ?? 'none',
-      outputAttached: !!this.outputElement,
-      outputPaused: this.outputElement?.paused ?? true,
+      contextState: 'none',
+      outputAttached: registryEntries.length > 0,
+      outputPaused: registryEntries.some(([, entry]) => entry.el.paused),
       mutedAll: this.mutedAll(),
       volume: this.volume(),
-      mixedPeerIds: [...this.sources.keys()],
-      mixedTrackIds: [...this.sources.values()].map((source) => source.track.id),
-      kickstartCount: this.sources.size,
-      kickstartPlayingCount: [...this.sources.values()].filter((source) => !source.kickstartElement.paused).length,
+      mixedPeerIds: registryEntries.map(([id]) => id),
+      mixedTrackIds: registryEntries.map(([, entry]) => entry.track.id),
+      kickstartCount: 0,
+      kickstartPlayingCount: 0,
+      registryPeerIds: registryEntries.map(([id]) => id),
+      registryTrackIds: registryEntries.map(([, entry]) => entry.track.id),
+      blockedPeerIds: registryEntries.filter(([, entry]) => remoteAudioBlockingReason(entry) !== null).map(([id]) => id),
+      unlocked: this.unlocked,
       voiceRecoveryCounters: { ...this.voiceRecoveryCounters },
     };
   }
 
+  playoutDiagnostics(): RemoteAudioPlayoutDiagnostics {
+    const registryEntries = [...this.registry.entries()];
+    return {
+      selectedAudioOutputId: this.selectedSinkId ?? null,
+      effectiveSinkId: this.effectiveSinkId,
+      usedFallback: this.usedDefaultSinkFallback,
+      unlocked: this.unlocked,
+      blockedPeerIds: registryEntries.filter(([, entry]) => remoteAudioBlockingReason(entry) !== null).map(([id]) => id),
+      perPublisher: registryEntries.map(([publisherClientId, entry]) => {
+        const withSink = entry.el as HTMLAudioElement & { sinkId?: string };
+        return {
+          publisherClientId,
+          trackName: entry.trackName,
+          trackId: entry.track.id ?? null,
+          paused: entry.el.paused,
+          muted: entry.el.muted,
+          volume: entry.el.volume,
+          sinkId: withSink.sinkId ?? null,
+          blockedReason: remoteAudioBlockingReason(entry),
+          sinkApplyResult: entry.sinkApplyResult,
+          sinkApplyTimedOut: entry.sinkApplyTimedOut,
+          srcObjectAttached: entry.el.srcObject !== null,
+          readyState: entry.track.readyState ?? null,
+        };
+      }),
+    };
+  }
+
+  setInCallActive(active: boolean): void {
+    if (this.inCall === active) return;
+    this.inCall = active;
+    this.generation += 1;
+    if (!active) this.clearRegistry();
+  }
+
   reset(): void {
-    this.clearSources();
-    this.outputElement = null;
-    this.gain?.disconnect();
-    this.limiter?.disconnect();
-    this.destination?.disconnect();
-    this.stopKeepalive();
-    if (this.context && this.context.state !== 'closed') void this.context.close().catch(() => undefined);
-    this.context = null;
-    this.gain = null;
-    this.limiter = null;
-    this.destination = null;
+    this.inCall = false;
+    this.generation += 1;
+    this.clearRegistry();
+    this.unlocked = false;
+    this.selectedSinkId = undefined;
+    this.effectiveSinkId = null;
+    this.usedDefaultSinkFallback = false;
     this.mutedAll.set(false);
     this.contextState.set('none');
+    this.outputPlaying.set(false);
+    this.remoteAudioBlocked.set(false);
     this.voiceRecoveryCounters.resume = 0;
     this.voiceRecoveryCounters.kickstart = 0;
     this.voiceRecoveryCounters.replay = 0;
     this.voiceRecoveryCounters.rebuild = 0;
   }
 
-  private addSource(id: string, stream: MediaStream, track: MediaStreamTrack): void {
+  async addPublisher(id: string, stream: MediaStream, track = currentAudioTrack(stream), trackName: string | null = null): Promise<void> {
+    if (!this.inCall || !track || track.readyState === 'ended') return;
+    this.removePublisher(id);
+    const generation = this.generation;
+    const el = document.createElement('audio');
+    el.dataset['remoteAudio'] = id;
+    el.setAttribute('playsinline', '');
+    el.style.display = 'none';
+    el.setAttribute('aria-hidden', 'true');
+    el.srcObject = stream;
+    this.applyVolumeState(el);
+
+    const onEnded = () => this.removePublisher(id);
+    const onPlaying = () => {
+      const entry = this.registry.get(id);
+      if (!entry || entry.el !== el) return;
+      entry.blocked = false;
+      entry.playbackFailure = null;
+      this.refreshBlockedState();
+    };
+    const onPaused = () => {
+      const entry = this.registry.get(id);
+      if (!entry || entry.el !== el) return;
+      entry.blocked = true;
+      this.refreshBlockedState();
+    };
+    track.addEventListener('ended', onEnded, { once: true });
+    el.addEventListener('playing', onPlaying);
+    el.addEventListener('play', onPlaying);
+    el.addEventListener('pause', onPaused);
+    el.addEventListener('ended', onPaused);
+    el.addEventListener('error', onPaused);
+
+    const entry: RemotePublisherEntry = {
+      stream,
+      track,
+      trackName,
+      el,
+      blocked: true,
+      playbackFailure: null,
+      voiceStalled: false,
+      sinkApplyResult: 'selected',
+      sinkApplyTimedOut: false,
+      onEnded,
+      onPlaying,
+      onPaused,
+      generation,
+    };
+    this.registry.set(id, entry);
+    document.body.append(el);
+    this.refreshBlockedState();
+
+    const sinkApplied = await withTimeout(this.applySinkId(el, this.selectedSinkId), SINK_ID_TIMEOUT_MS);
+    if (!this.isEntryCurrent(id, entry)) {
+      this.destroyRegistryElement(entry);
+      return;
+    }
+    if (sinkApplied === 'timeout') {
+      entry.sinkApplyResult = 'failed';
+      entry.sinkApplyTimedOut = true;
+      entry.blocked = true;
+      console.debug('[media] remote audio sink routing timed out; playing through current/default output', { id });
+    } else {
+      entry.sinkApplyResult = sinkApplied;
+      entry.sinkApplyTimedOut = false;
+      if (sinkApplied === 'failed') {
+        entry.blocked = true;
+        this.refreshBlockedState();
+      } else {
+        this.updateSinkFallbackState(this.selectedSinkId, [sinkApplied]);
+      }
+    }
+
     try {
-      const context = this.ensureGraph();
-      const source = context.createMediaStreamSource(new MediaStream([track]));
-      source.connect(this.gain!);
-      const kickstartElement = this.createKickstartElement(id, stream);
-      const onEnded = () => this.removeSource(id);
-      track.addEventListener('ended', onEnded, { once: true });
-      this.sources.set(id, { stream, track, source, kickstartElement, onEnded });
-      this.sourcesVersion.update((v) => v + 1);
-      void this.recoverPlayback().catch((err) => console.debug('[media] remote audio source-add recovery failed', err));
+      await el.play();
+      if (!this.isEntryCurrent(id, entry)) {
+        this.destroyRegistryElement(entry);
+        return;
+      }
+      entry.blocked = false;
+      entry.playbackFailure = null;
     } catch (err) {
-      console.debug('[media] remote audio mixer source failed', err);
+      if (!this.isEntryCurrent(id, entry)) {
+        this.destroyRegistryElement(entry);
+        return;
+      }
+      const playbackFailure = classifyPlaybackFailure(err);
+      entry.playbackFailure = playbackFailure;
+      entry.blocked = playbackFailure === null;
+      console.debug('[media] remote audio registry play rejected', { id, unlocked: this.unlocked, err });
     }
+    this.refreshBlockedState();
   }
 
-  private removeSource(id: string): void {
-    const current = this.sources.get(id);
-    if (!current) return;
-    current.track.removeEventListener('ended', current.onEnded);
-    try {
-      current.source.disconnect();
-    } catch {
-      // best effort
-    }
-    this.destroyKickstartElement(current.kickstartElement);
-    this.sources.delete(id);
-    this.sourcesVersion.update((v) => v + 1);
+  removePublisher(id: string): void {
+    const entry = this.registry.get(id);
+    if (!entry) return;
+    this.registry.delete(id);
+    this.destroyRegistryElement(entry);
+    this.refreshBlockedState();
   }
 
-  private rebuildSource(id: string): void {
-    const current = this.sources.get(id);
-    if (!current) return;
-    const { stream, track } = current;
-    this.removeSource(id);
-    if (track.readyState === 'ended') return;
-    this.addSource(id, stream, track);
+  clearRegistry(): void {
+    for (const id of [...this.registry.keys()]) this.removePublisher(id);
+    this.registry.clear();
+    this.refreshBlockedState();
   }
 
-  private clearSources(): void {
-    for (const id of [...this.sources.keys()]) this.removeSource(id);
-  }
-
-  private ensureGraph(): AudioContext {
-    if (!this.context || this.context.state === 'closed') {
-      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-      this.context = new AudioContextCtor();
-      this.context.onstatechange = () => this.contextState.set(this.context?.state ?? 'none');
-      this.contextState.set(this.context.state);
-    }
-    if (!this.gain) {
-      this.gain = this.context.createGain();
-      this.gain.gain.value = this.mutedAll() ? 0 : this.volume();
-    }
-    if (!this.limiter) {
-      // Brick-wall limiter downstream of the volume/mute gain: caps runaway same-room
-      // feedback peaks WITHOUT makeup gain, so gain=0 (mute-all) still yields silence.
-      this.limiter = this.context.createDynamicsCompressor();
-      this.limiter.threshold.value = FEEDBACK_LIMITER_PARAMS.threshold;
-      this.limiter.knee.value = FEEDBACK_LIMITER_PARAMS.knee;
-      this.limiter.ratio.value = FEEDBACK_LIMITER_PARAMS.ratio;
-      this.limiter.attack.value = FEEDBACK_LIMITER_PARAMS.attack;
-      this.limiter.release.value = FEEDBACK_LIMITER_PARAMS.release;
-    }
-    if (!this.destination) {
-      this.destination = this.context.createMediaStreamDestination();
-      // Chain: source(s) → gain (volume/mute) → limiter (peak cap) → destination.
-      this.gain.connect(this.limiter);
-      this.limiter.connect(this.destination);
-    }
-    this.ensureKeepalive();
-    return this.context;
-  }
-
-  private bindOutputElement(): void {
-    if (!this.outputElement) return;
-    const context = this.ensureGraph();
-    if (this.destination && this.outputElement.srcObject !== this.destination.stream) this.outputElement.srcObject = this.destination.stream;
-    this.outputElement.muted = false;
-    this.contextState.set(context.state);
-  }
-
-  private async resumeContext(): Promise<void> {
-    if (!this.context || this.context.state === 'closed') return;
-    if (this.context.state === 'suspended') await this.context.resume();
-    this.contextState.set(this.context.state);
-  }
-
-  private createKickstartElement(id: string, stream: MediaStream): HTMLAudioElement {
-    const audio = document.createElement('audio');
-    audio.dataset['remoteAudioKickstart'] = id;
-    audio.autoplay = true;
-    audio.setAttribute('playsinline', '');
-    audio.muted = true;
-    audio.srcObject = stream;
-    audio.style.display = 'none';
-    audio.setAttribute('aria-hidden', 'true');
-    document.body.append(audio);
-    void audio.play().catch((err) => {
-      console.debug('[media] remote audio kickstart play rejected', err);
+  private async applySinkId(element: HTMLMediaElement | null, deviceId?: string): Promise<SinkApplyResult> {
+    return this.sinkIdApplier.apply(element, deviceId, {
+      label: 'remote-audio',
     });
-    return audio;
   }
 
-  private destroyKickstartElement(audio: HTMLAudioElement): void {
-    try {
-      audio.pause();
-    } catch {
-      // best effort
-    }
-    audio.srcObject = null;
-    audio.remove();
+  private updateSinkFallbackState(deviceId: string | undefined, results: SinkApplyResult[]): void {
+    const combined = combineSinkApplyResults(results);
+    if (combined === 'failed') return;
+    const usedFallback = combined === 'default-fallback' || combined === 'unsupported';
+    this.usedDefaultSinkFallback = usedFallback;
+    this.effectiveSinkId = usedFallback ? '' : (deviceId ?? null);
   }
 
-  private async ensureKickstartPlaying(id: string, deviceId?: string): Promise<void> {
-    const current = this.sources.get(id);
-    if (!current) return;
-    if (!current.kickstartElement.isConnected || current.kickstartElement.srcObject !== current.stream) {
-      this.destroyKickstartElement(current.kickstartElement);
-      current.kickstartElement = this.createKickstartElement(id, current.stream);
-    }
-    current.kickstartElement.muted = true;
-    await this.applySinkId(current.kickstartElement, deviceId);
-    try {
-      await current.kickstartElement.play();
-    } catch (err) {
-      console.debug('[media] remote voice watchdog kickstart play rejected', err);
-    }
+  private applyVolumeState(el: HTMLAudioElement): void {
+    el.volume = this.mutedAll() ? 0 : Math.min(this.volume(), MAX_VOLUME);
+    el.muted = this.mutedAll();
   }
 
-  private async replayMixerOutput(deviceId?: string): Promise<void> {
-    const output = this.outputElement;
-    if (!output) return;
-    this.bindOutputElement();
-    await this.applySinkId(output, deviceId);
-    try {
-      await output.play();
-    } catch (err) {
-      console.debug('[media] remote voice watchdog mixer replay rejected', err);
-    }
-  }
-
-  private async playKickstartElements(deviceId?: string): Promise<void> {
+  private async replayRegistryElements(deviceId: string | undefined, reason: string, peerId?: string): Promise<void> {
+    const entries = [...this.registry.entries()].filter(([id]) => !peerId || id === peerId);
     await Promise.all(
-      [...this.sources.values()].map(async ({ stream, kickstartElement }) => {
-        if (kickstartElement.srcObject !== stream) kickstartElement.srcObject = stream;
-        kickstartElement.muted = true;
-        await this.applySinkId(kickstartElement, deviceId);
-        try {
-          await kickstartElement.play();
-        } catch (err) {
-          console.debug('[media] remote audio kickstart still blocked', err);
+      entries.map(async ([id, entry]) => {
+        this.applyVolumeState(entry.el);
+        const sinkApplied = await this.applySinkId(entry.el, deviceId);
+        if (!this.isEntryCurrent(id, entry)) return;
+        entry.sinkApplyResult = sinkApplied;
+        entry.sinkApplyTimedOut = false;
+        if (sinkApplied === 'failed') {
+          entry.blocked = true;
+          this.refreshBlockedState();
+        } else {
+          if (!entry.el.paused || entry.playbackFailure) entry.blocked = false;
+          this.updateSinkFallbackState(deviceId, [sinkApplied]);
         }
+        try {
+          await entry.el.play();
+          if (!this.isEntryCurrent(id, entry)) return;
+          entry.blocked = false;
+          entry.playbackFailure = null;
+        } catch (err) {
+          if (!this.isEntryCurrent(id, entry)) return;
+          const playbackFailure = classifyPlaybackFailure(err);
+          entry.playbackFailure = playbackFailure;
+          entry.blocked = playbackFailure === null;
+          console.debug('[media] remote audio registry replay rejected', { id, reason, err });
+        }
+        this.refreshBlockedState();
       }),
     );
   }
 
-  private ensureKeepalive(): void {
-    if (!this.context || !this.destination || this.keepaliveOscillator) return;
-    this.keepaliveGain = this.context.createGain();
-    this.keepaliveGain.gain.value = 0;
-    this.keepaliveOscillator = this.context.createOscillator();
-    this.keepaliveOscillator.frequency.value = 20;
-    this.keepaliveOscillator.connect(this.keepaliveGain);
-    this.keepaliveGain.connect(this.destination);
-    try {
-      this.keepaliveOscillator.start();
-    } catch {
-      // best effort
-    }
+  private isEntryCurrent(id: string, entry: RemotePublisherEntry): boolean {
+    return this.inCall && entry.generation === this.generation && this.registry.get(id) === entry;
   }
 
-  private stopKeepalive(): void {
+  private destroyRegistryElement(entry: RemotePublisherEntry): void {
+    entry.track.removeEventListener('ended', entry.onEnded);
+    entry.el.removeEventListener('playing', entry.onPlaying);
+    entry.el.removeEventListener('play', entry.onPlaying);
+    entry.el.removeEventListener('pause', entry.onPaused);
+    entry.el.removeEventListener('ended', entry.onPaused);
+    entry.el.removeEventListener('error', entry.onPaused);
     try {
-      this.keepaliveOscillator?.stop();
+      entry.el.pause();
     } catch {
       // best effort
     }
-    try {
-      this.keepaliveOscillator?.disconnect();
-      this.keepaliveGain?.disconnect();
-    } catch {
-      // best effort
-    }
-    this.keepaliveOscillator = null;
-    this.keepaliveGain = null;
+    entry.el.srcObject = null;
+    entry.el.remove();
   }
 
-  private async applySinkId(element: HTMLMediaElement | null, deviceId?: string): Promise<boolean> {
-    return this.sinkIdApplier.apply(element, deviceId, {
-      onSelectedSinkFailure: clearStoredAudioOutputDeviceId,
-      label: 'remote-audio',
-    });
+  private refreshBlockedState(): void {
+    const entries = [...this.registry.values()];
+    const blocked = entries.length > 0 && entries.some((entry) => remoteAudioBlockingReason(entry) !== null);
+    const playing = entries.length > 0 && entries.every((entry) => remoteAudioBlockingReason(entry) === null);
+    const changed = this.remoteAudioBlocked() !== blocked || this.outputPlaying() !== playing;
+    this.remoteAudioBlocked.set(blocked);
+    this.outputPlaying.set(playing);
+    if (changed) this.sourcesVersion.update((v) => v + 1);
+  }
+
+  private setVoiceStalled(peerId: string, stalled: boolean): void {
+    const entry = this.registry.get(peerId);
+    if (!entry || entry.voiceStalled === stalled) return;
+    entry.voiceStalled = stalled;
+    this.refreshBlockedState();
   }
 }
 
-function currentAudioTrack(stream: MediaStream | null): MediaStreamTrack | null {
+function remoteAudioBlockingReason(entry: RemotePublisherEntry): RemoteAudioPlayoutDiagnostics['perPublisher'][number]['blockedReason'] {
+  if (entry.sinkApplyTimedOut || entry.sinkApplyResult === 'failed') return 'sink-failed';
+  if (entry.voiceStalled) return 'voice-stalled';
+  if (entry.playbackFailure) return null;
+  if (entry.el.paused) return entry.blocked ? 'autoplay' : 'paused';
+  return null;
+}
+
+export function currentAudioTrack(stream: MediaStream | null): MediaStreamTrack | null {
   const tracks = stream?.getAudioTracks() ?? [];
-  return tracks.find((track) => track.readyState !== 'ended') ?? tracks[0] ?? null;
+  return tracks.find((track) => track.readyState !== 'ended') ?? null;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T | 'timeout'> {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  try {
+    return await Promise.race<T | 'timeout'>([
+      promise,
+      new Promise<'timeout'>((resolve) => {
+        timeoutId = setTimeout(() => resolve('timeout'), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeoutId) clearTimeout(timeoutId);
+  }
+}
+
+export function combineSinkApplyResults(results: SinkApplyResult[]): SinkApplyResult {
+  if (results.some((result) => result === 'failed')) return 'failed';
+  if (results.some((result) => result === 'default-fallback')) return 'default-fallback';
+  if (results.some((result) => result === 'unsupported')) return 'unsupported';
+  return 'selected';
 }
 
 function sampleUsable(sample: VoiceRecoverySample | undefined): sample is VoiceRecoverySample {
-  return !!sample && Number.isFinite(sample.bytes) && Number.isFinite(sample.emitted);
+  return !!sample && Number.isFinite(sample.bytes) && sample.bytes >= 0 && Number.isFinite(sample.emitted) && sample.emitted >= 0;
+}
+
+function classifyPlaybackFailure(err: unknown): 'unsupported' | 'aborted' | null {
+  const name = typeof (err as { name?: unknown } | null)?.name === 'string' ? (err as { name: string }).name : '';
+  if (name === 'NotSupportedError') return 'unsupported';
+  if (name === 'AbortError') return 'aborted';
+  return null;
 }
 
 function readStoredVolume(): number {
@@ -682,11 +706,5 @@ function persistVolume(value: number): void {
     window.localStorage.setItem(VOLUME_STORAGE_KEY, String(value));
   } catch {
     // best effort
-  }
-}
-
-declare global {
-  interface Window {
-    webkitAudioContext?: typeof AudioContext;
   }
 }

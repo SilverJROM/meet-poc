@@ -129,6 +129,37 @@
                 }
               </div>
             }
+
+            @if (remoteAudioPlayoutRows(latest).length) {
+              <div class="remote-audio-health" aria-label="Remote audio playout">
+                <span class="label">Remote audio playout</span>
+                @for (row of remoteAudioPlayoutRows(latest); track row.publisherClientId + row.trackId) {
+                  <div class="remote-audio-row">
+                    <span class="peer-name">{{ row.publisherLabel }}</span>
+                    <span>{{ row.paused }}</span>
+                    <span>{{ row.muted }}</span>
+                    <span>{{ row.volume }}</span>
+                    <span>{{ row.sink }}</span>
+                    <span>{{ row.blockedReason }}</span>
+                    <span>{{ row.sinkApply }}</span>
+                    <span>{{ row.srcObject }}</span>
+                    <span>{{ row.readyState }}</span>
+                    <span>{{ row.audioLevel }}</span>
+                    <span>{{ row.totalAudioEnergy }}</span>
+                  </div>
+                }
+              </div>
+            }
+            @if (callWideMediaPlayoutRow(latest); as row) {
+              <div class="remote-audio-health" aria-label="Call-wide media playout">
+                <span class="label">Call-wide media playout</span>
+                <div class="remote-audio-row">
+                  <span>{{ row.audioLevel }}</span>
+                  <span>{{ row.totalAudioEnergy }}</span>
+                  <span>{{ row.totalSamplesDuration }}</span>
+                </div>
+              </div>
+            }
           }
 
           <div class="entry-list" aria-label="Diagnostics timeline">

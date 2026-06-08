@@ -206,6 +206,26 @@ async function flushSfuQueue(sfu: SfuClientService): Promise<void> {
   await Promise.resolve();
 }
 
+async function withFakeMediaStream(run: () => Promise<void>): Promise<void> {
+  const originalMediaStream = globalThis.MediaStream;
+  class FakeMediaStream {
+    tracks: MediaStreamTrack[] = [];
+    addTrack(track: MediaStreamTrack): void {
+      this.tracks.push(track);
+    }
+    getTracks(): MediaStreamTrack[] {
+      return this.tracks;
+    }
+  }
+
+  Object.defineProperty(globalThis, 'MediaStream', { configurable: true, value: FakeMediaStream });
+  try {
+    await run();
+  } finally {
+    Object.defineProperty(globalThis, 'MediaStream', { configurable: true, value: originalMediaStream });
+  }
+}
+
 async function withPublishPeerConnectionRecorder(run: (configs: RTCConfiguration[]) => Promise<void>): Promise<RTCConfiguration[]> {
   const originalPeerConnection = globalThis.RTCPeerConnection;
   const configs: RTCConfiguration[] = [];
@@ -469,6 +489,24 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
       assert.equal(timers.slice(beforeScheduleCount).every((timer) => !timer.active), true, `${methodName} clearTimeouts every tracked backoff`);
     }
   });
+}
+
+// CR-FIX-3 — live-mid conflict warning keys are cleared in every transport teardown path.
+{
+  for (const methodName of ['clearLocalTransportSessionState', 'closeLiveTracksForExit', 'destroy'] as const) {
+    const sfu = createSfuClient();
+    const privateSfu = sfu as unknown as {
+      subscribeMidConflictWarnings: Set<string>;
+      clearLocalTransportSessionState: () => void;
+      closeLiveTracksForExit: () => void;
+      destroy: () => void;
+    };
+    privateSfu.subscribeMidConflictWarnings.add('mid|alice|audio|bob|audio');
+
+    privateSfu[methodName]();
+
+    assert.equal(privateSfu.subscribeMidConflictWarnings.size, 0, `${methodName} clears subscribe mid conflict warning keys`);
+  }
 }
 
 // FIX2 — transient mid-call subscribe failure retries directly and eventually commits the missing track.
@@ -1095,9 +1133,18 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
         packetsLost: 2,
         jitter: 0.007,
         audioLevel: 0.31,
+        totalAudioEnergy: 4.25,
         jitterBufferDelay: 0.08,
         jitterBufferEmittedCount: 40,
         concealedSamples: 12,
+      },
+      {
+        id: 'playout-audio',
+        type: 'media-playout',
+        kind: 'audio',
+        audioLevel: 0.42,
+        totalAudioEnergy: 7.5,
+        totalSamplesDuration: 11.25,
       },
       {
         id: 'in-video',
@@ -1138,9 +1185,15 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
   const audioIn = diagnostics?.inboundTracks.find((track) => track.kind === 'audio');
   const videoIn = diagnostics?.inboundTracks.find((track) => track.kind === 'video');
   assert.equal(audioIn?.audioLevel, 0.31, 'inbound audio liveness is captured');
+  assert.equal(audioIn?.totalAudioEnergy, 4.25, 'legacy inbound audio energy is captured when present');
   assert.equal(audioIn?.jitter, 0.007);
   assert.equal(videoIn?.nackCount, 3);
   assert.equal(videoIn?.pliCount, 1);
+  assert.deepEqual(
+    diagnostics?.mediaPlayout,
+    { audioLevel: 0.42, totalAudioEnergy: 7.5, totalSamplesDuration: 11.25 },
+    'Chrome media-playout audio playout stats are captured',
+  );
 
   const missing = await collectDiagnosticsFromStats(
     statsReportOf(
@@ -1153,7 +1206,9 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
   assert.equal(missing.diagnostics?.selectedCandidatePair?.availableOutgoingBitrate, null);
   assert.equal(missing.diagnostics?.outboundTracks[0]?.remoteFractionLost, null);
   assert.equal(missing.diagnostics?.inboundTracks[0]?.audioLevel, null);
+  assert.equal(missing.diagnostics?.inboundTracks[0]?.totalAudioEnergy, null);
   assert.equal(missing.diagnostics?.inboundTracks[0]?.jitter, null);
+  assert.equal(missing.diagnostics?.mediaPlayout, undefined);
 }
 
 // selectNewRemoteTracks — partial subscribe covers added audio/video/screen and skips existing names
@@ -1351,63 +1406,82 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
 
 // SFU-S1 — failed subscribe renegotiate restores touched mid entries, subscribedTracks, retry metadata, and rolls back PC.
 {
-  const http = {
-    post: () =>
-      of({
-        requiresImmediateRenegotiation: true,
-        sessionDescription: { type: 'offer', sdp: 'remote-offer' },
-        tracks: [
-          { trackName: 'p-alice:1:audio:a1', mid: '' },
-          { trackName: 'p-alice:1:video:v1', mid: '' },
-        ],
-      }),
-    put: () => throwError(() => new Error('renegotiate failed')),
-  } as unknown as Partial<HttpClient>;
-  const sfu = createSfuClient(http);
-  const pc = makeSubscribePc({ renegotiateFails: true });
-  installPublishedSfuState(sfu, pc);
+  await withFakeMediaStream(async () => {
+    let sfu!: SfuClientService;
+    const http = {
+      post: () =>
+        of({
+          requiresImmediateRenegotiation: true,
+          sessionDescription: { type: 'offer', sdp: 'remote-offer' },
+          tracks: [
+            { trackName: 'p-alice:1:audio:a1', mid: '' },
+            { trackName: 'p-alice:1:video:v1', mid: '' },
+          ],
+        }),
+      put: () => {
+        const aliceStream = new MediaStream();
+        aliceStream.addTrack({ kind: 'audio', id: 'alice-browser-track' } as MediaStreamTrack);
+        sfu.remoteStreams.set(new Map([['concurrent-alice', aliceStream]]));
+        sfu.remoteTrackNames.set(new Map([['concurrent-alice', new Map([['alice-browser-track', 'alice-audio']])]]));
+        return throwError(() => new Error('renegotiate failed'));
+      },
+    } as unknown as Partial<HttpClient>;
+    sfu = createSfuClient(http);
+    const pc = makeSubscribePc({ renegotiateFails: true });
+    installPublishedSfuState(sfu, pc);
 
-  const privateSfu = sfu as unknown as {
-    doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
-    midToEntry: Map<string, SubscribedTrackEntry>;
-    subscribeRetryAttempts: Map<string, number>;
-    subscribeFirstFrameAt: Map<string, number>;
-  };
-  const priorOverwritten: SubscribedTrackEntry = { publisherClientId: 'old-client', trackName: 'old-audio', kind: 'audio', mid: '2' };
-  const priorUntouched: SubscribedTrackEntry = { publisherClientId: 'other-client', trackName: 'other-video', kind: 'video', mid: '9' };
-  privateSfu.midToEntry.set('2', priorOverwritten);
-  privateSfu.midToEntry.set('9', priorUntouched);
-  sfu.subscribedTracks.set(
-    new Map([
+    const privateSfu = sfu as unknown as {
+      doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
+      midToEntry: Map<string, SubscribedTrackEntry>;
+      pendingOntrack: Map<string, RTCTrackEvent>;
+      subscribeRetryAttempts: Map<string, number>;
+      subscribeFirstFrameAt: Map<string, number>;
+    };
+    const priorOverwritten: SubscribedTrackEntry = { publisherClientId: 'old-client', trackName: 'old-audio', kind: 'audio', mid: '2' };
+    const priorUntouched: SubscribedTrackEntry = { publisherClientId: 'other-client', trackName: 'other-video', kind: 'video', mid: '9' };
+    privateSfu.midToEntry.set('2', priorOverwritten);
+    privateSfu.midToEntry.set('9', priorUntouched);
+    privateSfu.pendingOntrack.set('2', { track: { kind: 'audio', id: 'ghost-audio' } } as RTCTrackEvent);
+    sfu.subscribedTracks.set(
+      new Map([
+        ['2', priorOverwritten],
+        ['9', priorUntouched],
+      ]),
+    );
+    privateSfu.subscribeRetryAttempts.set('alice', 3);
+    privateSfu.subscribeFirstFrameAt.set('alice', 1234);
+
+    await assert.rejects(
+      privateSfu.doSubscribeTracks(
+        { clientId: 'alice', participantId: 'p-alice', cfSessionId: 'alice-cf', revision: 1, tracks: [] },
+        [
+          { trackName: 'p-alice:1:audio:a1', kind: 'audio' },
+          { trackName: 'p-alice:1:video:v1', kind: 'video' },
+        ],
+      ),
+      /renegotiate failed/,
+    );
+
+    assert.deepEqual([...privateSfu.midToEntry.entries()], [
       ['2', priorOverwritten],
       ['9', priorUntouched],
-    ]),
-  );
-  privateSfu.subscribeRetryAttempts.set('alice', 3);
-  privateSfu.subscribeFirstFrameAt.set('alice', 1234);
-
-  await assert.rejects(
-    privateSfu.doSubscribeTracks(
-      { clientId: 'alice', participantId: 'p-alice', cfSessionId: 'alice-cf', revision: 1, tracks: [] },
-      [
-        { trackName: 'p-alice:1:audio:a1', kind: 'audio' },
-        { trackName: 'p-alice:1:video:v1', kind: 'video' },
-      ],
-    ),
-    /renegotiate failed/,
-  );
-
-  assert.deepEqual([...privateSfu.midToEntry.entries()], [
-    ['2', priorOverwritten],
-    ['9', priorUntouched],
-  ]);
-  assert.deepEqual([...sfu.subscribedTracks().entries()], [
-    ['2', priorOverwritten],
-    ['9', priorUntouched],
-  ]);
-  assert.equal(privateSfu.subscribeRetryAttempts.get('alice'), 3, 'failed subscribe restores prior retry attempts');
-  assert.equal(privateSfu.subscribeFirstFrameAt.get('alice'), 1234, 'failed subscribe restores prior first-frame marker');
-  assert.equal(pc.rollbackCount, 1, 'failed renegotiate attempts PC rollback');
+    ]);
+    assert.deepEqual([...sfu.subscribedTracks().entries()], [
+      ['2', priorOverwritten],
+      ['9', priorUntouched],
+    ]);
+    assert.equal(sfu.remoteStreams().has('alice'), false, 'failed renegotiate leaves no ghost remote audio stream');
+    assert.equal(sfu.remoteScreenStreams().has('alice'), false, 'failed renegotiate leaves no ghost remote screen stream');
+    assert.equal(sfu.remoteStreams().has('concurrent-alice'), true, 'failed bob/alice rollback preserves unrelated concurrent ontrack stream');
+    assert.equal(
+      sfu.remoteTrackNames().get('concurrent-alice')?.get('alice-browser-track'),
+      'alice-audio',
+      'failed rollback preserves unrelated concurrent trackName metadata',
+    );
+    assert.equal(privateSfu.subscribeRetryAttempts.get('alice'), 3, 'failed subscribe restores prior retry attempts');
+    assert.equal(privateSfu.subscribeFirstFrameAt.get('alice'), 1234, 'failed subscribe restores prior first-frame marker');
+    assert.equal(pc.rollbackCount, 1, 'failed renegotiate attempts PC rollback');
+  });
 }
 
 // SFU-S1 — successful subscribe renegotiate commits reconciled mids into both maps.
@@ -1445,6 +1519,215 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
   assert.equal(sfu.subscribedTracks().get('2')?.trackName, 'p-bob:1:audio:a1', 'audio mid committed to subscribed signal');
   assert.equal(sfu.subscribedTracks().get('3')?.trackName, 'p-bob:1:video:v1', 'video mid committed to subscribed signal');
   assert.equal(pc.rollbackCount, 0, 'successful renegotiate does not roll back');
+}
+
+// IMPL-2 — no-renegotiation subscribe keeps two live publisher audio mids and remote streams side by side.
+{
+  await withFakeMediaStream(async () => {
+    let postCalls = 0;
+    const http = {
+      post: () => {
+        postCalls += 1;
+        return of({
+          tracks: [{ trackName: postCalls === 1 ? 'alice-audio' : 'bob-audio', mid: String(postCalls) }],
+        });
+      },
+    } as unknown as Partial<HttpClient>;
+    const sfu = createSfuClient(http);
+    const pc = makeSingleTrackSubscribePc();
+    installPublishedSfuState(sfu, pc);
+    const privateSfu = sfu as unknown as {
+      doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
+      processOntrack: (event: RTCTrackEvent, entry: SubscribedTrackEntry) => void;
+      midToEntry: Map<string, SubscribedTrackEntry>;
+    };
+    const alice: RemotePublisher = {
+      clientId: 'alice',
+      participantId: 'p-alice',
+      cfSessionId: 'alice-cf',
+      revision: 1,
+      tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
+    };
+    const bob: RemotePublisher = {
+      clientId: 'bob',
+      participantId: 'p-bob',
+      cfSessionId: 'bob-cf',
+      revision: 1,
+      tracks: [{ trackName: 'bob-audio', kind: 'audio' }],
+    };
+    sfu.remotePublishers.set(
+      new Map([
+        ['alice', alice],
+        ['bob', bob],
+      ]),
+    );
+
+    await privateSfu.doSubscribeTracks(alice, alice.tracks);
+    await privateSfu.doSubscribeTracks(bob, bob.tracks);
+    const aliceEntry = privateSfu.midToEntry.get('1')!;
+    const bobEntry = privateSfu.midToEntry.get('2')!;
+    privateSfu.processOntrack({ track: { kind: 'audio' } } as RTCTrackEvent, aliceEntry);
+    privateSfu.processOntrack({ track: { kind: 'audio' } } as RTCTrackEvent, bobEntry);
+
+    assert.equal(aliceEntry.publisherClientId, 'alice', 'alice audio keeps its own mid');
+    assert.equal(bobEntry.publisherClientId, 'bob', 'bob audio keeps its own mid');
+    assert.equal(sfu.subscribedTracks().get('1')?.publisherClientId, 'alice', 'alice remains subscribed');
+    assert.equal(sfu.subscribedTracks().get('2')?.publisherClientId, 'bob', 'bob remains subscribed');
+    assert.equal(sfu.remoteStreams().has('alice'), true, 'alice remote stream is present');
+    assert.equal(sfu.remoteStreams().has('bob'), true, 'bob remote stream is present');
+  });
+}
+
+// CR-FIX-5 — live cross-publisher mid collision forces bounded renegotiation and never burns permanent-stop retry caps.
+{
+  await withFakeTimersAsync(async (timers) => {
+    let warnCalls = 0;
+    const originalWarn = console.warn;
+    console.warn = () => {
+      warnCalls += 1;
+    };
+    try {
+      const postBodies: Array<{ forceRenegotiation?: boolean }> = [];
+      let postCalls = 0;
+      const http = {
+        post: (_url: string, body: { forceRenegotiation?: boolean }) => {
+          postBodies.push(body);
+          postCalls += 1;
+          if (postCalls === 1) {
+            return of({
+              tracks: [{ trackName: 'bob-audio', mid: '1' }],
+            });
+          }
+          return of({
+            requiresImmediateRenegotiation: true,
+            sessionDescription: { type: 'offer', sdp: 'remote-offer' },
+            tracks: [{ trackName: 'bob-audio', mid: '' }],
+          });
+        },
+        put: () => of({}),
+      } as unknown as Partial<HttpClient>;
+      const sfu = createSfuClient(http);
+      const transceivers = [
+        { mid: '0', receiver: { track: { kind: 'audio' } } },
+        { mid: '1', receiver: { track: { kind: 'audio' } } },
+      ];
+      let localDescription: RTCSessionDescriptionInit | null = null;
+      const pc = {
+        connectionState: 'connected',
+        iceConnectionState: 'connected',
+        signalingState: 'stable',
+        get localDescription(): RTCSessionDescriptionInit | null {
+          return localDescription;
+        },
+        getTransceivers(): RTCRtpTransceiver[] {
+          return transceivers as unknown as RTCRtpTransceiver[];
+        },
+        async setRemoteDescription(): Promise<void> {
+          transceivers.push({ mid: '2', receiver: { track: { kind: 'audio' } } });
+        },
+        async createAnswer(): Promise<RTCSessionDescriptionInit> {
+          return { type: 'answer', sdp: 'answer-sdp' };
+        },
+        async setLocalDescription(desc: RTCSessionDescriptionInit): Promise<void> {
+          localDescription = desc;
+        },
+      } as unknown as RTCPeerConnection;
+      installPublishedSfuState(sfu, pc);
+      const privateSfu = sfu as unknown as {
+        midToEntry: Map<string, SubscribedTrackEntry>;
+        subscribedClientIds: Set<string>;
+        subscribeRetryAttempts: Map<string, number>;
+        midCallSubscribeRetryAttempts: Map<string, number>;
+        liveMidConflictRetryAttempts: Map<string, number>;
+        liveMidConflictRetryTimers: Map<string, unknown>;
+      };
+      const alice: RemotePublisher = {
+        clientId: 'alice',
+        participantId: 'p-alice',
+        cfSessionId: 'alice-cf',
+        revision: 1,
+        tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
+      };
+      const bob: RemotePublisher = {
+        clientId: 'bob',
+        participantId: 'p-bob',
+        cfSessionId: 'bob-cf',
+        revision: 1,
+        tracks: [{ trackName: 'bob-audio', kind: 'audio' }],
+      };
+      const aliceEntry: SubscribedTrackEntry = { publisherClientId: 'alice', trackName: 'alice-audio', kind: 'audio', mid: '1' };
+      privateSfu.midToEntry.set('1', aliceEntry);
+      sfu.subscribedTracks.set(new Map([['1', aliceEntry]]));
+      sfu.remotePublishers.set(
+        new Map([
+          ['alice', alice],
+          ['bob', bob],
+        ]),
+      );
+
+      sfu.subscribeIfNeeded(bob);
+      await flushSfuQueue(sfu);
+
+      assert.equal(privateSfu.midToEntry.get('1'), aliceEntry, 'live alice mid mapping is preserved after bob collision');
+      assert.equal(sfu.subscribedTracks().get('1'), aliceEntry, 'live alice subscribed entry is preserved after bob collision');
+      assert.equal(privateSfu.subscribeRetryAttempts.has('bob'), false, 'live mid conflict does not increment permanent-stop subscribe retry attempts');
+      assert.equal(privateSfu.midCallSubscribeRetryAttempts.size, 0, 'live mid conflict does not increment mid-call permanent-stop retry attempts');
+      assert.equal(privateSfu.liveMidConflictRetryTimers.size, 1, 'live mid conflict schedules one idempotent renegotiation retry');
+
+      const retryTimer = timers.filter((timer) => timer.active).at(-1);
+      assert.ok(retryTimer, 'renegotiation retry timer should be active');
+      retryTimer.active = false;
+      retryTimer.callback();
+      await flushSfuQueue(sfu);
+
+      assert.equal(postBodies.length, 2, 'live conflict performs initial subscribe plus one forced renegotiating retry');
+      assert.equal(postBodies[0].forceRenegotiation, false, 'initial subscribe does not force renegotiation');
+      assert.equal(postBodies[1].forceRenegotiation, true, 'retry requests renegotiating subscribe for fresh mids');
+      assert.equal(privateSfu.midToEntry.get('1'), aliceEntry, 'alice keeps original mid after bob converges');
+      assert.equal(privateSfu.midToEntry.get('2')?.publisherClientId, 'bob', 'bob converges on a fresh renegotiated mid');
+      assert.equal(sfu.subscribedTracks().get('2')?.publisherClientId, 'bob', 'bob reaches subscribedTracks after renegotiation');
+      assert.equal(privateSfu.subscribedClientIds.has('bob'), true, 'bob remains subscribed, not permanently stopped');
+      assert.equal(privateSfu.subscribeRetryAttempts.has('bob'), false, 'successful conflict recovery leaves permanent-stop attempts empty');
+      assert.equal(privateSfu.liveMidConflictRetryAttempts.size, 0, 'successful conflict recovery clears conflict retry counter');
+      assert.equal(warnCalls >= 2, true, 'conflict and forced-renegotiation paths warn loudly');
+    } finally {
+      console.warn = originalWarn;
+    }
+  });
+}
+
+// IMPL-2 — stale cross-publisher mid mapping is reclaimed for the current publisher.
+{
+  const http = {
+    post: () =>
+      of({
+        tracks: [{ trackName: 'bob-audio', mid: '1' }],
+      }),
+  } as unknown as Partial<HttpClient>;
+  const sfu = createSfuClient(http);
+  const pc = makeSingleTrackSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  const privateSfu = sfu as unknown as {
+    doSubscribeTracks: (publisher: RemotePublisher, tracks: { trackName: string; kind: string }[]) => Promise<void>;
+    midToEntry: Map<string, SubscribedTrackEntry>;
+  };
+  const bob: RemotePublisher = {
+    clientId: 'bob',
+    participantId: 'p-bob',
+    cfSessionId: 'bob-cf',
+    revision: 1,
+    tracks: [{ trackName: 'bob-audio', kind: 'audio' }],
+  };
+  const staleAliceEntry: SubscribedTrackEntry = { publisherClientId: 'alice', trackName: 'alice-audio', kind: 'audio', mid: '1' };
+  privateSfu.midToEntry.set('1', staleAliceEntry);
+  sfu.subscribedTracks.set(new Map([['1', staleAliceEntry]]));
+  sfu.remotePublishers.set(new Map([['bob', bob]]));
+
+  await privateSfu.doSubscribeTracks(bob, bob.tracks);
+
+  assert.equal(privateSfu.midToEntry.get('1')?.publisherClientId, 'bob', 'stale alice mid is reclaimed for bob');
+  assert.equal(privateSfu.midToEntry.get('1')?.trackName, 'bob-audio', 'reclaimed mid carries bob track name');
+  assert.equal(sfu.subscribedTracks().get('1')?.publisherClientId, 'bob', 'subscribed signal replaces stale alice with bob');
 }
 
 // SFU-S2 — new cfSessionId for a known clientId evicts stale subscribe state before fresh subscribe.

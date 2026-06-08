@@ -30,7 +30,6 @@ type SessionRow = {
 export type DiagnosticsPayload = {
   kind?: string;
   createdAt?: number;
-  clientKey?: string;
   participantId?: string;
   peers?: unknown[];
   forceRelay?: boolean;
@@ -80,7 +79,6 @@ type DiagnosticEntryRow = {
   peer_count: number;
   participant_id: string | null;
   participant_name: string | null;
-  participant_client_key: string | null;
 };
 
 type DiagnosticSummaryRow = SessionRow & {
@@ -272,6 +270,8 @@ export function appendDiagnosticsEntry(
   const diagnosticOwnerEmail = session.host_email;
 
   const summary = summarizeDiagnosticsPayload(payload);
+  const participantClientKey = coerceIdentity(payload.clientKey);
+  const { clientKey: _clientKey, ...persistedPayload } = payload;
   const entry = {
     id: crypto.randomUUID(),
     sessionId,
@@ -279,13 +279,13 @@ export function appendDiagnosticsEntry(
     ownerEmail: diagnosticOwnerEmail,
     kind: summary.kind,
     createdAt: Date.now(),
-    payloadJson: JSON.stringify(payload),
+    payloadJson: JSON.stringify(persistedPayload),
     relayUsed: summary.relayUsed ? 1 : 0,
     candidateTypes: summary.candidateTypes.join(','),
     peerCount: summary.peerCount,
     participantId: coerceIdentity(payload.participantId),
     participantName: coerceIdentity(payload.clientName),
-    participantClientKey: coerceIdentity(payload.clientKey),
+    participantClientKey,
   };
 
   const insert = database.transaction(() => {
@@ -408,7 +408,7 @@ export function getDiagnosticsForSession(
   const entries = database
     .prepare(
       `
-        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name, d.participant_client_key
+        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name
         FROM meeting_session_diagnostics d
         JOIN rooms r ON r.id = d.room_id
         WHERE d.session_id = ? AND d.owner_email = ?
@@ -467,7 +467,7 @@ function getDiagnosticsEntry(ownerEmail: string, id: string, database: Database.
   const row = database
     .prepare(
       `
-        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name, d.participant_client_key
+        SELECT d.id, d.session_id, d.room_id, r.title AS room_title, d.owner_email, d.kind, d.created_at, d.payload_json, d.relay_used, d.candidate_types, d.peer_count, d.participant_id, d.participant_name
         FROM meeting_session_diagnostics d
         JOIN rooms r ON r.id = d.room_id
         WHERE d.id = ? AND d.owner_email = ?
@@ -539,7 +539,9 @@ function splitCandidateTypes(value: string | null | undefined): string[] {
 function parsePayload(value: string): DiagnosticsPayload {
   try {
     const parsed = JSON.parse(value) as unknown;
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as DiagnosticsPayload) : {};
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const { clientKey: _clientKey, ...sanitized } = parsed as DiagnosticsPayload;
+    return sanitized;
   } catch {
     return {};
   }

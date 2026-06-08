@@ -69,7 +69,7 @@ export class ControlsBarComponent {
   readonly settingsPopoverOpen = signal(false);
   readonly volumeLabel = computed(() => {
     const percent = Math.round(this.remoteAudio.volume() * 100);
-    return percent > 100 ? `${percent}% (amp)` : `${percent}%`;
+    return `${percent}%`;
   });
 
   constructor() {

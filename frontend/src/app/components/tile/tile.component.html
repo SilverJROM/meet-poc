@@ -11,9 +11,6 @@
   [attr.data-screen-on]="peer().screenOn"
 >
   <div class="tile-content">
-    @if (!peer().isLocal && remoteAudioEnabled()) {
-      <audio #remoteAudio class="remote-audio-sink" data-remote-audio autoplay playsinline></audio>
-    }
     @if (showVideo()) {
       <video #video autoplay playsinline [muted]="true" [class.is-mirrored-self-view]="isMirroredSelfView()"></video>
     } @else {
