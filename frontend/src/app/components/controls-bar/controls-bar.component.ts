@@ -36,6 +36,7 @@ export class ControlsBarComponent {
   readonly roomLabel = input.required<string>();
   readonly elapsedLabel = input('');
   readonly micOn = input.required<boolean>();
+  readonly audioConnecting = input(false);
   readonly cameraOn = input.required<boolean>();
   readonly screenOn = input.required<boolean>();
   readonly recording = input.required<boolean>();

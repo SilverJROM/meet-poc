@@ -32,6 +32,9 @@
             <ion-icon name="mic-off-outline"></ion-icon>
           </span>
         }
+        @if (audioUnhealthy() && !peer().isLocal) {
+          <span class="audio-health-badge" aria-label="No audio received from this participant">No audio</span>
+        }
         @if (!peer().isLocal) {
           <span class="quality-pill" [attr.data-quality]="peer().audioOnlyReason ? 'audio-only' : peer().quality">
             {{ peer().audioOnlyReason ? 'audio only' : peer().quality }}

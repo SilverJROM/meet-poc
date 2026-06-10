@@ -102,6 +102,7 @@
         [roomLabel]="roomTitle()"
         [elapsedLabel]="formattedElapsed()"
         [micOn]="media.micOn()"
+        [audioConnecting]="preflightGateStatus() === 'audio-connecting'"
         [cameraOn]="effectiveCameraOn()"
         [screenOn]="media.screenOn()"
         [recording]="recorder.isRecording()"
@@ -209,11 +210,16 @@
           <button type="button" (click)="actionNotice.set(null)">Dismiss</button>
         </div>
       }
+      @if (preflightGateStatus() === 'audio-connecting') {
+        <div class="device-notice audio-connecting-notice" role="status" aria-live="polite">
+          <span>Connecting your audio…</span>
+        </div>
+      }
       @if (initialPublishFailureNotice()) {
         <div class="device-notice" role="status">
           <span>{{ initialPublishFailureNotice() }}</span>
-          <button type="button" [disabled]="initialPublishRetrying()" (click)="retryInitialPublish()">
-            {{ initialPublishRetrying() ? 'Retrying...' : 'Retry audio/video' }}
+          <button type="button" [disabled]="initialPublishRetrying()" (click)="retryPublishAudio()">
+            {{ initialPublishRetrying() ? 'Retrying...' : 'Retry audio' }}
           </button>
           <button type="button" [disabled]="initialPublishRetrying()" (click)="rejoinAfterInitialPublishFailure()">Rejoin</button>
         </div>
@@ -257,6 +263,7 @@
               [reactions]="tileReactions(presenter.id)"
               variant="share-main"
               [speaking]="activeSpeaker.activePeerId() === presenter.id"
+              [audioUnhealthy]="isHost() && peerAudioUnhealthy(presenter)"
             />
           </div>
           <aside class="share-strip" [class.collapsed]="shareStripCollapsed()" aria-label="Participants during screen share">
@@ -271,7 +278,7 @@
             @if (!shareStripCollapsed()) {
               <div class="strip-list" [attr.data-count]="orderedStripPeers().length">
                 @for (peer of orderedStripPeers(); track peer.participantId) {
-                  <app-tile [peer]="peer" [displayStream]="peer.isLocal ? effectiveLocalStream() : null" variant="strip" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" />
+                  <app-tile [peer]="peer" [displayStream]="peer.isLocal ? effectiveLocalStream() : null" variant="strip" [raisedHand]="raisedHands().has(peer.id)" [reactions]="tileReactions(peer.id)" [speaking]="activeSpeaker.activePeerId() === peer.id" [audioUnhealthy]="isHost() && peerAudioUnhealthy(peer)" />
                 }
               </div>
             }
@@ -294,6 +301,7 @@
                 [raisedHand]="raisedHands().has(peer.id)"
                 [reactions]="tileReactions(peer.id)"
                 [speaking]="activeSpeaker.activePeerId() === peer.id"
+                [audioUnhealthy]="isHost() && peerAudioUnhealthy(peer)"
               />
             }
           </div>
@@ -552,12 +560,20 @@
           [error]="deviceDialogError()"
           [micTestFlagged]="lobbySelfTestFlag()"
           [micTestDeviceLabel]="selectedAudioLabel()"
+          [confirmGate]="true"
+          [confirmReady]="preflightConfirmReady()"
+          [speakerTested]="speakerVerified()"
+          [micVerified]="micWorking()"
+          [speakerTestPending]="speakerTestPending()"
           (continuePermission)="continueDeviceSetup()"
           (audioDeviceChange)="changeAudioDevice($event)"
           (videoDeviceChange)="changeVideoDevice($event)"
           (audioOutputChange)="changeAudioOutputDevice($event)"
           (flipCamera)="flipCamera()"
           (testSpeaker)="testSpeaker()"
+          (speakerConfirmed)="confirmSpeakerHeard()"
+          (speakerDenied)="speakerNotHeard()"
+          (confirm)="onPreflightConfirm()"
           (close)="lobbyDeviceDialogOpen.set(false)"
         />
       }

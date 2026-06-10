@@ -22,6 +22,7 @@ export class TileComponent {
   readonly forceVideo = input(false);
   readonly raisedHand = input(false);
   readonly reactions = input<TileReaction[]>([]);
+  readonly audioUnhealthy = input(false);
   readonly initials = computed(() => toInitials(this.peer().name));
   readonly videoStream = computed(() => this.displayStream() ?? this.peer().stream);
   readonly showVideo = computed(() => this.forceVideo() || (!this.peer().screenOn && this.peer().camEnabled && !!this.videoStream()?.getVideoTracks()?.length));

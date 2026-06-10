@@ -53,15 +53,23 @@ import { ReactionKind, SignalingMessage, WsService } from '../../services/ws.ser
 import { SfuClientService, type LocalPublishState } from '../../services/sfu-client.service';
 import { planInitialPublishRetry } from '../../services/sfu-roster-utils';
 import {
+  classifyPeerAudioHealth,
   decideLocalTrackFailureRecovery,
   decideRemoteVoiceWatchdogAction,
+  missingPreflightPrereqs,
+  nextMicWorkingState,
   shouldAcquireMicTrackForToggle,
+  shouldOpenDeviceDialogOnAudioFail,
   shouldReconcileAudioOutputAfterRefresh,
   shouldClearVideoPinAfterRefresh,
   shouldPromptGuestPassword,
   shouldRearmLobbySelfTest,
+  shouldShowAudioFailNotice,
   shouldSubmitChat,
+  shouldSurfacePublishFailure,
   storedDeviceAfterSelectionAttempt,
+  type PeerAudioHealthInput,
+  type PreflightGateStatus,
 } from './room-decisions';
 import { decideRoomLifecycleLeave } from './room-lifecycle';
 import { recordPeerResumed, syncRecorderPeerStreams } from './room-recording';
@@ -86,6 +94,7 @@ const MIC_SILENCE_WATCHDOG_POLL_MS = 1_000;
 const MIC_SILENCE_WATCHDOG_WINDOW = 6;
 const REMOTE_AUDIO_KEEPALIVE_MS = 15_000;
 const REMOTE_VOICE_WATCHDOG_POLL_MS = 1_500;
+const PEER_AUDIO_GRACE_MS = 7_000;
 const INITIAL_PUBLISH_RETRY_CAP = 3;
 const INITIAL_PUBLISH_RETRY_BASE_BACKOFF_MS = 500;
 const INITIAL_PUBLISH_RETRY_MAX_BACKOFF_MS = 2000;
@@ -216,6 +225,7 @@ export class RoomPage implements OnDestroy {
   readonly lobbyDeviceDialogOpen = signal(true);
   readonly devicePermissionIntro = signal(true);
   readonly inCallDeviceDialogOpen = signal(false);
+  readonly remoteAudioUnhealthyIds = signal<ReadonlySet<string>>(new Set<string>());
   readonly deviceDialogBusy = signal(false);
   readonly deviceDialogError = signal<string | null>(null);
   readonly selectedSpeakerUnavailable = signal(false);
@@ -241,10 +251,23 @@ export class RoomPage implements OnDestroy {
   // the B2b copy; the multi-device sweep swaps in the terminal "no working
   // microphone" copy when NO available mic produces energy (R10).
   readonly micSilentWarningMessage = signal("We can't detect sound from your microphone");
-  // B5 — pre-call lobby self-test flag (R8). Driven by the lobby self-test poller
-  // via the SAME classifyMicCapture + nextMicWarningState the in-call watchdog uses;
-  // surfaces a NON-blocking "No sound detected" flag in both lobby surfaces.
+  // B5 — pre-call lobby self-test WARNING flag (R8). Driven by the lobby self-test
+  // poller via classifyMicCapture + nextMicWarningState. true = mic is SILENT (bad);
+  // false = working or untested. Feeds the "No sound detected" copy in both surfaces.
+  // NOT used as the gate signal — see micWorking below.
   readonly lobbySelfTestFlag = signal(false);
+  // CR-FIX-2: POSITIVE "mic confirmed energy" signal. true only when classifyMicCapture
+  // returns 'working'; false on 'silent', mic-off, or untested (init). Gate signal.
+  readonly micWorking = signal(false);
+  // CR-FIX-2: true only when the user explicitly confirmed they heard the speaker tone
+  // ("Did you hear it? → Yes"). Replaces speakerTestCount > 0 as the gate signal.
+  readonly speakerVerified = signal(false);
+  // CR-FIX-2: true while awaiting user Yes/No after the speaker tone plays.
+  readonly speakerTestPending = signal(false);
+  // Preflight gate status: tracks the pre-join device check + post-admit publish phase.
+  readonly preflightGateStatus = signal<PreflightGateStatus>('pending');
+  // True when the device-dialog "Confirm" button should enable (mic verified + speaker verified).
+  readonly preflightConfirmReady = computed(() => this.micWorking() && this.speakerVerified());
   // The human device name for the flag copy: the selected mic's MediaDeviceInfo
   // label, falling back to a generic phrase when the label is empty/blank (labels
   // are empty before the user grants mic permission).
@@ -495,6 +518,14 @@ export class RoomPage implements OnDestroy {
   private lastSfuVideoTrack: MediaStreamTrack | null = null;
   private readonly lastGumError = signal<DiagnosticsPayload['lastGumError']>(null);
   private initialPublishRunId = 0;
+  // Incremented at TOP of publishInitialSfuWithRetry (before any early-return) so
+  // publishTriggerCount===0 after admit → PATH A (trigger never fired).
+  private publishTriggerCount = 0;
+  private audioConnectingTimeoutId: number | null = null;
+  // R9 host-badge: previous inbound-rtp bytesReceived snapshot per remote clientId.
+  private readonly prevInboundBytes = new Map<string, number | null>();
+  // R9 host-badge: first-seen timestamp per admitted peer (for grace-period flicker suppression).
+  private readonly peerFirstSeen = new Map<string, number>();
   private joinAnywayWithStunFallback = false;
   private readonly forceRelayDiagnostic = signal<TurnHealthResult | null>(null);
   private readonly forceRelayDiagnosticRequested = signal(false);
@@ -563,8 +594,10 @@ export class RoomPage implements OnDestroy {
         screenShareAttempts: this.media.screenShareAttempts(),
         lastVideoConstraints: this.media.lastVideoConstraints(),
         audioContextActivated: this.media.audioContextActivated(),
-        speakerTestCount: window.__meetDebug?.speakerTestCount ?? 0,
+        speakerVerified: this.speakerVerified(),
         doorbellCount: window.__meetDebug?.doorbellCount ?? 0,
+        publishTriggerCount: this.publishTriggerCount,
+        preflightGateStatus: this.preflightGateStatus(),
         waitingKnockers: this.knockers().map((knocker) => ({ ...knocker })),
         wsConnected: this.ws.connected(),
         wsStatus: this.ws.status(),
@@ -929,6 +962,11 @@ export class RoomPage implements OnDestroy {
     }
   }
 
+  onPreflightConfirm(): void {
+    this.joinPrereqPopout.set(null);
+    this.lobbyDeviceDialogOpen.set(false);
+  }
+
   async setLobbyMicEnabled(value: boolean): Promise<void> {
     this.microphoneRequested.set(value);
     const stream = this.media.localStream();
@@ -960,9 +998,10 @@ export class RoomPage implements OnDestroy {
       }
       return;
     }
-    // B5 — clear the prior device's self-test verdict so it can't bleed onto the
-    // newly selected mic; reacquireLobbyStream re-arms the poller on a fresh window.
+    // B5 / CR-FIX-2 — clear the prior device's self-test verdict so it can't bleed
+    // onto the newly selected mic; reacquireLobbyStream re-arms the poller.
     this.lobbySelfTestFlag.set(false);
+    this.micWorking.set(false);
     acquired = await this.reacquireLobbyStream();
     if (!acquired) {
       this.selectedAudioId.set(previousSelectedId);
@@ -1009,6 +1048,10 @@ export class RoomPage implements OnDestroy {
 
   async changeAudioOutputDevice(deviceId: string): Promise<void> {
     this.deviceDialogError.set(null);
+    // CR-FIX-2: switching speaker invalidates the prior test — user must re-verify
+    // the new output device before the gate passes.
+    this.speakerVerified.set(false);
+    this.speakerTestPending.set(false);
     const result = await this.applySpeakerDevice(deviceId);
     this.selectedAudioOutputId.set(deviceId);
     storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
@@ -1030,21 +1073,44 @@ export class RoomPage implements OnDestroy {
   }
 
   async testSpeaker(): Promise<void> {
-    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    const context = new AudioContextCtor();
-    const oscillator = context.createOscillator();
-    const gain = context.createGain();
-    oscillator.frequency.value = 440;
-    gain.gain.value = 0.2;
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    await context.resume();
-    oscillator.start();
-    if (window.__meetDebug) window.__meetDebug.speakerTestCount = (window.__meetDebug.speakerTestCount ?? 0) + 1;
-    window.setTimeout(() => {
-      oscillator.stop();
-      void context.close();
-    }, 1000);
+    // CR-FIX-2: play tone, then require explicit "Did you hear it?" confirm before
+    // marking speakerVerified. On autoplay error or oscillator failure treat as
+    // not-verified + show guidance — never pass the gate on a click alone.
+    this.speakerVerified.set(false);
+    this.speakerTestPending.set(false);
+    this.deviceDialogError.set(null);
+    try {
+      const AudioContextCtor = window.AudioContext || (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('AudioContext unavailable');
+      const context = new AudioContextCtor();
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.frequency.value = 440;
+      gain.gain.value = 0.2;
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      await context.resume();
+      oscillator.start();
+      window.setTimeout(() => {
+        oscillator.stop();
+        void context.close();
+      }, 1000);
+      this.speakerTestPending.set(true);
+    } catch {
+      this.deviceDialogError.set('Could not play the test tone. Try unmuting your device or selecting a different speaker.');
+    }
+  }
+
+  confirmSpeakerHeard(): void {
+    this.speakerTestPending.set(false);
+    this.speakerVerified.set(true);
+    this.deviceDialogError.set(null);
+  }
+
+  speakerNotHeard(): void {
+    this.speakerTestPending.set(false);
+    this.speakerVerified.set(false);
+    this.deviceDialogError.set('No sound? Try unmuting your device, raising the volume, or selecting a different speaker above.');
   }
 
   openInCallDeviceDialog(): void {
@@ -1537,6 +1603,43 @@ export class RoomPage implements OnDestroy {
     await this.join();
   }
 
+  async retryPublishAudio(): Promise<void> {
+    if (this.initialPublishRetrying()) return;
+    if (this.state() !== 'in-call') return;
+    const participantId = this.myParticipantId();
+    const sessionId = this.currentSessionId();
+    if (!participantId || !sessionId) {
+      this.preflightGateStatus.set('audio-failed');
+      if (shouldShowAudioFailNotice({ isHost: this.isHost() })) {
+        this.initialPublishFailureNotice.set('Session unavailable — please rejoin the call.');
+      }
+      return;
+    }
+    this.initialPublishRunId += 1;
+    this.initialPublishFailureNotice.set(null);
+    await this.publishInitialSfuWithRetry(participantId, sessionId);
+  }
+
+  private startAudioConnectingTimeout(): void {
+    this.clearAudioConnectingTimeout();
+    this.audioConnectingTimeoutId = window.setTimeout(() => {
+      if (this.preflightGateStatus() === 'audio-connecting') {
+        this.preflightGateStatus.set('audio-failed');
+        if (shouldShowAudioFailNotice({ isHost: this.isHost() })) {
+          this.initialPublishFailureNotice.set("We couldn't connect your audio in time. Check your internet and try again.");
+        }
+        if (shouldOpenDeviceDialogOnAudioFail({ isHost: this.isHost() })) {
+          this.inCallDeviceDialogOpen.set(true);
+        }
+      }
+    }, 15_000);
+  }
+
+  private clearAudioConnectingTimeout(): void {
+    if (this.audioConnectingTimeoutId !== null) window.clearTimeout(this.audioConnectingTimeoutId);
+    this.audioConnectingTimeoutId = null;
+  }
+
   private async directLeave(sendLeaveMessage: boolean): Promise<void> {
     this.cleanupCall(sendLeaveMessage);
     await this.router.navigate([this.auth.user() ? '/app/rooms' : '/']);
@@ -1552,20 +1655,49 @@ export class RoomPage implements OnDestroy {
   }
 
   private async publishInitialSfuWithRetry(participantId: string, sessionId: string): Promise<void> {
+    // Count ALL trigger fires (PATH A detector: publishTriggerCount===0 after admit
+    // means this function was never called — trigger never fired).
+    this.publishTriggerCount += 1;
+
     if (this.state() !== 'in-call' || this.sfuClient.localPublishState()?.status === 'published') return;
+
+    this.preflightGateStatus.set('audio-connecting');
+    this.startAudioConnectingTimeout();
 
     const runId = ++this.initialPublishRunId;
     this.initialPublishRetrying.set(true);
     this.initialPublishFailureNotice.set(null);
     this.actionNotice.set(null);
 
+    let publishSucceeded = false;
     try {
       for (let attempt = 1; attempt <= INITIAL_PUBLISH_RETRY_CAP; attempt += 1) {
         if (runId !== this.initialPublishRunId || this.state() !== 'in-call') return;
         try {
           await this.publishSfuOnceAfterAdmit(participantId, sessionId);
           if (runId !== this.initialPublishRunId || this.state() !== 'in-call') return;
+          // R3 real-transmission gate: 2s after a successful publish, confirm the
+          // outbound-rtp audio sender is established. Checks stat EXISTENCE (not
+          // bytesSent>0) so muted joiners pass — they are correctly published with
+          // ~0 energy bytes but a valid outbound-rtp entry.
+          await delay(2_000);
+          if (runId !== this.initialPublishRunId || this.state() !== 'in-call') return;
+          const trackEstablished = await this.sfuClient.hasOutboundAudioTrack();
+          if (!trackEstablished) {
+            console.error('[sfu-client] outbound-rtp audio stat absent after publish — transceiver not established');
+            this.status.set('Audio/video did not start.');
+            this.preflightGateStatus.set('audio-failed');
+            if (shouldShowAudioFailNotice({ isHost: this.isHost() })) {
+              this.initialPublishFailureNotice.set("Your audio wasn't accepted by the call. Check your network and try again.");
+            }
+            if (shouldOpenDeviceDialogOnAudioFail({ isHost: this.isHost() })) {
+              this.inCallDeviceDialogOpen.set(true);
+            }
+            return;
+          }
           this.initialPublishFailureNotice.set(null);
+          this.preflightGateStatus.set('ready');
+          publishSucceeded = true;
           return;
         } catch (err) {
           const retryableFailure = this.isRetryableInitialPublishFailure(err);
@@ -1583,7 +1715,13 @@ export class RoomPage implements OnDestroy {
             console.error('[sfu-client] initial publish failed permanently', err);
             this.status.set('Audio/video did not start.');
             this.actionNotice.set(null);
-            this.initialPublishFailureNotice.set(this.initialPublishFailureMessage(retry.reason));
+            this.preflightGateStatus.set('audio-failed');
+            if (shouldShowAudioFailNotice({ isHost: this.isHost() })) {
+              this.initialPublishFailureNotice.set(this.initialPublishFailureMessage(retry.reason));
+            }
+            if (shouldOpenDeviceDialogOnAudioFail({ isHost: this.isHost() })) {
+              this.inCallDeviceDialogOpen.set(true);
+            }
             return;
           }
 
@@ -1598,7 +1736,26 @@ export class RoomPage implements OnDestroy {
         }
       }
     } finally {
-      if (runId === this.initialPublishRunId) this.initialPublishRetrying.set(false);
+      // Guard on runId: a concurrent new publish run must NOT have its timeout
+      // cleared by this (older) run's finally block.
+      if (runId === this.initialPublishRunId) {
+        this.initialPublishRetrying.set(false);
+        this.clearAudioConnectingTimeout();
+        // CR-FIX-1 state-revert guard: any exit that did not reach 'ready' and
+        // left the gate at 'audio-connecting' surfaces audio-failed here. The
+        // preflightGateStatus check prevents a double-set when inner logic
+        // already set 'audio-failed' before returning (retries exhausted,
+        // transceiver check failed, etc.).
+        if (shouldSurfacePublishFailure({ publishSucceeded, gateStatus: this.preflightGateStatus() })) {
+          this.preflightGateStatus.set('audio-failed');
+          if (shouldShowAudioFailNotice({ isHost: this.isHost() })) {
+            this.initialPublishFailureNotice.set("We couldn't connect your audio. Check your connection and try again.");
+          }
+          if (shouldOpenDeviceDialogOnAudioFail({ isHost: this.isHost() })) {
+            this.inCallDeviceDialogOpen.set(true);
+          }
+        }
+      }
     }
   }
 
@@ -1653,7 +1810,7 @@ export class RoomPage implements OnDestroy {
       stream = this.media.localStream();
     }
     if (!stream?.getAudioTracks().some((t) => t.readyState !== 'ended')) {
-      console.warn('[sfu] publish proceeding without live audio track — mic may be unavailable');
+      throw new InitialPublishPermanentError('[sfu] no live audio track at deadline — check microphone in settings');
     }
     const publishStream = this.effectiveLocalStream() ?? stream;
     if (!publishStream?.getTracks().some((t) => t.readyState !== 'ended')) {
@@ -1777,13 +1934,25 @@ export class RoomPage implements OnDestroy {
       if (msg.participantId && msg.sessionId) {
         const participantId = msg.participantId;
         const sessionId = msg.sessionId;
-        if (wasInCall) {
-          void this.publishInitialSfuWithRetry(participantId, sessionId).catch((err: unknown) => {
-            console.error('[sfu-client] publish failed', err);
-            this.actionNotice.set('Unable to start your audio/video. Please refresh the page.');
+        // State-revert guard is in publishInitialSfuWithRetry's finally block.
+        // .catch() surfaces any unexpected outer throw not caught internally.
+        void this.publishInitialSfuWithRetry(participantId, sessionId)
+          .catch((err: unknown) => {
+            console.error('[sfu-client] publish failed with unexpected outer error', err);
+            this.preflightGateStatus.set('audio-failed');
+            if (shouldShowAudioFailNotice({ isHost: this.isHost() })) {
+              this.initialPublishFailureNotice.set("We couldn't connect your audio. Check your connection and try again.");
+            }
+            if (shouldOpenDeviceDialogOnAudioFail({ isHost: this.isHost() })) {
+              this.inCallDeviceDialogOpen.set(true);
+            }
           });
-        } else {
-          void this.publishInitialSfuWithRetry(participantId, sessionId);
+      } else {
+        // PATH A guard: admit without participantId/sessionId → never-publish is now loud.
+        console.error('[sfu-client] admitted without participantId/sessionId — cannot publish');
+        this.preflightGateStatus.set('audio-failed');
+        if (shouldShowAudioFailNotice({ isHost: this.isHost() })) {
+          this.initialPublishFailureNotice.set("We couldn't start your audio — the session ID is missing. Please rejoin.");
         }
       }
       this.startDiagnosticsLogger();
@@ -2260,10 +2429,15 @@ export class RoomPage implements OnDestroy {
     this.media.micOn.set(track.enabled);
   }
 
-  private missingJoinPrereqs(): ('name' | 'mic')[] {
-    const missing: ('name' | 'mic')[] = [];
+  private missingJoinPrereqs(): ('name' | 'mic' | 'mic-silent' | 'speaker')[] {
+    const missing: ('name' | 'mic' | 'mic-silent' | 'speaker')[] = [];
     if (!this.displayName().trim()) missing.push('name');
-    if (!this.hasMicAccess()) missing.push('mic');
+    const preflightMissing = missingPreflightPrereqs({
+      hasMicAccess: this.hasMicAccess(),
+      micVerified: this.micWorking(),
+      speakerTested: this.speakerVerified(),
+    });
+    for (const item of preflightMissing) missing.push(item);
     return missing;
   }
 
@@ -2272,7 +2446,7 @@ export class RoomPage implements OnDestroy {
     return !!audioTrack && audioTrack.readyState === 'live';
   }
 
-  private showJoinPrereqPopout(missing: ('name' | 'mic')[]): void {
+  private showJoinPrereqPopout(missing: ('name' | 'mic' | 'mic-silent' | 'speaker')[]): void {
     if (missing.includes('name')) {
       this.nameError.set('Enter your name to join');
       this.displayNameInput()?.nativeElement.focus();
@@ -2283,6 +2457,14 @@ export class RoomPage implements OnDestroy {
       this.joinPrereqPopout.set('Please add your name and enable your microphone');
     } else if (missing.includes('name')) {
       this.joinPrereqPopout.set('Please add your name');
+    } else if (missing.includes('mic')) {
+      this.joinPrereqPopout.set('Please enable your microphone');
+    } else if (missing.includes('mic-silent')) {
+      this.lobbyDeviceDialogOpen.set(true);
+      this.joinPrereqPopout.set("Say something into your mic — we need to hear you before you can join. Check it isn't muted and speak now.");
+    } else if (missing.includes('speaker')) {
+      this.lobbyDeviceDialogOpen.set(true);
+      this.joinPrereqPopout.set('Test your speaker first — press "Test speaker" in the device panel below.');
     } else {
       this.joinPrereqPopout.set('Please enable your microphone');
     }
@@ -2447,6 +2629,11 @@ export class RoomPage implements OnDestroy {
     this.lastSfuVideoTrack = null;
     this.lastGumError.set(null);
     this.initialPublishRunId += 1;
+    this.publishTriggerCount = 0;
+    this.preflightGateStatus.set('pending');
+    this.speakerVerified.set(false);
+    this.speakerTestPending.set(false);
+    this.clearAudioConnectingTimeout();
     this.initialPublishRetrying.set(false);
     this.initialPublishFailureNotice.set(null);
     this.selectedSpeakerUnavailable.set(false);
@@ -2501,6 +2688,9 @@ export class RoomPage implements OnDestroy {
     this.uninstallRemoteAudioInteractionRecovery();
     this.stopClock();
     this.uninstallMobileVisibilityPause();
+    this.remoteAudioUnhealthyIds.set(new Set());
+    this.prevInboundBytes.clear();
+    this.peerFirstSeen.clear();
   }
 
   private async replaceInCallAudio(deviceId: string): Promise<boolean> {
@@ -2587,7 +2777,7 @@ export class RoomPage implements OnDestroy {
     });
     const fallbackChosenId =
       requestedDeviceId && stage !== 'exact' && trackReportedId !== requestedDeviceId
-        ? (!isGenericAudioDeviceId(trackReportedId) ? trackReportedId : '')
+        ? (!isGenericAudioDeviceId(trackReportedId) ? trackReportedId : requestedDeviceId)
         : resolvedId || this.selectedAudioId();
     const next = resolveSelectedAudioId({
       chosenId: fallbackChosenId,
@@ -2749,11 +2939,59 @@ export class RoomPage implements OnDestroy {
       for (const track of inboundAudio) {
         await this.observeRemoteVoiceTrack(track);
       }
+
+      if (this.isHost()) {
+        this.updateRemoteAudioHealth(inboundAudio);
+      }
     } catch (err) {
       console.debug('[media] remote voice watchdog poll failed', err);
     } finally {
       this.remoteVoiceWatchdogInFlight = false;
     }
+  }
+
+  peerAudioUnhealthy(peer: PeerState): boolean {
+    return this.remoteAudioUnhealthyIds().has(peer.id);
+  }
+
+  private updateRemoteAudioHealth(inboundAudio: Array<SfuInboundTrackStats & { publisherClientId: string }>): void {
+    const inboundByClientId = new Map<string, number | null>();
+    for (const track of inboundAudio) {
+      inboundByClientId.set(track.publisherClientId, track.bytesReceived);
+    }
+    const publishers = this.sfuClient.remotePublishers();
+    const now = Date.now();
+    const unhealthy = new Set<string>();
+    // Iterate the full admitted-peer roster so admitted-but-never-published peers (Joanne case)
+    // are evaluated, not just those in remotePublishers.
+    const admittedIds = new Set<string>();
+    for (const peer of this.peers()) {
+      if (peer.isLocal) continue;
+      const clientId = peer.id;
+      admittedIds.add(clientId);
+      if (!this.peerFirstSeen.has(clientId)) this.peerFirstSeen.set(clientId, now);
+      const firstSeen = this.peerFirstSeen.get(clientId)!;
+      const isPublishing = publishers.has(clientId);
+      const hasTrack = inboundByClientId.has(clientId);
+      const bytesNow = inboundByClientId.get(clientId) ?? null;
+      const bytesPrev = this.prevInboundBytes.get(clientId) ?? null;
+      const input: PeerAudioHealthInput = {
+        isPublishing,
+        hasTrack,
+        bytesReceivedNow: bytesNow,
+        bytesReceivedPrev: bytesPrev,
+        micEnabled: peer.micEnabled,
+        pastGrace: (now - firstSeen) >= PEER_AUDIO_GRACE_MS,
+      };
+      if (classifyPeerAudioHealth(input) !== 'ok') unhealthy.add(clientId);
+    }
+    // Prune departed peers from the first-seen map.
+    for (const clientId of this.peerFirstSeen.keys()) {
+      if (!admittedIds.has(clientId)) this.peerFirstSeen.delete(clientId);
+    }
+    this.prevInboundBytes.clear();
+    for (const [k, v] of inboundByClientId) this.prevInboundBytes.set(k, v);
+    this.remoteAudioUnhealthyIds.set(unhealthy);
   }
 
   private async observeRemoteVoiceTrack(track: SfuInboundTrackStats & { publisherClientId: string }): Promise<void> {
@@ -3395,6 +3633,7 @@ export class RoomPage implements OnDestroy {
     if (this.lobbySelfTestTimer) window.clearInterval(this.lobbySelfTestTimer);
     this.lobbySelfTestTimer = null;
     this.lobbySelfTestFlag.set(false);
+    this.micWorking.set(false);
   }
 
   private pollLobbySelfTest(): void {
@@ -3410,6 +3649,7 @@ export class RoomPage implements OnDestroy {
     const micActive = this.microphoneRequested() && !!track && track.readyState === 'live' && track.enabled === true;
     const cls = classifyMicCapture(this.media.getMicCaptureWindow());
     this.lobbySelfTestFlag.set(nextMicWarningState(this.lobbySelfTestFlag(), cls, micActive));
+    this.micWorking.set(nextMicWorkingState(this.micWorking(), cls, micActive));
   }
 
   private startConnectionQualitySampler(): void {
@@ -3542,6 +3782,8 @@ export class RoomPage implements OnDestroy {
       micSilent: micFields.micSilent,
       peers: this.advertisedRemotePublisherDiagnostics(),
       remoteAudioPlayout: this.remoteAudio.playoutDiagnostics(),
+      publishTriggerCount: this.publishTriggerCount,
+      roomState: this.state(),
     };
     if (sfuDiagnostics) payload.sfuDiagnostics = sfuDiagnostics;
     if (error) payload.error = error;
@@ -4098,8 +4340,10 @@ declare global {
       screenShareAttempts: number;
       lastVideoConstraints?: MediaStreamConstraints | null;
       audioContextActivated?: boolean;
-      speakerTestCount?: number;
+      speakerVerified?: boolean;
       doorbellCount?: number;
+      publishTriggerCount?: number;
+      preflightGateStatus?: string;
       waitingKnockers?: { id: string; name: string }[];
       wsConnected?: boolean;
       wsStatus?: string;

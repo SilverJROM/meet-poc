@@ -1,8 +1,17 @@
 import assert from 'node:assert/strict';
 import type { VoiceRecoverySample } from '../../services/remote-audio.service';
 import {
+  classifyPeerAudioHealth,
   decideLocalTrackFailureRecovery,
   decideRemoteVoiceWatchdogAction,
+  derivePublishGateStatus,
+  fallbackChosenIdForAudioSync,
+  missingPreflightPrereqs,
+  nextMicWorkingState,
+  requireLiveTransceiver,
+  shouldOpenDeviceDialogOnAudioFail,
+  shouldShowAudioFailNotice,
+  shouldSurfacePublishFailure,
   shouldAcquireMicTrackForToggle,
   shouldClearVideoPinAfterRefresh,
   shouldPromptGuestPassword,
@@ -265,8 +274,11 @@ assert.strictEqual(
     mutedAll: false,
   });
 
-  assert.strictEqual(decision.kind, 'clear', 'CR-FIX-10: no voice energy clears the voice-stall latch');
-  if (decision.kind === 'clear') assert.strictEqual(decision.deletePeer, false);
+  assert.strictEqual(decision.kind, 'recover', 'PHASE-D: bytes-climbing/emitted-flat zero-energy window still recovers');
+  if (decision.kind === 'recover') {
+    assert.strictEqual(decision.recoveryAction, 'kickstart');
+    assert.strictEqual(decision.nextAttemptsThisWindow, 2);
+  }
 }
 
 {
@@ -298,6 +310,298 @@ assert.strictEqual(
   });
 
   assert.strictEqual(decision.kind, 'hold', 'CR-FIX-10: negative stats are rejected and cannot create a false stall verdict');
+}
+
+// ── R8: fallbackChosenIdForAudioSync ─────────────────────────────────────────
+// The bug: when the capture track reports a generic id ('default') on a non-exact
+// acquisition the old code returned '' → resolveSelectedAudioId skipped rule 2 and
+// snapped back to the previous stored device.  Fix: return requestedDeviceId.
+assert.strictEqual(
+  fallbackChosenIdForAudioSync({ requestedDeviceId: 'device-B', trackReportedId: 'default', stage: 'default' }),
+  'device-B',
+  'R8: generic track id preserves requestedDeviceId instead of returning empty',
+);
+assert.strictEqual(
+  fallbackChosenIdForAudioSync({ requestedDeviceId: 'device-B', trackReportedId: 'device-C', stage: 'default' }),
+  'device-C',
+  'R8: non-generic reported id takes precedence (device switched at OS level)',
+);
+assert.strictEqual(
+  fallbackChosenIdForAudioSync({ requestedDeviceId: 'device-B', trackReportedId: 'device-B', stage: 'exact' }),
+  'device-B',
+  'R8: exact acquisition path returns requestedDeviceId unchanged',
+);
+assert.strictEqual(
+  fallbackChosenIdForAudioSync({ requestedDeviceId: 'device-B', trackReportedId: '', stage: 'default' }),
+  'device-B',
+  'R8: empty track reported id (getSettings had no deviceId) preserves requestedDeviceId',
+);
+
+// ── Publish gate: all never-publish paths reach audio-failed ──────────────────
+assert.strictEqual(
+  derivePublishGateStatus({ triggerFired: false, publishFailed: false, stateReverted: false, noLiveAudioAtDeadline: false }),
+  'audio-failed',
+  'PATH A: publish trigger never fired → audio-failed (publishTriggerCount=0)',
+);
+assert.strictEqual(
+  derivePublishGateStatus({ triggerFired: true, publishFailed: true, stateReverted: false, noLiveAudioAtDeadline: false }),
+  'audio-failed',
+  'PATH B/C: retries exhausted → audio-failed',
+);
+assert.strictEqual(
+  derivePublishGateStatus({ triggerFired: true, publishFailed: false, stateReverted: false, noLiveAudioAtDeadline: true }),
+  'audio-failed',
+  'haiku path: no live audio track at deadline (empty transceiver) → audio-failed',
+);
+assert.strictEqual(
+  derivePublishGateStatus({ triggerFired: true, publishFailed: false, stateReverted: true, noLiveAudioAtDeadline: false }),
+  'audio-failed',
+  'state-revert: in-call→waiting-room during publish → audio-failed',
+);
+assert.strictEqual(
+  derivePublishGateStatus({ triggerFired: true, publishFailed: false, stateReverted: false, noLiveAudioAtDeadline: false }),
+  'audio-connecting',
+  'happy path: trigger fired, no failure → audio-connecting (still in flight)',
+);
+
+// ── Preflight prereqs gate (R1): mic+speaker mandatory, camera optional ───────
+assert.deepStrictEqual(
+  missingPreflightPrereqs({ hasMicAccess: false, micVerified: false, speakerTested: false }),
+  ['mic', 'speaker'],
+  'R1: no mic access → mic blocked + speaker untested',
+);
+assert.deepStrictEqual(
+  missingPreflightPrereqs({ hasMicAccess: true, micVerified: false, speakerTested: false }),
+  ['mic-silent', 'speaker'],
+  'R1: silent/dead mic blocks even with permission granted',
+);
+assert.deepStrictEqual(
+  missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: false }),
+  ['speaker'],
+  'R1: mic verified but speaker untested → speaker blocked',
+);
+assert.deepStrictEqual(
+  missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: true }),
+  [],
+  'R1: mic+speaker verified → gate clears (camera off NOT blocking)',
+);
+
+// ── shouldSurfacePublishFailure: finally-block guard (CR-FIX-1) ───────────────
+assert.strictEqual(
+  shouldSurfacePublishFailure({ publishSucceeded: false, gateStatus: 'audio-connecting' }),
+  true,
+  'CR-FIX-1: state-revert exit with gate still audio-connecting → must surface audio-failed',
+);
+assert.strictEqual(
+  shouldSurfacePublishFailure({ publishSucceeded: true, gateStatus: 'ready' }),
+  false,
+  'CR-FIX-1: happy path (publishSucceeded=true) → finally guard does not fire',
+);
+assert.strictEqual(
+  shouldSurfacePublishFailure({ publishSucceeded: false, gateStatus: 'audio-failed' }),
+  false,
+  'CR-FIX-1: inner loop already set audio-failed → guard skips double-set',
+);
+
+// ── nextMicWorkingState (CR-FIX-2): positive "mic confirmed energy" reducer ───
+assert.strictEqual(
+  nextMicWorkingState(false, 'working', true),
+  true,
+  'CR-FIX-2 mic: working classification → micWorking becomes true',
+);
+assert.strictEqual(
+  nextMicWorkingState(true, 'silent', true),
+  false,
+  'CR-FIX-2 mic: silent classification → micWorking becomes false',
+);
+assert.strictEqual(
+  nextMicWorkingState(true, 'indeterminate', true),
+  true,
+  'CR-FIX-2 mic: indeterminate after working → stays true (no flicker)',
+);
+assert.strictEqual(
+  nextMicWorkingState(false, 'indeterminate', true),
+  false,
+  'CR-FIX-2 mic: indeterminate while untested → stays false (no false pass)',
+);
+assert.strictEqual(
+  nextMicWorkingState(true, 'working', false),
+  false,
+  'CR-FIX-2 mic: mic disabled (micActive=false) → false regardless of cls',
+);
+assert.strictEqual(
+  nextMicWorkingState(false, 'working', false),
+  false,
+  'CR-FIX-2 mic: mic off + working cls → false (mic off = unverified)',
+);
+
+// ── Speaker confirm gate: speakerVerified only on explicit Yes (CR-FIX-2) ──
+// missingPreflightPrereqs is the gate function; speakerTested param = speakerVerified signal
+assert.deepStrictEqual(
+  missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: false }),
+  ['speaker'],
+  'CR-FIX-2 speaker: tone played but not confirmed (speakerVerified=false) → gate still blocks',
+);
+assert.deepStrictEqual(
+  missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: true }),
+  [],
+  'CR-FIX-2 speaker: user confirmed they heard it (speakerVerified=true) → gate clears',
+);
+
+// ── R9: quiet-guest policy — shouldOpenDeviceDialogOnAudioFail + shouldShowAudioFailNotice ──
+assert.strictEqual(
+  shouldOpenDeviceDialogOnAudioFail({ isHost: true }),
+  true,
+  'R9: host gets device dialog on audio failure',
+);
+assert.strictEqual(
+  shouldOpenDeviceDialogOnAudioFail({ isHost: false }),
+  false,
+  'R9: guest does NOT auto-open device dialog on audio failure (quiet guest)',
+);
+assert.strictEqual(
+  shouldShowAudioFailNotice({ isHost: true }),
+  true,
+  'R9: host sees failure notice (retry/rejoin text)',
+);
+assert.strictEqual(
+  shouldShowAudioFailNotice({ isHost: false }),
+  false,
+  'R9: guest does NOT see technical failure notice (silent background retry)',
+);
+
+// ── R10: failure-simulation matrix ────────────────────────────────────────────
+
+// R10(a) — audio-not-reaching-server: inbound bytes stuck at 0 → stalled badge
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: true, hasTrack: true, bytesReceivedNow: 0, bytesReceivedPrev: 0, micEnabled: true, pastGrace: true }),
+  'stalled',
+  'R10(a): inbound bytes frozen at 0 (audio not reaching host) → stalled → host badge',
+);
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: true, hasTrack: true, bytesReceivedNow: 1000, bytesReceivedPrev: 500, micEnabled: true, pastGrace: true }),
+  'ok',
+  'R10(a): climbing bytes → ok (audio flowing normally)',
+);
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: true, hasTrack: false, bytesReceivedNow: null, bytesReceivedPrev: null, micEnabled: true, pastGrace: true }),
+  'no-track',
+  'R10(a): publishing peer with no inbound track → no-track → host badge',
+);
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: false, hasTrack: false, bytesReceivedNow: null, bytesReceivedPrev: null, micEnabled: true, pastGrace: false }),
+  'ok',
+  'R10(a): peer within grace window (not yet joined SFU) → ok (no flicker)',
+);
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: true, hasTrack: true, bytesReceivedNow: 500, bytesReceivedPrev: null, micEnabled: true, pastGrace: true }),
+  'ok',
+  'R10(a): first sample (no prev) → ok (never false-positive on first tick)',
+);
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: true, hasTrack: true, bytesReceivedNow: 500, bytesReceivedPrev: 600, micEnabled: true, pastGrace: true }),
+  'stalled',
+  'R10(a): bytes decreased (jitter/reset) → stalled (not climbing)',
+);
+// CR-FIX-4: mute-awareness, grace period, roster-coverage
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: true, hasTrack: true, bytesReceivedNow: 0, bytesReceivedPrev: 0, micEnabled: false, pastGrace: true }),
+  'ok',
+  'CR-FIX-4: muted peer with stalled bytes → ok (mute takes priority, no cry-wolf)',
+);
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: false, hasTrack: false, bytesReceivedNow: null, bytesReceivedPrev: null, micEnabled: true, pastGrace: false }),
+  'ok',
+  'CR-FIX-4: just-joined peer within grace → ok (subscription setup window, no flicker)',
+);
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: false, hasTrack: false, bytesReceivedNow: null, bytesReceivedPrev: null, micEnabled: true, pastGrace: true }),
+  'never-published',
+  'CR-FIX-4: admitted + past grace + never published + unmuted → never-published → host badge (Joanne case)',
+);
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: false, hasTrack: false, bytesReceivedNow: null, bytesReceivedPrev: null, micEnabled: false, pastGrace: true }),
+  'ok',
+  'CR-FIX-4: admitted + past grace + never published + muted → ok (mute beats never-published)',
+);
+assert.strictEqual(
+  classifyPeerAudioHealth({ isPublishing: true, hasTrack: true, bytesReceivedNow: 0, bytesReceivedPrev: 0, micEnabled: true, pastGrace: true }),
+  'stalled',
+  'CR-FIX-4: publishing + stalled + unmuted + past grace → stalled → host badge',
+);
+
+// R10(b) — publish-fails → audio-failed (handled, not silent)
+assert.strictEqual(
+  derivePublishGateStatus({ triggerFired: true, publishFailed: true, stateReverted: false, noLiveAudioAtDeadline: false }),
+  'audio-failed',
+  'R10(b): publish-fails → audio-failed (surfaced via gate status, not silent)',
+);
+
+// R10(c) — hasPc=false trigger-never-fires → audio-failed
+assert.strictEqual(
+  derivePublishGateStatus({ triggerFired: false, publishFailed: false, stateReverted: false, noLiveAudioAtDeadline: false }),
+  'audio-failed',
+  'R10(c): hasPc=false / trigger never fired → audio-failed (PATH A handled)',
+);
+
+// R10(d) — state-revert-mid-publish → audio-failed (shouldSurfacePublishFailure guard)
+assert.strictEqual(
+  shouldSurfacePublishFailure({ publishSucceeded: false, gateStatus: 'audio-connecting' }),
+  true,
+  'R10(d): state-revert mid-publish leaves gate at audio-connecting → finally guard fires → audio-failed',
+);
+assert.strictEqual(
+  derivePublishGateStatus({ triggerFired: true, publishFailed: false, stateReverted: true, noLiveAudioAtDeadline: false }),
+  'audio-failed',
+  'R10(d): stateReverted=true → audio-failed via derivePublishGateStatus',
+);
+
+// R10(e) — mic-dies-mid-call (track ended) → recovery attempted
+assert.strictEqual(
+  decideLocalTrackFailureRecovery({ inCall: true, currentTrack: true, trackEnabled: true, event: 'ended', trackReadyState: 'ended' }),
+  'recover-ended',
+  'R10(e): in-call mic track ends unexpectedly → recover-ended (not ignored)',
+);
+
+// R10(f) — speaker-dead (not verified) → gate blocks join
+assert.deepStrictEqual(
+  missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: false }),
+  ['speaker'],
+  'R10(f): speaker not tested/verified → gate blocks with [speaker] (dead speaker caught pre-join)',
+);
+
+// R10(g) — device-unplugged at gate → config panel / re-acquire (mic missing)
+assert.deepStrictEqual(
+  missingPreflightPrereqs({ hasMicAccess: false, micVerified: false, speakerTested: true }),
+  ['mic'],
+  'R10(g): mic permission/device lost at gate → gate blocks with [mic]',
+);
+
+// R10(h) — permission-revoked → friendly green-room block
+assert.deepStrictEqual(
+  missingPreflightPrereqs({ hasMicAccess: false, micVerified: false, speakerTested: false }),
+  ['mic', 'speaker'],
+  'R10(h): permission revoked → gate blocks with [mic, speaker] (friendly pre-join block)',
+);
+
+// R10(i) — empty-transceiver → throws loudly (not silently swallowed)
+assert.throws(
+  () => requireLiveTransceiver(null),
+  /no live audio transceiver/,
+  'R10(i): null transceiver throws loudly — empty-transceiver path is never silent',
+);
+assert.throws(
+  () => requireLiveTransceiver(undefined),
+  /no live audio transceiver/,
+  'R10(i): undefined transceiver throws loudly',
+);
+{
+  const obj = { sender: {} };
+  assert.strictEqual(
+    requireLiveTransceiver(obj),
+    obj,
+    'R10(i): live transceiver passes through unchanged',
+  );
 }
 
 console.log('room-decisions: all assertions passed');

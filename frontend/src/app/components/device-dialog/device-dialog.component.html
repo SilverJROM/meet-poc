@@ -53,6 +53,8 @@
               <app-mic-meter [level]="level()" />
               @if (micTestFlagged() && mode() === 'lobby') {
                 <div class="mic-test-flag" role="status">No sound detected from {{ micTestDeviceLabel() }} — pick another</div>
+              } @else if (!micVerified() && mode() === 'lobby') {
+                <div class="mic-test-prompt" role="status">Say something to test your mic — speak now and watch the level above</div>
               }
             </div>
 
@@ -91,10 +93,17 @@
               </select>
             </label>
 
-            <button type="button" class="speaker-btn" [disabled]="busy()" (click)="testSpeaker.emit()">
+            <button type="button" class="speaker-btn" [disabled]="busy() || speakerTestPending()" (click)="testSpeaker.emit()">
               <ion-icon name="volume-high-outline"></ion-icon>
-              <span>Test speaker</span>
+              <span>{{ speakerTestPending() ? 'Playing tone…' : 'Test speaker' }}</span>
             </button>
+            @if (speakerTestPending()) {
+              <div class="speaker-confirm" role="status">
+                <span>Did you hear it?</span>
+                <button type="button" class="speaker-confirm-yes" (click)="speakerConfirmed.emit()">Yes</button>
+                <button type="button" class="speaker-confirm-no" (click)="speakerDenied.emit()">No</button>
+              </div>
+            }
           </div>
         </div>
 
@@ -105,6 +114,22 @@
         <footer class="dialog-actions">
           @if (mode() === 'in-call') {
             <button type="button" class="primary-btn" [disabled]="busy()" (click)="close.emit()">Done</button>
+          } @else if (confirmGate()) {
+            <div class="confirm-gate">
+              @if (!speakerTested()) {
+                <p class="gate-hint" role="status">Test your speaker above and confirm you heard it.</p>
+              } @else if (!confirmReady()) {
+                <p class="gate-hint" role="status">Say something into your mic — speak now so the meter reacts, then join.</p>
+              }
+              <button
+                type="button"
+                class="primary-btn confirm-btn"
+                [disabled]="!confirmReady() || busy()"
+                (click)="confirm.emit()"
+              >
+                {{ confirmReady() ? 'Confirm — everything works' : 'Check mic and speaker above first' }}
+              </button>
+            </div>
           } @else {
             <span class="hint">Your choices will be used when you join.</span>
           }

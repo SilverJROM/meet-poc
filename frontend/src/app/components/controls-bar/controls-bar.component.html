@@ -16,17 +16,22 @@
   </div>
 
   <div class="controls" aria-label="Primary call controls">
-    <div class="split-control" [class.is-off]="!micOn()">
+    <div class="split-control" [class.is-off]="!micOn()" [class.is-connecting]="audioConnecting()">
       <button
         type="button"
         class="control-btn primary-toggle"
         [class.is-off]="!micOn()"
+        [class.is-connecting]="audioConnecting()"
         [attr.aria-pressed]="micOn()"
-        [attr.aria-label]="micOn() ? 'Mute microphone' : 'Unmute microphone'"
+        [attr.aria-label]="audioConnecting() ? 'Microphone connecting…' : (micOn() ? 'Mute microphone' : 'Unmute microphone')"
         (click)="mute.emit()"
-        [title]="micOn() ? 'Mute microphone' : 'Unmute microphone'"
+        [title]="audioConnecting() ? 'Audio connecting…' : (micOn() ? 'Mute microphone' : 'Unmute microphone')"
       >
-        <ion-icon [name]="micOn() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
+        @if (audioConnecting()) {
+          <ion-icon name="reload-outline" class="connecting-spinner"></ion-icon>
+        } @else {
+          <ion-icon [name]="micOn() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
+        }
       </button>
       <button
         type="button"

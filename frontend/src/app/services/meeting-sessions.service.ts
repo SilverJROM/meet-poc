@@ -410,6 +410,8 @@ export type DiagnosticsPayload = {
   peers: DiagnosticsPeerSample[];
   sfuDiagnostics?: SfuDiagnosticsSnapshot;
   remoteAudioPlayout?: RemoteAudioPlayoutDiagnostics;
+  publishTriggerCount?: number;
+  roomState?: string;
   error?: string;
 };
 

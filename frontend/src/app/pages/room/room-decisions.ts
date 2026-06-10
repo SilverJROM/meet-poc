@@ -5,6 +5,7 @@ import {
   type VoiceRecoverySample,
   type VoiceRecoveryStep,
 } from '../../services/remote-audio.service';
+import { type MicCaptureClass } from '../../services/mic-energy';
 
 export type ChatSubmitKeyEvent = {
   key?: string;
@@ -133,4 +134,138 @@ function remoteVoiceEmittedClimbed(samples: VoiceRecoverySample[]): boolean {
 function remoteVoiceBytesClimbed(samples: VoiceRecoverySample[]): boolean {
   if (samples.length < 2) return false;
   return samples[samples.length - 1].bytes > samples[0].bytes;
+}
+
+// ── Pre-join device gate (preflight) ──────────────────────────────────────────
+
+export type PreflightGateStatus =
+  | 'pending'          // preflight not yet started or device check running
+  | 'mic-fail'         // classifyMicCapture → silent; gate blocks join
+  | 'speaker-needed'   // mic ok; speaker test not yet done
+  | 'ready'            // mic verified + speaker tested → join unblocked
+  | 'audio-connecting' // post-admit: publishInitialSfuWithRetry in flight
+  | 'audio-failed';    // retries exhausted or publish never triggered
+
+// R8 persistence fix: extracted from syncSelectedAudioIdToTrack so the regression
+// (selecting a non-default mic, reloading, getting the old/default mic back) is testable.
+export type FallbackChosenIdInput = {
+  requestedDeviceId: string;
+  trackReportedId: string;
+  stage: 'exact' | 'default' | 'none';
+};
+
+/** Returns the fallbackChosenId for syncSelectedAudioIdToTrack. Preserves
+ *  requestedDeviceId when the track reports a generic id ('default', 'communications', '')
+ *  instead of losing the selection by falling back to ''. */
+export function fallbackChosenIdForAudioSync(input: FallbackChosenIdInput): string {
+  const { requestedDeviceId, trackReportedId, stage } = input;
+  if (requestedDeviceId && stage !== 'exact' && trackReportedId !== requestedDeviceId) {
+    const isGeneric = trackReportedId === '' || trackReportedId === 'default' || trackReportedId === 'communications';
+    return isGeneric ? requestedDeviceId : trackReportedId;
+  }
+  return requestedDeviceId;
+}
+
+// Publish gate status derivation — used to test that all never-publish paths reach
+// 'audio-failed' (never silent in-call). publishTriggerCount===0 diagnoses PATH A.
+export type PublishGateInput = {
+  triggerFired: boolean;          // publishTriggerCount > 0 at end of session
+  publishFailed: boolean;         // retries exhausted (permanent or capped)
+  stateReverted: boolean;         // state left 'in-call' during retry → silent early-return
+  noLiveAudioAtDeadline: boolean; // initialPublishStream threw on no live track
+};
+
+export function derivePublishGateStatus(input: PublishGateInput): 'audio-connecting' | 'audio-failed' {
+  if (!input.triggerFired || input.publishFailed || input.stateReverted || input.noLiveAudioAtDeadline) {
+    return 'audio-failed';
+  }
+  return 'audio-connecting';
+}
+
+// ── micWorking positive signal reducer (CR-FIX-2) ────────────────────────────
+// Distinct from nextMicWarningState (which is a WARNING flag: true=silent).
+// This reducer is the POSITIVE "mic has confirmed energy" signal:
+//   micActive=false → false (mic off = not verified)
+//   'working'       → true
+//   'silent'        → false
+//   'indeterminate' → current (no flicker; keep state until a decisive sample)
+export function nextMicWorkingState(
+  current: boolean,
+  classification: MicCaptureClass,
+  micActive: boolean,
+): boolean {
+  if (!micActive) return false;
+  if (classification === 'working') return true;
+  if (classification === 'silent') return false;
+  return current; // 'indeterminate' — no change.
+}
+
+// Gate prereqs: mic + speaker mandatory, camera optional (R1).
+export type PreflightPrereqsInput = {
+  hasMicAccess: boolean;
+  micVerified: boolean;    // micWorking signal — classifyMicCapture returned 'working'
+  speakerTested: boolean;  // speakerVerified — user confirmed they heard the tone
+};
+
+export function missingPreflightPrereqs(input: PreflightPrereqsInput): ('mic' | 'mic-silent' | 'speaker')[] {
+  const missing: ('mic' | 'mic-silent' | 'speaker')[] = [];
+  if (!input.hasMicAccess) {
+    missing.push('mic');
+  } else if (!input.micVerified) {
+    missing.push('mic-silent');
+  }
+  if (!input.speakerTested) missing.push('speaker');
+  return missing;
+}
+
+// Publish-flow finally-block guard (CR-FIX-1).
+// Returns true when the finally block should surface an audio-failed — i.e., the
+// publish attempt ended without success and the gate is still stuck at
+// 'audio-connecting'. The preflightGateStatus check prevents a double-set when
+// the inner retry logic already set 'audio-failed' before returning.
+export type ShouldSurfacePublishFailureInput = {
+  publishSucceeded: boolean;
+  gateStatus: PreflightGateStatus;
+};
+export function shouldSurfacePublishFailure(input: ShouldSurfacePublishFailureInput): boolean {
+  return !input.publishSucceeded && input.gateStatus === 'audio-connecting';
+}
+
+// ── R9: peer audio-health classification (host-badge signal) ──────────────────
+
+export type PeerAudioHealthInput = {
+  isPublishing: boolean;        // peer appears in remotePublishers (has sent audio to SFU)
+  hasTrack: boolean;            // inbound-rtp audio track exists for this peer at the host
+  bytesReceivedNow: number | null;
+  bytesReceivedPrev: number | null;
+  micEnabled: boolean;          // peer's mic is on (muted peer must not be badged)
+  pastGrace: boolean;           // grace window has elapsed since peer was admitted
+};
+
+export type PeerAudioHealthResult = 'ok' | 'no-track' | 'never-published' | 'stalled';
+
+export function classifyPeerAudioHealth(input: PeerAudioHealthInput): PeerAudioHealthResult {
+  if (!input.micEnabled) return 'ok';               // muted — no badge
+  if (!input.pastGrace) return 'ok';                 // subscription setup window — no flicker
+  if (!input.isPublishing) return 'never-published'; // admitted + past grace + never published (Joanne)
+  if (!input.hasTrack || input.bytesReceivedNow === null) return 'no-track';
+  if (input.bytesReceivedPrev !== null && input.bytesReceivedNow <= input.bytesReceivedPrev) return 'stalled';
+  return 'ok';
+}
+
+// R9: quiet-guest policy — in-call audio failure surfaces (device dialog + notice)
+// are host-only. Non-host guests get silent background retry + host badge.
+export function shouldOpenDeviceDialogOnAudioFail(input: { isHost: boolean }): boolean {
+  return input.isHost;
+}
+
+export function shouldShowAudioFailNotice(input: { isHost: boolean }): boolean {
+  return input.isHost;
+}
+
+// R10(i): empty-transceiver invariant — extracted for unit-testing.
+// Throws when the transceiver is absent so the caller fails loudly instead of silently.
+export function requireLiveTransceiver<T>(transceiver: T | null | undefined): T {
+  if (transceiver == null) throw new Error('[sfu] no live audio transceiver — track cannot be published');
+  return transceiver;
 }

@@ -427,6 +427,27 @@ export class SfuClientService {
     return extractOutboundAudioSource(stats);
   }
 
+  /**
+   * Returns true when an outbound-rtp audio stat exists — i.e., the WebRTC
+   * sending pipeline is established and the SFU has accepted the audio sender.
+   * Deliberately does NOT require bytesSent > 0: a muted joiner is correctly
+   * published with ~0 audio bytes but a valid outbound-rtp entry.
+   */
+  async hasOutboundAudioTrack(): Promise<boolean> {
+    const pc = this.pc;
+    if (!pc) return false;
+    let stats: RTCStatsReport;
+    try {
+      stats = await pc.getStats();
+    } catch {
+      return false;
+    }
+    for (const stat of stats.values()) {
+      if (stat.type === 'outbound-rtp' && stat.kind === 'audio') return true;
+    }
+    return false;
+  }
+
   async collectConnectionQuality(): Promise<SfuConnectionQuality | null> {
     const pc = this.pc;
     if (!pc) {

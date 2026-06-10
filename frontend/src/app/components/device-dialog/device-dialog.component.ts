@@ -37,13 +37,27 @@ export class DeviceDialogComponent {
   readonly micTestFlagged = input(false);
   readonly micTestDeviceLabel = input('this microphone');
 
+  // Pre-join gate: when true, shows a "Confirm — everything works" button in lobby mode.
+  readonly confirmGate = input(false);
+  // True when mic energy verified + speaker verified — enables the confirm button.
+  readonly confirmReady = input(false);
+  // True when speaker has been explicitly confirmed heard (drives gate hint copy).
+  readonly speakerTested = input(false);
+  // CR-FIX-2: true when classifyMicCapture returned 'working' (positive signal).
+  readonly micVerified = input(false);
+  // CR-FIX-2: true while awaiting user Yes/No after the speaker tone plays.
+  readonly speakerTestPending = input(false);
+
   readonly continuePermission = output<void>();
   readonly close = output<void>();
+  readonly confirm = output<void>();
   readonly audioDeviceChange = output<string>();
   readonly videoDeviceChange = output<string>();
   readonly audioOutputChange = output<string>();
   readonly flipCamera = output<void>();
   readonly testSpeaker = output<void>();
+  readonly speakerConfirmed = output<void>();
+  readonly speakerDenied = output<void>();
 
   readonly levelPercent = computed(() => `${Math.round(this.level()() * 100)}%`);
   readonly levelLabel = computed(() => Math.round(this.level()() * 100));
