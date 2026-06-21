@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>Option 1 – Dashboard (Calm Light)</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --accent: #4f46e5;
+    --accent-light: #eef2ff;
+    --accent-hover: #4338ca;
+    --bg: #f8f8fb;
+    --surface: #ffffff;
+    --border: #e8e8f0;
+    --text: #111118;
+    --text-muted: #6b6b80;
+    --text-faint: #9999aa;
+    --chip-open-bg: #d1fae5;
+    --chip-open-text: #065f46;
+    --chip-closed-bg: #f1f1f5;
+    --chip-closed-text: #6b6b80;
+    --danger: #ef4444;
+    --danger-hover: #dc2626;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --sidebar-w: 56px;
+    --topbar-h: 52px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,.07), 0 1px 2px rgba(0,0,0,.04);
+    --shadow-md: 0 4px 16px rgba(0,0,0,.10);
+  }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    background: var(--bg);
+    color: var(--text);
+    width: 1440px;
+    height: 900px;
+    overflow: hidden;
+    display: flex;
+  }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    width: var(--sidebar-w);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 12px 0 16px;
+    gap: 4px;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+
+  .brand {
+    width: 32px;
+    height: 32px;
+    background: var(--accent);
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -.5px;
+    margin-bottom: 12px;
+    flex-shrink: 0;
+  }
+
+  .nav-item {
+    width: 40px;
+    height: 40px;
+    border-radius: var(--radius-md);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    cursor: pointer;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: .2px;
+    transition: background .15s, color .15s;
+    border: none;
+    background: none;
+  }
+  .nav-item:hover { background: var(--bg); color: var(--text); }
+  .nav-item.active { background: var(--accent-light); color: var(--accent); }
+
+  .nav-icon {
+    width: 18px;
+    height: 18px;
+    display: block;
+  }
+
+  .nav-spacer { flex: 1; }
+
+  /* ── MAIN ── */
+  .main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  /* ── TOPBAR ── */
+  .topbar {
+    height: var(--topbar-h);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .topbar-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .topbar-spacer { flex: 1; }
+
+  .avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 12px;
+    font-weight: 600;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+
+  /* ── PAGE CONTENT ── */
+  .page {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px 28px;
+  }
+
+  /* ── PAGE HEADER ── */
+  .page-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .search-wrap {
+    position: relative;
+    flex: 1;
+    max-width: 340px;
+  }
+  .search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-faint);
+    pointer-events: none;
+  }
+  .search-input {
+    width: 100%;
+    padding: 8px 12px 8px 32px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    font-size: 13.5px;
+    background: var(--surface);
+    color: var(--text);
+    outline: none;
+  }
+  .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(79,70,229,.1); }
+
+  .header-spacer { flex: 1; }
+
+  .join-link {
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 500;
+    text-decoration: none;
+    padding: 7px 12px;
+    border-radius: var(--radius-md);
+  }
+  .join-link:hover { background: var(--accent-light); }
+
+  .create-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .create-btn:hover { background: var(--accent-hover); }
+
+  .count-label {
+    font-size: 12px;
+    color: var(--text-faint);
+    margin-bottom: 10px;
+  }
+
+  /* ── ROOM LIST ── */
+  .room-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .room-row {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    padding: 0 14px;
+    height: 52px;
+    gap: 12px;
+    position: relative;
+    transition: box-shadow .15s;
+  }
+  .room-row:hover { box-shadow: var(--shadow-sm); }
+  .room-row.has-overflow { z-index: 20; }
+
+  .room-title {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+
+  .status-chip {
+    font-size: 11.5px;
+    font-weight: 500;
+    padding: 3px 8px;
+    border-radius: 20px;
+    flex-shrink: 0;
+  }
+  .status-chip.open { background: var(--chip-open-bg); color: var(--chip-open-text); }
+  .status-chip.closed { background: var(--chip-closed-bg); color: var(--chip-closed-text); }
+
+  .row-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .join-btn {
+    padding: 6px 14px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .join-btn:hover { background: var(--accent-hover); }
+
+  .icon-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 13px;
+  }
+  .icon-btn:hover { background: var(--bg); color: var(--text); }
+
+  /* ── OVERFLOW POPOVER ── */
+  .overflow-wrap {
+    position: relative;
+  }
+
+  .overflow-popover {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    width: 260px;
+    padding: 10px;
+    z-index: 100;
+  }
+
+  .popover-section {
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .popover-section:last-child { border-bottom: none; }
+
+  .popover-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .5px;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    padding: 2px 6px 6px;
+    display: block;
+  }
+
+  .popover-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 6px;
+    gap: 8px;
+    border-radius: var(--radius-sm);
+  }
+  .popover-row:hover { background: var(--bg); }
+
+  .popover-row-label {
+    font-size: 13px;
+    color: var(--text);
+    font-weight: 500;
+  }
+
+  .popover-row-sub {
+    font-size: 11.5px;
+    color: var(--text-muted);
+  }
+
+  .toggle-pill {
+    width: 36px;
+    height: 20px;
+    background: var(--accent);
+    border-radius: 10px;
+    position: relative;
+    flex-shrink: 0;
+    cursor: pointer;
+  }
+  .toggle-pill::after {
+    content: '';
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    background: #fff;
+    border-radius: 50%;
+    top: 3px;
+    right: 3px;
+    transition: right .15s;
+  }
+  .toggle-pill.off { background: var(--chip-closed-bg); }
+  .toggle-pill.off::after { right: auto; left: 3px; }
+
+  .timeout-input {
+    width: 56px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    text-align: center;
+    background: var(--bg);
+    color: var(--text);
+  }
+
+  .popover-action-row {
+    display: flex;
+    gap: 6px;
+    padding: 6px 6px 2px;
+  }
+
+  .popover-btn {
+    flex: 1;
+    padding: 7px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text);
+    text-align: center;
+  }
+  .popover-btn:hover { background: var(--border); }
+  .popover-btn.danger { color: var(--danger); border-color: #fee2e2; background: #fef2f2; }
+  .popover-btn.danger:hover { background: #fee2e2; }
+
+  /* ── PAGINATION ── */
+  .pagination {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 16px;
+    justify-content: center;
+  }
+
+  .page-btn {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .page-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .page-btn:hover:not(.active) { background: var(--bg); }
+
+  /* ── SVG ICONS ── */
+  svg { display: block; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="brand">V</div>
+
+  <!-- Rooms -->
+  <a class="nav-item active" href="#">
+    <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+      <rect x="3" y="3" width="6" height="6" rx="1.5"/>
+      <rect x="11" y="3" width="6" height="6" rx="1.5"/>
+      <rect x="3" y="11" width="6" height="6" rx="1.5"/>
+      <rect x="11" y="11" width="6" height="6" rx="1.5"/>
+    </svg>
+    Rooms
+  </a>
+
+  <!-- Meetings -->
+  <a class="nav-item" href="#">
+    <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+      <rect x="3" y="4" width="14" height="13" rx="2"/>
+      <path d="M7 2v3M13 2v3M3 9h14"/>
+    </svg>
+    Meetings
+  </a>
+
+  <!-- Library -->
+  <a class="nav-item" href="#">
+    <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+      <path d="M5 4h10M5 8h10M5 12h6"/>
+      <rect x="2" y="2" width="16" height="16" rx="2"/>
+    </svg>
+    Library
+  </a>
+
+  <div class="nav-spacer"></div>
+
+  <!-- Settings -->
+  <a class="nav-item" href="#">
+    <svg class="nav-icon" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6">
+      <circle cx="10" cy="10" r="2.5"/>
+      <path d="M10 3v2M10 15v2M3 10h2M15 10h2M4.93 4.93l1.41 1.41M13.66 13.66l1.41 1.41M4.93 15.07l1.41-1.41M13.66 6.34l1.41-1.41"/>
+    </svg>
+    Settings
+  </a>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <span class="topbar-title">Rooms</span>
+    <span class="topbar-spacer"></span>
+    <div class="avatar" title="silverjrom@gmail.com">JR</div>
+  </header>
+
+  <!-- PAGE -->
+  <div class="page">
+
+    <!-- Header row -->
+    <div class="page-header">
+      <div class="search-wrap">
+        <span class="search-icon">
+          <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="9" cy="9" r="6"/><path d="M15 15l3 3"/>
+          </svg>
+        </span>
+        <input class="search-input" type="search" placeholder="Search rooms…" value="">
+      </div>
+      <span class="header-spacer"></span>
+      <a class="join-link" href="#">Have a code? Join →</a>
+      <button class="create-btn">
+        <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.2">
+          <path d="M10 4v12M4 10h12"/>
+        </svg>
+        New room
+      </button>
+    </div>
+
+    <p class="count-label">8 rooms</p>
+
+    <!-- Room list -->
+    <div class="room-list">
+
+      <!-- Row 1 – normal closed -->
+      <div class="room-row">
+        <span class="room-title">Daily Standup</span>
+        <span class="status-chip closed">Closed</span>
+        <div class="row-actions">
+          <button class="join-btn">Join</button>
+          <button class="icon-btn" title="Copy link">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="8" y="8" width="9" height="9" rx="1.5"/>
+              <path d="M5 12H4a1 1 0 01-1-1V4a1 1 0 011-1h7a1 1 0 011 1v1"/>
+            </svg>
+          </button>
+          <div class="overflow-wrap">
+            <button class="icon-btn" title="More options">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                <circle cx="10" cy="4" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="10" cy="16" r="1.5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 2 – open with popover SHOWN (demo) -->
+      <div class="room-row has-overflow">
+        <span class="room-title">Product Review — Q3</span>
+        <span class="status-chip open">Open</span>
+        <div class="row-actions">
+          <button class="join-btn">Join</button>
+          <button class="icon-btn" title="Copy link">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="8" y="8" width="9" height="9" rx="1.5"/>
+              <path d="M5 12H4a1 1 0 01-1-1V4a1 1 0 011-1h7a1 1 0 011 1v1"/>
+            </svg>
+          </button>
+          <div class="overflow-wrap">
+            <button class="icon-btn" title="More options" style="background:var(--accent-light);color:var(--accent);border-color:var(--accent);">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                <circle cx="10" cy="4" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="10" cy="16" r="1.5"/>
+              </svg>
+            </button>
+
+            <!-- POPOVER (shown as example) -->
+            <div class="overflow-popover">
+              <!-- Access -->
+              <div class="popover-section">
+                <span class="popover-label">Access</span>
+                <div class="popover-row">
+                  <span class="popover-row-label">Open for guests</span>
+                  <div class="toggle-pill"></div>
+                </div>
+                <div class="popover-row">
+                  <div>
+                    <div class="popover-row-label">Lobby timeout</div>
+                    <div class="popover-row-sub">Minutes guests wait before auto-drop</div>
+                  </div>
+                  <input class="timeout-input" type="number" value="10" min="1" max="240">
+                </div>
+              </div>
+
+              <!-- Password -->
+              <div class="popover-section">
+                <span class="popover-label">Password</span>
+                <div class="popover-row">
+                  <span class="popover-row-label">No password set</span>
+                  <button class="popover-btn" style="flex:0 0 auto;width:auto;padding:5px 10px;">Set</button>
+                </div>
+              </div>
+
+              <!-- Danger -->
+              <div class="popover-section">
+                <div class="popover-action-row">
+                  <button class="popover-btn">Rename</button>
+                  <button class="popover-btn danger">Delete</button>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 3 -->
+      <div class="room-row">
+        <span class="room-title">Engineering All-Hands</span>
+        <span class="status-chip closed">Closed</span>
+        <div class="row-actions">
+          <button class="join-btn">Join</button>
+          <button class="icon-btn" title="Copy link">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="8" y="8" width="9" height="9" rx="1.5"/>
+              <path d="M5 12H4a1 1 0 01-1-1V4a1 1 0 011-1h7a1 1 0 011 1v1"/>
+            </svg>
+          </button>
+          <div class="overflow-wrap">
+            <button class="icon-btn" title="More options">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                <circle cx="10" cy="4" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="10" cy="16" r="1.5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 4 -->
+      <div class="room-row">
+        <span class="room-title">JROM × Peer2 — Session Room</span>
+        <span class="status-chip open">Open</span>
+        <div class="row-actions">
+          <button class="join-btn">Join</button>
+          <button class="icon-btn" title="Copy link">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="8" y="8" width="9" height="9" rx="1.5"/>
+              <path d="M5 12H4a1 1 0 01-1-1V4a1 1 0 011-1h7a1 1 0 011 1v1"/>
+            </svg>
+          </button>
+          <div class="overflow-wrap">
+            <button class="icon-btn" title="More options">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                <circle cx="10" cy="4" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="10" cy="16" r="1.5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 5 -->
+      <div class="room-row">
+        <span class="room-title">Design Review</span>
+        <span class="status-chip closed">Closed</span>
+        <div class="row-actions">
+          <button class="join-btn">Join</button>
+          <button class="icon-btn" title="Copy link">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="8" y="8" width="9" height="9" rx="1.5"/>
+              <path d="M5 12H4a1 1 0 01-1-1V4a1 1 0 011-1h7a1 1 0 011 1v1"/>
+            </svg>
+          </button>
+          <div class="overflow-wrap">
+            <button class="icon-btn" title="More options">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                <circle cx="10" cy="4" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="10" cy="16" r="1.5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 6 -->
+      <div class="room-row">
+        <span class="room-title">Client Call — Acme Corp</span>
+        <span class="status-chip closed">Closed</span>
+        <div class="row-actions">
+          <button class="join-btn">Join</button>
+          <button class="icon-btn" title="Copy link">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="8" y="8" width="9" height="9" rx="1.5"/>
+              <path d="M5 12H4a1 1 0 01-1-1V4a1 1 0 011-1h7a1 1 0 011 1v1"/>
+            </svg>
+          </button>
+          <div class="overflow-wrap">
+            <button class="icon-btn" title="More options">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                <circle cx="10" cy="4" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="10" cy="16" r="1.5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 7 -->
+      <div class="room-row">
+        <span class="room-title">Onboarding — New Hires</span>
+        <span class="status-chip open">Open</span>
+        <div class="row-actions">
+          <button class="join-btn">Join</button>
+          <button class="icon-btn" title="Copy link">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="8" y="8" width="9" height="9" rx="1.5"/>
+              <path d="M5 12H4a1 1 0 01-1-1V4a1 1 0 011-1h7a1 1 0 011 1v1"/>
+            </svg>
+          </button>
+          <div class="overflow-wrap">
+            <button class="icon-btn" title="More options">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                <circle cx="10" cy="4" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="10" cy="16" r="1.5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 8 -->
+      <div class="room-row">
+        <span class="room-title">TEST_ROOM01</span>
+        <span class="status-chip closed">Closed</span>
+        <div class="row-actions">
+          <button class="join-btn">Join</button>
+          <button class="icon-btn" title="Copy link">
+            <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8">
+              <rect x="8" y="8" width="9" height="9" rx="1.5"/>
+              <path d="M5 12H4a1 1 0 01-1-1V4a1 1 0 011-1h7a1 1 0 011 1v1"/>
+            </svg>
+          </button>
+          <div class="overflow-wrap">
+            <button class="icon-btn" title="More options">
+              <svg width="14" height="14" viewBox="0 0 20 20" fill="currentColor">
+                <circle cx="10" cy="4" r="1.5"/><circle cx="10" cy="10" r="1.5"/><circle cx="10" cy="16" r="1.5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /room-list -->
+
+    <!-- Pagination -->
+    <div class="pagination">
+      <button class="page-btn">‹</button>
+      <button class="page-btn active">1</button>
+      <button class="page-btn">2</button>
+      <button class="page-btn">›</button>
+    </div>
+
+  </div><!-- /page -->
+</main>
+
+</body>
+</html>

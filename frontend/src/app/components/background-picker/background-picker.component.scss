@@ -1,6 +1,6 @@
 :host {
   display: block;
-  --picker-accent: var(--accent, var(--blue, #3b82f6));
+  --picker-accent: var(--accent, var(--blue, #0d9488));
 }
 
 :host.overlay {
@@ -148,12 +148,12 @@
 }
 
 .background-tile:hover {
-  border-color: rgba(59, 130, 246, 0.68);
+  border-color: rgba(13, 148, 136, 0.68);
   transform: translateY(-1px);
 }
 
 .background-tile:focus-visible {
-  outline: 2px solid rgba(59, 130, 246, 0.8);
+  outline: 2px solid rgba(13, 148, 136, 0.8);
   outline-offset: 2px;
 }
 
@@ -161,7 +161,7 @@
   border-color: transparent;
   outline: 2px solid var(--picker-accent);
   outline-offset: 0;
-  box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.14);
+  box-shadow: 0 0 0 4px rgba(13, 148, 136, 0.14);
 }
 
 .background-tile.loading {
@@ -204,7 +204,7 @@
 }
 
 .delete-custom:focus-visible {
-  outline: 2px solid rgba(59, 130, 246, 0.8);
+  outline: 2px solid rgba(13, 148, 136, 0.8);
   outline-offset: 2px;
 }
 
@@ -245,7 +245,7 @@
 .blur-thumb {
   background:
     radial-gradient(circle at 25% 35%, rgba(255, 255, 255, 0.9), transparent 22%),
-    radial-gradient(circle at 76% 72%, rgba(59, 130, 246, 0.58), transparent 26%),
+    radial-gradient(circle at 76% 72%, rgba(13, 148, 136, 0.58), transparent 26%),
     linear-gradient(135deg, #587084, #c7d2d8 48%, #78909c);
   filter: blur(0.2px);
 }

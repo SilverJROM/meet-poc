@@ -1,9 +1,9 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, OnDestroy, computed, inject, signal } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, HostListener, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { addIcons } from 'ionicons';
-import { checkmarkOutline, chevronDownOutline, chevronUpOutline, clipboardOutline, closeOutline, createOutline, keyOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline } from 'ionicons/icons';
+import { checkmarkOutline, chevronDownOutline, chevronUpOutline, clipboardOutline, closeOutline, createOutline, ellipsisHorizontal, keyOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline } from 'ionicons/icons';
 import { PaginationComponent } from '../../components/pagination/pagination.component';
 import { Room, RoomsService } from '../../services/rooms.service';
 
@@ -39,6 +39,7 @@ export class RoomsPage implements OnDestroy {
   readonly editingTitleId = signal<string | null>(null);
   readonly editingPasswordId = signal<string | null>(null);
   readonly passwordExpandedId = signal<string | null>(null);
+  readonly menuOpenId = signal<string | null>(null);
   readonly titleDraft = signal('');
   readonly passwordDraft = signal('');
   readonly editBusyId = signal<string | null>(null);
@@ -52,7 +53,7 @@ export class RoomsPage implements OnDestroy {
   });
 
   constructor() {
-    addIcons({ checkmarkOutline, chevronDownOutline, chevronUpOutline, clipboardOutline, closeOutline, createOutline, keyOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline });
+    addIcons({ checkmarkOutline, chevronDownOutline, chevronUpOutline, clipboardOutline, closeOutline, createOutline, ellipsisHorizontal, keyOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline });
     this.querySub = this.route.queryParamMap.subscribe((params) => {
       this.page.set(readPositiveInt(params.get('page'), 1));
       this.pageSize.set(Math.min(readPositiveInt(params.get('pageSize'), DEFAULT_PAGE_SIZE), 100));
@@ -63,6 +64,25 @@ export class RoomsPage implements OnDestroy {
 
   ngOnDestroy(): void {
     this.querySub.unsubscribe();
+  }
+
+  toggleMenu(roomId: string, event?: Event): void {
+    event?.stopPropagation();
+    this.menuOpenId.set(this.menuOpenId() === roomId ? null : roomId);
+    // Closing the overflow also exits any inline edit started from within it.
+    if (this.menuOpenId() === null) {
+      this.editingTitleId.set(null);
+      this.editingPasswordId.set(null);
+    }
+  }
+
+  closeMenu(): void {
+    this.menuOpenId.set(null);
+  }
+
+  @HostListener('document:click')
+  onDocumentClick(): void {
+    this.menuOpenId.set(null);
   }
 
   shareUrl(room: Room): string {

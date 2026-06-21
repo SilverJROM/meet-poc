@@ -331,7 +331,7 @@
 
 .settings-check.checked {
   border-color: #bfdbfe;
-  background: #2563eb;
+  background: #0f766e;
 }
 
 .settings-check.checked::after {
@@ -348,7 +348,7 @@
 
 .settings-option:hover,
 .settings-option:focus-visible {
-  background: rgba(59, 130, 246, 0.42);
+  background: rgba(13, 148, 136, 0.42);
 }
 
 .settings-option:focus-visible {
@@ -388,7 +388,7 @@
 
 .reaction-option:hover,
 .reaction-option.active {
-  background: rgba(59, 130, 246, 0.42);
+  background: rgba(13, 148, 136, 0.42);
 }
 
 .reaction-option:not(.reaction-emoji) {
@@ -523,7 +523,7 @@
   bottom: -2px;
   min-width: 19px;
   height: 19px;
-  background: #2563eb;
+  background: #0f766e;
 }
 
 .waiting-badge {

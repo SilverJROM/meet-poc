@@ -10,11 +10,15 @@
   --text: #1a1f2b;
   --muted: #5b6573;
   --muted-2: #7a8392;
-  --blue: #3b82f6;
-  --blue-strong: #2563eb;
+  /* Option #2 "Compact Pro" accent — teal. --blue kept as the var name so every
+     component that references var(--blue)/var(--blue-strong) re-themes automatically. */
+  --blue: #0d9488;
+  --blue-strong: #0f766e;
+  --accent: #0d9488;
+  --accent-strong: #0f766e;
   --green: #16a34a;
   --red: #dc2626;
-  --selected-tint: #e8f0ff;
+  --selected-tint: #d1fae5;
   --video-bg: #0b0d11;
 }
 
@@ -132,7 +136,7 @@ ion-icon {
 }
 
 .field input:focus {
-  outline: 2px solid rgba(59, 130, 246, 0.28);
+  outline: 2px solid rgba(13, 148, 136, 0.28);
   border-color: var(--blue);
 }
 

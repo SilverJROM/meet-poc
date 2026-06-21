@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1440">
+<title>Option 1 – In-Call (Calm Light / Dark Stage)</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --accent: #4f46e5;
+    --accent-hover: #4338ca;
+    --accent-light: rgba(79,70,229,.15);
+    --bg-dark: #0f0f14;
+    --stage: #16161f;
+    --tile-bg: #1e1e2a;
+    --tile-border: rgba(255,255,255,.07);
+    --tile-speaking: #4f46e5;
+    --bar-bg: #1a1a24;
+    --bar-border: rgba(255,255,255,.08);
+    --text-on-dark: #f0f0f6;
+    --text-muted-dark: rgba(240,240,246,.55);
+    --ctrl-bg: rgba(255,255,255,.08);
+    --ctrl-hover: rgba(255,255,255,.14);
+    --ctrl-active: var(--accent-light);
+    --ctrl-off: rgba(239,68,68,.18);
+    --danger: #ef4444;
+    --danger-hover: #dc2626;
+    --notice-bg: rgba(79,70,229,.2);
+    --notice-text: #c7d2fe;
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-tile: 12px;
+    --bar-h: 64px;
+    --notice-h: 36px;
+  }
+
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    background: var(--bg-dark);
+    color: var(--text-on-dark);
+    width: 1440px;
+    height: 900px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  svg { display: block; }
+
+  /* ── NOTICE STRIP ── */
+  .notice-strip {
+    height: var(--notice-h);
+    background: var(--notice-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    flex-shrink: 0;
+    padding: 0 16px;
+    border-bottom: 1px solid rgba(79,70,229,.3);
+  }
+  .notice-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    animation: pulse 1.8s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .4; }
+  }
+  .notice-text {
+    font-size: 12.5px;
+    color: var(--notice-text);
+    font-weight: 500;
+  }
+  .notice-dismiss {
+    font-size: 12px;
+    color: var(--text-muted-dark);
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .notice-dismiss:hover { color: var(--text-on-dark); }
+
+  /* ── STAGE ── */
+  .stage {
+    flex: 1;
+    background: var(--stage);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    overflow: hidden;
+    padding: 16px;
+    gap: 12px;
+  }
+
+  /* ── VIDEO GRID ── */
+  .video-grid {
+    flex: 1;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    grid-template-rows: repeat(2, 1fr);
+    gap: 10px;
+    min-height: 0;
+  }
+
+  /* 5 tiles: first row 3, second row 2 centered */
+  .tile {
+    background: var(--tile-bg);
+    border-radius: var(--radius-tile);
+    border: 1.5px solid var(--tile-border);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: border-color .2s;
+  }
+
+  .tile.speaking {
+    border-color: var(--tile-speaking);
+    box-shadow: 0 0 0 2px rgba(79,70,229,.35);
+  }
+
+  /* Avatar placeholder when camera off */
+  .tile-avatar {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    font-weight: 600;
+    color: #fff;
+    flex-shrink: 0;
+  }
+
+  /* Fake video gradient for tiles with "camera on" */
+  .tile-video-bg {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .tile-nameplate {
+    position: absolute;
+    bottom: 10px;
+    left: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(0,0,0,.55);
+    backdrop-filter: blur(4px);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: #fff;
+  }
+
+  .mic-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    flex-shrink: 0;
+  }
+  .mic-dot.muted { background: rgba(255,255,255,.3); }
+
+  .speaking-ring {
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-tile);
+    pointer-events: none;
+  }
+
+  /* Self-pip for tile 5 (local) */
+  .tile-self-label {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    font-size: 10.5px;
+    background: rgba(0,0,0,.5);
+    color: rgba(255,255,255,.7);
+    padding: 2px 7px;
+    border-radius: 4px;
+  }
+
+  /* ── 5th tile sits in 2nd row, columns 1-2 centered via subgrid trick ── */
+  .tile:nth-child(4) { grid-column: 1; grid-row: 2; }
+  .tile:nth-child(5) { grid-column: 2; grid-row: 2; }
+  /* 6th slot empty — keep grid clean */
+
+  /* ── CONTROLS BAR ── */
+  .controls-bar {
+    height: var(--bar-h);
+    background: var(--bar-bg);
+    border-top: 1px solid var(--bar-border);
+    border-radius: var(--radius-lg);
+    display: flex;
+    align-items: center;
+    padding: 0 20px;
+    gap: 0;
+    flex-shrink: 0;
+    position: relative;
+  }
+
+  /* Left: room info */
+  .bar-left {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .room-label {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text-on-dark);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+
+  .elapsed {
+    font-size: 12px;
+    color: var(--text-muted-dark);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .quality-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    flex-shrink: 0;
+  }
+
+  /* Center: primary controls */
+  .bar-center {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .ctrl-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    border: none;
+    background: var(--ctrl-bg);
+    color: var(--text-on-dark);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background .15s;
+    position: relative;
+  }
+  .ctrl-btn:hover { background: var(--ctrl-hover); }
+  .ctrl-btn.is-off { background: var(--ctrl-off); color: var(--danger); }
+  .ctrl-btn.is-active { background: var(--ctrl-active); color: #a5b4fc; }
+
+  .ctrl-sep {
+    width: 1px;
+    height: 24px;
+    background: rgba(255,255,255,.1);
+    margin: 0 4px;
+  }
+
+  .leave-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: var(--radius-md);
+    border: none;
+    background: var(--danger);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .leave-btn:hover { background: var(--danger-hover); }
+
+  /* ctrl label tooltip (shown on hover in production; shown always here for demo) */
+  .ctrl-label {
+    position: absolute;
+    bottom: calc(100% + 7px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #000;
+    color: #fff;
+    font-size: 11px;
+    padding: 3px 7px;
+    border-radius: 4px;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+  }
+  .ctrl-btn:hover .ctrl-label,
+  .leave-btn:hover .ctrl-label { opacity: 1; }
+
+  /* Right: participants + chat */
+  .bar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    justify-content: flex-end;
+  }
+
+  .corner-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0 12px;
+    height: 36px;
+    background: var(--ctrl-bg);
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--text-on-dark);
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: background .15s;
+    position: relative;
+  }
+  .corner-btn:hover { background: var(--ctrl-hover); }
+  .corner-btn.has-unread { color: #a5b4fc; }
+
+  .badge {
+    min-width: 18px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 700;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+  }
+
+  /* ── MORE POPOVER ── */
+  .more-wrap {
+    position: relative;
+  }
+
+  .more-popover {
+    position: absolute;
+    bottom: calc(100% + 10px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: #22222f;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 32px rgba(0,0,0,.5);
+    width: 220px;
+    padding: 8px;
+    z-index: 200;
+  }
+
+  .more-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--text-on-dark);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .more-item:hover { background: rgba(255,255,255,.07); }
+
+  .more-item-icon {
+    width: 30px;
+    height: 30px;
+    background: rgba(255,255,255,.07);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted-dark);
+    flex-shrink: 0;
+  }
+
+  .more-sep {
+    height: 1px;
+    background: rgba(255,255,255,.07);
+    margin: 4px 0;
+  }
+
+  .more-toggle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 9px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-on-dark);
+  }
+  .more-toggle-row:hover { background: rgba(255,255,255,.07); }
+
+  .mini-pill {
+    width: 32px;
+    height: 18px;
+    background: var(--accent);
+    border-radius: 9px;
+    position: relative;
+    flex-shrink: 0;
+  }
+  .mini-pill::after {
+    content: '';
+    position: absolute;
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    top: 3px;
+    right: 3px;
+  }
+  .mini-pill.off { background: rgba(255,255,255,.15); }
+  .mini-pill.off::after { right: auto; left: 3px; }
+
+  /* fake video gradients */
+  .grad-1 { background: linear-gradient(135deg, #1e2a3a 0%, #2a1e3a 100%); }
+  .grad-2 { background: linear-gradient(135deg, #1a2e1a 0%, #1e2a1a 100%); }
+  .grad-3 { background: linear-gradient(135deg, #2e1a1a 0%, #1e1a2a 100%); }
+  .grad-4 { background: linear-gradient(135deg, #1a1e2e 0%, #2a2e1e 100%); }
+  .grad-5 { background: linear-gradient(135deg, #2e2a1a 0%, #1a2e2a 100%); }
+
+  .av-1 { background: #7c3aed; }
+  .av-2 { background: #0891b2; }
+  .av-3 { background: #b45309; }
+  .av-4 { background: #be185d; }
+  .av-5 { background: #15803d; }
+</style>
+</head>
+<body>
+
+<!-- NOTICE STRIP -->
+<div class="notice-strip">
+  <div class="notice-dot"></div>
+  <span class="notice-text">Recording in progress — all participants have been notified</span>
+  <button class="notice-dismiss">✕</button>
+</div>
+
+<!-- STAGE -->
+<div class="stage">
+
+  <!-- VIDEO GRID: 5 tiles (3 top + 2 bottom) -->
+  <div class="video-grid">
+
+    <!-- Tile 1: JROM — speaking, camera on -->
+    <div class="tile speaking">
+      <div class="tile-video-bg grad-1">
+        <!-- person silhouette for "camera on" feel -->
+        <svg width="80" height="80" viewBox="0 0 80 80" fill="none" opacity=".12">
+          <circle cx="40" cy="28" r="16" fill="#fff"/>
+          <ellipse cx="40" cy="70" rx="26" ry="18" fill="#fff"/>
+        </svg>
+      </div>
+      <div class="tile-nameplate">
+        <div class="mic-dot"></div>
+        JROM (You)
+      </div>
+      <div class="tile-self-label">You</div>
+    </div>
+
+    <!-- Tile 2: Peer2 — camera on -->
+    <div class="tile">
+      <div class="tile-video-bg grad-2">
+        <svg width="80" height="80" viewBox="0 0 80 80" fill="none" opacity=".12">
+          <circle cx="40" cy="28" r="16" fill="#fff"/>
+          <ellipse cx="40" cy="70" rx="26" ry="18" fill="#fff"/>
+        </svg>
+      </div>
+      <div class="tile-nameplate">
+        <div class="mic-dot"></div>
+        Peer2 Reyes
+      </div>
+    </div>
+
+    <!-- Tile 3: Maria — camera off -->
+    <div class="tile">
+      <div class="tile-avatar av-3">MG</div>
+      <div class="tile-nameplate">
+        <div class="mic-dot muted"></div>
+        Maria Garcia
+      </div>
+    </div>
+
+    <!-- Tile 4: Alex — camera on -->
+    <div class="tile">
+      <div class="tile-video-bg grad-4">
+        <svg width="80" height="80" viewBox="0 0 80 80" fill="none" opacity=".12">
+          <circle cx="40" cy="28" r="16" fill="#fff"/>
+          <ellipse cx="40" cy="70" rx="26" ry="18" fill="#fff"/>
+        </svg>
+      </div>
+      <div class="tile-nameplate">
+        <div class="mic-dot"></div>
+        Alex Kim
+      </div>
+    </div>
+
+    <!-- Tile 5: Sam — camera off -->
+    <div class="tile">
+      <div class="tile-avatar av-5">SW</div>
+      <div class="tile-nameplate">
+        <div class="mic-dot muted"></div>
+        Sam Watson
+      </div>
+    </div>
+
+    <!-- 6th cell intentionally empty for 3-col grid -->
+
+  </div><!-- /video-grid -->
+
+  <!-- CONTROLS BAR -->
+  <div class="controls-bar">
+
+    <!-- Left: room info -->
+    <div class="bar-left">
+      <span class="room-label">Product Review — Q3</span>
+      <span class="elapsed">42:17</span>
+      <span class="quality-dot" title="Connection: Good"></span>
+    </div>
+
+    <!-- Center: controls -->
+    <div class="bar-center">
+
+      <!-- Mic (on) -->
+      <button class="ctrl-btn" title="Mute microphone">
+        <span class="ctrl-label">Mute mic</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/>
+          <path d="M19 10v1a7 7 0 0 1-14 0v-1M12 19v3M8 22h8"/>
+        </svg>
+      </button>
+
+      <!-- Camera (off) -->
+      <button class="ctrl-btn is-off" title="Turn camera on">
+        <span class="ctrl-label">Camera off</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M23 7l-7 5 7 5V7z"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          <line x1="1" y1="1" x2="23" y2="23"/>
+        </svg>
+      </button>
+
+      <!-- Screen share -->
+      <button class="ctrl-btn" title="Share screen">
+        <span class="ctrl-label">Share screen</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <path d="M8 21h8M12 17v4"/>
+        </svg>
+      </button>
+
+      <div class="ctrl-sep"></div>
+
+      <!-- More (...) — shown with popover open as demo -->
+      <div class="more-wrap">
+        <button class="ctrl-btn is-active" title="More options">
+          <span class="ctrl-label">More</span>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+            <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+          </svg>
+        </button>
+
+        <!-- MORE POPOVER (shown open for demo) -->
+        <div class="more-popover">
+
+          <div class="more-item">
+            <div class="more-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <path d="M12 2a4 4 0 0 1 4 4v6a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"/>
+                <path d="M19 10v1a7 7 0 0 1-14 0v-1"/>
+              </svg>
+            </div>
+            Device settings
+          </div>
+
+          <div class="more-sep"></div>
+
+          <div class="more-item">
+            <div class="more-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <circle cx="12" cy="12" r="10"/>
+                <circle cx="12" cy="10" r="3"/>
+                <path d="M7 20.662V19a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v1.662"/>
+              </svg>
+            </div>
+            Background effects
+          </div>
+
+          <div class="more-sep"></div>
+
+          <!-- Speaker volume -->
+          <div class="more-item">
+            <div class="more-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+              </svg>
+            </div>
+            Speaker — 80%
+          </div>
+
+          <div class="more-sep"></div>
+
+          <!-- Record -->
+          <div class="more-item">
+            <div class="more-item-icon" style="color:#ef4444;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="#ef4444">
+                <circle cx="12" cy="12" r="8"/>
+              </svg>
+            </div>
+            Stop recording
+          </div>
+
+          <div class="more-sep"></div>
+
+          <!-- Reactions -->
+          <div class="more-item">
+            <div class="more-item-icon">✋</div>
+            Raise hand
+          </div>
+          <div class="more-item" style="padding-left:10px;gap:8px;">
+            <span style="font-size:18px;line-height:1;">👍</span>
+            <span style="font-size:18px;line-height:1;">👏</span>
+            <span style="font-size:18px;line-height:1;">❤️</span>
+          </div>
+
+          <div class="more-sep"></div>
+
+          <!-- Equal size tiles toggle -->
+          <div class="more-toggle-row">
+            <span>Equal-size tiles</span>
+            <div class="mini-pill off"></div>
+          </div>
+
+        </div>
+      </div>
+
+      <div class="ctrl-sep"></div>
+
+      <!-- Leave -->
+      <button class="leave-btn" title="Leave call">
+        <span class="ctrl-label">Leave</span>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07C9.44 17.29 7.76 15.63 6.06 13"/>
+          <path d="M6.06 13A19.79 19.79 0 0 1 3 4.36 2 2 0 0 1 5 2.18h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L9 10.09"/>
+          <line x1="23" y1="1" x2="1" y2="23"/>
+        </svg>
+      </button>
+
+    </div><!-- /bar-center -->
+
+    <!-- Right: chat + participants -->
+    <div class="bar-right">
+      <button class="corner-btn has-unread" title="Chat (3 unread)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        Chat
+        <div class="badge">3</div>
+      </button>
+      <button class="corner-btn" title="Participants (5)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+        </svg>
+        5
+      </button>
+    </div>
+
+  </div><!-- /controls-bar -->
+
+</div><!-- /stage -->
+
+</body>
+</html>

@@ -1,9 +1,8 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, computed, inject, signal } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, HostListener, computed, inject, signal } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { addIcons } from 'ionicons';
 import {
-  chevronBackOutline,
-  chevronForwardOutline,
+  chevronDownOutline,
   documentTextOutline,
   logOutOutline,
   peopleOutline,
@@ -17,13 +16,8 @@ import {
 import { AuthService } from '../../services/auth.service';
 import { filter } from 'rxjs';
 
-const SIDEBAR_STORAGE_KEY = 'meet-poc.sidebar-collapsed';
-
-type NavItem = {
-  label: string;
-  path: string;
-  icon: string;
-};
+type NavLink = { label: string; path: string; icon: string };
+type NavGroup = { label: string; icon: string; path?: string; children?: NavLink[] };
 
 @Component({
   selector: 'app-shell',
@@ -38,31 +32,51 @@ export class AppShellComponent {
   private readonly router = inject(Router);
 
   readonly user = this.auth.user;
-  readonly collapsed = signal(this.readInitialCollapsed());
   readonly currentUrl = signal(this.router.url);
-  readonly pageTitle = () => this.navItems().find((item) => this.currentUrl().startsWith(item.path))?.label || 'Rooms';
+  readonly openGroup = signal<string | null>(null);
+  readonly userMenuOpen = signal(false);
 
-  private readonly baseNavItems: NavItem[] = [
-    { label: 'Rooms', path: '/app/rooms', icon: 'videocam-outline' },
-    { label: 'Ongoing meetings', path: '/app/ongoing', icon: 'radio-outline' },
-    { label: 'Past meetings', path: '/app/past', icon: 'time-outline' },
-    { label: 'Call diagnostics', path: '/app/diagnostics', icon: 'pulse-outline' },
-    { label: 'Recordings', path: '/app/recordings', icon: 'recording-outline' },
-    { label: 'Transcripts', path: '/app/transcripts', icon: 'document-text-outline' },
-    { label: 'Settings', path: '/app/settings', icon: 'settings-outline' },
+  // Consensus rec #3: 4 core nav groups. Secondary pages live under Meetings/Library
+  // dropdowns (links to existing routes — no new pages).
+  private readonly baseNavGroups: NavGroup[] = [
+    { label: 'Rooms', icon: 'videocam-outline', path: '/app/rooms' },
+    {
+      label: 'Meetings',
+      icon: 'radio-outline',
+      children: [
+        { label: 'Ongoing', path: '/app/ongoing', icon: 'radio-outline' },
+        { label: 'Past', path: '/app/past', icon: 'time-outline' },
+      ],
+    },
+    {
+      label: 'Library',
+      icon: 'recording-outline',
+      children: [
+        { label: 'Recordings', path: '/app/recordings', icon: 'recording-outline' },
+        { label: 'Transcripts', path: '/app/transcripts', icon: 'document-text-outline' },
+        { label: 'Call diagnostics', path: '/app/diagnostics', icon: 'pulse-outline' },
+      ],
+    },
+    { label: 'Settings', icon: 'settings-outline', path: '/app/settings' },
   ];
 
-  // Admin tab is appended only for admins (R5 — UI gated; route + API also gated).
-  readonly navItems = computed<NavItem[]>(() =>
+  readonly navGroups = computed<NavGroup[]>(() =>
     this.user()?.isAdmin
-      ? [...this.baseNavItems, { label: 'User admin', path: '/app/admin', icon: 'people-outline' }]
-      : this.baseNavItems,
+      ? [...this.baseNavGroups, { label: 'Admin', icon: 'people-outline', path: '/app/admin' }]
+      : this.baseNavGroups,
   );
+
+  readonly initials = computed<string>(() => {
+    const email = this.user()?.email || '';
+    const name = email.split('@')[0] || '';
+    const parts = name.split(/[.\-_]+/).filter(Boolean);
+    const letters = parts.length >= 2 ? parts[0][0] + parts[1][0] : name.slice(0, 2);
+    return (letters || '?').toUpperCase();
+  });
 
   constructor() {
     addIcons({
-      chevronBackOutline,
-      chevronForwardOutline,
+      chevronDownOutline,
       documentTextOutline,
       logOutOutline,
       peopleOutline,
@@ -75,22 +89,39 @@ export class AppShellComponent {
     });
     this.router.events.pipe(filter((event): event is NavigationEnd => event instanceof NavigationEnd)).subscribe((event) => {
       this.currentUrl.set(event.urlAfterRedirects);
+      this.closeMenus();
     });
   }
 
-  toggleSidebar(): void {
-    const next = !this.collapsed();
-    this.collapsed.set(next);
-    localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next));
+  isGroupActive(group: NavGroup): boolean {
+    if (group.path) return this.currentUrl().startsWith(group.path);
+    return (group.children || []).some((child) => this.currentUrl().startsWith(child.path));
+  }
+
+  toggleGroup(label: string, event: Event): void {
+    event.stopPropagation();
+    this.userMenuOpen.set(false);
+    this.openGroup.set(this.openGroup() === label ? null : label);
+  }
+
+  toggleUserMenu(event: Event): void {
+    event.stopPropagation();
+    this.openGroup.set(null);
+    this.userMenuOpen.set(!this.userMenuOpen());
+  }
+
+  closeMenus(): void {
+    this.openGroup.set(null);
+    this.userMenuOpen.set(false);
+  }
+
+  @HostListener('document:click')
+  onDocumentClick(): void {
+    this.closeMenus();
   }
 
   async logout(): Promise<void> {
     await this.auth.logout();
     await this.router.navigate(['/login']);
-  }
-
-  private readInitialCollapsed(): boolean {
-    const stored = localStorage.getItem(SIDEBAR_STORAGE_KEY);
-    return stored == null ? true : stored === 'true';
   }
 }

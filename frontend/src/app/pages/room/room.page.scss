@@ -285,10 +285,10 @@ h1 {
 
 .configure-toggle {
   min-height: 40px;
-  border: 1px solid rgba(59, 130, 246, 0.42);
+  border: 1px solid rgba(13, 148, 136, 0.42);
   border-radius: 6px;
   color: #0b1220;
-  background: rgba(59, 130, 246, 0.10);
+  background: rgba(13, 148, 136, 0.10);
   cursor: pointer;
   font-weight: 900;
 }
@@ -421,7 +421,7 @@ h1 {
   padding: 14px 18px calc(116px + env(safe-area-inset-bottom));
   color: #f8fafc;
   background:
-    radial-gradient(circle at 12% 12%, rgba(59, 130, 246, 0.16), transparent 30%),
+    radial-gradient(circle at 12% 12%, rgba(13, 148, 136, 0.16), transparent 30%),
     #111214;
 }
 
@@ -482,8 +482,8 @@ h1 {
 }
 
 .share-request-status {
-  border-color: rgba(59, 130, 246, 0.42);
-  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(13, 148, 136, 0.42);
+  background: rgba(13, 148, 136, 0.12);
   color: #dbeafe;
   font-weight: 900;
 }
@@ -493,8 +493,8 @@ h1 {
 }
 
 .audio-unblock-notice {
-  border-color: rgba(59, 130, 246, 0.52);
-  background: rgba(59, 130, 246, 0.14);
+  border-color: rgba(13, 148, 136, 0.52);
+  background: rgba(13, 148, 136, 0.14);
   color: #dbeafe;
 }
 
@@ -581,7 +581,7 @@ h1 {
   justify-self: start;
   border: 0;
   background: transparent;
-  color: #1d4ed8;
+  color: #0f766e;
   cursor: pointer;
   font-weight: 800;
   padding: 0;
@@ -720,7 +720,7 @@ app-tile {
 .chat-tabs button.active {
   border-color: rgba(147, 197, 253, 0.74);
   color: #f8fafc;
-  background: rgba(59, 130, 246, 0.26);
+  background: rgba(13, 148, 136, 0.26);
 }
 
 .chat-tabs button.offline {
