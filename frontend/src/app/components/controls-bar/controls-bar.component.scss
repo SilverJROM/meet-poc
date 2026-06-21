@@ -4,46 +4,51 @@
   pointer-events: none;
 }
 
+/* Full-area overlay; corners pinned top, control pill floats bottom-center. */
 .controls-bar {
   position: fixed;
+  inset: 0;
   z-index: 24;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  min-height: calc(86px + env(safe-area-inset-bottom));
-  display: grid;
-  grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
-  align-items: end;
-  gap: 14px;
-  padding: 14px 18px max(14px, env(safe-area-inset-bottom));
-  color: #f8fafc;
-  background: linear-gradient(180deg, rgba(10, 10, 12, 0), rgba(10, 10, 12, 0.88) 42%, rgba(10, 10, 12, 0.96));
   pointer-events: none;
+  color: #f8fafc;
 }
 
 .meeting-corner,
-.controls,
+.controls-pill,
 .control-btn,
-.control-chevron,
 .leave-btn,
 .corner-btn {
   pointer-events: auto;
 }
 
+/* ── Top corners ──────────────────────────────────────────────────────── */
 .meeting-corner {
-  min-width: 0;
-  min-height: 48px;
+  position: absolute;
+  top: 14px;
   display: flex;
   align-items: center;
   gap: 10px;
+  max-width: 46%;
 }
 
 .meeting-corner-left {
-  justify-self: start;
-  width: 100%;
-  padding-bottom: 6px;
-  // Name claims the corner; clock + status dot are compressed to the side.
-  flex-wrap: nowrap;
+  left: 16px;
+}
+
+.meeting-corner-right {
+  right: 16px;
+  gap: 8px;
+}
+
+.room-label {
+  min-width: 0;
+  overflow: hidden;
+  color: #f8fafc;
+  font-size: 15px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
 .meeting-aside {
@@ -51,43 +56,22 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
-}
-
-.meeting-corner-right {
-  justify-self: end;
-  padding-bottom: 3px;
 }
 
 .meeting-clock {
-  flex: 0 0 auto;
   color: #f8fafc;
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 13px;
+  font-weight: 700;
   font-variant-numeric: tabular-nums;
-  line-height: 1;
   white-space: nowrap;
   opacity: 0.85;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
 }
 
-.room-label {
-  flex: 1 1 auto;
-  min-width: 0;
-  // Name owns the corner; the clock + status dot are pinned compact to the side.
-  max-width: 80%;
-  overflow: hidden;
-  color: #f8fafc;
-  font-size: 18px;
-  font-weight: 900;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-// Compact status dot (label is in the tooltip).
 .connection-quality-dot {
   flex: 0 0 auto;
-  width: 12px;
-  height: 12px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   border: 1px solid rgba(248, 250, 252, 0.35);
   background: rgba(148, 163, 184, 0.9);
@@ -98,558 +82,305 @@
 .connection-quality-dot[data-tone='relayed'] { background: #eab308; border-color: rgba(234, 179, 8, 0.65); }
 .connection-quality-dot[data-tone='poor'] { background: #f87171; border-color: rgba(248, 113, 113, 0.7); }
 
-.controls {
-  min-width: 0;
-  max-width: min(100%, 760px);
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-}
-
-.split-control {
-  position: relative;
-  display: inline-flex;
-  align-items: stretch;
-  border-radius: 18px;
-  background: #2f3338;
-}
-
-.reaction-control,
-.settings-control {
-  position: relative;
-  display: inline-flex;
-}
-
-.control-btn,
-.control-chevron,
-.leave-btn,
+/* ── Corner buttons (chat / participants) ─────────────────────────────── */
 .corner-btn {
-  min-width: 48px;
-  height: 48px;
+  position: relative;
+  width: 40px;
+  height: 40px;
   border: 0;
-  padding: 0;
+  border-radius: 11px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: #f8fafc;
-  background: #2f3338;
+  background: rgba(28, 32, 38, 0.72);
+  backdrop-filter: blur(8px);
   cursor: pointer;
-  transition:
-    background 140ms ease,
-    color 140ms ease,
-    transform 140ms ease,
-    opacity 140ms ease,
-    box-shadow 140ms ease;
 }
 
-.control-btn,
-.leave-btn {
-  border-radius: 999px;
-}
-
-.split-control .control-btn {
-  border-radius: 999px 0 0 999px;
-}
-
-.control-chevron {
-  min-width: 34px;
-  border-left: 1px solid rgba(248, 250, 252, 0.12);
-  border-radius: 0 999px 999px 0;
-}
-
-.control-btn ion-icon,
-.control-chevron ion-icon,
-.leave-btn ion-icon,
 .corner-btn ion-icon {
-  font-size: 24px;
-  color: currentColor;
-  --ionicon-stroke-width: 40px;
+  font-size: 20px;
 }
 
-.control-chevron ion-icon {
-  font-size: 17px;
-}
-
-.control-btn:hover,
-.control-chevron:hover,
 .corner-btn:hover {
-  background: #454a50;
-  transform: translateY(-1px);
+  background: rgba(45, 51, 59, 0.9);
 }
 
-.leave-btn:hover {
-  background: #ef4444;
-  transform: translateY(-1px);
-}
-
-.control-btn:focus-visible,
-.control-chevron:focus-visible,
-.leave-btn:focus-visible,
-.corner-btn:focus-visible {
-  outline: 2px solid rgba(147, 197, 253, 0.95);
-  outline-offset: 3px;
-}
-
-.control-btn.active,
 .corner-btn.active {
-  background: #3f4752;
-  box-shadow: inset 0 0 0 1px rgba(248, 250, 252, 0.16);
+  background: var(--accent);
 }
 
-.audio-only-btn.active {
-  color: #dff6ff;
-  background: #075985;
-}
-
-.control-btn.muted,
-.speaker-control.is-muted .control-btn {
-  color: #7f1d1d;
-  background: #fee2e2;
-}
-
-.speaker-control.is-muted .control-btn:hover {
-  background: #fecaca;
-}
-
-.combined-muted-indicator {
-  position: absolute;
-  right: 27px;
-  top: -3px;
-  width: 11px;
-  height: 11px;
-  border: 2px solid rgba(17, 24, 39, 0.78);
-  border-radius: 999px;
-  background: #dc2626;
-  box-shadow: 0 0 0 2px rgba(254, 226, 226, 0.58);
-}
-
-.volume-popover {
-  position: absolute;
-  z-index: 30;
-  bottom: 58px;
-  left: 50%;
-  width: 86px;
-  min-height: 196px;
-  padding: 10px 10px 12px;
-  display: grid;
-  justify-items: center;
-  gap: 8px;
-  border: 1px solid rgba(248, 250, 252, 0.12);
-  border-radius: 8px;
-  color: #f8fafc;
-  background: rgba(17, 24, 39, 0.96);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
-  transform: translateX(-50%);
-}
-
-.reactions-popover {
-  position: absolute;
-  z-index: 30;
-  bottom: 58px;
-  left: 50%;
-  min-width: 210px;
-  min-height: 54px;
-  padding: 8px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid rgba(248, 250, 252, 0.12);
-  border-radius: 8px;
-  color: #f8fafc;
-  background: rgba(17, 24, 39, 0.96);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
-  transform: translateX(-50%);
-}
-
-.settings-popover {
-  position: absolute;
-  z-index: 30;
-  bottom: 58px;
-  left: 50%;
-  min-width: 198px;
-  padding: 8px;
-  display: grid;
-  gap: 4px;
-  border: 1px solid rgba(248, 250, 252, 0.12);
-  border-radius: 8px;
-  color: #f8fafc;
-  background: rgba(17, 24, 39, 0.96);
-  box-shadow: 0 16px 36px rgba(0, 0, 0, 0.36);
-  pointer-events: auto;
-  transform: translateX(-50%);
-}
-
-.settings-popover::after {
-  content: '';
-  position: absolute;
-  bottom: -7px;
-  left: calc(50% - 7px);
-  width: 14px;
-  height: 14px;
-  border-right: 1px solid rgba(248, 250, 252, 0.12);
-  border-bottom: 1px solid rgba(248, 250, 252, 0.12);
-  background: rgba(17, 24, 39, 0.96);
-  transform: rotate(45deg);
-}
-
-.settings-option {
-  width: 100%;
-  min-height: 40px;
-  border: 0;
-  border-radius: 6px;
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #f8fafc;
-  background: transparent;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 800;
-  text-align: left;
-  white-space: nowrap;
-}
-
-.settings-option ion-icon {
-  flex: 0 0 auto;
-  font-size: 20px;
-}
-
-.settings-toggle {
-  justify-content: flex-start;
-}
-
-.settings-check {
-  position: relative;
-  width: 20px;
-  height: 20px;
-  flex: 0 0 auto;
-  border: 2px solid rgba(248, 250, 252, 0.62);
-  border-radius: 6px;
-  background: rgba(248, 250, 252, 0.08);
-}
-
-.settings-check.checked {
-  border-color: #bfdbfe;
-  background: #0f766e;
-}
-
-.settings-check.checked::after {
-  content: '';
-  position: absolute;
-  left: 5px;
-  top: 2px;
-  width: 5px;
-  height: 10px;
-  border-right: 2px solid #fff;
-  border-bottom: 2px solid #fff;
-  transform: rotate(45deg);
-}
-
-.settings-option:hover,
-.settings-option:focus-visible {
-  background: rgba(13, 148, 136, 0.42);
-}
-
-.settings-option:focus-visible {
-  outline: 2px solid rgba(147, 197, 253, 0.95);
-  outline-offset: 2px;
-}
-
-.reactions-popover::after {
-  content: '';
-  position: absolute;
-  bottom: -7px;
-  left: calc(50% - 7px);
-  width: 14px;
-  height: 14px;
-  border-right: 1px solid rgba(248, 250, 252, 0.12);
-  border-bottom: 1px solid rgba(248, 250, 252, 0.12);
-  background: rgba(17, 24, 39, 0.96);
-  transform: rotate(45deg);
-}
-
-.reaction-option {
-  min-width: 42px;
-  height: 38px;
-  border: 1px solid rgba(248, 250, 252, 0.12);
-  border-radius: 6px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  color: #f8fafc;
-  background: rgba(248, 250, 252, 0.08);
-  cursor: pointer;
-  font-size: 20px;
-  font-weight: 900;
-  white-space: nowrap;
-}
-
-.reaction-option:hover,
-.reaction-option.active {
-  background: rgba(13, 148, 136, 0.42);
-}
-
-.reaction-option:not(.reaction-emoji) {
-  min-width: 110px;
-  padding: 0 10px;
-  font-size: 13px;
-}
-
-.reaction-emoji {
-  line-height: 1;
-}
-
-.volume-popover::after {
-  content: '';
-  position: absolute;
-  bottom: -7px;
-  left: calc(50% - 7px);
-  width: 14px;
-  height: 14px;
-  border-right: 1px solid rgba(248, 250, 252, 0.12);
-  border-bottom: 1px solid rgba(248, 250, 252, 0.12);
-  background: rgba(17, 24, 39, 0.96);
-  transform: rotate(45deg);
-}
-
-.volume-value,
-.volume-normal-label {
-  min-height: 14px;
-  color: #f8fafc;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1.2;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.volume-normal-label {
-  color: #cbd5e1;
-  font-size: 10px;
-}
-
-.volume-slider-wrap {
-  position: relative;
-  width: 36px;
-  height: 126px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.volume-normal-marker {
-  position: absolute;
-  left: 25px;
-  bottom: calc((100 / 130) * 100%);
-  width: 13px;
-  height: 2px;
-  border-radius: 999px;
-  background: #fbbf24;
-}
-
-.volume-slider {
-  width: 126px;
-  height: 28px;
-  accent-color: #38bdf8;
-  cursor: pointer;
-  transform: rotate(-90deg);
-}
-
-.control-btn.is-off,
-.split-control.is-off .control-btn,
-.split-control.is-off .control-chevron {
-  color: #7f1d1d;
-  background: #fee2e2;
-}
-
-.control-btn.recording {
-  color: #fff;
-  background: #7f1d1d;
-}
-
-.control-btn:disabled {
-  cursor: not-allowed;
-  color: #9ca3af;
-  background: #262a2f;
-  opacity: 0.7;
-}
-
-.leave-btn {
-  min-width: 76px;
-  color: #fff;
-  background: #ea4335;
-}
-
-.leave-btn ion-icon {
-  transform: rotate(135deg);
-}
-
-.corner-btn {
-  position: relative;
-  min-width: 44px;
-  height: 44px;
-  border-radius: 999px;
-  background: transparent;
-}
-
-.corner-btn:hover {
-  background: rgba(248, 250, 252, 0.14);
-}
-
-.chat-toggle,
-.participant-toggle {
-  position: relative;
-}
-
+.chat-badge,
 .count-badge,
-.waiting-badge,
-.chat-badge {
+.waiting-badge {
   position: absolute;
+  top: -5px;
+  right: -5px;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(17, 24, 39, 0.42);
-  border-radius: 999px;
   color: #fff;
-  font-size: 10px;
-  font-weight: 900;
-  line-height: 1;
 }
 
 .count-badge {
-  right: -2px;
-  bottom: -2px;
-  min-width: 19px;
-  height: 19px;
-  background: #0f766e;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.chat-badge,
 .waiting-badge {
-  right: -4px;
-  top: -4px;
-  min-width: 18px;
-  height: 18px;
+  background: var(--accent-strong);
+}
+
+.has-waiting .waiting-badge {
+  background: #f59e0b;
+}
+
+/* ── Floating control pill ────────────────────────────────────────────── */
+.controls-pill {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border-radius: 999px;
+  background: rgba(22, 26, 31, 0.86);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+  backdrop-filter: blur(14px);
+}
+
+.control-btn {
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #f3f5f8;
+  background: rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+.control-btn ion-icon {
+  font-size: 21px;
+}
+
+.control-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.control-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+/* muted mic / camera off → red */
+.control-btn.is-off {
   background: #dc2626;
+  color: #fff;
 }
 
-.chat-badge {
-  right: -3px;
-  top: -3px;
-  min-width: 18px;
-  height: 18px;
+.control-btn.is-connecting {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.connecting-spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.leave-btn {
+  width: 56px;
   background: #dc2626;
+  color: #fff;
 }
 
-.participant-toggle.has-waiting .waiting-badge,
-.chat-toggle.has-unread .chat-badge {
-  animation: participant-waiting-pulse 1.4s infinite;
+.leave-btn:hover {
+  background: #b91c1c;
 }
 
-@keyframes participant-waiting-pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.6);
-  }
-
-  70% {
-    box-shadow: 0 0 0 7px rgba(220, 38, 38, 0);
-  }
-
-  100% {
-    box-shadow: 0 0 0 0 rgba(220, 38, 38, 0);
-  }
+/* recording indicator on the More button */
+.more-btn {
+  position: relative;
 }
 
-@include bp.max(900px) {
-  .controls-bar {
-    grid-template-columns: 1fr auto;
-    align-items: end;
-  }
-
-  .meeting-corner-left {
-    position: fixed;
-    z-index: 25;
-    top: max(8px, env(safe-area-inset-top));
-    left: 10px;
-    min-height: 32px;
-    padding: 0;
-  }
-
-  .meeting-corner-left .meeting-clock,
-  .meeting-corner-left .room-label {
-    display: none;
-  }
-
-  .controls {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    justify-content: flex-start;
-    overflow-x: auto;
-    overscroll-behavior-x: contain;
-    padding: 4px 2px 8px;
-    scrollbar-width: thin;
-  }
-
-  .meeting-corner-right {
-    position: fixed;
-    z-index: 25;
-    top: max(8px, env(safe-area-inset-top));
-    right: 10px;
-    min-height: 42px;
-    padding: 0;
-    border-radius: 999px;
-    background: rgba(19, 22, 27, 0.72);
-    backdrop-filter: blur(14px);
-  }
-
-  // Lift popovers out of the horizontally-scrollable .controls strip so they
-  // aren't clipped/unclickable on mobile (was: only settings-popover was fixed,
-  // so reactions + volume got clipped and couldn't be tapped).
-  .settings-popover,
-  .reactions-popover,
-  .volume-popover {
-    position: fixed;
-    z-index: 40;
-    left: 50%;
-    bottom: calc(82px + env(safe-area-inset-bottom));
-    transform: translateX(-50%);
-  }
-
-  // The little arrow pointers don't align once popovers are centered — hide them.
-  .settings-popover::after,
-  .reactions-popover::after,
-  .volume-popover::after {
-    display: none;
-  }
+.rec-dot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(22, 26, 31, 0.86);
 }
 
-@include bp.mobile {
-  .controls-bar {
-    min-height: calc(76px + env(safe-area-inset-bottom));
-    padding: 8px 10px max(8px, env(safe-area-inset-bottom));
+/* ── More menu (opens upward from the pill) ───────────────────────────── */
+.more-control {
+  position: relative;
+  display: inline-flex;
+}
+
+.more-menu {
+  position: absolute;
+  bottom: calc(100% + 12px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 248px;
+  padding: 8px;
+  border-radius: 14px;
+  background: #1c2026;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  color: #f3f5f8;
+}
+
+.more-reactions {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 2px;
+}
+
+.reaction-btn {
+  flex: 1;
+  height: 40px;
+  border: 0;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.06);
+  font-size: 19px;
+  cursor: pointer;
+}
+
+.reaction-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.reaction-btn.active {
+  background: var(--accent);
+}
+
+.more-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 6px 0;
+}
+
+.more-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #f3f5f8;
+  font-size: 13.5px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.more-item ion-icon {
+  font-size: 18px;
+  color: #c2c9d2;
+}
+
+.more-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.more-item:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.more-item.is-recording ion-icon {
+  color: #ef4444;
+}
+
+.more-item.toggle {
+  justify-content: flex-start;
+}
+
+.more-check {
+  margin-left: auto;
+  width: 34px;
+  height: 20px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  position: relative;
+  transition: background 0.15s ease;
+}
+
+.more-check::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.15s ease;
+}
+
+.more-check.checked {
+  background: var(--accent);
+}
+
+.more-check.checked::after {
+  transform: translateX(14px);
+}
+
+.more-volume {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 10px 8px;
+}
+
+.volume-slider {
+  flex: 1;
+  accent-color: var(--accent);
+}
+
+.volume-value {
+  font-size: 12px;
+  color: #c2c9d2;
+  min-width: 34px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+@include bp.max(720px) {
+  .controls-pill {
+    bottom: 16px;
+    gap: 6px;
+    padding: 7px;
   }
 
-  .controls {
-    gap: 8px;
+  .control-btn {
+    width: 44px;
+    height: 44px;
   }
 
-  .control-btn,
-  .leave-btn {
-    min-width: 48px;
-    height: 48px;
-  }
-
-  .leave-btn {
-    min-width: 58px;
-  }
-
-  .control-chevron {
-    min-width: 30px;
-  }
-
-  .corner-btn {
-    min-width: 40px;
-    height: 40px;
+  .room-label {
+    font-size: 13px;
   }
 }

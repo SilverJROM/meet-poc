@@ -255,3 +255,12 @@ h3 {
     justify-content: flex-start;
   }
 }
+
+/* Single active helper line (replaces always-rendered model-details spans). */
+.active-detail {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}

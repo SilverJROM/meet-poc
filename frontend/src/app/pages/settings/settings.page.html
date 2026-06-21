@@ -147,14 +147,7 @@
             }
           </select>
         </div>
-        <div class="model-details">
-          @for (mode of transcriptionModes; track mode.id) {
-            <span [class.active]="transcriptionMode() === mode.id">
-              <strong>{{ mode.label }}</strong>
-              {{ mode.detail }}
-            </span>
-          }
-        </div>
+        <small class="active-detail">{{ transcriptionModeDetail() }}</small>
       </div>
       <div class="transcriber-control">
         <div class="field">
@@ -165,14 +158,7 @@
             }
           </select>
         </div>
-        <div class="model-details">
-          @for (prov of transcriptionProviders; track prov.id) {
-            <span [class.active]="transcriptionProvider() === prov.id">
-              <strong>{{ prov.label }}</strong>
-              {{ prov.detail }}
-            </span>
-          }
-        </div>
+        <small class="active-detail">{{ transcriptionProviderDetail() }}</small>
       </div>
     </section>
     <section class="panel-section" aria-label="Transcriber model">
@@ -191,14 +177,7 @@
             }
           </select>
         </div>
-        <div class="model-details">
-          @for (model of transcriberModels; track model.id) {
-            <span [class.active]="transcriberModel() === model.id">
-              <strong>{{ model.label }}</strong>
-              {{ model.detail }}
-            </span>
-          }
-        </div>
+        <small class="active-detail">{{ transcriberModelDetail() }}</small>
       </div>
     </section>
     }

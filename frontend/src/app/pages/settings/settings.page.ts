@@ -53,6 +53,10 @@ export class SettingsPage {
   readonly transcriberModel = signal<TranscriberModel>('medium');
   readonly transcriptionMode = signal<TranscriptionMode>('auto');
   readonly transcriptionProvider = signal<TranscriptionProvider>('local');
+  // Consensus rec: render only the ACTIVE selection's helper text, not all of them.
+  readonly transcriberModelDetail = computed(() => this.transcriberModels.find((m) => m.id === this.transcriberModel())?.detail ?? '');
+  readonly transcriptionModeDetail = computed(() => this.transcriptionModes.find((m) => m.id === this.transcriptionMode())?.detail ?? '');
+  readonly transcriptionProviderDetail = computed(() => this.transcriptionProviders.find((p) => p.id === this.transcriptionProvider())?.detail ?? '');
   readonly loading = signal(true);
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);

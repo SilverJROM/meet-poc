@@ -1,7 +1,7 @@
-<header class="controls-bar" aria-label="Call controls">
+<div class="controls-bar" aria-label="Call controls">
   <div class="meeting-corner meeting-corner-left">
     <span class="room-label" [attr.title]="roomLabel()">{{ roomLabel() }}</span>
-    <span class="meeting-aside" aria-hidden="false">
+    <span class="meeting-aside">
       <span class="meeting-clock" aria-label="Meeting elapsed time">{{ elapsedLabel() }}</span>
       @if (connectionQualityLabel()) {
         <span
@@ -13,203 +13,6 @@
         ></span>
       }
     </span>
-  </div>
-
-  <div class="controls" aria-label="Primary call controls">
-    <div class="split-control" [class.is-off]="!micOn()" [class.is-connecting]="audioConnecting()">
-      <button
-        type="button"
-        class="control-btn primary-toggle"
-        [class.is-off]="!micOn()"
-        [class.is-connecting]="audioConnecting()"
-        [attr.aria-pressed]="micOn()"
-        [attr.aria-label]="audioConnecting() ? 'Microphone connecting…' : (micOn() ? 'Mute microphone' : 'Unmute microphone')"
-        (click)="mute.emit()"
-        [title]="audioConnecting() ? 'Audio connecting…' : (micOn() ? 'Mute microphone' : 'Unmute microphone')"
-      >
-        @if (audioConnecting()) {
-          <ion-icon name="reload-outline" class="connecting-spinner"></ion-icon>
-        } @else {
-          <ion-icon [name]="micOn() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
-        }
-      </button>
-      <button
-        type="button"
-        class="control-chevron"
-        aria-label="Microphone device settings"
-        title="Microphone device settings"
-        (click)="devices.emit()"
-      >
-        <ion-icon name="chevron-up-outline"></ion-icon>
-      </button>
-    </div>
-
-    <div class="split-control" [class.is-off]="!cameraOn()">
-      <button
-        type="button"
-        class="control-btn primary-toggle"
-        [class.is-off]="!cameraOn()"
-        [attr.aria-pressed]="cameraOn()"
-        [attr.aria-label]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
-        (click)="camera.emit()"
-        [title]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
-      >
-        <ion-icon [name]="cameraOn() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
-      </button>
-      <button
-        type="button"
-        class="control-chevron"
-        aria-label="Camera device settings"
-        title="Camera device settings"
-        (click)="devices.emit()"
-      >
-        <ion-icon name="chevron-up-outline"></ion-icon>
-      </button>
-    </div>
-
-    <button
-      type="button"
-      class="control-btn"
-      [class.active]="screenOn()"
-      [attr.aria-pressed]="screenOn()"
-      [attr.aria-label]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
-      (click)="screen.emit()"
-      [title]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
-    >
-      <ion-icon name="desktop-outline"></ion-icon>
-    </button>
-
-    @if (isHost()) {
-      <button
-        type="button"
-        class="control-btn"
-        [class.recording]="recording()"
-        [disabled]="uploading()"
-        [attr.aria-pressed]="recording()"
-        [attr.aria-label]="recording() ? 'Stop recording' : 'Record'"
-        (click)="record.emit()"
-        [title]="recording() ? 'Stop recording' : 'Record'"
-      >
-        <ion-icon [name]="recording() ? 'ellipse' : 'ellipse-outline'"></ion-icon>
-      </button>
-    }
-
-    <div class="settings-control">
-      <button
-        type="button"
-        class="control-btn"
-        [class.active]="settingsPopoverOpen()"
-        [attr.aria-expanded]="settingsPopoverOpen()"
-        aria-label="Settings"
-        (click)="toggleSettingsPopover($event)"
-        title="Settings"
-      >
-        <ion-icon name="settings-outline"></ion-icon>
-      </button>
-      @if (settingsPopoverOpen()) {
-        <div class="settings-popover" role="menu" aria-label="Settings" (click)="$event.stopPropagation()">
-          <button type="button" class="settings-option" role="menuitem" (click)="chooseDeviceSettings()">
-            <ion-icon name="settings-outline" aria-hidden="true"></ion-icon>
-            <span>Device settings</span>
-          </button>
-          <button type="button" class="settings-option" role="menuitem" (click)="chooseBackgroundEffects()">
-            <ion-icon name="color-wand-outline" aria-hidden="true"></ion-icon>
-            <span>Background effects</span>
-          </button>
-          <button
-            type="button"
-            class="settings-option settings-toggle"
-            role="menuitemcheckbox"
-            [attr.aria-checked]="equalSizeTiles()"
-            (click)="toggleEqualSizeTiles()"
-          >
-            <span class="settings-check" [class.checked]="equalSizeTiles()" aria-hidden="true"></span>
-            <span>Equal-size tiles</span>
-          </button>
-        </div>
-      }
-    </div>
-
-    <div class="split-control speaker-control" [class.is-muted]="remoteAudio.mutedAll()">
-      <button
-        type="button"
-        class="control-btn primary-toggle"
-        [class.muted]="remoteAudio.mutedAll()"
-        [attr.aria-pressed]="remoteAudio.mutedAll()"
-        [attr.aria-label]="remoteAudio.mutedAll() ? 'Unmute meeting speakers' : 'Mute meeting speakers'"
-        (click)="toggleSpeakerMuted()"
-        [title]="remoteAudio.mutedAll() ? 'Unmute meeting speakers' : 'Mute meeting speakers'"
-      >
-        <ion-icon [name]="remoteAudio.mutedAll() ? 'volume-mute-outline' : 'volume-high-outline'"></ion-icon>
-      </button>
-      <button
-        type="button"
-        class="control-chevron"
-        aria-label="Speaker volume"
-        title="Speaker volume"
-        [attr.aria-expanded]="volumePopoverOpen()"
-        (click)="toggleVolumePopover($event)"
-      >
-        <ion-icon name="chevron-up-outline"></ion-icon>
-      </button>
-      @if (!micOn() && remoteAudio.mutedAll()) {
-        <span class="combined-muted-indicator" aria-label="Microphone and speaker muted" title="Microphone and speaker muted"></span>
-      }
-      @if (volumePopoverOpen()) {
-        <div class="volume-popover" role="dialog" aria-label="Speaker volume" (click)="$event.stopPropagation()">
-          <span class="volume-value">{{ volumeLabel() }}</span>
-          <div class="volume-slider-wrap">
-            <span class="volume-normal-marker" aria-hidden="true"></span>
-            <input
-              class="volume-slider"
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              [value]="remoteAudio.volume()"
-              aria-label="Speaker volume"
-              (input)="setSpeakerVolume($event)"
-            />
-          </div>
-          <span class="volume-normal-label">100%</span>
-        </div>
-      }
-    </div>
-
-    <div class="reaction-control">
-      <button
-        type="button"
-        class="control-btn"
-        [class.active]="reactionsPopoverOpen() || raiseHandOn()"
-        [attr.aria-expanded]="reactionsPopoverOpen()"
-        aria-label="Reactions"
-        title="Reactions"
-        (click)="toggleReactionsPopover($event)"
-      >
-        <ion-icon name="happy-outline"></ion-icon>
-      </button>
-      @if (reactionsPopoverOpen()) {
-        <div class="reactions-popover" role="dialog" aria-label="Reactions" (click)="$event.stopPropagation()">
-          <button
-            type="button"
-            class="reaction-option"
-            [class.active]="raiseHandOn()"
-            [attr.aria-pressed]="raiseHandOn()"
-            (click)="chooseReaction('raise-hand')"
-          >
-            <span aria-hidden="true">✋</span>
-            <span>{{ raiseHandOn() ? 'Lower hand' : 'Raise hand' }}</span>
-          </button>
-          <button type="button" class="reaction-option reaction-emoji" aria-label="Thumbs up" (click)="chooseReaction('thumbs-up')">👍</button>
-          <button type="button" class="reaction-option reaction-emoji" aria-label="Clap" (click)="chooseReaction('clap')">👏</button>
-          <button type="button" class="reaction-option reaction-emoji" aria-label="Heart" (click)="chooseReaction('heart')">❤️</button>
-        </div>
-      }
-    </div>
-
-    <button type="button" class="leave-btn" (click)="leave.emit()" aria-label="Leave call" title="Leave call">
-      <ion-icon name="call-outline"></ion-icon>
-    </button>
   </div>
 
   <div class="meeting-corner meeting-corner-right" aria-label="Meeting tools">
@@ -245,4 +48,121 @@
       }
     </button>
   </div>
-</header>
+
+  <!-- Floating pill: Mic · Camera · Screen · More · Leave -->
+  <div class="controls-pill" aria-label="Primary call controls">
+    <button
+      type="button"
+      class="control-btn"
+      [class.is-off]="!micOn()"
+      [class.is-connecting]="audioConnecting()"
+      [attr.aria-pressed]="micOn()"
+      [attr.aria-label]="audioConnecting() ? 'Microphone connecting…' : (micOn() ? 'Mute microphone' : 'Unmute microphone')"
+      (click)="mute.emit()"
+      [title]="audioConnecting() ? 'Audio connecting…' : (micOn() ? 'Mute microphone' : 'Unmute microphone')"
+    >
+      @if (audioConnecting()) {
+        <ion-icon name="chevron-up-outline" class="connecting-spinner"></ion-icon>
+      } @else {
+        <ion-icon [name]="micOn() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
+      }
+    </button>
+
+    <button
+      type="button"
+      class="control-btn"
+      [class.is-off]="!cameraOn()"
+      [attr.aria-pressed]="cameraOn()"
+      [attr.aria-label]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
+      (click)="camera.emit()"
+      [title]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
+    >
+      <ion-icon [name]="cameraOn() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
+    </button>
+
+    <button
+      type="button"
+      class="control-btn"
+      [class.active]="screenOn()"
+      [attr.aria-pressed]="screenOn()"
+      [attr.aria-label]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
+      (click)="screen.emit()"
+      [title]="screenOn() ? 'Stop sharing screen' : 'Share screen'"
+    >
+      <ion-icon name="desktop-outline"></ion-icon>
+    </button>
+
+    <div class="more-control">
+      <button
+        type="button"
+        class="control-btn more-btn"
+        [class.active]="moreOpen() || raiseHandOn() || recording()"
+        [attr.aria-expanded]="moreOpen()"
+        aria-label="More controls"
+        title="More controls"
+        (click)="toggleMore($event)"
+      >
+        <ion-icon name="ellipsis-horizontal"></ion-icon>
+        @if (recording()) { <span class="rec-dot" aria-hidden="true"></span> }
+      </button>
+
+      @if (moreOpen()) {
+        <div class="more-menu" role="menu" aria-label="More controls" (click)="$event.stopPropagation()">
+          <div class="more-reactions" aria-label="Reactions">
+            <button type="button" class="reaction-btn" [class.active]="raiseHandOn()" [attr.aria-pressed]="raiseHandOn()" (click)="chooseReaction('raise-hand')" [title]="raiseHandOn() ? 'Lower hand' : 'Raise hand'">✋</button>
+            <button type="button" class="reaction-btn" aria-label="Thumbs up" (click)="chooseReaction('thumbs-up')">👍</button>
+            <button type="button" class="reaction-btn" aria-label="Clap" (click)="chooseReaction('clap')">👏</button>
+            <button type="button" class="reaction-btn" aria-label="Heart" (click)="chooseReaction('heart')">❤️</button>
+          </div>
+
+          <div class="more-divider"></div>
+
+          @if (isHost()) {
+            <button type="button" class="more-item" role="menuitem" [class.is-recording]="recording()" [disabled]="uploading()" (click)="chooseRecord()">
+              <ion-icon [name]="recording() ? 'ellipse' : 'ellipse-outline'"></ion-icon>
+              <span>{{ recording() ? 'Stop recording' : 'Record meeting' }}</span>
+            </button>
+          }
+
+          <button type="button" class="more-item" role="menuitem" (click)="toggleSpeakerMuted()">
+            <ion-icon [name]="remoteAudio.mutedAll() ? 'volume-mute-outline' : 'volume-high-outline'"></ion-icon>
+            <span>{{ remoteAudio.mutedAll() ? 'Unmute speakers' : 'Mute speakers' }}</span>
+          </button>
+          <div class="more-volume">
+            <input
+              class="volume-slider"
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              [value]="remoteAudio.volume()"
+              aria-label="Speaker volume"
+              (input)="setSpeakerVolume($event)"
+            />
+            <span class="volume-value">{{ volumeLabel() }}</span>
+          </div>
+
+          <div class="more-divider"></div>
+
+          <button type="button" class="more-item" role="menuitem" (click)="chooseDeviceSettings()">
+            <ion-icon name="settings-outline"></ion-icon>
+            <span>Device settings</span>
+          </button>
+          <button type="button" class="more-item" role="menuitem" (click)="chooseBackgroundEffects()">
+            <ion-icon name="color-wand-outline"></ion-icon>
+            <span>Background effects</span>
+          </button>
+          <button type="button" class="more-item toggle" role="menuitemcheckbox" [attr.aria-checked]="equalSizeTiles()" (click)="toggleEqualSizeTiles()">
+            <ion-icon name="grid-outline"></ion-icon>
+            <span>Equal-size tiles</span>
+            <span class="more-check" [class.checked]="equalSizeTiles()" aria-hidden="true"></span>
+          </button>
+        </div>
+      }
+    </div>
+
+    <button type="button" class="control-btn leave-btn" (click)="leave.emit()" aria-label="Leave call" title="Leave call">
+      <ion-icon name="call-outline"></ion-icon>
+    </button>
+  </div>
+</div>

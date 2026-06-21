@@ -8,6 +8,9 @@ import {
   desktopOutline,
   ellipseOutline,
   ellipse,
+  ellipsisHorizontal,
+  gridOutline,
+  handLeftOutline,
   happyOutline,
   micOffOutline,
   micOutline,
@@ -65,9 +68,9 @@ export class ControlsBarComponent {
   readonly backgroundEffects = output<void>();
   readonly equalSizeTilesChange = output<boolean>();
   readonly leave = output<void>();
-  readonly volumePopoverOpen = signal(false);
-  readonly reactionsPopoverOpen = signal(false);
-  readonly settingsPopoverOpen = signal(false);
+  // Option #2: a single consolidated "More" menu replaces the separate
+  // settings / reactions / speaker-volume popovers.
+  readonly moreOpen = signal(false);
   readonly volumeLabel = computed(() => {
     const percent = Math.round(this.remoteAudio.volume() * 100);
     return `${percent}%`;
@@ -82,6 +85,9 @@ export class ControlsBarComponent {
       desktopOutline,
       ellipse,
       ellipseOutline,
+      ellipsisHorizontal,
+      gridOutline,
+      handLeftOutline,
       happyOutline,
       micOffOutline,
       micOutline,
@@ -94,27 +100,18 @@ export class ControlsBarComponent {
     });
   }
 
-  toggleReactionsPopover(event: Event): void {
+  toggleMore(event: Event): void {
     event.stopPropagation();
-    this.reactionsPopoverOpen.update((open) => !open);
-    this.volumePopoverOpen.set(false);
-    this.settingsPopoverOpen.set(false);
+    this.moreOpen.update((open) => !open);
   }
 
   chooseReaction(kind: ReactionKind): void {
     this.reaction.emit(kind);
-    if (kind !== 'raise-hand') this.reactionsPopoverOpen.set(false);
+    if (kind !== 'raise-hand') this.moreOpen.set(false);
   }
 
   toggleSpeakerMuted(): void {
     this.remoteAudio.setMutedAll(!this.remoteAudio.mutedAll());
-  }
-
-  toggleVolumePopover(event: Event): void {
-    event.stopPropagation();
-    this.volumePopoverOpen.update((open) => !open);
-    this.settingsPopoverOpen.set(false);
-    this.reactionsPopoverOpen.set(false);
   }
 
   setSpeakerVolume(event: Event): void {
@@ -122,21 +119,19 @@ export class ControlsBarComponent {
     this.remoteAudio.setVolume(Number.parseFloat(inputEl.value));
   }
 
-  toggleSettingsPopover(event: Event): void {
-    event.stopPropagation();
-    this.settingsPopoverOpen.update((open) => !open);
-    this.volumePopoverOpen.set(false);
-    this.reactionsPopoverOpen.set(false);
-  }
-
   chooseDeviceSettings(): void {
-    this.settingsPopoverOpen.set(false);
+    this.moreOpen.set(false);
     this.devices.emit();
   }
 
   chooseBackgroundEffects(): void {
-    this.settingsPopoverOpen.set(false);
+    this.moreOpen.set(false);
     this.backgroundEffects.emit();
+  }
+
+  chooseRecord(): void {
+    this.moreOpen.set(false);
+    this.record.emit();
   }
 
   toggleEqualSizeTiles(): void {
@@ -144,18 +139,14 @@ export class ControlsBarComponent {
   }
 
   @HostListener('document:click', ['$event'])
-  closeVolumePopoverOnOutsideClick(event: MouseEvent): void {
-    if (!this.volumePopoverOpen() && !this.reactionsPopoverOpen() && !this.settingsPopoverOpen()) return;
+  closeMoreOnOutsideClick(event: MouseEvent): void {
+    if (!this.moreOpen()) return;
     if (this.elementRef.nativeElement.contains(event.target as Node)) return;
-    this.volumePopoverOpen.set(false);
-    this.reactionsPopoverOpen.set(false);
-    this.settingsPopoverOpen.set(false);
+    this.moreOpen.set(false);
   }
 
   @HostListener('document:keydown.escape')
-  closeVolumePopoverOnEscape(): void {
-    this.volumePopoverOpen.set(false);
-    this.reactionsPopoverOpen.set(false);
-    this.settingsPopoverOpen.set(false);
+  closeMoreOnEscape(): void {
+    this.moreOpen.set(false);
   }
 }
