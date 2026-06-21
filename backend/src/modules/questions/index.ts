@@ -14,10 +14,14 @@ import {
   getDefaultProvider,
   getQuestion,
   getTranscriberModel,
+  getTranscriptionMode,
+  getTranscriptionProvider,
   listAutoRunQuestions,
   listQuestions,
   setDefaultProvider,
   setTranscriberModel,
+  setTranscriptionMode,
+  setTranscriptionProvider,
   slugQuestionName,
   starQuestion,
   updateQuestion,
@@ -92,6 +96,8 @@ export function questionsRouter(
       defaultProvider: getDefaultProvider(authReq.user.email, database),
       defaultOllamaModel: DEFAULT_OLLAMA_MODEL,
       transcriberModel: getTranscriberModel(authReq.user.email, database),
+      transcriptionMode: getTranscriptionMode(authReq.user.email, database),
+      transcriptionProvider: getTranscriptionProvider(authReq.user.email, database),
     });
   });
 
@@ -106,10 +112,20 @@ export function questionsRouter(
         req.body && Object.prototype.hasOwnProperty.call(req.body, 'transcriberModel')
           ? setTranscriberModel(authReq.user.email, req.body.transcriberModel, database)
           : getTranscriberModel(authReq.user.email, database);
+      const transcriptionMode =
+        req.body && Object.prototype.hasOwnProperty.call(req.body, 'transcriptionMode')
+          ? setTranscriptionMode(authReq.user.email, req.body.transcriptionMode, database)
+          : getTranscriptionMode(authReq.user.email, database);
+      const transcriptionProvider =
+        req.body && Object.prototype.hasOwnProperty.call(req.body, 'transcriptionProvider')
+          ? setTranscriptionProvider(authReq.user.email, req.body.transcriptionProvider, database)
+          : getTranscriptionProvider(authReq.user.email, database);
       return res.json({
         defaultProvider,
         defaultOllamaModel: DEFAULT_OLLAMA_MODEL,
         transcriberModel,
+        transcriptionMode,
+        transcriptionProvider,
       });
     } catch (err) {
       return res.status(400).json({ error: (err as Error).message });

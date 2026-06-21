@@ -131,6 +131,50 @@
     @if (loading()) {
       <p class="empty">Loading settings...</p>
     } @else {
+    <section class="panel-section" aria-label="Transcription">
+      <div class="section-head compact">
+        <div>
+          <h3>Transcription</h3>
+          <p>Transcription runs after the call ends — never during a live call.</p>
+        </div>
+      </div>
+      <div class="transcriber-control">
+        <div class="field">
+          <label for="transcription-mode">When to transcribe</label>
+          <select id="transcription-mode" name="transcriptionMode" [ngModel]="transcriptionMode()" (ngModelChange)="setTranscriptionMode($event)" [disabled]="saving()">
+            @for (mode of transcriptionModes; track mode.id) {
+              <option [value]="mode.id">{{ mode.label }}</option>
+            }
+          </select>
+        </div>
+        <div class="model-details">
+          @for (mode of transcriptionModes; track mode.id) {
+            <span [class.active]="transcriptionMode() === mode.id">
+              <strong>{{ mode.label }}</strong>
+              {{ mode.detail }}
+            </span>
+          }
+        </div>
+      </div>
+      <div class="transcriber-control">
+        <div class="field">
+          <label for="transcription-provider">Provider</label>
+          <select id="transcription-provider" name="transcriptionProvider" [ngModel]="transcriptionProvider()" (ngModelChange)="setTranscriptionProvider($event)" [disabled]="saving()">
+            @for (prov of transcriptionProviders; track prov.id) {
+              <option [value]="prov.id">{{ prov.label }}</option>
+            }
+          </select>
+        </div>
+        <div class="model-details">
+          @for (prov of transcriptionProviders; track prov.id) {
+            <span [class.active]="transcriptionProvider() === prov.id">
+              <strong>{{ prov.label }}</strong>
+              {{ prov.detail }}
+            </span>
+          }
+        </div>
+      </div>
+    </section>
     <section class="panel-section" aria-label="Transcriber model">
       <div class="section-head compact">
         <div>

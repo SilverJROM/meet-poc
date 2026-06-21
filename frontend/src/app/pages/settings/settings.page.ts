@@ -2,7 +2,7 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, computed, inject, signal } from '@an
 import { FormsModule } from '@angular/forms';
 import { addIcons } from 'ionicons';
 import { closeOutline, createOutline, saveOutline, star, starOutline, trashOutline } from 'ionicons/icons';
-import { LlmProviderId, Question, QuestionPayload, QuestionsService, TranscriberModel } from '../../services/questions.service';
+import { LlmProviderId, Question, QuestionPayload, QuestionsService, TranscriberModel, TranscriptionMode, TranscriptionProvider } from '../../services/questions.service';
 import { AccountSettingsComponent } from '../../components/account-settings/account-settings.component';
 import { BackgroundLibraryComponent } from '../../components/background-library/background-library.component';
 
@@ -38,10 +38,21 @@ export class SettingsPage {
     { id: 'medium', label: 'medium', detail: 'Current default balance' },
     { id: 'large-v3', label: 'large-v3', detail: 'Highest accuracy; downloads on first use' },
   ];
+  readonly transcriptionModes: { id: TranscriptionMode; label: string; detail: string }[] = [
+    { id: 'auto', label: 'Auto (after call)', detail: 'Transcribe a session automatically once the call ends' },
+    { id: 'ondemand', label: 'On demand', detail: 'Only transcribe when you click Transcribe' },
+    { id: 'off', label: 'Off', detail: 'Record only — no transcription' },
+  ];
+  readonly transcriptionProviders: { id: TranscriptionProvider; label: string; detail: string }[] = [
+    { id: 'local', label: 'On-box (Whisper)', detail: 'Runs faster-whisper on the server, post-call' },
+    { id: 'thirdparty', label: 'External STT', detail: 'Send to an external provider (set MEET_STT_* env)' },
+  ];
   readonly questions = signal<Question[]>([]);
   readonly defaultProvider = signal<LlmProviderId>('ollama');
   readonly defaultOllamaModel = signal('mistral-nemo:12b');
   readonly transcriberModel = signal<TranscriberModel>('medium');
+  readonly transcriptionMode = signal<TranscriptionMode>('auto');
+  readonly transcriptionProvider = signal<TranscriptionProvider>('local');
   readonly loading = signal(true);
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);
@@ -69,6 +80,8 @@ export class SettingsPage {
       this.defaultProvider.set(settings.defaultProvider);
       this.defaultOllamaModel.set(settings.defaultOllamaModel);
       this.transcriberModel.set(settings.transcriberModel);
+      this.transcriptionMode.set(settings.transcriptionMode);
+      this.transcriptionProvider.set(settings.transcriptionProvider);
       this.questions.set(questions);
     } catch {
       this.error.set('Settings could not be loaded');
@@ -106,6 +119,36 @@ export class SettingsPage {
       this.status.set('Transcriber model saved');
     } catch {
       this.error.set('Transcriber model could not be saved');
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  async setTranscriptionMode(mode: TranscriptionMode): Promise<void> {
+    this.saving.set(true);
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      const settings = await this.questionsService.updateSettings({ transcriptionMode: mode });
+      this.transcriptionMode.set(settings.transcriptionMode);
+      this.status.set('Transcription mode saved');
+    } catch {
+      this.error.set('Transcription mode could not be saved');
+    } finally {
+      this.saving.set(false);
+    }
+  }
+
+  async setTranscriptionProvider(provider: TranscriptionProvider): Promise<void> {
+    this.saving.set(true);
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      const settings = await this.questionsService.updateSettings({ transcriptionProvider: provider });
+      this.transcriptionProvider.set(settings.transcriptionProvider);
+      this.status.set('Transcription provider saved');
+    } catch {
+      this.error.set('Transcription provider could not be saved');
     } finally {
       this.saving.set(false);
     }

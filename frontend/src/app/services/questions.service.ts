@@ -17,10 +17,15 @@ export type Question = {
   updatedAt: number;
 };
 
+export type TranscriptionMode = 'auto' | 'ondemand' | 'off';
+export type TranscriptionProvider = 'local' | 'thirdparty';
+
 export type LlmSettings = {
   defaultProvider: LlmProviderId;
   defaultOllamaModel: string;
   transcriberModel: TranscriberModel;
+  transcriptionMode: TranscriptionMode;
+  transcriptionProvider: TranscriptionProvider;
 };
 
 export type Analysis = {
@@ -75,8 +80,17 @@ export class QuestionsService {
     return firstValueFrom(this.http.get<LlmSettings>('/api/llm/settings'));
   }
 
-  async updateSettings(payload: Partial<Pick<LlmSettings, 'defaultProvider' | 'transcriberModel'>>): Promise<LlmSettings> {
+  async updateSettings(
+    payload: Partial<Pick<LlmSettings, 'defaultProvider' | 'transcriberModel' | 'transcriptionMode' | 'transcriptionProvider'>>,
+  ): Promise<LlmSettings> {
     return firstValueFrom(this.http.put<LlmSettings>('/api/llm/settings', payload));
+  }
+
+  /** On-demand: transcribe every recording in a session (host-triggered). */
+  async transcribeSession(sessionId: string, force = false): Promise<{ ok: true; queued: number }> {
+    return firstValueFrom(
+      this.http.post<{ ok: true; queued: number }>(`/api/recordings/session/${encodeURIComponent(sessionId)}/transcribe`, { force }),
+    );
   }
 
   async analyze(filename: string, questionId: string, providerOverride?: LlmProviderId | null): Promise<Analysis> {

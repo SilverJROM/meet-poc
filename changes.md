@@ -1,95 +1,62 @@
-# Ghost-Participant Fix (2026-06-21)
+# Transcription decoupled from the live call (2026-06-21)
 
 ## Problem
-Dropped participants lingered as fully-active ghosts for the full 2-min reconnect grace:
-- Per-user MediaRecorder kept running → 7+ ghost recorders → renderer OOM (blocked R9)
-- Dead SFU track subscriptions held open for 2 min per ghost
-- Tiles showed phantom-active (no visual distinction from live participant)
+Transcription (faster-whisper) was triggered on **every recording upload** (`scheduleTranscription`
+on `POST /upload`). With per-user recording, a participant's `.webm` uploads when they leave —
+which can be **mid-call** while others keep talking. So whisper (the `medium` model) spun up on
+the signaling box *during a live call*, contending for CPU with the call it was recording. The
+auto-LLM-analysis chained off transcription, compounding it. Bad design: transcription is
+post-call work, not inline.
 
-## Root cause
-`syncRecorderPeerStreams` treated `reconnecting: true` peers as ACTIVE — they stayed in
-`activePeerIds`, so `removePeerStream` was never called. Ghost recorder ran until
-`peer-left` (2 min later).
+## Fix — transcription is now POST-call only, host-configurable, provider-pluggable
 
-## Files changed
+### backend/src/modules/recording/index.ts
+- **Removed** the per-upload trigger. `POST /upload` now only saves the file.
+- **Serialized queue** (`enqueueTranscription` / `pumpTranscribeQueue`): at most ONE transcription
+  runs at a time, so a multi-party session ending (N per-user recordings) never spikes CPU.
+- **Post-call auto** (`maybeAutoTranscribeSession`): called from the signaling layer when a session
+  closes. No-op unless the room owner's mode is `auto`.
+- **On-demand**: existing `POST /api/recordings/:filename/transcribe` (per file) now enqueues;
+  new `POST /api/recordings/session/:sessionId/transcribe` transcribes a whole session on demand.
+- **Provider seam** (`transcribeViaThirdParty`): `local` on-box whisper (default) or `thirdparty`
+  external STT via `MEET_STT_ENDPOINT` / `MEET_STT_API_KEY` / `MEET_STT_MODEL`. Selecting
+  `thirdparty` without config is a logged no-op (never errors the call path).
+- `spawnTranscription` now signals completion (settled-guarded `onDone`) so the queue advances.
 
-### frontend/src/app/pages/room/room-recording.ts
-Skip reconnecting peers in `syncRecorderPeerStreams` (1-line change).
-Reconnecting peer falls out of `activePeerIds` → `removePeerStream(clientId)` called →
-per-user MediaRecorder stopped + AudioContext source node disconnected immediately.
-_OOM fix._
-
-### frontend/src/app/services/recorder.service.ts
-Clear stopped per-user entry in `addStream` (2-line change).
-Before `startPerUserRecorder`, check if existing entry has `stopped=true` and delete it.
-Allows per-user recorder to restart fresh when peer rejoins and their SFU stream returns.
-_Rejoin recorder restart fix._
-
-### frontend/src/app/pages/room/room.page.ts
-`sfuClient.removePeer` on `peer-reconnecting` (1-line addition).
-Dead SFU track subscriptions torn down immediately on disconnect, not 2 min later.
-On `peer-resumed`, existing code re-subscribes via SFU roster.
-_SFU subscription churn fix._
-
-### frontend/src/app/components/tile/tile.component.scss
-Grey reconnecting tile (5 lines).
-`[data-reconnecting="true"]` → opacity: 0.45; filter: grayscale(0.7); pointer-events: none.
-Template already sets data-reconnecting and shows "Reconnecting…" label.
-_Phantom-active tile fix._
+### backend/src/modules/questions/store.ts
+- New per-owner settings in the existing `llm_settings` KV table (no migration):
+  `transcription_mode` (`auto` | `ondemand` | `off`, default **auto**) and
+  `transcription_provider` (`local` | `thirdparty`, default `local`).
 
 ### backend/src/modules/signaling/index.ts
-Extend `remove-peer` to handle reconnecting peers (Case B, ~20 lines).
-Previously `remove-peer` silently no-op'd if the target was in `live.reconnecting`.
-Now:
-1. Finds peer in `live.reconnecting`
-2. Guards: owner cannot be kicked
-3. `cleanupReconnectState` — cancels grace timer + DELETES reconnect token
-4. Revokes durable identity (revoked: true) — rejoin cannot auto-reattach, must knock → host-admit
-5. Broadcasts `peer-left` to all admitted peers
-6. `promoteNextActingHost` / `maybeCloseEmptyRoom` (mirrors expireReconnectingPeer)
+- `closeSessionAndAutoTranscribe` wraps the 3 session-close sites (`maybeCloseEmptyRoom`,
+  `closeRoomForHost`, `meeting-ended-by-host`) → fires auto-transcription **after** the call ends.
 
-## Acceptance matrix
+### backend/src/modules/questions/index.ts
+- `GET/PUT /api/llm/settings` now read/write `transcriptionMode` + `transcriptionProvider`.
 
-### Case A: drop → rejoin WITHIN grace (token valid)
-- Drop → `startReconnectGrace` → `peer-reconnecting` broadcast
-- Frontend: reconnecting:true → `syncRecorderPeerStreams` skips peer → `removePeerStream` → recorder STOPPED immediately
-- `sfuClient.removePeer(clientId)` → dead SFU sub dropped
-- Tile greyed (opacity 0.45, grayscale)
-- Rejoin with valid token → `peer-resumed {oldClientId, clientId: newId}`
-- `peer-resumed` handler: removes old ghost entry, inserts new live entry (reconnecting: false)
-- `addStream`: clears stopped entry → fresh per-user recorder started
-- Result: EXACTLY ONE participant, no duplicate, recorder restarted ✅
-
-### Case B: drop → KICK (host) or grace EXPIRED (token invalidated)
-**Grace expiry (expireReconnectingPeer, pre-existing):**
-- `cleanupReconnectState` → token deleted; `peer-left` broadcast
-- Recorder already stopped (via Case A flow); frontend removes ghost entry
-- Rejoin: no token, identity not auto-admitted → knocks, host must admit ✅
-
-**Host kick of dropped peer (NEW in this fix):**
-- Host sends `remove-peer` with reconnecting peer's clientId
-- Backend finds peer in `live.reconnecting` (was previously a silent no-op)
-- `cleanupReconnectState` → cancels timer + DELETES token
-- `clientIdentities.set(..., {revoked: true})` → identity revoked
-- `peer-left` broadcast → frontend removes ghost immediately
-- Rejoin: no valid token + revoked identity → `canResume=false`, `canAutoAdmitByIdentity=false`
-  → knocks, waits for host Admit ✅
-- Owner cannot be kicked (guard added)
-
-### Unclean-drop (SIGKILL / network-kill — no clean WS close)
-- Server WS ping every 20s; terminate after 2 missed pongs → `ws.terminate()` → `ws.on('close')`
-- Max detection: ~40s
-- After close: `startReconnectGrace` → `peer-reconnecting` → recorder STOPPED within ~40s ✅
-- 40s << 2-min OOM window
+### frontend (questions.service.ts, settings → Transcribe tab)
+- `LlmSettings` extended; `updateSettings` accepts the new fields; `transcribeSession()` added.
+- Settings → Transcribe tab: "When to transcribe" (Auto after call / On demand / Off) and
+  "Provider" (On-box Whisper / External STT) selectors.
 
 ## What did NOT change
-- `startReconnectGrace` / token issuance / reconnect ticket lifetime
-- `expireReconnectingPeer` (pre-existing grace-expire path)
-- `peer-resumed` / `recordPeerResumed` / `sfuClient.removePeer(oldClientId)` on resume
-- `peer-left` → `notifyParticipantLeft` → `removePeerStream` (safe no-op when already stopped)
-- Normal recording start/stop
-- Re-subscribe reconnect fix (B7)
+- Per-user recording + the named cross-talk transcription pipeline (R8/R9) — only *when* it runs.
+- The call/media path (audio/video/screenshare/signaling-media) — untouched. Safe for live calls.
+- The `/api/recordings/:filename/download` per-person download endpoint.
 
 ## Deploy
-- Frontend: npm run build → pm2 restart meet-poc-fe ✅
-- Backend: tsc → pm2 restart meet-poc-be ✅
+- Backend: `tsx watch` auto-reloaded (typecheck clean; new session-transcribe route returns 401 =
+  registered + auth-gated).
+- Frontend: `npm run build` → bundle `main-MXQKFKT3.js`, served on localhost:4700 and
+  voice.silverjrom.app.
+
+## Default behavior now
+Out of the box: a call records per-person, then — once the call ends — transcribes automatically
+(mode `auto`), serialized, on-box. A host can switch to `ondemand` or `off`, or point at an
+external STT provider. Whisper never runs while the call is live.
+
+---
+
+See `plan/CFBASE/README.md` for the separate Cloudflare-first redesign spec (where transcription
+is off by default and whisper is a Queue→Worker provider).

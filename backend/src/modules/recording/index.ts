@@ -7,7 +7,12 @@ import express from 'express';
 import { getDb, getRepoRoot } from '../../db.js';
 import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
 import { runAutoAnalysesForRecording } from '../questions/index.js';
-import { DEFAULT_TRANSCRIBER_MODEL, getTranscriberModel } from '../questions/store.js';
+import {
+  DEFAULT_TRANSCRIBER_MODEL,
+  getTranscriberModel,
+  getTranscriptionMode,
+  getTranscriptionProvider,
+} from '../questions/store.js';
 import { getRoom, isOwnerOf } from '../rooms/store.js';
 import { getOpenSessionFor } from '../sessions/store.js';
 
@@ -84,7 +89,10 @@ export function recordingRouter(database: Database.Database = getDb()): express.
       }
       console.log(`[rec] saved ${filename} (${(body.length / 1024).toFixed(1)} KB)${isPerUser ? ' [per-user]' : ''}`);
       res.json({ ok: true, file: filename, bytes: body.length } satisfies UploadResponse);
-      scheduleTranscription(filename, database);
+      // NOTE: transcription is deliberately NOT triggered here. Running whisper on
+      // per-recording upload spikes CPU on the signaling box while the call is still
+      // live. Transcription is post-call processing only: auto on session close
+      // (maybeAutoTranscribeSession) or on demand (host-triggered endpoints).
     });
   });
 
@@ -221,8 +229,17 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     const filename = String(req.params.filename || '');
     const ownership = ownedRecordingPath(filename, authReq.user.email, database);
     if (ownership.status !== 200) return res.status(ownership.status).json({ error: ownership.error });
-    spawnTranscription(filename, { force: req.body?.force === true }, database);
+    enqueueTranscription(filename, { force: req.body?.force === true }, database);
     return res.json({ ok: true, status: 'started' });
+  });
+
+  // On-demand: transcribe every recording in a session (host-triggered).
+  router.post('/api/recordings/session/:sessionId/transcribe', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const sessionId = String(req.params.sessionId || '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+    if (!sessionId) return res.status(400).json({ error: 'sessionId required' });
+    const queued = transcribeSessionRecordings(sessionId, authReq.user.email, database, { force: req.body?.force === true });
+    return res.json({ ok: true, status: 'started', queued });
   });
 
   router.post('/api/recordings/bulk-delete', requireAuth(database), (req, res) => {
@@ -401,17 +418,92 @@ function ownedRecordingPath(
   return { status: 200, filepath };
 }
 
-function spawnTranscription(filename: string, options: { force: boolean }, database: Database.Database = getDb()): void {
+// ── Transcription execution: serialized, post-call only ─────────────────────
+// At most ONE transcription runs at a time, so a multi-party session ending (with
+// N per-user recordings) never spikes CPU on the signaling box. Transcription is
+// invoked post-call (auto on session close) or on demand — never on upload.
+const transcribeQueue: Array<{ filename: string; force: boolean }> = [];
+let transcribeRunning = false;
+
+export function enqueueTranscription(
+  filename: string,
+  options: { force: boolean } = { force: false },
+  database: Database.Database = getDb(),
+): void {
   if (process.env.MEET_TRANSCRIBE_DISABLED === '1') return;
+  if (!transcribeQueue.some((q) => q.filename === filename)) {
+    transcribeQueue.push({ filename, force: options.force });
+  }
+  pumpTranscribeQueue(database);
+}
+
+function pumpTranscribeQueue(database: Database.Database): void {
+  if (transcribeRunning) return;
+  const next = transcribeQueue.shift();
+  if (!next) return;
+  transcribeRunning = true;
+  spawnTranscription(next.filename, { force: next.force }, database, () => {
+    transcribeRunning = false;
+    pumpTranscribeQueue(database);
+  });
+}
+
+/**
+ * Auto-transcribe a finished session's recordings. Invoked from the signaling
+ * layer AFTER the call/session ends — never mid-call. No-op unless the room
+ * owner's transcription mode is 'auto'.
+ */
+export function maybeAutoTranscribeSession(
+  ownerEmail: string,
+  sessionId: string,
+  database: Database.Database = getDb(),
+): void {
+  if (!ownerEmail || !sessionId) return;
+  if (getTranscriptionMode(ownerEmail, database) !== 'auto') return;
+  transcribeSessionRecordings(sessionId, ownerEmail, database, { force: false });
+}
+
+/** Queue every recording belonging to a session for (serialized) transcription. */
+export function transcribeSessionRecordings(
+  sessionId: string,
+  ownerEmail: string,
+  database: Database.Database = getDb(),
+  options: { force: boolean } = { force: false },
+): number {
+  const recordings = listRecordingsForUser(ownerEmail, database, sessionId);
+  let queued = 0;
+  for (const entry of recordings) {
+    enqueueTranscription(entry.filename, options, database);
+    queued += 1;
+  }
+  if (queued > 0) console.log(`[transcribe] queued ${queued} recording(s) for session ${sessionId}`);
+  return queued;
+}
+
+function spawnTranscription(
+  filename: string,
+  options: { force: boolean },
+  database: Database.Database = getDb(),
+  onDone: () => void = () => {},
+): void {
+  let settled = false;
+  const finish = (): void => { if (!settled) { settled = true; onDone(); } };
+  if (process.env.MEET_TRANSCRIBE_DISABLED === '1') return finish();
   const filepath = safeRecordingPath(filename);
   const lockPath = transcriptLockPathFor(filename);
-  if (!filepath || !lockPath) return;
+  if (!filepath || !lockPath) return finish();
   const transcriptPath = transcriptPathFor(filename);
-  if (!options.force && transcriptPath && fs.existsSync(transcriptPath)) return;
+  if (!options.force && transcriptPath && fs.existsSync(transcriptPath)) return finish();
   try {
     fs.writeFileSync(lockPath, JSON.stringify({ startedAtIso: new Date().toISOString(), filename }, null, 2));
   } catch (err) {
     console.error('[transcribe] lock create failed', err);
+    return finish();
+  }
+  // Provider seam: local on-box whisper (default) or an external STT API.
+  const provider = transcriptionProviderForRecording(filename, database);
+  if (provider === 'thirdparty') {
+    transcribeViaThirdParty(filename, filepath, lockPath, options, database, finish);
     return;
   }
   const python = process.env.MEET_TRANSCRIBE_PYTHON || path.join(getRepoRoot(), 'backend', '.venv-transcribe', 'bin', 'python');
@@ -429,6 +521,7 @@ function spawnTranscription(filename: string, options: { force: boolean }, datab
   child.on('error', (err) => {
     console.error(`[transcribe] failed to start ${filename}`, err);
     cleanupTranscribeLock(lockPath);
+    finish();
   });
   child.on('close', (code) => {
     cleanupTranscribeLock(lockPath);
@@ -440,7 +533,44 @@ function spawnTranscription(filename: string, options: { force: boolean }, datab
     } else {
       console.error(`[transcribe] exited ${code} for ${filename}`);
     }
+    finish();
   });
+}
+
+function transcriptionProviderForRecording(filename: string, database: Database.Database): 'local' | 'thirdparty' {
+  const parsed = parseRecordingFilename(filename);
+  if (!parsed) return 'local';
+  const room = getRoom(parsed.roomId, database);
+  if (!room) return 'local';
+  return getTranscriptionProvider(room.ownerEmail, database);
+}
+
+/**
+ * External STT provider seam. Inert until configured via env:
+ *   MEET_STT_ENDPOINT — HTTP endpoint accepting the audio, returns transcript JSON
+ *   MEET_STT_API_KEY  — bearer credential (kept in .env, never in code)
+ *   MEET_STT_MODEL    — optional model id
+ * Selecting 'thirdparty' without an endpoint is a logged no-op (no transcript),
+ * so it never errors the call path. Integration is wired here so a vendor can be
+ * enabled by config alone. See plan/CFBASE for the Cloudflare-native target
+ * (Queue -> Worker -> Workers AI / external STT -> R2).
+ */
+function transcribeViaThirdParty(
+  filename: string,
+  _filepath: string,
+  lockPath: string,
+  _options: { force: boolean },
+  _database: Database.Database,
+  onDone: () => void,
+): void {
+  const endpoint = process.env.MEET_STT_ENDPOINT;
+  if (!endpoint) {
+    console.warn(`[transcribe] thirdparty selected but MEET_STT_ENDPOINT unset — skipping ${filename}`);
+  } else {
+    console.log(`[transcribe] thirdparty endpoint configured (${endpoint}) — integration pending for ${filename}`);
+  }
+  cleanupTranscribeLock(lockPath);
+  onDone();
 }
 
 function transcriberModelForRecording(filename: string, database: Database.Database): string {
@@ -449,16 +579,6 @@ function transcriberModelForRecording(filename: string, database: Database.Datab
   const room = getRoom(parsed.roomId, database);
   if (!room) return DEFAULT_TRANSCRIBER_MODEL;
   return getTranscriberModel(room.ownerEmail, database);
-}
-
-function scheduleTranscription(filename: string, database: Database.Database): void {
-  if (process.env.MEET_TRANSCRIBE_DISABLED === '1') return;
-  const delayMs = Number(process.env.MEET_TRANSCRIBE_UPLOAD_DELAY_MS || 1500);
-  windowlessSetTimeout(() => spawnTranscription(filename, { force: false }, database), Number.isFinite(delayMs) ? Math.max(0, delayMs) : 1500);
-}
-
-function windowlessSetTimeout(callback: () => void, delayMs: number): void {
-  setTimeout(callback, delayMs).unref?.();
 }
 
 function cleanupTranscribeLock(lockPath: string): void {

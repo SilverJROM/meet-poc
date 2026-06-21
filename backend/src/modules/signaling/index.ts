@@ -7,7 +7,25 @@ import { parseCookies } from '../../lib/cookies.js';
 import { getSessionUser } from '../auth/sessions.js';
 import { closeRoomBySystem, getRoom, getRoomBySlugOrId, isOwnerOf, openRoomBySystem, verifyRoomPassword } from '../rooms/store.js';
 import { bumpPeak, closeSession, openSession } from '../sessions/store.js';
+import { maybeAutoTranscribeSession } from '../recording/index.js';
 import { notifyOwnerLobbyPending } from '../telegram/index.js';
+
+// Close a meeting session and (post-call only) kick off auto-transcription if the
+// room owner has it enabled. Transcription never runs while the call is live.
+function closeSessionAndAutoTranscribe(
+  sessionId: string | null | undefined,
+  reason: string,
+  database: Database.Database,
+): void {
+  const session = closeSession(sessionId, reason, database);
+  if (session) {
+    try {
+      maybeAutoTranscribeSession(session.hostEmail, session.id, database);
+    } catch (err) {
+      console.warn('[transcribe] auto-transcribe on session close failed', err);
+    }
+  }
+}
 
 type PeerState = 'idle' | 'admitted' | 'pending' | 'waiting';
 
@@ -386,7 +404,7 @@ function bumpAdmittedPeak(live: LiveRoom, database: Database.Database): void {
 function maybeCloseEmptyRoom(roomId: string, live: LiveRoom, reason: 'host-disconnect-empty' | 'last-peer-left', database: Database.Database): void {
   if (live.admitted.size > 0 || live.pending.size > 0 || live.closedWaiters.size > 0 || live.reconnecting.size > 0) return;
   try {
-    closeSession(live.currentSessionId, reason, database);
+    closeSessionAndAutoTranscribe(live.currentSessionId, reason, database);
   } catch (err) {
     console.warn(`[room ${roomId}] failed to close meeting session`, err);
   }
@@ -676,7 +694,7 @@ function openRoomForOwnerAdmission(roomId: string, live: LiveRoom, database: Dat
 
 function closeRoomForHost(roomId: string, live: LiveRoom, database: Database.Database): void {
   closeRoomBySystem(roomId, database);
-  closeSession(live.currentSessionId, 'host-close-room', database);
+  closeSessionAndAutoTranscribe(live.currentSessionId, 'host-close-room', database);
 
   const admitted = [...live.admitted.values()];
   const pending = [...live.pending.values()];
@@ -1288,7 +1306,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const live = getLiveAdmittedRoom(currentRoom, state);
         if (!live || !currentRoom) return;
         if (!isHostCommandAllowed('meeting-ended-by-host', currentRoom, clientId, userEmail, database)) return;
-        closeSession(live.currentSessionId, 'host-end', database);
+        closeSessionAndAutoTranscribe(live.currentSessionId, 'host-end', database);
         const admitted = [...live.admitted.values()];
         const pending = [...live.pending.values()];
         live.currentSessionId = null;

@@ -9,6 +9,18 @@ export const DEFAULT_TRANSCRIBER_MODEL: TranscriberModel = 'medium';
 
 export type TranscriberModel = 'small' | 'medium' | 'large-v3';
 
+// Transcription is POST-call processing, never inline during a live call.
+// 'auto'     — transcribe a session's recordings automatically once the call ends
+// 'ondemand' — never automatic; host triggers per-recording or per-session
+// 'off'      — disabled
+export type TranscriptionMode = 'auto' | 'ondemand' | 'off';
+export const DEFAULT_TRANSCRIPTION_MODE: TranscriptionMode = 'auto';
+
+// Where transcription runs. 'local' = on-box faster-whisper; 'thirdparty' = external STT API
+// (configured via env: MEET_STT_ENDPOINT / MEET_STT_API_KEY / MEET_STT_MODEL).
+export type TranscriptionProvider = 'local' | 'thirdparty';
+export const DEFAULT_TRANSCRIPTION_PROVIDER: TranscriptionProvider = 'local';
+
 export type Question = {
   id: string;
   name: string;
@@ -197,6 +209,48 @@ export function setTranscriberModel(ownerEmail: string, model: unknown, database
     .prepare('INSERT OR REPLACE INTO llm_settings (key, value, owner_email, updated_at) VALUES (?, ?, ?, ?)')
     .run(settingKey(ownerEmail, 'transcriber_model'), value, ownerEmail, now);
   return value;
+}
+
+export function getTranscriptionMode(ownerEmail: string, database: Database.Database = getDb()): TranscriptionMode {
+  ensureQuestionDefaults(ownerEmail, database);
+  const row = database
+    .prepare('SELECT key, value, owner_email, updated_at FROM llm_settings WHERE key = ? AND owner_email = ?')
+    .get(settingKey(ownerEmail, 'transcription_mode'), ownerEmail) as SettingRow | undefined;
+  return isTranscriptionMode(row?.value) ? row.value : DEFAULT_TRANSCRIPTION_MODE;
+}
+
+export function setTranscriptionMode(ownerEmail: string, mode: unknown, database: Database.Database = getDb()): TranscriptionMode {
+  const value = isTranscriptionMode(mode) ? mode : DEFAULT_TRANSCRIPTION_MODE;
+  const now = Date.now();
+  database
+    .prepare('INSERT OR REPLACE INTO llm_settings (key, value, owner_email, updated_at) VALUES (?, ?, ?, ?)')
+    .run(settingKey(ownerEmail, 'transcription_mode'), value, ownerEmail, now);
+  return value;
+}
+
+export function getTranscriptionProvider(ownerEmail: string, database: Database.Database = getDb()): TranscriptionProvider {
+  ensureQuestionDefaults(ownerEmail, database);
+  const row = database
+    .prepare('SELECT key, value, owner_email, updated_at FROM llm_settings WHERE key = ? AND owner_email = ?')
+    .get(settingKey(ownerEmail, 'transcription_provider'), ownerEmail) as SettingRow | undefined;
+  return isTranscriptionProvider(row?.value) ? row.value : DEFAULT_TRANSCRIPTION_PROVIDER;
+}
+
+export function setTranscriptionProvider(ownerEmail: string, provider: unknown, database: Database.Database = getDb()): TranscriptionProvider {
+  const value = isTranscriptionProvider(provider) ? provider : DEFAULT_TRANSCRIPTION_PROVIDER;
+  const now = Date.now();
+  database
+    .prepare('INSERT OR REPLACE INTO llm_settings (key, value, owner_email, updated_at) VALUES (?, ?, ?, ?)')
+    .run(settingKey(ownerEmail, 'transcription_provider'), value, ownerEmail, now);
+  return value;
+}
+
+function isTranscriptionMode(value: unknown): value is TranscriptionMode {
+  return value === 'auto' || value === 'ondemand' || value === 'off';
+}
+
+function isTranscriptionProvider(value: unknown): value is TranscriptionProvider {
+  return value === 'local' || value === 'thirdparty';
 }
 
 export function slugQuestionName(name: string): string {
