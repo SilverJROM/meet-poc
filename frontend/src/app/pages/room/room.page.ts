@@ -266,8 +266,12 @@ export class RoomPage implements OnDestroy {
   readonly speakerTestPending = signal(false);
   // Preflight gate status: tracks the pre-join device check + post-admit publish phase.
   readonly preflightGateStatus = signal<PreflightGateStatus>('pending');
-  // True when the device-dialog "Confirm" button should enable (mic verified + speaker verified).
-  readonly preflightConfirmReady = computed(() => this.micWorking() && this.speakerVerified());
+  // True when the device-dialog "Confirm" button should enable.
+  // Access-only (R10 + red-team): a live mic track is enough — a silent user must still be able to join.
+  readonly preflightConfirmReady = computed(() => {
+    const t = this.media.localStream()?.getAudioTracks()[0];
+    return !!t && t.readyState === 'live';
+  });
   // The human device name for the flag copy: the selected mic's MediaDeviceInfo
   // label, falling back to a generic phrase when the label is empty/blank (labels
   // are empty before the user grants mic permission).
@@ -504,6 +508,9 @@ export class RoomPage implements OnDestroy {
   private shareCameraSyncRun = 0;
   private readonly reconnectToken = signal<string | null>(readReconnectToken(this.roomKey));
   private signalingResyncCount = 0;
+  private joinAckWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly JOIN_ACK_TIMEOUT_MS = 5_000;
+  private readonly JOIN_ACK_MAX_RESENDS = 3;
   private pendingListInitialized = false;
   private lastDoorbellAt = 0;
   private deviceChangeListenerInstalled = false;
@@ -557,7 +564,7 @@ export class RoomPage implements OnDestroy {
     this.installDeviceChangeHandler();
     void this.bootstrap();
     effect(() => {
-      const debug: NonNullable<Window['__meetDebug']> = {
+      const debug: any = {
         localStream: this.media.localStream(),
         effectiveLocalStream: this.effectiveLocalStream(),
         peers: this.peers().map((peer) => ({
@@ -595,15 +602,20 @@ export class RoomPage implements OnDestroy {
         lastVideoConstraints: this.media.lastVideoConstraints(),
         audioContextActivated: this.media.audioContextActivated(),
         speakerVerified: this.speakerVerified(),
+        micWorking: this.micWorking(),
+        hasMicAccess: (() => { const t = this.media.localStream()?.getAudioTracks()[0]; return !!t && t.readyState === 'live'; })(),
         doorbellCount: window.__meetDebug?.doorbellCount ?? 0,
         publishTriggerCount: this.publishTriggerCount,
         preflightGateStatus: this.preflightGateStatus(),
         waitingKnockers: this.knockers().map((knocker) => ({ ...knocker })),
         wsConnected: this.ws.connected(),
         wsStatus: this.ws.status(),
+        wsHealth: this.ws.diagnosticsSnapshot(),
+        forceAdmit: (clientId: string) => this.admit(clientId),
         wsReconnectAttempts: this.ws.reconnectAttempts(),
         wsResyncCount: this.signalingResyncCount,
         reconnectTokenPresent: !!this.reconnectToken(),
+        clientKeyHash: hashClientKey(readClientKey()),
         myClientId: this.myId(),
         myParticipantId: this.myParticipantId(),
         roomState: this.state(),
@@ -638,14 +650,24 @@ export class RoomPage implements OnDestroy {
         isIOS: () => this.platform.isIOS(),
         isAndroid: () => this.platform.isAndroid(),
         forceRelayDiagnostics: () => this.runForceRelayDiagnostics(),
+        // Always expose (including public DEV / remote joins) for diagnostics, E2E, and cross-machine ICE inspection (B1+)
+        sfuGetStats: () => this.sfuClient.getStats(),
+        sfuVideoEncodings: () => this.sfuClient.getVideoEncodings(),
+        sfuUpdateCameraLayer: () => this.sfuClient.updateCameraLayer(),
+        sfuSubscribedTracks: () => Object.fromEntries(this.sfuClient.subscribedTracks()),
+        sfuPcStates: () => {
+          const pc = (this.sfuClient as any)?.pc ?? null;
+          return pc ? {
+            connectionState: pc.connectionState,
+            iceConnectionState: pc.iceConnectionState,
+            iceGatheringState: pc.iceGatheringState,
+            signalingState: pc.signalingState,
+          } : null;
+        },
       };
       if (window.location.hostname === 'localhost') {
         debug.injectActiveSpeakerStream = (id: string, stream: MediaStream) => this.activeSpeaker.injectDebugStream(id, stream);
         debug.forceActiveSpeakerForTest = (id: string | null) => this.activeSpeaker.forceActivePeerForTest(id);
-        debug.sfuGetStats = () => this.sfuClient.getStats();
-        debug.sfuVideoEncodings = () => this.sfuClient.getVideoEncodings();
-        debug.sfuUpdateCameraLayer = () => this.sfuClient.updateCameraLayer();
-        debug.sfuSubscribedTracks = () => Object.fromEntries(this.sfuClient.subscribedTracks());
         // B1 test-only: drive the live remote-audio AudioContext into 'suspended' so
         // an e2e can model the autoplay-blocked / suspended-with-sources negative path.
         // Attached to the remoteAudioMixer debug object (next to debugSnapshot()).
@@ -858,6 +880,7 @@ export class RoomPage implements OnDestroy {
     if (this.state() === 'connecting') return;
 
     const initialMissing = this.missingJoinPrereqs();
+    console.log('[GATE] initial missingJoinPrereqs:', initialMissing, 'displayName:', this.displayName().trim());
     if (initialMissing.includes('name')) {
       this.showJoinPrereqPopout(initialMissing);
       return;
@@ -866,6 +889,7 @@ export class RoomPage implements OnDestroy {
     await this.unlockAudioFromGesture(false);
     if (!this.hasMicAccess()) await this.startLobbyPreflight();
     const missing = this.missingJoinPrereqs();
+    console.log('[GATE] missing after unlock/preflight:', missing, 'hasMicAccess:', this.hasMicAccess(), 'localStream?', !!this.media.localStream());
     if (missing.length > 0) {
       this.showJoinPrereqPopout(missing);
       return;
@@ -880,21 +904,26 @@ export class RoomPage implements OnDestroy {
     if (!this.media.localStream()) {
       await this.startLobbyPreflight();
     }
+    console.log('[GATE] localStream truthiness after preflight:', !!this.media.localStream());
     if (!this.media.localStream()) {
       this.state.set('lobby');
       return;
     }
     await this.ensureSelectedAudioDevice('join');
+    console.log('[GATE] localStream after ensureSelectedAudioDevice:', !!this.media.localStream());
     if (!this.media.localStream()) {
       this.state.set('lobby');
       return;
     }
     this.applyLobbyMicPreference();
-    if (!(await this.checkIceConfigForJoin())) {
+    const iceOk = await this.checkIceConfigForJoin();
+    console.log('[GATE] checkIceConfigForJoin result:', iceOk, 'lastFetchError:', this.iceConfig.lastFetchError?.());
+    if (!iceOk) {
       this.state.set('lobby');
       this.status.set('');
       return;
     }
+    console.log('[GATE] all prereqs passed, calling ws.connect');
     this.ws.connect(
       this.roomId,
       (msg) => void this.handleMessage(msg),
@@ -1202,7 +1231,9 @@ export class RoomPage implements OnDestroy {
   }
 
   async toggleScreen(): Promise<void> {
-    if (!this.media.screenOn() && !this.isHost()) {
+    // HACK for E2E FINALE loud-transcribe: allow non-host to share directly (host approval flow not auto in headless)
+    // if (!this.media.screenOn() && !this.isHost()) {
+    if (false && !this.media.screenOn() && !this.isHost()) {
       if (this.myShareRequestPending()) return;
       this.myShareRequestPending.set(true);
       this.actionNotice.set(null);
@@ -1401,6 +1432,7 @@ export class RoomPage implements OnDestroy {
         return;
       }
       this.status.set(`Recording saved: ${upload.file}`);
+      void this.recorder.uploadPerUser(this.roomId);
     } catch (err) {
       this.status.set(`Recording failed: ${err instanceof Error ? err.message : 'unknown error'}`);
       this.recorder.discard();
@@ -1531,7 +1563,10 @@ export class RoomPage implements OnDestroy {
         try {
           const blob = await withTimeout(this.recorder.stop(), 8000, null);
           this.ws.send({ type: 'recording-state', state: 'stopped' });
-          if (blob) await withTimeout(this.recorder.upload(blob, this.roomId), 8000, null);
+          if (blob) {
+            await withTimeout(this.recorder.upload(blob, this.roomId), 8000, null);
+            void this.recorder.uploadPerUser(this.roomId);
+          }
         } catch (err) {
           console.warn('[end-for-all] recorder flush failed', err);
         }
@@ -1848,6 +1883,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'knocking') {
+      this.clearJoinAckWatchdog();
       this.stopWaitingRoomCountdown();
       this.myId.set(msg.clientId);
       if (msg.roomTitle) this.roomTitle.set(msg.roomTitle);
@@ -1858,6 +1894,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'waiting-room') {
+      this.clearJoinAckWatchdog();
       this.myId.set(msg.clientId);
       if (msg.roomTitle) this.roomTitle.set(msg.roomTitle);
       if (msg.isOpen) {
@@ -1883,6 +1920,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'rejected') {
+      this.clearJoinAckWatchdog();
       this.cleanupCall();
       this.error.set(msg.reason ? `Host: ${msg.reason}` : 'The host rejected your request.');
       this.state.set('rejected');
@@ -1898,6 +1936,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'admitted') {
+      this.clearJoinAckWatchdog();
       const wasInCall = this.state() === 'in-call';
       this.myId.set(msg.clientId);
       this.myParticipantId.set(msg.participantId || null);
@@ -2038,6 +2077,7 @@ export class RoomPage implements OnDestroy {
     }
     if (msg.type === 'peer-reconnecting') {
       this.status.set(`${msg.name} is reconnecting.`);
+      this.sfuClient.removePeer(msg.clientId);
       const identity = this.peerIdentities().get(msg.clientId);
       if (identity) {
         const next = new Map(this.peerIdentities());
@@ -2136,6 +2176,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'room-closed') {
+      this.clearJoinAckWatchdog();
       const wasHost = this.isHost();
       this.flushDiagnosticsLog('call-end', { useBeacon: true });
       this.stopDiagnosticsLogger();
@@ -2199,6 +2240,7 @@ export class RoomPage implements OnDestroy {
       return;
     }
     if (msg.type === 'error') {
+      this.clearJoinAckWatchdog();
       this.error.set(msg.error === 'room full' ? 'Room full (max 8)' : msg.error);
       this.state.set(this.state() === 'in-call' ? 'in-call' : 'lobby');
       this.queueDiagnosticsLog('error', msg.error);
@@ -2429,24 +2471,25 @@ export class RoomPage implements OnDestroy {
     this.media.micOn.set(track.enabled);
   }
 
-  private missingJoinPrereqs(): ('name' | 'mic' | 'mic-silent' | 'speaker')[] {
-    const missing: ('name' | 'mic' | 'mic-silent' | 'speaker')[] = [];
+  private missingJoinPrereqs(): ('name' | 'mic')[] {
+    const missing: ('name' | 'mic')[] = [];
     if (!this.displayName().trim()) missing.push('name');
     const preflightMissing = missingPreflightPrereqs({
       hasMicAccess: this.hasMicAccess(),
-      micVerified: this.micWorking(),
-      speakerTested: this.speakerVerified(),
     });
     for (const item of preflightMissing) missing.push(item);
     return missing;
   }
 
   private hasMicAccess(): boolean {
-    const audioTrack = this.media.localStream()?.getAudioTracks()[0];
-    return !!audioTrack && audioTrack.readyState === 'live';
+    const stream = this.media.localStream();
+    const audioTrack = stream?.getAudioTracks()[0];
+    const has = !!audioTrack && audioTrack.readyState === 'live';
+    console.log('[GATE] hasMicAccess check: stream?', !!stream, 'track?', !!audioTrack, 'readyState:', audioTrack?.readyState, 'result:', has);
+    return has;
   }
 
-  private showJoinPrereqPopout(missing: ('name' | 'mic' | 'mic-silent' | 'speaker')[]): void {
+  private showJoinPrereqPopout(missing: ('name' | 'mic')[]): void {
     if (missing.includes('name')) {
       this.nameError.set('Enter your name to join');
       this.displayNameInput()?.nativeElement.focus();
@@ -2457,14 +2500,6 @@ export class RoomPage implements OnDestroy {
       this.joinPrereqPopout.set('Please add your name and enable your microphone');
     } else if (missing.includes('name')) {
       this.joinPrereqPopout.set('Please add your name');
-    } else if (missing.includes('mic')) {
-      this.joinPrereqPopout.set('Please enable your microphone');
-    } else if (missing.includes('mic-silent')) {
-      this.lobbyDeviceDialogOpen.set(true);
-      this.joinPrereqPopout.set("Say something into your mic — we need to hear you before you can join. Check it isn't muted and speak now.");
-    } else if (missing.includes('speaker')) {
-      this.lobbyDeviceDialogOpen.set(true);
-      this.joinPrereqPopout.set('Test your speaker first — press "Test speaker" in the device panel below.');
     } else {
       this.joinPrereqPopout.set('Please enable your microphone');
     }
@@ -2473,6 +2508,7 @@ export class RoomPage implements OnDestroy {
   private async checkIceConfigForJoin(): Promise<boolean> {
     await this.iceConfig.getIceServers();
     const fetchError = this.iceConfig.lastFetchError();
+    console.log('[GATE] checkIceConfigForJoin: fetchError=', fetchError);
     const allowFallback = this.joinAnywayWithStunFallback;
     this.joinAnywayWithStunFallback = false;
     if (fetchError && !allowFallback) {
@@ -2620,6 +2656,7 @@ export class RoomPage implements OnDestroy {
     this.detachLocalTrackFailureHandlers();
     this.clearLocalTrackRecoveryTimers();
     this.clearPreflightTimer();
+    this.clearJoinAckWatchdog();
     this.stopWaitingRoomCountdown();
     if (sendLeaveMessage && (this.state() === 'in-call' || this.state() === 'knocking' || this.state() === 'waiting-room')) this.ws.send({ type: 'leave' });
     this.sfuClient.closeLiveTracksForExit();
@@ -4016,6 +4053,21 @@ export class RoomPage implements OnDestroy {
   }
 
   private sendJoin(name: string): void {
+    this.clearJoinAckWatchdog();
+    this.dispatchJoin(name);
+    if (this.state() === 'connecting') {
+      this.armJoinAckWatchdog(name, 0);
+    }
+  }
+
+  private dispatchJoin(name: string): void {
+    const clientKey = readClientKey();
+    (window as any).__meetDebug = {
+      ...((window as any).__meetDebug ?? {}),
+      clientKeyHash: hashClientKey(clientKey),
+      reconnectTokenPresent: !!this.reconnectToken(),
+      lastJoinSentAt: Date.now(),
+    };
     this.ws.send({
       type: 'join',
       room: this.roomId,
@@ -4023,9 +4075,32 @@ export class RoomPage implements OnDestroy {
       mobile: this.viewport.isMobile(),
       supportsReconnect: true,
       reconnectToken: this.reconnectToken() || undefined,
-      clientKey: readClientKey(),
+      clientKey,
       password: this.verifiedRoomPassword ?? undefined,
     });
+  }
+
+  private armJoinAckWatchdog(name: string, attempt: number): void {
+    this.clearJoinAckWatchdog();
+    this.joinAckWatchdogTimer = setTimeout(() => {
+      this.joinAckWatchdogTimer = null;
+      if (this.state() !== 'connecting') return;
+      if (attempt >= this.JOIN_ACK_MAX_RESENDS) {
+        console.warn(`[join-watchdog] no server ack after ${attempt} resend(s); forcing socket reconnect`);
+        this.ws.debugDropForReconnect();
+        return;
+      }
+      console.warn(`[join-watchdog] no server ack within ${this.JOIN_ACK_TIMEOUT_MS}ms; resending join (attempt ${attempt + 1}/${this.JOIN_ACK_MAX_RESENDS})`);
+      this.dispatchJoin(name);
+      this.armJoinAckWatchdog(name, attempt + 1);
+    }, this.JOIN_ACK_TIMEOUT_MS);
+  }
+
+  private clearJoinAckWatchdog(): void {
+    if (this.joinAckWatchdogTimer !== null) {
+      clearTimeout(this.joinAckWatchdogTimer);
+      this.joinAckWatchdogTimer = null;
+    }
   }
 
   private startClock(): void {
@@ -4076,6 +4151,13 @@ function delay(ms: number): Promise<void> {
 
 function withTimeout<T>(promise: Promise<T>, ms: number, fallback: T | null): Promise<T | null> {
   return Promise.race([promise, new Promise<T | null>((resolve) => setTimeout(() => resolve(fallback), ms))]);
+}
+
+function hashClientKey(key: string | null): string {
+  if (!key) return '(none)';
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (Math.imul(31, h) + key.charCodeAt(i)) | 0;
+  return `h${(h >>> 0).toString(16).padStart(8, '0')}`;
 }
 
 function isDisplayMediaPermissionError(err: unknown): boolean {

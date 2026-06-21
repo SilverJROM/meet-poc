@@ -99,6 +99,7 @@ export class RecorderService {
   private stopInFlight = false;
   private finalized = false;
   private pendingStopResolve: ((blob: Blob) => void) | null = null;
+  private perUserRecorders = new Map<string, { recorder: MediaRecorder; chunks: Blob[]; displayName: string; stopped: boolean }>();
 
   constructor() {
     effect(() => {
@@ -159,6 +160,16 @@ export class RecorderService {
       this.recorder.start(1000);
     }
     this.isRecording.set(true);
+    const nameMap = new Map<string, string>();
+    let localDisplayName = 'host';
+    for (const p of metadata?.participants || []) {
+      nameMap.set(p.clientId, p.displayName);
+      if (p.isHost) localDisplayName = p.displayName;
+    }
+    this.startPerUserRecorder('local', localStream, localDisplayName);
+    for (const [cid, stream] of peerStreams) {
+      this.startPerUserRecorder(cid, stream, nameMap.get(cid) || cid);
+    }
   }
 
   addPeerStream(clientId: string, stream: MediaStream | null): void {
@@ -190,6 +201,11 @@ export class RecorderService {
     this.sourceFor.delete(clientId);
     this.streamFor.delete(clientId);
     this.sourceCount.set(this.sourceFor.size);
+    const perUser = this.perUserRecorders.get(clientId);
+    if (perUser && !perUser.stopped && perUser.recorder.state !== 'inactive') {
+      perUser.recorder.onstop = () => { perUser.stopped = true; };
+      try { perUser.recorder.stop(); } catch { perUser.stopped = true; }
+    }
   }
 
   recordedClientIds(): string[] {
@@ -210,6 +226,7 @@ export class RecorderService {
         this.finalizeRecording(blob);
       };
     });
+    const perUserDone = this.stopAllPerUserRecorders();
     try {
       recorder.stop();
     } catch (err) {
@@ -217,7 +234,7 @@ export class RecorderService {
       this.pendingStopResolve = null;
       throw err;
     }
-    return stopped;
+    return Promise.all([stopped, perUserDone]).then(results => results[0]);
   }
 
   async upload(blob: Blob, roomId: string): Promise<RecordingResponse> {
@@ -258,6 +275,13 @@ export class RecorderService {
         // Discard still tears down local state if the browser already stopped the recorder.
       }
     }
+    for (const [, entry] of this.perUserRecorders) {
+      if (!entry.stopped && entry.recorder.state !== 'inactive') {
+        entry.recorder.onstop = () => {};
+        try { entry.recorder.stop(); } catch {}
+      }
+    }
+    this.perUserRecorders.clear();
     this.finalizeRecording(blob, { resetMetadata: true });
     this.isUploading.set(false);
   }
@@ -301,6 +325,12 @@ export class RecorderService {
       this.sourceCount.set(this.sourceFor.size);
     } catch (err) {
       console.warn('recording mix source failed', err);
+    }
+    const existingPerUser = this.perUserRecorders.get(clientId);
+    if (existingPerUser?.stopped) this.perUserRecorders.delete(clientId);
+    if (!this.perUserRecorders.has(clientId)) {
+      const meta = this.participants.get(clientId);
+      this.startPerUserRecorder(clientId, stream, meta?.displayName || clientId);
     }
   }
 
@@ -443,6 +473,65 @@ export class RecorderService {
       console.warn('recording metadata upload failed', err);
       this.metadataWarning.set('Recording saved, but speaker metadata was not saved.');
     }
+  }
+
+  private startPerUserRecorder(clientId: string, stream: MediaStream, displayName: string): void {
+    if (!this.isRecording() || this.perUserRecorders.has(clientId)) return;
+    if (stream.getAudioTracks().length === 0) return;
+    try {
+      const mime = this.mimeType || 'audio/webm';
+      const recOpts = mime && MediaRecorder.isTypeSupported(mime) ? { mimeType: mime } : undefined;
+      const rec = new MediaRecorder(stream, recOpts);
+      const chunks: Blob[] = [];
+      rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+      if (this.platform.isIOS()) { rec.start(); } else { rec.start(1000); }
+      this.perUserRecorders.set(clientId, { recorder: rec, chunks, displayName, stopped: false });
+    } catch (err) {
+      console.warn('[rec-peruser] start failed', { clientId, err });
+    }
+  }
+
+  private stopAllPerUserRecorders(): Promise<void> {
+    const waits: Promise<void>[] = [];
+    for (const [, entry] of this.perUserRecorders) {
+      if (entry.stopped || entry.recorder.state === 'inactive') { entry.stopped = true; continue; }
+      waits.push(new Promise<void>((resolve) => {
+        const prev = entry.recorder.onstop as EventListener | null;
+        entry.recorder.onstop = (e) => {
+          entry.stopped = true;
+          if (prev) prev(e);
+          resolve();
+        };
+        try { entry.recorder.stop(); } catch { entry.stopped = true; resolve(); }
+      }));
+    }
+    return Promise.all(waits).then(() => undefined);
+  }
+
+  async uploadPerUser(roomId: string): Promise<void> {
+    for (const [clientId, entry] of this.perUserRecorders) {
+      if (entry.chunks.length === 0) continue;
+      const blob = new Blob(entry.chunks, { type: this.mimeType || 'audio/webm' });
+      const { mimeType, extension } = resolveRecordingMime(blob.type, this.mimeType, this.extension);
+      const sanitized = entry.displayName.replace(/[^\w\s\-]/g, '').trim().slice(0, 64) || 'participant';
+      try {
+        await fetch('/upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': mimeType,
+            'X-Ext': extension,
+            'X-Room': roomId,
+            'X-PerUser': '1',
+            'X-DisplayName': sanitized,
+            'X-ClientId': clientId,
+          },
+          body: blob,
+        });
+      } catch (err) {
+        console.warn('[rec-peruser] upload failed', { clientId, err });
+      }
+    }
+    this.perUserRecorders.clear();
   }
 
   private pickMime(): { mimeType: string; extension: string } {

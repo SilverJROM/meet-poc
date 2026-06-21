@@ -200,21 +200,19 @@ export function nextMicWorkingState(
   return current; // 'indeterminate' — no change.
 }
 
-// Gate prereqs: mic + speaker mandatory, camera optional (R1).
+// Gate prereqs: mic ACCESS only (R10 + red-team fix).
+// A live mic track is sufficient to join — a silent-but-accessible mic must NOT block join.
+// Silent users join; in-call watchdogs surface 'No sound' after admit.
 export type PreflightPrereqsInput = {
   hasMicAccess: boolean;
-  micVerified: boolean;    // micWorking signal — classifyMicCapture returned 'working'
-  speakerTested: boolean;  // speakerVerified — user confirmed they heard the tone
 };
 
-export function missingPreflightPrereqs(input: PreflightPrereqsInput): ('mic' | 'mic-silent' | 'speaker')[] {
-  const missing: ('mic' | 'mic-silent' | 'speaker')[] = [];
+export function missingPreflightPrereqs(input: PreflightPrereqsInput): ('mic')[] {
+  const missing: ('mic')[] = [];
   if (!input.hasMicAccess) {
     missing.push('mic');
-  } else if (!input.micVerified) {
-    missing.push('mic-silent');
   }
-  if (!input.speakerTested) missing.push('speaker');
+  console.log('[GATE] missingPreflightPrereqs input:', input, 'missing:', missing);
   return missing;
 }
 

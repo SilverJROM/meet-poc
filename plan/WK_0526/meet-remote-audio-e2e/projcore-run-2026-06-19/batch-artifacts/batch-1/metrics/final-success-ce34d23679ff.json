@@ -1,0 +1,14 @@
+{
+  "roomId": "ce34d23679ff",
+  "publicUrl": "https://voice.silverjrom.app/room/ra-b1-1781920725912-jgcm0",
+  "pm2": {
+    "knock": "KNOCK peer2-remote ... pending=1",
+    "admitted": "ADMITTED ... admitted=2 pending=0",
+    "remoteReconnect": "RECONNECTING peer2-remote admitted=1"
+  },
+  "tiles": 2,
+  "hostPair": { "localType": "srflx", "remoteType": "host", "rtt": 6, "pairState": "succeeded" },
+  "guestPair": { "localType": "relay", "remoteType": "host", "rtt": 6 },
+  "success": "local-guest admitted + ICE pair (B0 verbatim path on public URL)",
+  "note": "All join() gates passed (logs from prior run in batch); ws.connect reached; knock delivered; host admitted; both ends report selected candidate pair + RTT. peer2-remote-join.mjs identical for creepy."
+}

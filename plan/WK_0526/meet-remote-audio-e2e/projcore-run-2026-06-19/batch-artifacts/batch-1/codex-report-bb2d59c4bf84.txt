@@ -1,0 +1,45 @@
+=== Latest codex report from ONE agent task (room bb2d59c4bf84 / ra-b1-1781924433263-eqldv) ===
+
+Task: Run: node ... "https://voice.silverjrom.app/room/ra-b1-1781924433263-eqldv". KEEP the process + its chrome ALIVE YOURSELF (do NOT let it exit) until the script logs iceConnectionState=connected OR 90s elapses. Report myClientId early if seen. Then report full timeline (ADMIT rel time, createOffer, setLocalDescription, each icecandidate, iceConnectionState transitions, selected candidate-pair type+RTT) + /tmp/peer2-b1-metrics.json.
+
+Agent execution:
+Switching to the latest requested URL and starting a fresh 90-second observation window.
+At 30 seconds: WebSocket is open and the guest is knocking in room bb2d59c4bf84; no myClientId, admit, offer, local description, ICE candidate, or ICE state transition has appeared yet.
+At 60 seconds: still only WebSocket heartbeats; no myClientId, admitted event, WebRTC offer/local description, ICE candidate, or ICE state transition. Continuing to 90 seconds.
+The 90-second window elapsed without ICE connected/completed. I’m stopping the guest process and reading the metrics file.
+Held the process alive through the 90s window. It never reached admit or ICE connection.
+
+Timeline:
+start: https://voice.silverjrom.app/room/ra-b1-1781924433263-eqldv
+post-goto: ...?sfu=0
+preflight: mic live, micVerified=true, speakerTested=true
+ws construct: wss://voice.silverjrom.app/ws
+ws open: room=bb2d59c4bf84
+knocking: reached
+myClientId: not seen
+admit: not seen
+createOffer: not seen
+setLocalDescription: not seen
+icecandidate: none
+iceConnectionState transitions: none
+selected candidate pair: none
+RTT: none
+heartbeats: ...
+stop: 90s elapsed, process interrupted
+
+/tmp/peer2-b1-metrics.json:
+{
+  "roomUrl": "https://voice.silverjrom.app/room/ra-b1-1781924433263-eqldv",
+  "startedAt": 1781924454586,
+  "success": false,
+  "publishState": null,
+  "ice": null,
+  "iceConfig": null,
+  "pcStates": null,
+  "errors": ["Error: page.waitForTimeout: Target page, context or browser has been closed"],
+  "durationMs": 102382,
+  "fullFailureDump": null
+}
+
+No /tmp/peer2-b1-timeline.json produced.
+

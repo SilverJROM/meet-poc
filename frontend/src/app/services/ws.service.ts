@@ -90,6 +90,8 @@ export class WsService {
   private lastHeartbeatRttMs: number | null = null;
   private heartbeatMissCount = 0;
   private heartbeatCheckTimer: ReturnType<typeof setInterval> | null = null;
+  private clientPingTimer: ReturnType<typeof setInterval> | null = null;
+  private readonly clientPingIntervalMs = 15_000;
   private readonly cycles: DiagnosticsWsCycle[] = [];
 
   readonly connected = signal(false);
@@ -121,6 +123,9 @@ export class WsService {
   send(msg: OutgoingSignalingMessage): void {
     if (this.socket?.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(msg));
+    } else {
+      // LIGHT diagnostic (codex55): log silent send failures when not OPEN (common churn cause)
+      console.warn(`[signaling] send while NOT OPEN type=${(msg as any)?.type || 'unknown'} readyState=${this.socket ? this.socket.readyState : 'null'}`);
     }
   }
 
@@ -128,6 +133,7 @@ export class WsService {
     this.intentionallyClosed = true;
     this.clearReconnectTimer();
     this.clearHeartbeatCheckTimer();
+    this.clearClientPingTimer();
     this.closeCurrentSocket();
     this.roomId = '';
     this.onMessage = null;
@@ -175,6 +181,7 @@ export class WsService {
       if (this.socket !== ws) return;
       this.lastSeenAt = Date.now();
       this.startHeartbeatCheckTimer(ws);
+      this.startClientPingTimer(ws);
       const wasReconnect = this.reconnectAttempt > 0 || reconnecting;
       this.connected.set(true);
       this.disconnected.set(false);
@@ -214,6 +221,7 @@ export class WsService {
       if (this.socket !== ws) return;
       this.socket = null;
       this.clearHeartbeatCheckTimer();
+      this.clearClientPingTimer();
       this.connected.set(false);
       this.disconnected.set(true);
       this.status.set('disconnected');
@@ -227,6 +235,7 @@ export class WsService {
     const ws = this.socket;
     this.socket = null;
     this.clearHeartbeatCheckTimer();
+    this.clearClientPingTimer();
     if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
       ws.close();
     }
@@ -272,6 +281,7 @@ export class WsService {
     this.heartbeatMissCount += 1;
     this.socket = null;
     this.clearHeartbeatCheckTimer();
+    this.clearClientPingTimer();
     this.connected.set(false);
     this.disconnected.set(true);
     this.status.set('disconnected');
@@ -283,6 +293,19 @@ export class WsService {
       // Best effort close; reconnect is scheduled below even if the browser cannot close cleanly.
     }
     this.scheduleReconnect();
+  }
+
+  private startClientPingTimer(ws: WebSocket): void {
+    this.clearClientPingTimer();
+    this.clientPingTimer = setInterval(() => {
+      if (this.socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+      ws.send(JSON.stringify({ type: 'ping' }));
+    }, this.clientPingIntervalMs);
+  }
+
+  private clearClientPingTimer(): void {
+    if (this.clientPingTimer) clearInterval(this.clientPingTimer);
+    this.clientPingTimer = null;
   }
 
   private recordDisconnect(code: number | null, reason: string | null, recoveryMethod = 'pending-reconnect'): void {

@@ -15,7 +15,7 @@ export type RoomRecordingResumeRecorder = {
 export function syncRecorderPeerStreams(peers: PeerState[], recorder: RoomRecordingSyncRecorder): void {
   const activePeerIds = new Set<string>();
   for (const peer of peers) {
-    if (peer.isLocal) continue;
+    if (peer.isLocal || peer.reconnecting) continue;
     activePeerIds.add(peer.id);
     recorder.addPeerStream(peer.id, peer.stream);
   }

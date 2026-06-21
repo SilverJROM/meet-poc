@@ -180,3 +180,10 @@ CRITICAL = talk(hear+be-heard)/record/see broken. Non-critical (cosmetic/observa
 ## ===== CODE-REDTEAM GATE PASSED (CRITICAL 3/3): CR11 clean + CR12 critical-clean(test gaps) + CR13 critical-clean =====
 13 red-team rounds, 13 distinct lenses, 10 fix rounds. Audio fix delivers talk(hear+be-heard)/see; record audio-only by-design (JROM-accepted). Zero regressions. Security (clientKey) closed. Next: commit + rebuild live app + JROM real US<->PH call.
 [overmind] 2026-06-08T09:39:47+00:00 sync OK current='' tasks=4
+
+## *** REAL-CALL VERIFIED 2026-06-08 10:43-10:46 UTC (session b14654d6) ***
+JROM placed a US-IP VPN call AFTER the 10:25 fix went live and HEARD the friend ("and it worked").
+Proof: host inbound audio audioLevel=0.063 energy=0.78 bytes=157k pktLost=0 (vs failed 11ee886f audioLevel=0); video 1389 frames both ways; both outbound mic+cam flowing; friend RTT 191ms (intl long-haul, no relay needed); 0 ws issues. No blocked/voiceStalled/gUM/subscribe-stuck. R1/R2/R3 VERIFIED.
+[overmind] 2026-06-09T23:13:09+00:00 complete OK
+[overmind] 2026-06-10T00:00:26+00:00 complete OK
+[overmind] 2026-06-10T00:01:10+00:00 complete OK

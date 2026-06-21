@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-0
+status=DONE
+source=callback
+line_no=4
+note=local 2-client mutual audio GREEN (both directions energy>5s + bytes delta; distinct 440/880 tones; guardrail1 inspected selector used; room 3073e6a60221 recorded for B1; all artifacts under batch-0/)

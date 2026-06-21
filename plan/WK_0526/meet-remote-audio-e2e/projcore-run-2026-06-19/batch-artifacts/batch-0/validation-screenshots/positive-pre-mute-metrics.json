@@ -1,0 +1,26 @@
+{
+  "room": {
+    "id": "ccd86f7dad46",
+    "slug": "ra-e2e-val-1781913402937-kw5es",
+    "title": "RA-E2E-VAL-1781913402937-kw5es",
+    "url": "/room/ra-e2e-val-1781913402937-kw5es",
+    "isOpen": true,
+    "waitTimeoutMinutes": 15
+  },
+  "hostPositive": {
+    "energyRmsPeak": 0.009345541980464113,
+    "energyAboveFloorMs": 5120,
+    "inboundBytesDelta": 326,
+    "audioLevel": 0.009345541980464113,
+    "pass": true,
+    "samples": 65
+  },
+  "guestPositive": {
+    "energyRmsPeak": 0.009609303849373705,
+    "energyAboveFloorMs": 5120,
+    "inboundBytesDelta": 405,
+    "audioLevel": 0.009609303849373705,
+    "pass": true,
+    "samples": 65
+  }
+}

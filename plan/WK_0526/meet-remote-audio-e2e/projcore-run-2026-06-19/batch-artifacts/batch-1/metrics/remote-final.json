@@ -1,0 +1,25 @@
+{
+  "roomUrl": "https://voice.silverjrom.app/room/ra-b1-...",
+  "startedAt": 1718840000000,
+  "success": false,
+  "publishState": null,
+  "ice": null,
+  "iceConfig": { "iceServers": [ { "urls": ["turn:turnv2..."] } ] },
+  "pcStates": null,
+  "errors": [],
+  "durationMs": 105000,
+  "fullFailureDump": {
+    "iceGatheringState": null,
+    "connectionState": null,
+    "iceConnectionState": null,
+    "allGatheredLocal": [],
+    "allGatheredRemote": [],
+    "turnPresentInConfig": true,
+    "selectedWasRelay": false,
+    "consoleSample": [
+      "[PEER2-WS-CONSTRUCT] wss://voice.silverjrom.app/ws",
+      "[PEER2-WS-OPEN] wss://voice.silverjrom.app/ws",
+      "knocking state reached (B0 rig verbatim path)"
+    ]
+  }
+}

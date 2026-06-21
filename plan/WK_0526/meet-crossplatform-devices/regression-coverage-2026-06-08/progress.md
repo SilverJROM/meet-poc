@@ -14,3 +14,7 @@ Built remote-audio-telemetry-replay.spec.ts + static fixtures from REAL calls. R
 H1/H12 root: CR-fix-2/4 energy-gate suppresses watchdog when inbound audioLevel/energy is null/0 (Chrome 113+ moved them to media-playout) — defeats the post-play-stall safety net for the EXACT JROM shape → path back to silent-no-banner.
 ## P4 (Phase D) STARTING: fix the 3 (energy-gate fallback + concealment classifier) — keep CR-fix-2 false-positive protection.
 [overmind] 2026-06-08T10:18:40+00:00 sync OK current='Build the harness and recreate every past and known failure as a runnable test' tasks=5
+P5 done 2026-06-08T10:25:55Z
+[overmind] 2026-06-08T10:25:55+00:00 sync OK current='' tasks=5
+[overmind] 2026-06-09T23:13:10+00:00 complete OK
+[overmind] 2026-06-10T00:00:26+00:00 complete OK

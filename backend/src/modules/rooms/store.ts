@@ -12,6 +12,7 @@ export type Room = {
   waitTimeoutMinutes: number;
   createdAt: number;
   passwordRequired: boolean;
+  autoAdmit: boolean;
 };
 
 type RoomRow = {
@@ -23,6 +24,7 @@ type RoomRow = {
   wait_timeout_minutes: number;
   created_at: number;
   password_hash: string | null;
+  auto_admit: number | null;
 };
 
 type SlugValidationResult =
@@ -59,12 +61,13 @@ function toRoom(row: RoomRow): Room {
     waitTimeoutMinutes: Number(row.wait_timeout_minutes || 15),
     createdAt: row.created_at,
     passwordRequired: !!row.password_hash,
+    autoAdmit: row.auto_admit === 1,
   };
 }
 
 export function getRoom(id: string, database: Database.Database = getDb()): Room | null {
   const row = database
-    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash FROM rooms WHERE id = ?')
+    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash, auto_admit FROM rooms WHERE id = ?')
     .get(id) as RoomRow | undefined;
   return row ? toRoom(row) : null;
 }
@@ -72,7 +75,7 @@ export function getRoom(id: string, database: Database.Database = getDb()): Room
 export function getRoomBySlugOrId(key: string, database: Database.Database = getDb()): Room | null {
   const roomKey = String(key || '').slice(0, MAX_SLUG_LENGTH);
   const bySlug = database
-    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash FROM rooms WHERE slug = ?')
+    .prepare('SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash, auto_admit FROM rooms WHERE slug = ?')
     .get(roomKey) as RoomRow | undefined;
   if (bySlug) return toRoom(bySlug);
   return getRoom(roomKey, database);
@@ -90,7 +93,7 @@ export function listOwnedRooms(email: string, database: Database.Database = getD
   const search = normalizeRoomSearch(searchQuery);
   const filter = titleSearchFilter(search);
   return database
-    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC`)
+    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash, auto_admit FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC`)
     .all(email, ...filter.params)
     .map((row) => toRoom(row as RoomRow));
 }
@@ -109,7 +112,7 @@ export function listOwnedRoomsPage(
     .prepare(`SELECT COUNT(*) AS total FROM rooms WHERE owner_email = ?${filter.sql}`)
     .get(email, ...filter.params) as { total: number };
   const rooms = database
-    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+    .prepare(`SELECT id, title, slug, owner_email, is_open, wait_timeout_minutes, created_at, password_hash, auto_admit FROM rooms WHERE owner_email = ?${filter.sql} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
     .all(email, ...filter.params, pageSize, offset)
     .map((row) => toRoom(row as RoomRow));
   return { rooms, total: totalRow.total };
@@ -125,7 +128,7 @@ export function createRoom(titleInput: unknown, email: string, database: Databas
     const result = database
       .prepare('INSERT OR IGNORE INTO rooms (id, title, slug, owner_email, created_at) VALUES (?, ?, ?, ?, ?)')
       .run(id, title, slug, email, createdAt);
-    if (result.changes === 1) return { id, title, slug, ownerEmail: email, isOpen: false, waitTimeoutMinutes: 15, createdAt, passwordRequired: false };
+    if (result.changes === 1) return { id, title, slug, ownerEmail: email, isOpen: false, waitTimeoutMinutes: 15, createdAt, passwordRequired: false, autoAdmit: false };
   }
   throw new Error('failed to create unique room id');
 }

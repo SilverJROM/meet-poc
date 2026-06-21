@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "batch_id": "B12",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-crossplatform-devices/projcore-run-2026-06-04",
+  "session": "meet-codex",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-crossplatform-devices/projcore-run-2026-06-04/prompts/batch-B12.md",
+  "dispatched_at": "2026-06-04T14:41:59Z",
+  "estimate_min": 30,
+  "bucket": "MEDIUM",
+  "wakeup_delay_sec": 3600,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-crossplatform-devices/projcore-run-2026-06-04/dispatch/B12.wakeup-required",
+  "watcher_pid": 824701,
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-crossplatform-devices/projcore-run-2026-06-04/dispatch/watcher-B12.log",
+  "dispatch_marker": "DISPATCH-B12-824574-1780584119",
+  "wakeup_acked_at": "2026-06-04T14:42:03Z",
+  "wakeup_acked_by": "projcore"
+}

@@ -1,0 +1,21 @@
+{
+  "schema_version": 4,
+  "batch_id": "batch-1",
+  "role": "implementer",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-remote-audio-e2e/projcore-run-2026-06-19",
+  "session": "lkvc-grok",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-remote-audio-e2e/projcore-run-2026-06-19/prompts/batch-1-voice.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-remote-audio-e2e/projcore-run-2026-06-19/dispatch/batch-1.implementer.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-remote-audio-e2e/projcore-run-2026-06-19/callbacks.md",
+  "dispatched_at": "2026-06-20T08:25:35Z",
+  "estimate_min": 20,
+  "bucket": "TEST-HEAVY",
+  "wakeup_delay_sec": 3000,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-remote-audio-e2e/projcore-run-2026-06-19/dispatch/batch-1.wakeup-required",
+  "watcher_pid": 998509,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-remote-audio-e2e/projcore-run-2026-06-19/dispatch/batch-1.watcher-implementer.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0526/meet-remote-audio-e2e/projcore-run-2026-06-19/dispatch/watcher-batch-1-implementer.log",
+  "dispatch_marker": "DISPATCH-batch-1-implementer-998412-1781943935",
+  "wakeup_acked_at": "2026-06-20T08:25:45Z",
+  "wakeup_acked_by": "projcore"
+}

@@ -1,0 +1,25 @@
+{
+  "roomId": "cc180836b0ee",
+  "publicUrl": "https://voice.silverjrom.app/room/ra-b1-1781925675455-lnlqe",
+  "from": "codex report 2026-06-20 dispatch",
+  "success": false,
+  "guest": {
+    "wsOpen": true,
+    "knockingReached": true,
+    "admitSeen": false,
+    "myClientId": null,
+    "createOfferSeen": false,
+    "setLocalSeen": false,
+    "iceConnection": null,
+    "selectedPair": null,
+    "outboundAudio": false,
+    "heartbeats": ["timestamps only"],
+    "errors": ["page closed early ~20s"]
+  },
+  "host": {
+    "tilesFinal": 1,
+    "pair": {"localType": "srflx", "remoteType": "host", "rtt": 7}
+  },
+  "pm2": "only host RESUME/RECONNECT, no KNOCK/ADMITTED=2",
+  "perBrief": "guest knock client state but no backend event; host reconnect lost window"
+}

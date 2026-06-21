@@ -65,6 +65,9 @@ proxy.on('error', (err, _req, res) => {
 });
 
 const server = http.createServer((req, res) => {
+  if (req.headers.upgrade) {
+    console.log(`[serve upgrade header] ${req.url} upgrade=${req.headers.upgrade}`);
+  }
   const url = req.url || '/';
   if (isBackendPath(url)) {
     proxy.web(req, res, { target: backendOrigin });
@@ -91,7 +94,9 @@ const server = http.createServer((req, res) => {
 });
 
 server.on('upgrade', (req, socket, head) => {
+  console.log(`[fe-ws-upgrade] url=${req.url}`);
   if (req.url === '/ws') {
+    console.log(`[fe-ws-proxy] proxying ws for ${req.url}`);
     proxy.ws(req, socket, head, { target: backendOrigin.replace(/^http/, 'ws') });
     return;
   }

@@ -823,6 +823,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
   server.on('close', clearHeartbeatTimer);
 
   wss.on('connection', (ws, req) => {
+    console.log(`[ws-connection] connected from ${req.socket.remoteAddress || 'local'}`);
     heartbeatStates.set(ws, { isAlive: true, missedPongs: 0, lastPongAt: Date.now() });
     ws.on('pong', () => {
       const state = heartbeatStates.get(ws);
@@ -849,6 +850,8 @@ export function attachSignaling(server: http.Server, database: Database.Database
       } catch {
         return;
       }
+      // DECISIVE [ws-recv] log: EVERY inbound + msg room key + current (resolved later)
+      console.log(`[ws-recv] type=${msg.type} room=${msg.room || currentRoom || 'pre'}`);
 
       if (msg.type === 'join') {
         const roomKey = String(msg.room || '').slice(0, 128);
@@ -859,6 +862,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
           return;
         }
         const roomId = room.id;
+        console.log(`[ws-recv] JOIN resolved roomId=${roomId} key=${roomKey}`);
         const requestedName = String(msg.name ?? '').trim().slice(0, 64);
         if (!userEmail && !requestedName) {
           send(ws, { type: 'error', error: 'name required' });
@@ -896,6 +900,38 @@ export function attachSignaling(server: http.Server, database: Database.Database
             return;
           }
         }
+
+        // (1) SERVER-SIDE IDEMPOTENCY (codex55): repeat 'join' from ALREADY-joined same socket/clientId
+        // (e.g. frontend join-ack watchdog resends) must be NO-OP/refresh, NOT create new KNOCK or duplicate session.
+        if (live.admitted.has(clientId)) {
+          console.log(`[room ${roomId}] repeat join on already-admitted ${clientId} - NO-OP/refresh`);
+          const entry = live.admitted.get(clientId)!;
+          const peers = peerSummaries(live, roomId, database).filter((peer) => peer.id !== clientId);
+          const hostClientId = getHostClientId(roomId, database) || (currentRoomOwner ? clientId : null);
+          send(ws, { type: 'admitted', clientId, participantId: entry.participantId, peers, roomTitle: room.title, isOwner: currentRoomOwner, hostClientId, sessionId: live.currentSessionId });
+          return;
+        }
+        if (live.pending.has(clientId)) {
+          console.log(`[room ${roomId}] repeat join on pending ${clientId} - refresh knocking (no new session)`);
+          send(ws, { type: 'knocking', clientId, roomTitle: room.title });
+          return;
+        }
+        if (live.closedWaiters.has(clientId)) {
+          console.log(`[room ${roomId}] repeat join on closedWaiter ${clientId} - NO-OP/refresh`);
+          const waiter = live.closedWaiters.get(clientId)!;
+          const waitTimeoutMs = room.waitTimeoutMinutes ? Math.max(1, Math.round(room.waitTimeoutMinutes * 60_000)) : 5 * 60_000;
+          const expiresAt = (waiter as any).expiresAt || (Date.now() + waitTimeoutMs);
+          send(ws, {
+            type: 'waiting-room',
+            clientId,
+            roomTitle: room.title,
+            isOpen: false,
+            waitTimeoutMs,
+            expiresAt,
+          });
+          return;
+        }
+
         const now = Date.now();
         const reconnectTicket = reconnectToken ? live.reconnectTickets.get(reconnectToken) : null;
         const tokenAdmitted = reconnectTicket ? live.admitted.get(reconnectTicket.clientId) : null;
@@ -920,6 +956,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const canResume = canResumeByToken || canResumeByClientKey || canAutoAdmitByIdentity;
         const ownerCandidate = owner ? findOwnerResumeCandidate(live, room.ownerEmail) : null;
         const ownerResume = !!ownerCandidate;
+        const resumeReason = canResumeByToken ? 'token' : canResumeByClientKey ? 'clientKey' : canAutoAdmitByIdentity ? 'identity' : ownerResume ? 'owner' : 'none';
         const tokenOldClientId =
           canResumeByToken && reconnectTicket
             ? tokenAdmitted
@@ -977,7 +1014,10 @@ export function attachSignaling(server: http.Server, database: Database.Database
           !hasOwnerPresentOrReconnecting(live, roomId, database) &&
           !getEffectiveHostClientId(live, roomId, database) &&
           live.admitted.size === 0;
-        if (owner || canResume || shouldActAsFirstOpenRoomHost) {
+        // auto_admit is a per-room DB flag (default 0). Only the AGENTROOM test room has it set to 1
+        // via migration 0014. No API allows it to be toggled at runtime. Real rooms always knock→host-admit.
+        const autoAdmitAllowed = room.autoAdmit && roomId === 'd98896162f09';
+        if (owner || canResume || shouldActAsFirstOpenRoomHost || autoAdmitAllowed) {
           if (resumeOldClientId) {
             cleanupReconnectState(live, resumeOldClientId);
             if (live.admitted.has(resumeOldClientId)) closeSupersededAdmittedPeer(live, resumeOldClientId);
@@ -1015,8 +1055,17 @@ export function attachSignaling(server: http.Server, database: Database.Database
           if (owner && live.pending.size > 0) {
             send(ws, { type: 'pending-list', knockers: pendingSummaries(live) });
           }
-          console.log(`[room ${roomId}] + ${owner ? 'OWNER' : 'RESUME'} ${myName} (${clientId})  admitted=${live.admitted.size}`);
+          const admitTag = owner ? 'OWNER' : (canResume || ownerResume) ? 'RESUME' : room.autoAdmit ? 'AUTO-ADMIT' : 'FIRST-OPEN';
+          console.log(`[room ${roomId}] + ${admitTag} ${myName} (${clientId}) resumeReason=${resumeReason} admitted=${live.admitted.size}`);
         } else {
+          // LIGHT diagnostic (codex55): flag when we KNOCK for a known admitted clientKey instead of RESUME
+          if (clientKey) {
+            const knownAdmitted = findAdmittedClientByClientKey(live, clientKey);
+            const knownGrace = findReconnectingClientByClientKey(live, clientKey);
+            if (knownAdmitted || knownGrace) {
+              console.warn(`[room ${roomId}] KNOCK instead of RESUME for known clientKeyPresent=true ${myName} (resumeReason would have been clientKey)`);
+            }
+          }
           live.pending.set(clientId, entry);
           state = 'pending';
           send(ws, { type: 'knocking', clientId, roomTitle: room.title });
@@ -1027,6 +1076,11 @@ export function attachSignaling(server: http.Server, database: Database.Database
           );
           console.log(`[room ${roomId}] KNOCK ${myName} (${clientId})  pending=${live.pending.size}`);
         }
+        return;
+      }
+
+      if (msg.type === 'ping') {
+        // client-sent app-layer keepalive to prevent idle tunnel/NAT drops — no response needed
         return;
       }
 
@@ -1290,7 +1344,27 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const targetId = String(msg.clientId || '');
         if (targetId === getHostClientId(currentRoom, database)) return;
         const target = live.admitted.get(targetId);
-        if (!target) return;
+        if (!target) {
+          // Allow kicking a peer who dropped into the reconnect grace window.
+          const reconnecting = live.reconnecting.get(targetId);
+          if (reconnecting) {
+            if (isOwnerOf(currentRoom, reconnecting.userEmail, database)) return; // never kick owner
+            const { participantId, userEmail: peerEmail, clientKey: peerClientKey, name: peerName, isHost: peerIsHost } = reconnecting;
+            cleanupReconnectState(live, targetId); // cancels timer + deletes reconnect token
+            // Revoke durable identity so a fresh rejoin must knock, not auto-reattach.
+            if (peerClientKey) {
+              live.clientIdentities.set(peerClientKey, { participantId, name: peerName, wasAdmitted: false, revoked: true });
+            }
+            for (const [, peer] of live.admitted) {
+              send(peer.ws, { type: 'peer-left', clientId: targetId, participantId });
+            }
+            console.log(`[room ${currentRoom}] KICKED-RECONNECTING ${peerName} (${targetId})`);
+            const wasOwner = isOwnerOf(currentRoom, peerEmail, database);
+            if (wasOwner) promoteNextActingHost(currentRoom, live, database);
+            maybeCloseEmptyRoom(currentRoom, live, peerIsHost ? 'host-disconnect-empty' : 'last-peer-left', database);
+          }
+          return;
+        }
         send(target.ws, { type: 'peer-removed', reason: 'removed by host' });
         removeAdmittedPeer(currentRoom, targetId, live, database, { revokeIdentity: true });
         try {
@@ -1365,6 +1439,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
   });
 
   server.on('upgrade', (req, socket, head) => {
+    console.log(`[ws-upgrade] url=${req.url}`);
     if (req.url !== '/ws') {
       socket.destroy();
       return;

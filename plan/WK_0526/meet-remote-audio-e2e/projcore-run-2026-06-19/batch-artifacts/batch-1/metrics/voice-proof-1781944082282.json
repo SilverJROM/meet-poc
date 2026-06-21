@@ -1,0 +1,19 @@
+{
+  "runId": 1781944082282,
+  "roomId": "d98896162f09",
+  "step": "voice-proof",
+  "agent": null,
+  "hostMeasuresAgent": null,
+  "hostHearsAgent": false,
+  "agentHearsHost": false,
+  "iceConnected": false,
+  "relayPair": false,
+  "hasOutboundAudio": false,
+  "hasKnockAdmit": false,
+  "tiles2": false,
+  "voiceBothWays": false,
+  "pm2Excerpt": "m=d98896162f09\n6|meet-poc | 2026-06-20T08:30:10: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:10: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:17: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:17: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:22: [ws-recv] type=ping room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:24: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:24: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:31: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:32: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:37: [ws-recv] type=ping room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:39: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:39: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:46: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:46: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:52: [ws-recv] type=ping room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:53: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:30:53: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:00: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:01: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:07: [ws-recv] type=ping room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:08: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:08: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:15: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:15: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:22: [ws-recv] type=ping room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:22: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:23: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:30: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:30: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:37: [ws-recv] type=media-state room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:37: [ws-recv] type=ping room=d98896162f09\n6|meet-poc | 2026-06-20T08:31:37: [ws-recv] type=media-state room=d98896162f09",
+  "hostTilesLine": "24|agent-h | 2026-06-20T08:31:33: [HOST] alive tick 152 tiles= 1 room= d98896162f09",
+  "hostDiagLine": "24|agent-h | 2026-06-20T08:31:33: [HOST-DIAG] {\"ws\":\"connected\",\"publish\":{\"cfSessionId\":\"22889f18c72f20c48c363efc0843b5713ef1fbe53dd5c066fa7fc009f13f4408\",\"status\":\"published\",\"tracks\":[{\"trackName\":\"200392fe-ecaf-41ce-9a4e-91f3b34ee012:1781944072381:audio:d30b9357-95e5-4c9d-ac8a-c7b64722eeab\",\"kind\":\"audio\",\"mid\":\"0\",\"status\":\"live\"}]},\"peers\":1,\"myId\":\"32ae9c426d25cb4d\",\"stats\":{\"pair\":{\"local\":\"srflx\",\"remote\":\"host\",\"rtt\":6}}}",
+  "failingStep": "agent_never_reported_voice_result"
+}

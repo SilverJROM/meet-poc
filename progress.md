@@ -1,1 +1,3 @@
 [overmind] 2026-05-29T23:53:52+00:00 re-register skipped (child-add lkvc-opus:implementer): no cache (run register first)
+[overmind] 2026-06-20T18:13:21+00:00 sync FAIL (best-effort, continuing): r":"Workflow not found","code":"workflow-not-found","message":"Workflow not found.","hint":"Use the workflow_id returned by /register, the canonical run_dir, or re-register before updating tasks."}404
+[overmind] 2026-06-20T18:13:50+00:00 sync FAIL (best-effort, continuing): r":"Workflow not found","code":"workflow-not-found","message":"Workflow not found.","hint":"Use the workflow_id returned by /register, the canonical run_dir, or re-register before updating tasks."}404

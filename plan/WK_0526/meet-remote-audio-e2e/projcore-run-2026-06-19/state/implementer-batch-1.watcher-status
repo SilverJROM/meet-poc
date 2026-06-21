@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-1
+status=PROPOSED
+source=callback
+line_no=370
+note=Short voice test: confirm host in-call, relay Peer2 to run peer2-remote-join ~2-3min, capture ICE/pair + dual-audio energy both ways + backend sfu pub/sub. Flag Telegram webview if present.

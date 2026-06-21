@@ -1,0 +1,1 @@
+Autonomous decision: used the exact admit selector discovered via live rendered-app guardrail inspection (.knock-toast primary + documented fallback). No other non-trivial autonomous calls. All per brief + APPROVED-PLAN guardrails.

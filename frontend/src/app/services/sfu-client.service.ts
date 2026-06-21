@@ -1122,6 +1122,13 @@ export class SfuClientService {
     if (samePublisherSession && nowPublisher) {
       this.subscribeNewRemoteTracks(nowPublisher, prev.tracks);
     }
+    // Publisher reconnected (new cfSessionId): state was evicted by clearPublisherSubscriptionStateForRetry.
+    // Call subscribeIfNeeded directly so re-subscribe is deterministic — not deferred to the async effect.
+    // The effect's subscribeIfNeeded call will no-op (subscribedClientIds already set by this direct call).
+    if (!samePublisherSession && nowPublisher && nowPublisher.tracks.length > 0
+        && this.localPublishState()?.status === 'published') {
+      this.subscribeIfNeeded(nowPublisher);
+    }
   }
 
   handleSfuRoster(publishers: { clientId: string; participantId: string; cfSessionId: string; tracks: { trackName: string; kind: string }[]; revision: number }[]): void {
@@ -1135,6 +1142,10 @@ export class SfuClientService {
       }
     }
     this.remotePublishers.set(applyRosterSnapshot(publishers));
+    // No direct subscribeIfNeeded here: sfu-roster is only sent to NEW PEERS on admission
+    // (signaling/index.ts sendSfuRosterToNewPeer). Existing peers receive sfu-presence on reconnect.
+    // For a newly admitted peer, previous is empty so no cfSessionId mismatch is ever detected above,
+    // and the Angular effect over remotePublishers() drives subscribe for all initial publishers.
   }
 
   removePeer(clientId: string): void {
@@ -1853,6 +1864,24 @@ export class SfuClientService {
     const errorTrack = (responseTracks as Array<{ trackName: string; mid: string; errorCode?: string }>).find((t) => t.errorCode);
     if (errorTrack) {
       throw new Error(`[sfu] CF subscribe not ready: ${errorTrack.errorCode}`);
+    }
+
+    // Stale-session guard: if the publisher reconnected (new cfSessionId) or left while the POST was
+    // in-flight, do NOT bind the response. Binding would land a dead 0-byte track in remoteStreams
+    // before the current-session subscribe runs, causing getAudioTracks()[0] to return the dead track.
+    // Fires when publisher left roster entirely (!publisherCurrent) OR cfSessionId changed — in the
+    // publisher-left case tearDownPeerSubscription may have sent mids.length=0 (no tracks in
+    // midToEntry yet since subscribe was still in-flight), so CF session may not be closed by that path.
+    // Return (not throw) so the subscribeIfNeeded.catch() does not increment retry counters or
+    // clear subscribedClientIds — the new subscribe for the current cfSession is already queued.
+    const publisherCurrent = this.remotePublishers().get(publisher.clientId);
+    if (!publisherCurrent || publisherCurrent.cfSessionId !== publisher.cfSessionId) {
+      console.warn('[sfu] doSubscribeTracks: stale cfSession — aborting bind after in-flight reconnect/leave', {
+        publisherClientId: publisher.clientId,
+        staleCfSessionId: publisher.cfSessionId,
+        currentCfSessionId: publisherCurrent?.cfSessionId ?? 'gone',
+      });
+      return;
     }
 
     const subscribedBefore = new Map(this.subscribedTracks());

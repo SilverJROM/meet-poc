@@ -1,0 +1,39 @@
+  MEET LEVEL and zero tiny bugs. YOUR ANGLE: REFERENCE-CLIENT PARITY. Compare our device/media/publish/subscribe vs
+  audio-only/cameraless, mid-call track-add, reconnect/ICE-restart, simulcast/bitrate adaptation, device hot-plug
+  (devicechange), mute semantics, autoplay/secure-context. List what they do that we STILL do NOT (beyond the 28
+  locked) — each [HIGH/MED/LOW] file:line-or-area — gap — why it matters for parity — fix — confidence. If nothing
+  YOUR ANGLE: REFERENCE-CLIENT PARITY vs Google Meet / Zoom web / LiveKit / mediasoup-client: device
+  devicechange hot-plug, mute semantics, autoplay/secure-context. What do they do that we STILL do NOT (beyond the 28
+  locked)? Each [HIGH/MED/LOW] area — gap — why-matters-for-parity — fix — confidence. If nothing new, say so. FIRST
+• Using the reviewer workflow again for this read-only parity pass. I’ll ground the comparison in local code plus
+    Search devicechange|replaceInCall|setCameraTrackEnabled|broadcastMediaState|mute|publishScreen|updateCameraLayer|
+           adaptive|bitrate|encodings|secure|https|AudioContext|playsinline|data-remote-audio|remote-audio in
+  adaptive stream documentation
+• The reference pass is turning up parity gaps around polish and scale rather than core two-way audio. I’m validating
+• Searched the web for site:docs.livekit.io/home/client/tracks/publish LiveKit mute unmute track stops sending data
+  server TrackMuted
+• Searched the web for site:developers.zoom.us/docs/video-sdk/web/audio startAudio muteAudio stopAudio microphone
+  default speaker device
+• I found new parity gaps, not new core blockers. I’m appending the required callback now, then I’ll list only the
+    8 +[projcore callback] R7-codex55 DONE reference-client parity pass found new polish/scale gaps in hot-plug recovery
+       , mute control, adaptive video, speaker permission, secure-context UX, and mic/headset UX
+• 1. [MED] frontend/src/app/pages/room/room.page.ts:2239 — devicechange does not recover a listen-only/no-track user
+  2. [MED] frontend/src/app/pages/room/room.page.ts:2797, frontend/src/app/services/sfu-client.service.ts:733 — mute is
+     UI/local-track only, not an SFU track mute — LiveKit models mute as a server-visible track state that stops sending
+     data and emits track mute events; Zoom separates mute from disconnect/stop-audio — fix: add explicit SFU mute/
+     unmute state, use replaceTrack(null) or sender encoding inactive for mute, reattach on unmute, and broadcast
+     authoritative mute metadata — confidence: high.
+  3. [MED] frontend/src/app/services/sfu-client.service.ts:41, frontend/src/app/services/sfu-client.service.ts:510 — no
+     true adaptive stream/dynacast equivalent — we have fixed simulcast layers and receiver RID selection, but not
+     visibility-based video pause or sender-side layer suppression like LiveKit adaptiveStream/dynacast — why: larger
+  4. [MED] frontend/src/app/pages/room/room.page.ts:2248 — speaker selection does not use selectAudioOutput() permission
+     web exposes speaker selection/test as a first-class setting — fix: when supported, route “choose speaker” through
+  5. [LOW] frontend/src/app/services/media.service.ts:71, frontend/src/app/pages/room/room.page.ts:1862 — no explicit
+     secure-context / unsupported-browser gate — getUserMedia, devicechange, and setSinkId are
+     secure-context/browser-dependent; production clients give clear unsupported-browser or permission-policy guidance
+     instead of generic media failure — fix: preflight window.isSecureContext, navigator.mediaDevices?.getUserMedia,
+  6. [LOW] frontend/src/app/components/lobby-preview/lobby-preview.component.html:40, frontend/src/app/components/
+     loopback mic test using the selected mic, with playback through selected/default speaker and no publish —
+  7. [LOW] frontend/src/app/components/controls-bar/controls-bar.component.html:25 — no headset hardware mute sync /
+     push-to-talk parity — Zoom web exposes headset button sync and press-and-hold space to temporarily unmute; our mute
+  Sources used: LiveKit connect/reconnect, track mute, device APIs, adaptive stream docs; mediasoup-client API; Zoom

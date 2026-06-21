@@ -1,0 +1,120 @@
+  deterministic sequence the AGENT SCRIPT must follow: (1) load real app page (verify NOT a Telegram webview context), (2) WAIT for ws OPEN before any join send (the 'NOT
+  OPEN' means join fires pre-open), (3) drive the real join (name+preflight+ask-to-join), (4) WAIT/poll for confirmed admit — window.__meetDebug.myClientId truthy AND
+  admitted — with a bounded timeout + ONE clean retry (reload) if it times out, (5) KEEP the page alive (Peer2-codex holds process) through publish+measure, (6) THEN publish
+  tone + measure. Plus: is the app-side join-ack watchdog actually helping or fighting (double-join)? Should the agent rely on the app watchdog OR drive its own
+  deterministic wait? Give the precise sequence + which file owns each step + the bounded-retry logic. Tight.
+
+
+• I’ll co-plan this from the current harness and app behavior. I’m going to inspect the agent script around navigation, preflight, join, lifecycle, and result exit so the
+  sequence is concrete and maps to file ownership.
+
+• Explored
+  └ Read peer2-remote-join.mjs, room.page.ts, ws.service.ts
+    Search Telegram|WebApp|webview|userAgent|page\.on\('websocket'|PEER2-WS|Ask to join|myClientId|ADMIT|browser\.close|process\.exit|TIMEOUT|STAY_ALIVE in peer2-remote-
+    join.mjs
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• The current agent already hard-gates on myClientId, but it still clicks Ask to join without first proving the app’s WebSocket is connected. The deterministic fix should
+  live mostly in peer2-remote-join.mjs: wait on __meetDebug.wsStatus === "connected" and native WS open before clicking, then make missing myClientId/admit trigger exactly
+  one full page reload retry instead of exiting mid-run.
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+• Deterministic Owner
+
+  Primary owner: e2e/scripts/peer2-remote-join.mjs.
+  App watchdog stays as safety net only. The agent should not rely on it for normal success.
+
+  Exact Sequence
+
+  1. Start Real Browser Context
+     In peer2-remote-join.mjs:
+      - Use chromium.launchPersistentContext(...) as it does now.
+      - After page.goto(), assert not Telegram webview:
+
+     const env = await page.evaluate(() => ({
+       ua: navigator.userAgent,
+       hasTelegram: !!window.Telegram?.WebApp,
+       href: location.href,
+     }));
+     if (env.hasTelegram || /Telegram/i.test(env.ua)) throw new Error('Telegram webview context detected');
+
+  2. Load Real App and Wait for Debug Surface
+     After page.goto(ROOM_URL + '?sfu=0'), wait for:
+
+     await page.waitForFunction(() => !!window.__meetDebug, null, { timeout: 15000 });
+
+     Do not click anything yet.
+
+  3. Preflight Before Join
+     Drive guest overlay, speaker confirm, device setup exactly as now:
+      - #guest-display-name
+      - driveLobbyPreflight(page)
+      - fill #display-name
+
+     But still do not click Ask to join.
+
+  4. Wait for WS OPEN Before Join Click
+     Add a helper in peer2-remote-join.mjs:
+
+     async function waitForAppWsReady(page, timeoutMs = 15000) {
+       await page.waitForFunction(() => {
+         const d = window.__meetDebug || {};
+         return d.wsStatus === 'connected' || d.wsConnected === true;
+       }, null, { timeout: timeoutMs });
+     }
+
+     Then:
+
+     await waitForAppWsReady(page);
+     await page.getByRole('button', { name: 'Ask to join' }).click();
+
+     This directly addresses send while NOT OPEN.
+
+  5. Confirmed Knock and Admit Gates
+     Replace the current one-shot myClientId exit with a combined wait:
+
+     async function waitForServerKnock(page, timeoutMs = 20000) {
+       return await page.waitForFunction(() => {
+         const d = window.__meetDebug || {};
+         return !!(d.myClientId || d.clientId) &&
+                ['knocking', 'waiting-room', 'in-call'].includes(d.roomState);
+       }, null, { timeout: timeoutMs });
+     }
+
+     async function waitForAdmit(page, timeoutMs = 45000) {
+       return await page.waitForFunction(() => {
+         const d = window.__meetDebug || {};
+         return d.roomState === 'in-call' &&
+                !!d.myClientId &&
+                !!d.myParticipantId &&
+                !!d.sfuPublishState;
+       }, null, { timeout: timeoutMs });
+     }
+
+  6. One Clean Retry
+     Wrap steps 2-5 in attemptJoin(page, attemptNo).
+
+     Retry policy:
+      - attempt 1 fails on timeout/no myClientId/page close;
+      - capture debug dump;
+      - await page.reload({ waitUntil: 'domcontentloaded' });
+      - rerun preflight and join once;
+      - attempt 2 failure exits with artifacts.
+
+     Pseudocode:
+
+     for (let attempt = 1; attempt <= 2; attempt++) {
+       try {
+         await attemptJoin(page, attempt);
+         break;
+       } catch (e) {
+         await dumpState(`join-attempt-${attempt}-failed`);
+         if (attempt === 2) throw e;
+         await page.reload({ waitUntil: 'domcontentloaded' });
+         await page.waitForTimeout(1000);
+       }
+     }
+
+  7. Keep Page Alive

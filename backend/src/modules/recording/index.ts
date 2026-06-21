@@ -59,7 +59,12 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     const roomSlug = sanitizeSlug(room.title);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const rand = crypto.randomBytes(3).toString('hex');
-    const filename = `${stamp}_${session.id}_${room.id}_${roomSlug}_${rand}.${ext}`;
+    const isPerUser = req.header('X-PerUser') === '1';
+    const rawDisplayName = req.header('X-DisplayName') || '';
+    const rawClientId = req.header('X-ClientId') || '';
+    const filename = isPerUser
+      ? `${stamp}_${session.id}_${room.id}_${roomSlug}_${sanitizeDisplayNameSlug(rawDisplayName)}_${rand}.${ext}`
+      : `${stamp}_${session.id}_${room.id}_${roomSlug}_${rand}.${ext}`;
     const filepath = path.join(dir, filename);
     const body = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
 
@@ -69,7 +74,15 @@ export function recordingRouter(database: Database.Database = getDb()): express.
         res.status(500).json({ ok: false, error: String(err) });
         return;
       }
-      console.log(`[rec] saved ${filename} (${(body.length / 1024).toFixed(1)} KB)`);
+      if (isPerUser) {
+        const displayName = rawDisplayName.replace(/[^\w\s\-]/g, '').trim().slice(0, 64) || 'participant';
+        const clientId = rawClientId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+        const participantPath = participantPathFor(filename);
+        if (participantPath) {
+          try { fs.writeFileSync(participantPath, JSON.stringify({ displayName, clientId, isPerUser: true })); } catch {}
+        }
+      }
+      console.log(`[rec] saved ${filename} (${(body.length / 1024).toFixed(1)} KB)${isPerUser ? ' [per-user]' : ''}`);
       res.json({ ok: true, file: filename, bytes: body.length } satisfies UploadResponse);
       scheduleTranscription(filename, database);
     });
@@ -110,6 +123,45 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     const body = JSON.stringify(metadata, null, 2);
     fs.writeFileSync(metaPath, body);
     return res.json({ ok: true, metaFile: `${filename}.meta.json`, bytes: Buffer.byteLength(body) });
+  });
+
+  router.get('/api/recordings/named-transcript/:sessionId', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const sessionId = String(req.params.sessionId || '');
+    if (!sessionId || !/^[0-9a-f-]{8,}$/i.test(sessionId)) return res.status(400).json({ error: 'invalid sessionId' });
+    const dir = ensureRecordingsDir();
+    const perUserFiles: Array<{ filename: string; displayName: string }> = [];
+    for (const f of fs.readdirSync(dir).filter((f) => isRecordingFilename(f) && isSafeFilename(f))) {
+      const parsed = parseRecordingFilename(f);
+      if (!parsed || parsed.sessionId !== sessionId) continue;
+      const room = getRoom(parsed.roomId, database);
+      if (!room || !isOwnerOf(room.id, authReq.user.email, database)) continue;
+      const pPath = participantPathFor(f);
+      if (!pPath || !fs.existsSync(pPath)) continue;
+      try {
+        const p = JSON.parse(fs.readFileSync(pPath, 'utf8')) as { displayName?: string; isPerUser?: boolean };
+        if (p.isPerUser) perUserFiles.push({ filename: f, displayName: p.displayName || 'Participant' });
+      } catch { /* skip unreadable sidecar */ }
+    }
+    if (perUserFiles.length === 0) return res.status(404).json({ error: 'no per-user recordings for session' });
+    const allLines: Array<{ startMs: number; endMs?: number; name: string; text: string }> = [];
+    let hasAny = false;
+    for (const { filename, displayName } of perUserFiles) {
+      const tPath = transcriptPathFor(filename);
+      if (!tPath || !fs.existsSync(tPath)) continue;
+      try {
+        const t = JSON.parse(fs.readFileSync(tPath, 'utf8')) as { lines?: unknown[] };
+        if (!Array.isArray(t.lines)) continue;
+        hasAny = true;
+        for (const line of t.lines) {
+          const l = line as { startMs?: number; endMs?: number; text?: string };
+          allLines.push({ startMs: typeof l.startMs === 'number' ? l.startMs : 0, endMs: typeof l.endMs === 'number' ? l.endMs : undefined, name: displayName, text: typeof l.text === 'string' ? l.text : '' });
+        }
+      } catch { /* skip unreadable transcript */ }
+    }
+    if (!hasAny) return res.status(404).json({ error: 'no transcripts ready yet' });
+    allLines.sort((a, b) => a.startMs - b.startMs);
+    return res.json({ sessionId, speakers: perUserFiles.map((f) => f.displayName), transcript: allLines });
   });
 
   router.get('/api/recordings/:filename/transcript', requireAuth(database), (req, res) => {
@@ -255,7 +307,7 @@ function transcriptLockPathFor(filename: string): string | null {
 }
 
 function deleteRecordingSidecars(filename: string): void {
-  for (const sidecarPath of [metadataPathFor(filename), transcriptPathFor(filename), transcriptLockPathFor(filename)]) {
+  for (const sidecarPath of [metadataPathFor(filename), transcriptPathFor(filename), transcriptLockPathFor(filename), participantPathFor(filename)]) {
     if (!sidecarPath) continue;
     try {
       fs.unlinkSync(sidecarPath);
@@ -536,6 +588,16 @@ function sanitizeRoomId(value: string | undefined): string {
 
 function sanitizeSlug(value: string): string {
   return value.replace(/[^a-z0-9_-]/gi, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 32) || 'room';
+}
+
+function sanitizeDisplayNameSlug(name: string): string {
+  return name.replace(/[^a-zA-Z0-9]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 24).toLowerCase() || 'participant';
+}
+
+function participantPathFor(filename: string): string | null {
+  const filepath = safeRecordingPath(filename);
+  if (!filepath) return null;
+  return `${filepath}.participant.json`;
 }
 
 function isSafeFilename(filename: string): boolean {

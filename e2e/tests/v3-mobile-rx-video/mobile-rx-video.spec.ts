@@ -33,7 +33,7 @@ test('DR-51/DR-52 mobile receives degraded video, culls non-speaker video under 
   await admit(page, 'phone');
   await expect(mobile.locator('.call-panel')).toBeVisible();
 
-  const mobileId = await expectPeerId(mobile, 'phone (you)');
+  const mobileId = await expectPeerId(mobile, 'phone');
   await expect.poll(() => senderFor(page, mobileId), { timeout: 10_000 }).toMatchObject({
     remoteIsMobile: true,
     videoPaused: false,
@@ -80,8 +80,10 @@ test('DR-51/DR-52 mobile receives degraded video, culls non-speaker video under 
 async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
   await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
+  await driveCurrentPreflight(page);
   await page.locator('#display-name').fill(name);
-  await page.locator('input[name="cameraRequested"]').check({ force: true });
+  // click visible label (hidden input + pointer-events overlay)
+  await page.locator('label.toggle-row:has(input[name="cameraRequested"])').click();
   await page.getByRole('button', { name: 'Join' }).click();
   await expect(page.locator('.call-panel')).toBeVisible();
 }
@@ -89,8 +91,17 @@ async function joinOwnerWithCamera(page: Page, room: TestRoom, name: string): Pr
 async function joinGuestWithCamera(page: Page, room: TestRoom, name: string): Promise<void> {
   await page.goto(room.url + '?sfu=0');
   await expect(page.getByRole('heading', { name: room.title })).toBeVisible();
+  // handle guest name overlay if present (align with working scripts)
+  const guestNameInput = page.locator('#guest-display-name');
+  if (await guestNameInput.count() > 0 && await guestNameInput.isVisible().catch(() => false)) {
+    await guestNameInput.fill(name);
+    await page.getByRole('button', { name: 'Continue' }).click().catch(() => {});
+    await page.waitForTimeout(300);
+  }
+  await driveCurrentPreflight(page);
   await page.locator('#display-name').fill(name);
-  await page.locator('input[name="cameraRequested"]').check({ force: true });
+  // click visible label (hidden input + pointer-events overlay)
+  await page.locator('label.toggle-row:has(input[name="cameraRequested"])').click();
   await page.getByRole('button', { name: 'Ask to join' }).click();
   await expect(page.getByText(/Asking the host to admit you|The host is available/)).toBeVisible();
 }
@@ -141,6 +152,33 @@ async function sampleQuality(page: Page, quality: 'good' | 'poor', count: number
 
 async function senderFor(page: Page, peerId: string): Promise<Record<string, unknown> | null> {
   return page.evaluate((id) => window.__meetDebug?.senderSnapshot?.().find((item) => item.id === id) ?? null, peerId);
+}
+
+async function driveCurrentPreflight(page: Page): Promise<void> {
+  // Align with current app join/pre-flight (from working e2e/scripts/local-client-*.mjs + persistent-agent-host.mjs)
+  const configure = page.getByRole('button', { name: /Test \/ configure devices|Hide device test|Test|configure/i });
+  if (await configure.count() > 0 && await configure.first().isVisible().catch(() => false)) {
+    await configure.first().click().catch(() => {});
+    await page.waitForTimeout(400);
+  }
+  const testSpk = page.getByRole('button', { name: 'Test speaker' });
+  if (await testSpk.count() > 0) {
+    await testSpk.first().click().catch(() => {});
+    await page.waitForTimeout(1100);
+  }
+  const yes = page.locator('button.speaker-confirm-yes, button:has-text("Yes")').first();
+  if (await yes.count() > 0 && await yes.isVisible().catch(() => false)) {
+    await yes.click().catch(() => {});
+    await page.waitForTimeout(350);
+  }
+  const confirmBtn = page.getByRole('button', { name: /Confirm — everything works|Check mic and speaker/i });
+  if (await confirmBtn.count() > 0) {
+    const enabled = await confirmBtn.first().isEnabled().catch(() => false);
+    if (enabled) {
+      await confirmBtn.first().click().catch(() => {});
+    }
+  }
+  await page.waitForTimeout(400);
 }
 
 async function installSenderProbe(context: BrowserContext): Promise<void> {

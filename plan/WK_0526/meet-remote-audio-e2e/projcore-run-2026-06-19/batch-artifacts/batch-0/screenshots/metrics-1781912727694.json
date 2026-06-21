@@ -1,0 +1,18 @@
+{
+  "hostMeasuresGuest": {
+    "energyRmsPeak": 0.009335859564003695,
+    "energyAboveFloorMs": 5120,
+    "inboundBytesDelta": 369,
+    "audioLevel": 0.009335859564003695,
+    "pass": true,
+    "samples": 65
+  },
+  "guestMeasuresHost": {
+    "energyRmsPeak": 0.00965090801541887,
+    "energyAboveFloorMs": 5120,
+    "inboundBytesDelta": 486,
+    "audioLevel": 0.00965090801541887,
+    "pass": true,
+    "samples": 65
+  }
+}

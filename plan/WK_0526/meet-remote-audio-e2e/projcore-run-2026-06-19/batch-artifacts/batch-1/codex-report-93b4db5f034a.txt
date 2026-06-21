@@ -1,0 +1,50 @@
+=== Codex report from ONE agent task delegation (room 93b4db5f034a / ra-b1-1781923982850-u2352) ===
+
+Task sent: Run: node /home/creepy/Documents/Workspace/peer2-remote-join.mjs "https://voice.silverjrom.app/room/ra-b1-1781923982850-u2352". KEEP the process + its chrome ALIVE YOURSELF (do NOT let it exit) until the script logs iceConnectionState=connected OR 90s elapses. Then report: full timeline (ADMIT rel time, createOffer, setLocalDescription, each icecandidate, iceConnectionState transitions, selected candidate-pair type+RTT) + contents of /tmp/peer2-b1-metrics.json.
+
+Codex response:
+I’m starting the guest process in the foreground and will watch its stdout for up to 90 seconds. I’ll stop once I see `iceConnectionState=connected` or when the 90-second window is up, then I’ll read the metrics artifact.
+
+At 30 seconds: the guest reached knocking state and WebSocket is open. No admitted/media/ICE events have appeared yet; I’m continuing to hold the process.
+
+At 60 seconds: still only WebSocket heartbeats; no admit, createOffer, setLocalDescription, ICE candidates, or ICE state transitions yet. Continuing to 90 seconds.
+
+The 90-second hold window elapsed without an admitted event or ICE connection. I’m stopping the foreground process now, then reading the metrics artifact.
+
+Held the process alive until the 90s observation window elapsed. No admit or ICE connection occurred.
+
+Timeline:
+start: https://voice.silverjrom.app/room/ra-b1-1781923982850-u2352
+post-goto: .../ra-b1-1781923982850-u2352?sfu=0
+preflight: mic live, micVerified true, speakerTested true
+ws construct: wss://voice.silverjrom.app/ws
+ws open: room=93b4db5f034a
+knocking: reached
+admit: not seen
+createOffer: not seen
+setLocalDescription: not seen
+icecandidate: none seen
+iceConnectionState transitions: none seen
+selected candidate pair: none
+RTT: none
+heartbeats: 1781924035372, 1781924055379, 1781924075381, 1781924095381
+stop: 90s window elapsed, process interrupted
+
+/tmp/peer2-b1-metrics.json:
+{
+  "roomUrl": "https://voice.silverjrom.app/room/ra-b1-1781923982850-u2352",
+  "startedAt": 1781924008205,
+  "success": false,
+  "publishState": null,
+  "ice": null,
+  "iceConfig": null,
+  "pcStates": null,
+  "errors": [
+    "Error: page.waitForTimeout: Target page, context or browser has been closed"
+  ],
+  "durationMs": 104701,
+  "fullFailureDump": null
+}
+
+No /tmp/peer2-b1-timeline.json was produced.
+

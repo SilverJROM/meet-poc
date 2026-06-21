@@ -22,3 +22,11 @@ e2e/.test-rooms.json
 # overmind ephemeral run state
 .overmind-state.json
 **/.overmind-state.json
+
+# host scaffold log + stray local DB files (real DB lives in data/)
+persistent-host.out
+*.out
+*.db
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

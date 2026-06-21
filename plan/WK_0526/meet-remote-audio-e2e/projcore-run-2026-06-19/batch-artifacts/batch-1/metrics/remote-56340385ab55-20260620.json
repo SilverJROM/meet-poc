@@ -1,0 +1,24 @@
+{
+  "roomUrl": "https://voice.silverjrom.app/room/ra-b1-1781922518150-os3fi",
+  "roomId": "56340385ab55",
+  "startedAt": 1781922518150,
+  "admitTs": null,
+  "success": false,
+  "publishState": null,
+  "ice": null,
+  "pcStates": null,
+  "publishTriggerCount": null,
+  "createOfferSeen": false,
+  "setLocalSeen": false,
+  "errors": [
+    "page closed externally (hyp1) - see peer2-b1.log for [PEER2-PAGE-CLOSE] and waitForTimeout error"
+  ],
+  "durationMs": 300000,
+  "fullFailureDump": {
+    "note": "Instrumentation (relAdmit, CREATE-OFFER/SET-LOCAL, publishTrigger, close listeners, timeline) added. Run showed knocking/WS but external close before full post-admit PC negotiation. See relay-transcript and test log for PM2 (ADMITTED then RECONNECT ~4s) + close error.",
+    "iceGatheringState": null,
+    "iceConnectionState": null,
+    "allGatheredLocal": []
+  },
+  "iceConfig": null
+}

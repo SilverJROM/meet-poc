@@ -1,0 +1,34 @@
+{
+  "room": {
+    "id": "ccd86f7dad46",
+    "slug": "ra-e2e-val-1781913402937-kw5es",
+    "title": "RA-E2E-VAL-1781913402937-kw5es",
+    "url": "/room/ra-e2e-val-1781913402937-kw5es",
+    "isOpen": true,
+    "waitTimeoutMinutes": 15
+  },
+  "hostSeesGuestTone": {
+    "peakHz": 878.90625,
+    "peakDb": -51.19932174682617
+  },
+  "guestSeesHostTone": {
+    "peakHz": 445.3125,
+    "peakDb": -51.82917785644531
+  },
+  "hostMeasuresMutedGuest": {
+    "energyRmsPeak": 0.000002611792500810344,
+    "energyAboveFloorMs": 0,
+    "inboundBytesDelta": 160,
+    "audioLevel": 0.000002611792500810344,
+    "pass": false,
+    "samples": 52
+  },
+  "guestMeasuresMutedHost": {
+    "energyRmsPeak": 0,
+    "energyAboveFloorMs": 0,
+    "inboundBytesDelta": 15,
+    "audioLevel": 0,
+    "pass": false,
+    "samples": 52
+  }
+}

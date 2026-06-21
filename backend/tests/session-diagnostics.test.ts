@@ -231,6 +231,68 @@ describe('meeting session diagnostics API', () => {
     await closeServer(server);
   });
 
+  it('CR-FIX-9 redacts clientKey from legacy diagnostics rows on detail and download reads', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Legacy diagnostics secret', 'jrom@silverjrom.app', db);
+    const session = openSession(room.id, 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server } = await startWsServer(db);
+    const payload = samplePayload({
+      clientId: 'legacy-guest-client',
+      participantId: 'legacy-guest-participant',
+      clientKey: 'legacy-client-key-secret',
+      clientName: 'Legacy Guest',
+      legacyMarker: 'old-row',
+    });
+
+    db.prepare(
+      `
+        INSERT INTO meeting_session_diagnostics
+          (id, session_id, room_id, owner_email, kind, created_at, payload_json, relay_used, candidate_types, peer_count, participant_id, participant_name, participant_client_key)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    ).run(
+      'legacy-diagnostic-row',
+      session.id,
+      session.roomId,
+      session.hostEmail,
+      'sample',
+      Date.now(),
+      JSON.stringify(payload),
+      0,
+      '',
+      0,
+      'legacy-guest-participant',
+      'Legacy Guest',
+      'legacy-client-key-secret',
+    );
+
+    const detail = await request(server)
+      .get(`/api/meeting-sessions/${session.id}/diagnostics`)
+      .set('Cookie', ownerCookie)
+      .expect(200);
+    expect(detail.body.entries).toHaveLength(1);
+    expect(detail.body.entries[0].payload.clientName).toBe('Legacy Guest');
+    expect(detail.body.entries[0].payload.legacyMarker).toBe('old-row');
+    expect(detail.body.entries[0].payload).not.toHaveProperty('clientKey');
+    expect(detail.body.entries[0]).not.toHaveProperty('participant_client_key');
+    expect(detail.body.entries[0]).not.toHaveProperty('participantClientKey');
+
+    const download = await request(server)
+      .get(`/api/meeting-sessions/${session.id}/diagnostics.json`)
+      .set('Cookie', ownerCookie)
+      .expect(200);
+    expect(download.body.entries).toHaveLength(1);
+    expect(download.body.entries[0].payload.clientName).toBe('Legacy Guest');
+    expect(download.body.entries[0].payload.legacyMarker).toBe('old-row');
+    expect(download.body.entries[0].payload).not.toHaveProperty('clientKey');
+    expect(download.body.entries[0]).not.toHaveProperty('participant_client_key');
+    expect(download.body.entries[0]).not.toHaveProperty('participantClientKey');
+
+    await closeServer(server);
+  });
+
   it('DR-28 retains a bounded number of diagnostics entries per session', async () => {
     const db = createTestDb();
     seedUser(db);
@@ -303,6 +365,30 @@ describe('meeting session diagnostics API', () => {
     expect(row.participant_id).toBe('owner-participant');
     expect(row.participant_name).toBe('Owner');
     expect(row.participant_client_key).toBe('owner-key');
+  });
+
+  it('CR-FIX-10 appendDiagnosticsEntry stores payload_json without clientKey', () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Stored payload redaction room', 'jrom@silverjrom.app', db);
+    const session = openSession(room.id, 'jrom@silverjrom.app', db);
+
+    const entry = appendDiagnosticsEntry(
+      session.id,
+      null,
+      samplePayload({ clientKey: 'normal-store-client-key', clientName: 'Payload Guest' }),
+      db,
+    )!;
+
+    expect(entry).not.toBeNull();
+    const row = db
+      .prepare('SELECT payload_json, participant_client_key FROM meeting_session_diagnostics WHERE id = ?')
+      .get(entry.id) as { payload_json: string; participant_client_key: string };
+    const storedPayload = JSON.parse(row.payload_json) as Record<string, unknown>;
+    expect(row.participant_client_key).toBe('normal-store-client-key');
+    expect(storedPayload.clientName).toBe('Payload Guest');
+    expect(storedPayload).not.toHaveProperty('clientKey');
+    expect(row.payload_json).not.toContain('normal-store-client-key');
   });
 
   it('P-3 missing identity fields insert NULL; no error', () => {
@@ -558,6 +644,18 @@ describe('meeting session diagnostics API', () => {
       }))
       .expect(200);
     expect(res.body.entry).not.toBeNull();
+    expect(res.body.entry).not.toHaveProperty('participant_client_key');
+    expect(res.body.entry).not.toHaveProperty('participantClientKey');
+    expect(res.body.entry.payload.clientName).toBe('Guest');
+    expect(res.body.entry.payload).not.toHaveProperty('clientKey');
+
+    const stored = db
+      .prepare('SELECT payload_json, participant_client_key FROM meeting_session_diagnostics WHERE id = ?')
+      .get(String(res.body.entry.id)) as { payload_json: string; participant_client_key: string };
+    expect(stored.participant_client_key).toBe('durable-gate-key-g1');
+    const storedPayload = JSON.parse(stored.payload_json) as Record<string, unknown>;
+    expect(storedPayload.clientName).toBe('Guest');
+    expect(storedPayload).not.toHaveProperty('clientKey');
 
     const detail = await request(server)
       .get(`/api/meeting-sessions/${sessionId}/diagnostics`)
@@ -565,7 +663,18 @@ describe('meeting session diagnostics API', () => {
       .expect(200);
     expect(detail.body.entries.length).toBeGreaterThanOrEqual(1);
     expect(detail.body.entries[0].payload.clientName).toBe('Guest');
-    expect(detail.body.entries[0].payload.clientKey).toBe('durable-gate-key-g1');
+    expect(detail.body.entries[0].payload).not.toHaveProperty('clientKey');
+    expect(detail.body.entries[0]).not.toHaveProperty('participant_client_key');
+    expect(detail.body.entries[0]).not.toHaveProperty('participantClientKey');
+
+    const download = await request(server)
+      .get(`/api/meeting-sessions/${sessionId}/diagnostics.json`)
+      .set('Cookie', ownerCookie)
+      .expect(200);
+    expect(download.body.entries[0].payload.clientName).toBe('Guest');
+    expect(download.body.entries[0].payload).not.toHaveProperty('clientKey');
+    expect(download.body.entries[0]).not.toHaveProperty('participant_client_key');
+    expect(download.body.entries[0]).not.toHaveProperty('participantClientKey');
 
     closeWs(owner);
     await closeServer(server);

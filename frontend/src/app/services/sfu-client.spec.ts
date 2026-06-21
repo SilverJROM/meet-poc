@@ -1298,6 +1298,8 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
     revision: 2,
     tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
   };
+  // Seed roster so doSubscribeTracks' stale-session guard does not fire on a matching cfSessionId.
+  sfu.remotePublishers.set(new Map([['alice', publisher]]));
 
   await privateSfu.doSubscribeTracks(publisher, publisher.tracks);
   await privateSfu.doSubscribeTracks(publisher, publisher.tracks);
@@ -1338,8 +1340,10 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
     { trackName: 'bob-old-audio', kind: 'audio' },
     { trackName: 'bob-new-audio', kind: 'audio' },
   ];
+  const bobPublisher: RemotePublisher = { clientId: 'bob', participantId: 'p-bob', cfSessionId: 'bob-cf', revision: 2, tracks };
+  sfu.remotePublishers.set(new Map([['bob', bobPublisher]]));
 
-  await privateSfu.doSubscribeTracks({ clientId: 'bob', participantId: 'p-bob', cfSessionId: 'bob-cf', revision: 2, tracks }, tracks);
+  await privateSfu.doSubscribeTracks(bobPublisher, tracks);
 
   assert.equal(postBodies.length, 1, 'mixed subscribe still POSTs for a genuinely missing track');
   assert.deepEqual(postBodies[0].tracks.map((track) => track.trackName), ['bob-new-audio'], 'POST body excludes already-subscribed tracks');
@@ -1450,6 +1454,7 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
     );
     privateSfu.subscribeRetryAttempts.set('alice', 3);
     privateSfu.subscribeFirstFrameAt.set('alice', 1234);
+    sfu.remotePublishers.set(new Map([['alice', { clientId: 'alice', participantId: 'p-alice', cfSessionId: 'alice-cf', revision: 1, tracks: [] }]]));
 
     await assert.rejects(
       privateSfu.doSubscribeTracks(
@@ -1506,6 +1511,7 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
     midToEntry: Map<string, SubscribedTrackEntry>;
   };
 
+  sfu.remotePublishers.set(new Map([['bob', { clientId: 'bob', participantId: 'p-bob', cfSessionId: 'bob-cf', revision: 1, tracks: [] }]]));
   await privateSfu.doSubscribeTracks(
     { clientId: 'bob', participantId: 'p-bob', cfSessionId: 'bob-cf', revision: 1, tracks: [] },
     [
@@ -1796,6 +1802,124 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
   assert.equal(privateSfu.subscribedClientIds.has('alice'), false, 'roster new cfSession clears subscribe guard');
   assert.equal(privateSfu.subscribeRetryAttempts.has('alice'), false, 'roster new cfSession clears retry attempts');
   assert.equal(privateSfu.subscribeFirstFrameAt.has('alice'), false, 'roster new cfSession clears first-frame retry state');
+}
+
+// SFU-R3 — publisher republishes (new cfSession + new trackName) → subscriber re-subscribes to the
+//           current trackName immediately; the CF POST carries the new cfSessionId, not the stale one.
+{
+  const postBodies: Array<{ cfSessionId: string; tracks: Array<{ sessionId: string; trackName: string }> }> = [];
+  const http = {
+    post: (_url: string, body: unknown) => {
+      postBodies.push(body as (typeof postBodies)[0]);
+      // Abort after recording — we only care that the POST was issued with the right params.
+      return throwError(() => new Error('SFU-R3: test-stop-after-record'));
+    },
+  } as unknown as Partial<HttpClient>;
+  const sfu = createSfuClient(http);
+  const pc = makeSingleTrackSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  const privateSfu = sfu as unknown as {
+    midToEntry: Map<string, SubscribedTrackEntry>;
+    subscribedClientIds: Set<string>;
+  };
+
+  // Seed: alice was subscribed to old-cf/alice-old-audio
+  const staleEntry: SubscribedTrackEntry = { publisherClientId: 'alice', trackName: 'alice-old-audio', kind: 'audio', mid: '5' };
+  privateSfu.midToEntry.set('5', staleEntry);
+  sfu.subscribedTracks.set(new Map([['5', staleEntry]]));
+  privateSfu.subscribedClientIds.add('alice');
+  sfu.remotePublishers.set(new Map([['alice', {
+    clientId: 'alice', participantId: 'p-alice',
+    cfSessionId: 'old-cf', tracks: [{ trackName: 'alice-old-audio', kind: 'audio' }], revision: 1,
+  }]]));
+
+  // Reconnect: presence with new cfSession arrives
+  sfu.handleSfuPresence({
+    clientId: 'alice', participantId: 'p-alice',
+    cfSessionId: 'new-cf', tracks: [{ trackName: 'alice-new-audio', kind: 'audio' }], revision: 2,
+  });
+  await flushSfuQueue(sfu);
+
+  assert.equal(postBodies.length, 1, 'SFU-R3: exactly one CF subscribe POST issued on publisher reconnect');
+  const postedTrack = postBodies[0]?.tracks?.[0];
+  assert.equal(postedTrack?.sessionId, 'new-cf', 'SFU-R3: POST carries new cfSessionId, not stale');
+  assert.equal(postedTrack?.trackName, 'alice-new-audio', 'SFU-R3: POST carries new trackName, not stale');
+  assert.equal(privateSfu.midToEntry.has('5'), false, 'SFU-R3: stale midToEntry evicted before re-subscribe');
+  assert.equal(sfu.subscribedTracks().has('5'), false, 'SFU-R3: stale subscribedTrack evicted before re-subscribe');
+}
+
+// SFU-R4 — in-flight doSubscribe(oldPublisher) that completes AFTER publisher reconnect MUST NOT
+//           bind a dead track. The stale-cfSession guard in doSubscribeTracks aborts the bind.
+{
+  const http = {
+    post: () =>
+      // CF accepts the subscribe (simulates stale session briefly still live) — no-renegotiation path
+      of({ tracks: [{ trackName: 'alice-old-audio', mid: '5' }], requiresImmediateRenegotiation: false }),
+  } as unknown as Partial<HttpClient>;
+  const sfu = createSfuClient(http);
+  const pc = makeSingleTrackSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  const privateSfu = sfu as unknown as {
+    midToEntry: Map<string, SubscribedTrackEntry>;
+    subscribedClientIds: Set<string>;
+    doSubscribeTracks: (
+      publisher: import('./sfu-roster-utils.js').RemotePublisher,
+      tracks: { trackName: string; kind: string }[],
+    ) => Promise<void>;
+  };
+
+  // Publisher reconnected: remotePublishers already reflects the new cfSession
+  sfu.remotePublishers.set(new Map([['alice', {
+    clientId: 'alice', participantId: 'p-alice',
+    cfSessionId: 'new-cf', tracks: [{ trackName: 'alice-new-audio', kind: 'audio' }], revision: 2,
+  }]]));
+
+  // Simulate the in-flight old subscribe completing with the stale publisher object
+  const oldPublisher: import('./sfu-roster-utils.js').RemotePublisher = {
+    clientId: 'alice', participantId: 'p-alice',
+    cfSessionId: 'old-cf', tracks: [{ trackName: 'alice-old-audio', kind: 'audio' }], revision: 1,
+  };
+  await privateSfu.doSubscribeTracks(oldPublisher, oldPublisher.tracks);
+
+  // Guard must have fired: no dead-track bind in any state map
+  assert.equal(privateSfu.midToEntry.has('5'), false, 'SFU-R4: stale-session guard prevents dead mid binding');
+  assert.equal(sfu.subscribedTracks().has('5'), false, 'SFU-R4: stale-session guard prevents dead subscribedTracks entry');
+  assert.equal(sfu.remoteStreams().has('alice'), false, 'SFU-R4: stale-session guard prevents dead remoteStreams entry');
+}
+
+// SFU-R5 — in-flight doSubscribe(oldPublisher) completes AFTER the publisher LEFT the roster entirely
+//           (removePeer was called). Guard must fire on !publisherCurrent and abort the bind — the
+//           publisher-left case where tearDownPeerSubscription may have sent mids.length=0 (subscribe
+//           still in-flight at teardown time, so no midToEntry entries yet → no CF close enqueued).
+{
+  const http = {
+    post: () =>
+      of({ tracks: [{ trackName: 'alice-audio', mid: '7' }], requiresImmediateRenegotiation: false }),
+  } as unknown as Partial<HttpClient>;
+  const sfu = createSfuClient(http);
+  const pc = makeSingleTrackSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  const privateSfu = sfu as unknown as {
+    midToEntry: Map<string, SubscribedTrackEntry>;
+    subscribedClientIds: Set<string>;
+    doSubscribeTracks: (
+      publisher: import('./sfu-roster-utils.js').RemotePublisher,
+      tracks: { trackName: string; kind: string }[],
+    ) => Promise<void>;
+  };
+
+  // Publisher has already left — roster is empty
+  sfu.remotePublishers.set(new Map());
+
+  const departedPublisher: import('./sfu-roster-utils.js').RemotePublisher = {
+    clientId: 'alice', participantId: 'p-alice',
+    cfSessionId: 'old-cf', tracks: [{ trackName: 'alice-audio', kind: 'audio' }], revision: 1,
+  };
+  await privateSfu.doSubscribeTracks(departedPublisher, departedPublisher.tracks);
+
+  assert.equal(privateSfu.midToEntry.has('7'), false, 'SFU-R5: departed-publisher guard prevents dead mid binding');
+  assert.equal(sfu.subscribedTracks().has('7'), false, 'SFU-R5: departed-publisher guard prevents dead subscribedTracks entry');
+  assert.equal(sfu.remoteStreams().has('alice'), false, 'SFU-R5: departed-publisher guard prevents dead remoteStreams entry');
 }
 
 // SFU-S4 — failed screen publish rolls back local offer and clears the added screen transceiver/sender.

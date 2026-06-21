@@ -307,3 +307,9 @@ video.is-mirrored-self-view {
 .self-pip-tile .floating-reaction {
   font-size: 32px;
 }
+
+.tile[data-reconnecting="true"] {
+  opacity: 0.45;
+  filter: grayscale(0.7);
+  pointer-events: none;
+}

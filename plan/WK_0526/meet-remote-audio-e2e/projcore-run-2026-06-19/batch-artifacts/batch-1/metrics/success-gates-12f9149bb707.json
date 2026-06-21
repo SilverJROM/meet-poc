@@ -1,0 +1,16 @@
+{
+  "room": "12f9149bb707",
+  "result": "PASS",
+  "pm2": "KNOCK peer2-remote pending=1; ADMITTED admitted=2 pending=0",
+  "tiles": 2,
+  "gates": [
+    "initial missingJoinPrereqs: [] displayName: peer2-remote",
+    "hasMicAccess ... result: true",
+    "missingPreflightPrereqs ... missing: []",
+    "localStream truthiness after preflight: true",
+    "localStream after ensureSelectedAudioDevice: true",
+    "checkIceConfigForJoin: fetchError= null result: true",
+    "all prereqs passed, calling ws.connect"
+  ],
+  "note": "exact B0 rig guest path + fake ui+device flags + name + audio + ice all passed; hack reverted; gate logs surfaced"
+}

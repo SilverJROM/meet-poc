@@ -1,0 +1,12 @@
+{
+  "hostDiag": {
+    "publish": null,
+    "pc": null
+  },
+  "admitted": false,
+  "result": {
+    "success": false,
+    "turnInConfig": true,
+    "durationMs": 112554
+  }
+}
