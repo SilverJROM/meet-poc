@@ -229,6 +229,10 @@ export class RoomPage implements OnDestroy {
   readonly deviceDialogBusy = signal(false);
   readonly deviceDialogError = signal<string | null>(null);
   readonly selectedSpeakerUnavailable = signal(false);
+  // Non-blocking device issues (e.g. speaker fell back to system default) are NOT
+  // shown as red in-call banners. They are recorded here, logged to diagnostics,
+  // and surfaced to the host once, at end-of-call (the leave dialog).
+  readonly callIssues = signal<readonly string[]>([]);
   readonly canSelectAudioOutput = signal(canSetSinkId());
   readonly canFlipCamera = computed(() => this.viewport.isMobile() && (this.state() === 'in-call' ? this.media.cameraOn() : this.cameraRequested()));
   readonly permissionError = signal<LobbyError | null>(null);
@@ -725,7 +729,7 @@ export class RoomPage implements OnDestroy {
         void this.applySpeakerDevice(deviceId)
           .then((result) => {
             if (this.selectedAudioOutputId() !== deviceId) return;
-            this.selectedSpeakerUnavailable.set(result === 'default-fallback' || result === 'failed');
+            this.setSpeakerUnavailable(result === 'default-fallback' || result === 'failed');
             if (result === 'selected' || result === 'unsupported') this.deviceDialogError.set(null);
             if (result === 'failed') this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
           })
@@ -1085,7 +1089,7 @@ export class RoomPage implements OnDestroy {
     this.selectedAudioOutputId.set(deviceId);
     storeDevice(DEVICE_STORAGE.audioOutput, deviceId);
     if (result !== 'failed') {
-      this.selectedSpeakerUnavailable.set(result === 'default-fallback');
+      this.setSpeakerUnavailable(result === 'default-fallback');
       if (result === 'default-fallback' && deviceId) {
         this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
       }
@@ -1093,7 +1097,7 @@ export class RoomPage implements OnDestroy {
     }
 
     await this.applySpeakerDevice('');
-    this.selectedSpeakerUnavailable.set(!!deviceId);
+    this.setSpeakerUnavailable(!!deviceId);
     if (deviceId) this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
   }
 
@@ -2380,7 +2384,7 @@ export class RoomPage implements OnDestroy {
     this.deviceDialogError.set(null);
     this.permissionError.set(null);
     this.setupWarning.set(null);
-    this.selectedSpeakerUnavailable.set(false);
+    this.setSpeakerUnavailable(false);
     this.relayUnavailableWarning.set(false);
     this.error.set(null);
     try {
@@ -2572,7 +2576,7 @@ export class RoomPage implements OnDestroy {
       this.selectedAudioOutputId.set(fallbackOutputId);
       if (selectedOutputMissing) {
         storeDevice(DEVICE_STORAGE.audioOutput, fallbackOutputId);
-        this.selectedSpeakerUnavailable.set(devices.audioOutputs.length > 0);
+        this.setSpeakerUnavailable(devices.audioOutputs.length > 0);
         if (devices.audioOutputs.length > 0) this.deviceDialogError.set('Selected speaker is unavailable. Using the system default speaker.');
       }
     }
@@ -2673,7 +2677,7 @@ export class RoomPage implements OnDestroy {
     this.clearAudioConnectingTimeout();
     this.initialPublishRetrying.set(false);
     this.initialPublishFailureNotice.set(null);
-    this.selectedSpeakerUnavailable.set(false);
+    this.setSpeakerUnavailable(false);
     this.initialCaptureEnergyChecked = false;
     this.micSweepInProgress = false;
     this.micSweepDoneForEpisode = false;
@@ -2860,7 +2864,7 @@ export class RoomPage implements OnDestroy {
       if (this.state() === 'lobby' || this.state() === 'in-call') await this.ensureSelectedAudioDevice('devicechange');
       if (this.state() === 'in-call' && this.selectedAudioOutputId()) {
         const result = await this.applySpeakerDevice(this.selectedAudioOutputId());
-        this.selectedSpeakerUnavailable.set(result === 'default-fallback' || result === 'failed');
+        this.setSpeakerUnavailable(result === 'default-fallback' || result === 'failed');
         if (result === 'selected' || result === 'unsupported') this.deviceDialogError.set(null);
       }
     } catch (err) {
@@ -3749,6 +3753,21 @@ export class RoomPage implements OnDestroy {
       this.actionNotice.set('Poor connection detected. Audio or video may lag.');
       this.queueDiagnosticsLog('state-change');
     }
+  }
+
+  // Set speaker-unavailable state. When it goes unavailable we record a non-blocking
+  // call issue (logged to diagnostics + shown to the host at end-of-call) instead of
+  // surfacing a red banner mid-call.
+  private setSpeakerUnavailable(unavailable: boolean): void {
+    this.selectedSpeakerUnavailable.set(unavailable);
+    if (unavailable) this.recordCallIssue('Selected speaker unavailable — used the system default');
+  }
+
+  private recordCallIssue(label: string): void {
+    if (this.callIssues().includes(label)) return;
+    this.callIssues.update((list) => [...list, label]);
+    // Best-effort diagnostics entry (no-op unless diagnostics logging is active).
+    this.queueDiagnosticsLog('error', label);
   }
 
   private queueDiagnosticsLog(kind: DiagnosticsPayload['kind'], error?: string): void {

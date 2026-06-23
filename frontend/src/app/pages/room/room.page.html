@@ -224,12 +224,9 @@
           <button type="button" [disabled]="initialPublishRetrying()" (click)="rejoinAfterInitialPublishFailure()">Rejoin</button>
         </div>
       }
-      @if (selectedSpeakerUnavailable()) {
-        <div class="device-notice" role="status">
-          <span>Selected speaker unavailable. Using system default.</span>
-          <button type="button" (click)="openInCallDeviceDialog()">Switch speaker</button>
-        </div>
-      }
+      <!-- Speaker-unavailable is non-blocking (audio continues on system default):
+           no mid-call banner. It's recorded as a call issue, logged to diagnostics,
+           and shown to the host at end-of-call (leave dialog). -->
       @if (remoteAudioBlocked()) {
         <div class="audio-unblock-notice" role="status">
           <span>Tap to enable audio</span>
@@ -388,7 +385,7 @@
         }
       </div>
       @if (leaveDialogOpen()) {
-        <app-leave-dialog (endForAll)="endForAll()" (justLeave)="justLeave()" (cancel)="leaveDialogOpen.set(false)" />
+        <app-leave-dialog [callIssues]="callIssues()" (endForAll)="endForAll()" (justLeave)="justLeave()" (cancel)="leaveDialogOpen.set(false)" />
       }
       @if (meetingEndedToastOpen()) {
         <app-meeting-ended-toast (dismiss)="dismissMeetingEnded()" />

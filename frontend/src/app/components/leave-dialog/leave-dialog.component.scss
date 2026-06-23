@@ -77,3 +77,31 @@ p {
     height: 48px;
   }
 }
+
+.call-issues {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 9px;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  text-align: left;
+  font-size: 13px;
+  color: #7c2d12;
+}
+
+.call-issues strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.call-issues ul {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+
+.call-issues-hint {
+  display: block;
+  margin-top: 4px;
+  color: #9a3412;
+  font-size: 12px;
+}

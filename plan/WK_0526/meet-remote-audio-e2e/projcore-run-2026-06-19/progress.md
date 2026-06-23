@@ -877,3 +877,9 @@ batch-1 dispatched_at: 2026-06-20T08:25:35Z estimate_min: 20 bucket: TEST-HEAVY 
 - Cleanup TODO: throwaway finale guests auto-expired (peers:1 host-alone confirmed). No TEST_ROOM01/AGENTROOM touched.
 [overmind] 2026-06-21T05:46:34+00:00 sync OK current='Make sure Peer2's machine can hear us' tasks=6
 [overmind] 2026-06-21T05:54:53+00:00 complete OK
+[overmind] 2026-06-21T12:14:19+00:00 child sync OK (child-rm lkvc-grok) children=["lkvc-sonnet", "lkvc-codex55", "lkvc-opus", "lkvc-haiku", "lkvc-sonnetb"]
+[overmind] 2026-06-21T12:14:19+00:00 child sync OK (child-rm lkvc-sonnet) children=["lkvc-codex55", "lkvc-opus", "lkvc-haiku", "lkvc-sonnetb"]
+[overmind] 2026-06-21T12:14:20+00:00 child sync OK (child-rm lkvc-codex55) children=["lkvc-opus", "lkvc-haiku", "lkvc-sonnetb"]
+[overmind] 2026-06-21T12:14:29+00:00 child sync OK (child-rm lkvc-opus) children=["lkvc-haiku", "lkvc-sonnetb"]
+[overmind] 2026-06-21T12:14:29+00:00 child sync OK (child-rm lkvc-haiku) children=["lkvc-sonnetb"]
+[overmind] 2026-06-21T12:14:29+00:00 child sync OK (child-rm lkvc-sonnetb) children=[]

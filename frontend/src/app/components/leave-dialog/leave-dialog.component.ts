@@ -1,4 +1,4 @@
-import { Component, output, signal } from '@angular/core';
+import { Component, input, output, signal } from '@angular/core';
 
 @Component({
   selector: 'app-leave-dialog',
@@ -8,6 +8,8 @@ import { Component, output, signal } from '@angular/core';
 })
 export class LeaveDialogComponent {
   readonly busy = signal(false);
+  // Non-blocking device issues recorded during the call (host-only heads-up).
+  readonly callIssues = input<readonly string[]>([]);
   readonly endForAll = output<void>();
   readonly justLeave = output<void>();
   readonly cancel = output<void>();
