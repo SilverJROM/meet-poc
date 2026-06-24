@@ -55,6 +55,9 @@
     } @else if (error()) {
       <p class="admin-error" role="alert">{{ error() }}</p>
     } @else {
+      @if (rowError()) {
+        <p class="admin-error" role="alert">{{ rowError() }}</p>
+      }
       <div class="user-table" role="table">
         <div class="user-row head" role="row">
           <span>Email</span>
@@ -62,9 +65,10 @@
           <span>Telegram</span>
           <span>Role</span>
           <span>Created</span>
+          <span>Actions</span>
         </div>
         @for (u of users(); track u.email) {
-          <div class="user-row" role="row">
+          <div class="user-row" role="row" [class.protected]="u.protected">
             <span class="email">{{ u.email }}</span>
             <span>{{ u.displayName }}</span>
             <span>
@@ -82,9 +86,55 @@
               }
             </span>
             <span>{{ u.createdAt | date: 'medium' }}</span>
+            <span class="actions-cell">
+              @if (u.protected) {
+                <span class="protected-label muted-cell">Protected</span>
+              } @else {
+                <div class="action-group">
+                  <button type="button" class="action-btn danger" [disabled]="rowBusy() === u.email" (click)="deleteUser(u)">
+                    <ion-icon name="trash-outline"></ion-icon> Delete
+                  </button>
+                  @if (!isSuperuser()) {
+                    <button type="button" class="action-btn" [disabled]="rowBusy() === u.email" (click)="toggleAdmin(u)">
+                      <ion-icon name="swap-horizontal-outline"></ion-icon>
+                      {{ u.isAdmin ? 'Revoke admin' : 'Make admin' }}
+                    </button>
+                  }
+                </div>
+                @if (isSuperuser()) {
+                  <div class="action-group god-mode">
+                    <button type="button" class="action-btn" [disabled]="rowBusy() === u.email" (click)="editDisplayName(u)">
+                      <ion-icon name="create-outline"></ion-icon> Username
+                    </button>
+                    <button type="button" class="action-btn" [disabled]="rowBusy() === u.email" (click)="editEmail(u)">
+                      <ion-icon name="mail-outline"></ion-icon> Email
+                    </button>
+                    <button type="button" class="action-btn" [disabled]="rowBusy() === u.email" (click)="toggleAdmin(u)">
+                      <ion-icon name="shield-checkmark-outline"></ion-icon> Role
+                    </button>
+                    <button type="button" class="action-btn" [disabled]="rowBusy() === u.email" (click)="resetPassword(u)">
+                      <ion-icon name="key-outline"></ion-icon> Reset password
+                    </button>
+                  </div>
+                }
+              }
+            </span>
           </div>
         }
       </div>
     }
   </section>
 </section>
+
+@if (confirmOpen()) {
+  <div class="modal-backdrop">
+    <div class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="admin-confirm-title">
+      <h3 id="admin-confirm-title">Confirm action</h3>
+      <p>{{ confirmMessage() }}</p>
+      <div class="confirm-actions">
+        <button type="button" class="secondary-btn" (click)="cancelConfirm()">Cancel</button>
+        <button type="button" class="primary-btn" (click)="acceptConfirm()">Confirm</button>
+      </div>
+    </div>
+  </div>
+}

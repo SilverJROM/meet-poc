@@ -77,6 +77,11 @@ async function drivePreflight(page) {
     await configure.first().click().catch(() => {});
     await page.waitForTimeout(300);
   }
+  // New pre-join gate requires a speaker test + "Yes" before Confirm enables.
+  const testSpk = page.getByRole('button', { name: 'Test speaker' });
+  if (await testSpk.count() > 0) { await testSpk.first().click().catch(() => {}); await page.waitForTimeout(1100); }
+  const yes = page.locator('button.speaker-confirm-yes, button:has-text("Yes")').first();
+  if (await yes.count() > 0 && await yes.isVisible().catch(() => false)) { await yes.click().catch(() => {}); await page.waitForTimeout(350); }
   const confirmBtn = page.getByRole('button', { name: /Confirm — everything works|Check mic and speaker/i });
   const dl = Date.now() + 6000;
   while (Date.now() < dl) {

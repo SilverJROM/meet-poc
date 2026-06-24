@@ -1,0 +1,21 @@
+{
+  "schema_version": 4,
+  "batch_id": "batch-B3a",
+  "role": "implementer",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23",
+  "session": "02_impl_sonnet_lkvc",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/prompts/batch-B3a.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B3a.implementer.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/callbacks.md",
+  "dispatched_at": "2026-06-23T09:36:22Z",
+  "estimate_min": 45,
+  "bucket": "MEDIUM",
+  "wakeup_delay_sec": 3600,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B3a.wakeup-required",
+  "watcher_pid": 2311396,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B3a.watcher-implementer.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/watcher-batch-B3a-implementer.log",
+  "dispatch_marker": "DISPATCH-batch-B3a-implementer-2311304-1782207382",
+  "wakeup_acked_at": "2026-06-23T09:36:25Z",
+  "wakeup_acked_by": "projcore"
+}

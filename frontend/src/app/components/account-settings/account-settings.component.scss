@@ -181,3 +181,32 @@ code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
 }
+
+.pwdless-panel {
+  .pwdless-hint {
+    margin-bottom: 10px;
+  }
+}
+
+.pwdless-number {
+  margin: 0 0 10px;
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #229ed9;
+}
+
+.pwdless-toggle {
+  margin-bottom: 10px;
+}
+
+.pwdless-disable-form {
+  margin-top: 8px;
+}
+
+.pwdless-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}

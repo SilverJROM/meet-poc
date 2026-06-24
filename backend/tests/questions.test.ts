@@ -100,7 +100,13 @@ describe('FIXC7 question library and analysis API', () => {
     expect(questions.body.questions).toHaveLength(2);
     expect(questions.body.questions[0]).toMatchObject({ name: 'Summarize meeting', autoRun: true, isDefault: true });
     expect(questions.body.questions[1]).toMatchObject({ name: 'Extract action items', autoRun: false });
-    expect(settings.body).toEqual({ defaultProvider: 'ollama', defaultOllamaModel: 'mistral-nemo:12b', transcriberModel: 'medium' });
+    expect(settings.body).toEqual({
+      defaultProvider: 'ollama',
+      defaultOllamaModel: 'mistral-nemo:12b',
+      transcriberModel: 'medium',
+      transcriptionMode: 'auto',
+      transcriptionProvider: 'local',
+    });
   });
 
   it('creates, updates, stars, and deletes a question', async () => {

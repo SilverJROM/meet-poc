@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B1c
+status=PROPOSED
+source=callback
+line_no=25
+note=versions panel + service methods + add/delete/set-primary on transcripts page

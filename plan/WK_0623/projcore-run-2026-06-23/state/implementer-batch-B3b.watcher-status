@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B3b
+status=PROPOSED
+source=callback
+line_no=53
+note=TG passwordless UI: login icon+number-match flow, settings activation toggle, passwordless service — frontend-only on B3a APIs

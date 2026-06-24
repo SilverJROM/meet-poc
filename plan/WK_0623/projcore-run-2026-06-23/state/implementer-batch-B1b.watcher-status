@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B1b
+status=PROPOSED
+source=callback
+line_no=20
+note=OpenRouter provider + versioned transcript paths + mocked tests

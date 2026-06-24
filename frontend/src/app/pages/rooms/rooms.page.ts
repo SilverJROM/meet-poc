@@ -45,6 +45,7 @@ export class RoomsPage implements OnDestroy {
   readonly editBusyId = signal<string | null>(null);
   readonly selectedIds = signal<ReadonlySet<string>>(new Set());
   readonly selectedCount = computed(() => this.selectedIds().size);
+  readonly pendingRecordingWarning = signal(false);
   readonly allOnPageSelected = computed(() => {
     const ids = this.rooms();
     if (ids.length === 0) return false;
@@ -54,6 +55,12 @@ export class RoomsPage implements OnDestroy {
 
   constructor() {
     addIcons({ checkmarkOutline, chevronDownOutline, chevronUpOutline, clipboardOutline, closeOutline, createOutline, ellipsisHorizontal, keyOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline });
+    for (let i = 0; i < localStorage.length; i++) {
+      if (localStorage.key(i)?.startsWith('recording-pending-')) {
+        this.pendingRecordingWarning.set(true);
+        break;
+      }
+    }
     this.querySub = this.route.queryParamMap.subscribe((params) => {
       this.page.set(readPositiveInt(params.get('page'), 1));
       this.pageSize.set(Math.min(readPositiveInt(params.get('pageSize'), DEFAULT_PAGE_SIZE), 100));
@@ -64,6 +71,16 @@ export class RoomsPage implements OnDestroy {
 
   ngOnDestroy(): void {
     this.querySub.unsubscribe();
+  }
+
+  dismissRecordingWarning(): void {
+    this.pendingRecordingWarning.set(false);
+    const keysToRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith('recording-pending-')) keysToRemove.push(k);
+    }
+    for (const k of keysToRemove) localStorage.removeItem(k);
   }
 
   toggleMenu(roomId: string, event?: Event): void {

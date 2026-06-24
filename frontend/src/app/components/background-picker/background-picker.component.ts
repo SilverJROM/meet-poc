@@ -176,9 +176,11 @@ export class BackgroundPickerComponent {
         writeStoredSelection({ mode: 'image', asset: option.id, custom: isCustomBackground(option) || undefined });
         await this.backgroundEffects.setBackgroundImage(option.assetUrl);
         await this.backgroundEffects.setMode('image');
+        this.backgroundEffects.setBackgroundDescriptor({ kind: 'image', id: option.id }, option.assetUrl);
       } else {
         writeStoredSelection({ mode: option.mode });
         await this.backgroundEffects.setMode(option.mode);
+        this.backgroundEffects.setBackgroundDescriptor({ kind: option.mode });
       }
       if (option.mode !== 'none' && this.backgroundEffects.mode() === 'none') {
         this.selectedId.set('none');
@@ -363,10 +365,12 @@ export class BackgroundPickerComponent {
       this.selectedId.set(option.id);
       await this.backgroundEffects.setBackgroundImage(option.assetUrl);
       await this.backgroundEffects.setMode('image');
+      this.backgroundEffects.setBackgroundDescriptor({ kind: 'image', id: option.id }, option.assetUrl);
       return;
     }
     this.selectedId.set(stored.mode);
     await this.backgroundEffects.setMode(stored.mode);
+    this.backgroundEffects.setBackgroundDescriptor({ kind: stored.mode });
   }
 }
 

@@ -139,6 +139,64 @@
 
     <hr class="account-divider">
 
+    <div class="account-field pwdless-panel">
+      <label>Passwordless Telegram login</label>
+      @if (pwdlessLoading()) {
+        <p class="field-hint">Checking status…</p>
+      } @else if (!pwdlessLinked()) {
+        <p class="field-hint pwdless-hint">Link Telegram first to enable passwordless sign-in.</p>
+      } @else if (pwdlessStatus() === 'active') {
+        <label class="toggle-row pwdless-toggle">
+          <input type="checkbox" checked disabled>
+          Active — sign in from the login screen with the Telegram icon
+        </label>
+        @if (!pwdlessShowDisable()) {
+          <button type="button" class="secondary-btn danger" (click)="showDisablePasswordless()" [disabled]="pwdlessBusy()">
+            Disable passwordless login
+          </button>
+        } @else {
+          <form class="pwdless-disable-form" (ngSubmit)="disablePasswordless()">
+            <p class="field-hint">Enter your password to turn off passwordless login.</p>
+            <input
+              class="stacked-input"
+              name="pwdlessDisablePassword"
+              type="password"
+              autocomplete="current-password"
+              placeholder="Current password"
+              [ngModel]="pwdlessDisablePassword()"
+              (ngModelChange)="pwdlessDisablePassword.set($event)"
+              [disabled]="pwdlessBusy()"
+            >
+            <div class="pwdless-actions">
+              <button type="submit" class="secondary-btn danger" [disabled]="pwdlessBusy()">Confirm disable</button>
+              <button type="button" class="secondary-btn" (click)="cancelDisablePasswordless()" [disabled]="pwdlessBusy()">Cancel</button>
+            </div>
+          </form>
+        }
+      } @else {
+        <p class="field-hint pwdless-hint">
+          @if (pwdlessStatus() === 'pending') {
+            Activation test in progress — tap the number in Telegram.
+          } @else {
+            Not activated. Run a one-time test to enable passwordless sign-in.
+          }
+        </p>
+        @if (pwdlessDisplayNumber() !== null) {
+          <p class="pwdless-number" aria-live="polite">{{ pwdlessDisplayNumber() }}</p>
+        }
+        <button type="button" class="primary-btn" (click)="enablePasswordless()" [disabled]="pwdlessBusy()">
+          {{ pwdlessStatus() === 'pending' ? 'Resend test number' : 'Enable passwordless login' }}
+        </button>
+      }
+    </div>
+
+    @if (pwdlessError()) {
+      <p class="account-error" role="alert">{{ pwdlessError() }}</p>
+    }
+    <div class="account-status" role="status">{{ pwdlessStatusMsg() || '' }}</div>
+
+    <hr class="account-divider">
+
     <div class="account-field">
       <label>Diagnostics</label>
       <p class="field-hint">When off, this device stops collecting and uploading call diagnostics. Stored on this device only.</p>

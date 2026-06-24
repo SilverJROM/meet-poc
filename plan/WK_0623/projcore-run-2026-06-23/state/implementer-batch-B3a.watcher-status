@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B3a
+status=PROPOSED
+source=callback
+line_no=48
+note=passwordless TG auth backend — schema+crypto+eligibility+start/status/complete+webhook tap+rate caps; Turnstile verify to add (not in backend yet); ~45min cohesive

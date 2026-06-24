@@ -1,0 +1,21 @@
+{
+  "schema_version": 4,
+  "batch_id": "batch-B1b",
+  "role": "implementer",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23",
+  "session": "02_impl_grokcompose_lkvc",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/prompts/batch-B1b.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B1b.implementer.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/callbacks.md",
+  "dispatched_at": "2026-06-23T08:05:03Z",
+  "estimate_min": 30,
+  "bucket": "SHORT",
+  "wakeup_delay_sec": 3600,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B1b.wakeup-required",
+  "watcher_pid": 2139630,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B1b.watcher-implementer.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/watcher-batch-B1b-implementer.log",
+  "dispatch_marker": "DISPATCH-batch-B1b-implementer-2139529-1782201903",
+  "wakeup_acked_at": "2026-06-23T08:05:22Z",
+  "wakeup_acked_by": "projcore"
+}

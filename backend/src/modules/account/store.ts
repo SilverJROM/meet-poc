@@ -8,6 +8,7 @@ type UserRow = {
   updated_at: number;
   display_name: string | null;
   is_admin: number;
+  is_superuser: number;
 };
 
 export type EmailChangeResult =
@@ -28,7 +29,7 @@ export function changeUserEmail(
   database: Database.Database = getDb(),
 ): EmailChangeResult {
   const user = database
-    .prepare('SELECT email, password_hash, created_at, updated_at, display_name, is_admin FROM users WHERE email = ?')
+    .prepare('SELECT email, password_hash, created_at, updated_at, display_name, is_admin, is_superuser FROM users WHERE email = ?')
     .get(oldEmail) as UserRow | undefined;
   if (!user) return { ok: false, status: 404, error: 'user not found' };
 
@@ -38,9 +39,9 @@ export function changeUserEmail(
   const tx = database.transaction(() => {
     database
       .prepare(
-        'INSERT INTO users (email, password_hash, created_at, updated_at, display_name, is_admin) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO users (email, password_hash, created_at, updated_at, display_name, is_admin, is_superuser) VALUES (?, ?, ?, ?, ?, ?, ?)',
       )
-      .run(newEmail, user.password_hash, user.created_at, Date.now(), user.display_name, user.is_admin);
+      .run(newEmail, user.password_hash, user.created_at, Date.now(), user.display_name, user.is_admin, user.is_superuser);
     database.prepare('UPDATE sessions SET email = ? WHERE email = ?').run(newEmail, oldEmail);
     database.prepare('UPDATE rooms SET owner_email = ? WHERE owner_email = ?').run(newEmail, oldEmail);
     database.prepare('UPDATE questions SET owner_email = ? WHERE owner_email = ?').run(newEmail, oldEmail);

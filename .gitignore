@@ -15,6 +15,7 @@ e2e/test-results/
 playwright-report/
 INITIAL_PASSWORD.txt
 jromlogin.md
+peer2.md
 *.log
 .DS_Store
 e2e/.test-rooms.json

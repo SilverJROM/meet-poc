@@ -1,5 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import type { DiagnosticsWsCycle, DiagnosticsWsHealth } from './meeting-sessions.service';
+import type { PeerBackground } from './peer-state';
 
 export type SignalingMessage =
   | {
@@ -24,7 +25,7 @@ export type SignalingMessage =
   | { type: 'peer-reconnecting'; clientId: string; participantId?: string; name: string; host?: boolean }
   | { type: 'peer-resumed'; oldClientId: string; clientId: string; participantId?: string; name: string; host?: boolean; isMobile?: boolean }
   | { type: 'peer-left'; clientId: string; participantId?: string }
-  | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean; screenOn?: boolean; isMobile?: boolean }
+  | { type: 'media-state'; clientId: string; mic: boolean; cam: boolean; screenOn?: boolean; isMobile?: boolean; background?: PeerBackground }
   | { type: 'chat'; id: string; clientId: string; sender: string; text: string; sentAt: number }
   | { type: 'chat-direct'; id: string; clientId: string; sender: string; toClientId: string; text: string; sentAt: number; mine?: boolean }
   | { type: 'recording-started'; clientId: string; sessionId: string }
@@ -52,7 +53,7 @@ export type OutgoingSignalingMessage =
   | { type: 'signal'; to: string; data: unknown }
   | { type: 'admit'; clientId: string }
   | { type: 'reject'; clientId: string; reason?: string }
-  | { type: 'media-state'; mic: boolean; cam: boolean; screenOn: boolean }
+  | { type: 'media-state'; mic: boolean; cam: boolean; screenOn: boolean; background?: PeerBackground }
   | { type: 'chat'; text: string; clientMessageId?: string }
   | { type: 'chat-direct'; toClientId: string; text: string; clientMessageId?: string }
   | { type: 'recording-state'; state: 'started' | 'stopped' }

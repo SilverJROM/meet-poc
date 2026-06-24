@@ -466,6 +466,7 @@ export class RecorderService {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ filename, metadata }),
+        keepalive: true,
       });
       if (!res.ok) throw new Error(`metadata upload failed ${res.status}`);
       this.lastMetadataUpload.set((await res.json()) as MetadataUploadResponse);
@@ -478,16 +479,27 @@ export class RecorderService {
   private startPerUserRecorder(clientId: string, stream: MediaStream, displayName: string): void {
     if (!this.isRecording() || this.perUserRecorders.has(clientId)) return;
     if (stream.getAudioTracks().length === 0) return;
-    try {
-      const mime = this.mimeType || 'audio/webm';
-      const recOpts = mime && MediaRecorder.isTypeSupported(mime) ? { mimeType: mime } : undefined;
-      const rec = new MediaRecorder(stream, recOpts);
+    const tryStart = (opts: MediaRecorderOptions | undefined): void => {
+      const rec = new MediaRecorder(stream, opts);
       const chunks: Blob[] = [];
       rec.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
       if (this.platform.isIOS()) { rec.start(); } else { rec.start(1000); }
       this.perUserRecorders.set(clientId, { recorder: rec, chunks, displayName, stopped: false });
+    };
+    try {
+      const mime = this.mimeType || 'audio/webm';
+      const recOpts = mime && MediaRecorder.isTypeSupported(mime) ? { mimeType: mime } : undefined;
+      tryStart(recOpts);
     } catch (err) {
-      console.warn('[rec-peruser] start failed', { clientId, err });
+      // Codec fallback: some remote/reconnecting SFU streams throw NotSupportedError for an
+      // explicit mimeType; retry letting the browser pick. The mix recorder is unaffected
+      // either way (it records the WebAudio dest, not the raw peer stream).
+      try {
+        tryStart(undefined);
+        console.warn('[rec-peruser] started via codec fallback', { clientId });
+      } catch (err2) {
+        console.warn('[rec-peruser] start failed (both)', { clientId, err: err2 });
+      }
     }
   }
 

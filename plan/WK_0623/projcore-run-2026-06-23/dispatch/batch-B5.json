@@ -1,0 +1,21 @@
+{
+  "schema_version": 4,
+  "batch_id": "batch-B5",
+  "role": "implementer",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23",
+  "session": "02_validator_codex55_lkvc",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/prompts/batch-B5-validator.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B5.implementer.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/callbacks.md",
+  "dispatched_at": "2026-06-23T06:26:46Z",
+  "estimate_min": 40,
+  "bucket": "MEDIUM",
+  "wakeup_delay_sec": 3600,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B5.wakeup-required",
+  "watcher_pid": 2043236,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B5.watcher-implementer.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/watcher-batch-B5-implementer.log",
+  "dispatch_marker": "DISPATCH-batch-B5-implementer-2043032-1782196006",
+  "wakeup_acked_at": "2026-06-23T06:28:30Z",
+  "wakeup_acked_by": "projcore"
+}

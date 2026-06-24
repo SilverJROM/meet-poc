@@ -14,6 +14,7 @@ import { realtimeSfuRouter } from './modules/realtime-sfu/index.js';
 import { LlmService, llmRouter, logBootAvailability } from './modules/llm/index.js';
 import { questionsRouter } from './modules/questions/index.js';
 import { telegramRouter } from './modules/telegram/index.js';
+import { tgPasswordlessRouter } from './modules/telegram/tg-passwordless.js';
 import { accountRouter } from './modules/account/index.js';
 import { adminRouter } from './modules/admin/index.js';
 import { backgroundsRouter } from './modules/backgrounds/index.js';
@@ -43,6 +44,7 @@ export function createApp(database = getDb(), options: CreateAppOptions = {}): e
       : undefined;
   app.use('/api', questionsRouter(database, analysisService));
   app.use('/api', telegramRouter(database));
+  app.use('/api', tgPasswordlessRouter(database));
   app.use('/api', accountRouter(database));
   app.use('/api', adminRouter(database));
   app.use('/api', backgroundsRouter(database));

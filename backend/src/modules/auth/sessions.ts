@@ -8,6 +8,7 @@ export type SessionUser = {
   email: string;
   displayName: string;
   isAdmin: boolean;
+  isSuperuser: boolean;
 };
 
 export function createSession(email: string, database: Database.Database = getDb()): string {
@@ -29,17 +30,24 @@ export function getSessionUser(token: string | undefined, database: Database.Dat
     return null;
   }
   const row = database
-    .prepare('SELECT email, display_name, is_admin FROM users WHERE email = ?')
-    .get(session.email) as { email: string; display_name: string | null; is_admin: number } | undefined;
+    .prepare('SELECT email, display_name, is_admin, is_superuser FROM users WHERE email = ?')
+    .get(session.email) as
+    | { email: string; display_name: string | null; is_admin: number; is_superuser: number }
+    | undefined;
   if (!row) return null;
   return {
     email: row.email,
     displayName: row.display_name || row.email.split('@')[0] || row.email,
     isAdmin: row.is_admin === 1,
+    isSuperuser: row.is_superuser === 1,
   };
 }
 
 export function destroySession(token: string | undefined, database: Database.Database = getDb()): void {
   if (!token) return;
   database.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+}
+
+export function destroyAllUserSessions(email: string, database: Database.Database = getDb()): void {
+  database.prepare('DELETE FROM sessions WHERE email = ?').run(email);
 }

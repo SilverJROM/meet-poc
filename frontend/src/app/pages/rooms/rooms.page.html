@@ -43,6 +43,13 @@
     <p class="error-text" role="alert">{{ error() }}</p>
   }
 
+  @if (pendingRecordingWarning()) {
+    <div class="recording-warning-banner" role="alert">
+      <span>A recording from your last session may not have saved.</span>
+      <button type="button" class="banner-dismiss" (click)="dismissRecordingWarning()" aria-label="Dismiss">×</button>
+    </div>
+  }
+
   @if (selectedCount() > 0) {
     <div class="bulk-bar">
       <span class="bulk-count">{{ selectedCount() }} selected</span>

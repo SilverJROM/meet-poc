@@ -124,6 +124,7 @@ type IncomingMessage = {
   mic?: unknown;
   cam?: unknown;
   screenOn?: unknown;
+  background?: unknown;
   text?: unknown;
   clientMessageId?: unknown;
   to?: string;
@@ -497,6 +498,21 @@ function isHostCommandAllowed(command: string, roomId: string | null, clientId: 
   const allowed = isOwnerOf(roomId, userEmail, database) || (!!roomId && !!live && getActingHostClientId(live, roomId, database) === clientId);
   if (!allowed) logRejectedHostCommand(command, userEmail, roomId);
   return allowed;
+}
+
+type RelayPeerBackground = { kind: 'none' | 'blur' | 'image'; id?: string };
+
+function parsePeerBackground(value: unknown): RelayPeerBackground | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const kind = (value as { kind?: unknown }).kind;
+  if (kind !== 'none' && kind !== 'blur' && kind !== 'image') return undefined;
+  const result: RelayPeerBackground = { kind };
+  const id = (value as { id?: unknown }).id;
+  if (typeof id === 'string') {
+    const trimmed = id.trim();
+    if (trimmed.length > 0 && trimmed.length <= 128) result.id = trimmed;
+  }
+  return result;
 }
 
 function peerSummaries(live: LiveRoom, roomId: string, database: Database.Database): { id: string; participantId: string; name: string; host: boolean; isMobile: boolean }[] {
@@ -1014,7 +1030,10 @@ export function attachSignaling(server: http.Server, database: Database.Database
           },
         };
 
-        if (!ownerResume && !canResume && !owner && !room.isOpen) {
+        // auto_admit is a per-room DB flag (default 0). Only the AGENTROOM test room has it set to 1
+        // via migration 0014. No API allows it to be toggled at runtime. Real rooms always knock→host-admit.
+        const autoAdmitAllowed = room.autoAdmit && roomId === 'd98896162f09';
+        if (!ownerResume && !canResume && !owner && !room.isOpen && !autoAdmitAllowed) {
           startClosedRoomWait(roomId, room.title, clientId, entry, room.waitTimeoutMinutes, live, database);
           console.log(`[room ${roomId}] WAIT ${myName} (${clientId}) timeout=${room.waitTimeoutMinutes}`);
           return;
@@ -1032,9 +1051,6 @@ export function attachSignaling(server: http.Server, database: Database.Database
           !hasOwnerPresentOrReconnecting(live, roomId, database) &&
           !getEffectiveHostClientId(live, roomId, database) &&
           live.admitted.size === 0;
-        // auto_admit is a per-room DB flag (default 0). Only the AGENTROOM test room has it set to 1
-        // via migration 0014. No API allows it to be toggled at runtime. Real rooms always knock→host-admit.
-        const autoAdmitAllowed = room.autoAdmit && roomId === 'd98896162f09';
         if (owner || canResume || shouldActAsFirstOpenRoomHost || autoAdmitAllowed) {
           if (resumeOldClientId) {
             cleanupReconnectState(live, resumeOldClientId);
@@ -1119,9 +1135,20 @@ export function attachSignaling(server: http.Server, database: Database.Database
         const mic = Boolean(msg.mic);
         const cam = Boolean(msg.cam);
         const screenOn = Boolean(msg.screenOn);
+        const background = parsePeerBackground(msg.background);
         const sender = live.admitted.get(clientId);
         for (const [id, peer] of live.admitted) {
-          if (id !== clientId) send(peer.ws, { type: 'media-state', clientId, mic, cam, screenOn, isMobile: sender?.isMobile ?? false });
+          if (id !== clientId) {
+            send(peer.ws, {
+              type: 'media-state',
+              clientId,
+              mic,
+              cam,
+              screenOn,
+              isMobile: sender?.isMobile ?? false,
+              ...(background ? { background } : {}),
+            });
+          }
         }
         return;
       }

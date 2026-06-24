@@ -16,9 +16,8 @@ export type TranscriberModel = 'small' | 'medium' | 'large-v3';
 export type TranscriptionMode = 'auto' | 'ondemand' | 'off';
 export const DEFAULT_TRANSCRIPTION_MODE: TranscriptionMode = 'auto';
 
-// Where transcription runs. 'local' = on-box faster-whisper; 'thirdparty' = external STT API
-// (configured via env: MEET_STT_ENDPOINT / MEET_STT_API_KEY / MEET_STT_MODEL).
-export type TranscriptionProvider = 'local' | 'thirdparty';
+// Where transcription runs. 'local' = on-box faster-whisper; 'openrouter' = cloud STT via OpenRouter.
+export type TranscriptionProvider = 'local' | 'openrouter';
 export const DEFAULT_TRANSCRIPTION_PROVIDER: TranscriptionProvider = 'local';
 
 export type Question = {
@@ -233,11 +232,11 @@ export function getTranscriptionProvider(ownerEmail: string, database: Database.
   const row = database
     .prepare('SELECT key, value, owner_email, updated_at FROM llm_settings WHERE key = ? AND owner_email = ?')
     .get(settingKey(ownerEmail, 'transcription_provider'), ownerEmail) as SettingRow | undefined;
-  return isTranscriptionProvider(row?.value) ? row.value : DEFAULT_TRANSCRIPTION_PROVIDER;
+  return normalizeTranscriptionProvider(row?.value);
 }
 
 export function setTranscriptionProvider(ownerEmail: string, provider: unknown, database: Database.Database = getDb()): TranscriptionProvider {
-  const value = isTranscriptionProvider(provider) ? provider : DEFAULT_TRANSCRIPTION_PROVIDER;
+  const value = normalizeTranscriptionProvider(provider);
   const now = Date.now();
   database
     .prepare('INSERT OR REPLACE INTO llm_settings (key, value, owner_email, updated_at) VALUES (?, ?, ?, ?)')
@@ -249,8 +248,29 @@ function isTranscriptionMode(value: unknown): value is TranscriptionMode {
   return value === 'auto' || value === 'ondemand' || value === 'off';
 }
 
-function isTranscriptionProvider(value: unknown): value is TranscriptionProvider {
-  return value === 'local' || value === 'thirdparty';
+function normalizeTranscriptionProvider(value: unknown): TranscriptionProvider {
+  if (value === 'openrouter' || value === 'thirdparty') return 'openrouter';
+  if (value === 'local') return 'local';
+  return DEFAULT_TRANSCRIPTION_PROVIDER;
+}
+
+export function getCloudTranscriberModel(ownerEmail: string, database: Database.Database = getDb()): string {
+  ensureQuestionDefaults(ownerEmail, database);
+  const row = database
+    .prepare('SELECT key, value, owner_email, updated_at FROM llm_settings WHERE key = ? AND owner_email = ?')
+    .get(settingKey(ownerEmail, 'cloud_transcriber_model'), ownerEmail) as SettingRow | undefined;
+  const candidate = typeof row?.value === 'string' ? row.value.trim() : '';
+  return candidate || process.env.OPENROUTER_MODEL || 'openai/whisper-1';
+}
+
+export function setCloudTranscriberModel(ownerEmail: string, model: unknown, database: Database.Database = getDb()): string {
+  const value = String(model || '').trim().slice(0, 120);
+  if (!value) throw new Error('invalid cloud transcriber model');
+  const now = Date.now();
+  database
+    .prepare('INSERT OR REPLACE INTO llm_settings (key, value, owner_email, updated_at) VALUES (?, ?, ?, ?)')
+    .run(settingKey(ownerEmail, 'cloud_transcriber_model'), value, ownerEmail, now);
+  return value;
 }
 
 export function slugQuestionName(name: string): string {

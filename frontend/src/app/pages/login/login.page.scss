@@ -57,8 +57,94 @@ p {
   gap: 8px;
 }
 
+.submit-row {
+  display: grid;
+  grid-template-columns: 1fr 48px;
+  gap: 8px;
+}
+
 .submit-btn {
   width: 100%;
+}
+
+.tg-login-btn {
+  display: grid;
+  place-items: center;
+  inline-size: 48px;
+  block-size: 44px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: #229ed9;
+  color: #fff;
+  cursor: pointer;
+
+  .tg-icon {
+    inline-size: 24px;
+    block-size: 24px;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
+.tg-number-panel {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(34, 158, 217, 0.08);
+  padding: 14px;
+  text-align: center;
+}
+
+.tg-number-label {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.tg-number-value {
+  margin: 8px 0 4px;
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #229ed9;
+}
+
+.tg-number-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.tg-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+
+  &.ineligible {
+    background: rgba(185, 28, 28, 0.08);
+    color: #b91c1c;
+  }
+
+  &.denied,
+  &.expired {
+    background: rgba(185, 28, 28, 0.08);
+    color: #b91c1c;
+  }
+}
+
+.link-btn {
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  cursor: pointer;
 }
 
 @include bp.mobile {

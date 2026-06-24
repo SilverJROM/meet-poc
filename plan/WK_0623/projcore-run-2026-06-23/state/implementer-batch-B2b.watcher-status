@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B2b
+status=PROPOSED
+source=callback
+line_no=38
+note=protected flag on list + admin UI god-mode/confirm · medium · concealment-safe grey row; B2a endpoints wired; window.confirm

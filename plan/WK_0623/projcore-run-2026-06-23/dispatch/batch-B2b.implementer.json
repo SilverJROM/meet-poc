@@ -1,0 +1,21 @@
+{
+  "schema_version": 4,
+  "batch_id": "batch-B2b",
+  "role": "implementer",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23",
+  "session": "02_impl_grokcompose_lkvc",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/prompts/batch-B2b.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B2b.implementer.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/callbacks.md",
+  "dispatched_at": "2026-06-23T08:57:33Z",
+  "estimate_min": 30,
+  "bucket": "SHORT",
+  "wakeup_delay_sec": 3600,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B2b.wakeup-required",
+  "watcher_pid": 2181821,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/batch-B2b.watcher-implementer.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23/dispatch/watcher-batch-B2b-implementer.log",
+  "dispatch_marker": "DISPATCH-batch-B2b-implementer-2181711-1782205053",
+  "wakeup_acked_at": null,
+  "wakeup_acked_by": null
+}

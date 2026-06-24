@@ -5,7 +5,7 @@
     <p>You're the host. What would you like to do?</p>
     @if (callIssues().length > 0) {
       <div class="call-issues" role="status">
-        <strong>Heads-up: {{ callIssues().length }} device issue{{ callIssues().length === 1 ? '' : 's' }} during this call.</strong>
+        <strong>Heads-up: {{ callIssues().length }} issue{{ callIssues().length === 1 ? '' : 's' }} during this call.</strong>
         <ul>
           @for (issue of callIssues(); track issue) {
             <li>{{ issue }}</li>

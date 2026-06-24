@@ -1,5 +1,6 @@
 import { Injectable, NgZone, inject, signal } from '@angular/core';
 import type { Results, SelfieSegmentation } from '@mediapipe/selfie_segmentation';
+import type { PeerBackground } from './peer-state';
 
 export type BackgroundEffectMode = 'none' | 'blur' | 'image';
 
@@ -16,6 +17,8 @@ export class BackgroundEffectsService {
   private readonly zone = inject(NgZone);
 
   readonly mode = signal<BackgroundEffectMode>('none');
+  readonly backgroundDescriptor = signal<PeerBackground>({ kind: 'none' });
+  readonly localBackgroundImageUrl = signal<string | null>(null);
   readonly modelReady = signal(false);
   readonly lastError = signal<string | null>(null);
 
@@ -31,9 +34,15 @@ export class BackgroundEffectsService {
   private lastFrameAt = 0;
   private backgroundImage: HTMLImageElement | null = null;
 
+  setBackgroundDescriptor(descriptor: PeerBackground, localImageUrl: string | null = null): void {
+    this.backgroundDescriptor.set(descriptor);
+    this.localBackgroundImageUrl.set(descriptor.kind === 'image' ? localImageUrl : null);
+  }
+
   async setMode(next: BackgroundEffectMode): Promise<void> {
     if (next === 'none') {
       this.mode.set('none');
+      this.setBackgroundDescriptor({ kind: 'none' });
       this.stopProcessing();
       return;
     }
@@ -119,6 +128,7 @@ export class BackgroundEffectsService {
 
   dispose(): void {
     this.mode.set('none');
+    this.setBackgroundDescriptor({ kind: 'none' });
     this.modelReady.set(false);
     this.stopProcessing();
     if (this.model) void this.model.close();

@@ -1,7 +1,7 @@
 import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, computed, effect, input, viewChild } from '@angular/core';
 import { addIcons } from 'ionicons';
 import { micOffOutline } from 'ionicons/icons';
-import { PeerState } from '../../services/peer-state';
+import { PeerState, resolveCamOffBackdropUrl } from '../../services/peer-state';
 import { ReactionKind } from '../../services/ws.service';
 import { toInitials } from '../../utils/initials';
 
@@ -26,6 +26,10 @@ export class TileComponent {
   readonly initials = computed(() => toInitials(this.peer().name));
   readonly videoStream = computed(() => this.displayStream() ?? this.peer().stream);
   readonly showVideo = computed(() => this.forceVideo() || (!this.peer().screenOn && this.peer().camEnabled && !!this.videoStream()?.getVideoTracks()?.length));
+  readonly camOffBackdropUrl = computed(() => {
+    const peer = this.peer();
+    return resolveCamOffBackdropUrl(peer.background, peer.isLocal ? peer.backgroundImageUrl : null);
+  });
   readonly isMirroredSelfView = computed(() => this.peer().isLocal && this.showVideo() && !this.displayStream() && this.variant() !== 'share-main');
   readonly avatarColor = computed(() => {
     const name = this.peer().name || 'x';

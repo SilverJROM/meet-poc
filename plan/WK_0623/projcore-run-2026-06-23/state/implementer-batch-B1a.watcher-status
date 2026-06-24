@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B1a
+status=PROPOSED
+source=callback
+line_no=15
+note=Owner-only per-person transcribe + skip mixed enqueue; named-transcript canonical

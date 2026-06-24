@@ -2,10 +2,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import request from 'supertest';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { normalizeOpenRouterTranscript } from '../src/modules/recording/openrouter-transcribe.js';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
 import { openSession } from '../src/modules/sessions/store.js';
+import { transcribeSessionRecordings } from '../src/modules/recording/index.js';
 import { createApp } from '../src/server.js';
 import { createTestDb } from './helpers.js';
 
@@ -32,11 +34,13 @@ function insertUser(db: ReturnType<typeof createTestDb>, email: string): void {
 }
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   delete process.env.MEET_RECORDINGS_DIR;
   delete process.env.MEET_TRANSCRIBE_DISABLED;
   delete process.env.MEET_TRANSCRIBE_PYTHON;
   delete process.env.MEET_TRANSCRIBE_SCRIPT;
   delete process.env.WHISPER_MODEL;
+  delete process.env.OPENROUTER_API_KEY;
   for (const dir of recordingDirs.splice(0)) {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -394,11 +398,19 @@ describe('recording API', () => {
     const fakeWorker = path.join(dir, 'fake-worker.cjs');
     fs.writeFileSync(filepath, Buffer.alloc(5));
     fs.writeFileSync(
+      path.join(dir, `${filename}.participant.json`),
+      JSON.stringify({ displayName: 'Host', clientId: 'host', isPerUser: true }),
+    );
+    fs.writeFileSync(
       fakeWorker,
       [
         "const fs = require('node:fs');",
         'const file = process.argv[2];',
-        "fs.writeFileSync(`${file}.transcript.json`, JSON.stringify({ schemaVersion: 1, audioFile: require('node:path').basename(file), model: process.env.WHISPER_MODEL, lines: [], words: [] }));",
+        "const provider = 'local';",
+        "const model = process.env.WHISPER_MODEL || 'medium';",
+        "const safe = model.replace(/[^a-zA-Z0-9._-]+/g, '-');",
+        "fs.writeFileSync(`${file}.transcript.${provider}-${safe}.json`, JSON.stringify({ schemaVersion: 1, audioFile: require('node:path').basename(file), provider, model, lines: [], words: [] }));",
+        "fs.writeFileSync(`${file}.transcript.primary.json`, JSON.stringify({ provider, model }));",
         'process.exit(0);',
       ].join('\n'),
     );
@@ -416,8 +428,8 @@ describe('recording API', () => {
       .send({ force: true })
       .expect(200, { ok: true, status: 'started' });
 
-    await waitForFile(path.join(dir, `${filename}.transcript.json`));
-    expect(JSON.parse(fs.readFileSync(path.join(dir, `${filename}.transcript.json`), 'utf8')).model).toBe('small');
+    await waitForFile(path.join(dir, `${filename}.transcript.local-small.json`));
+    expect(JSON.parse(fs.readFileSync(path.join(dir, `${filename}.transcript.local-small.json`), 'utf8')).model).toBe('small');
     expect(fs.existsSync(path.join(dir, `${filename}.transcribe.lock`))).toBe(false);
   });
 
@@ -582,6 +594,272 @@ describe('recording API', () => {
     const plain = res.body.recordings.find((recording: { filename: string }) => recording.filename === withoutMeta);
     expect(enriched).toMatchObject({ hasMetadata: true, speakerCount: 2 });
     expect(plain).toMatchObject({ hasMetadata: false, speakerCount: null });
+  });
+
+  it('B1a rejects transcription for mixed recordings', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'd98896162f09', 'AGENTROOM');
+    const mixed = '2026-06-21T05-38-39-199Z_80fa7254-1f91-42b0-a7d0-62d2411f9fc6_d98896162f09_AGENTROOM_dc411e.webm';
+    fs.writeFileSync(path.join(dir, mixed), Buffer.alloc(8));
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db))
+      .post(`/api/recordings/${mixed}/transcribe`)
+      .set('Cookie', cookie)
+      .send({})
+      .expect(400, { error: 'mixed recordings are not transcribed' });
+  });
+
+  it('B1a session transcription queues only per-user recordings', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'd98896162f09', 'AGENTROOM');
+    const sessionId = '80fa7254-1f91-42b0-a7d0-62d2411f9fc6';
+    const mixed = `2026-06-21T05-38-39-199Z_${sessionId}_d98896162f09_AGENTROOM_dc411e.webm`;
+    const host = `2026-06-21T05-38-39-223Z_${sessionId}_d98896162f09_AGENTROOM_host_90ee5f.webm`;
+    const guest = `2026-06-21T05-38-39-224Z_${sessionId}_d98896162f09_AGENTROOM_peer2_91aa6f.webm`;
+    for (const filename of [mixed, host, guest]) {
+      fs.writeFileSync(path.join(dir, filename), Buffer.alloc(8));
+    }
+    fs.writeFileSync(
+      path.join(dir, `${host}.participant.json`),
+      JSON.stringify({ displayName: 'host', clientId: 'local', isPerUser: true }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${guest}.participant.json`),
+      JSON.stringify({ displayName: 'Peer2', clientId: 'guest-1', isPerUser: true }),
+    );
+
+    const queued = transcribeSessionRecordings(sessionId, 'jrom@silverjrom.app', db, { force: false });
+
+    expect(queued).toBe(2);
+  });
+
+  it('B1a named-transcript merges owner-labeled lines with zero question marks', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'd98896162f09', 'AGENTROOM');
+    const sessionId = '80fa7254-1f91-42b0-a7d0-62d2411f9fc6';
+    const host = `2026-06-21T05-38-39-223Z_${sessionId}_d98896162f09_AGENTROOM_host_90ee5f.webm`;
+    const guest = `2026-06-21T05-38-39-224Z_${sessionId}_d98896162f09_AGENTROOM_peer2_91aa6f.webm`;
+    for (const filename of [host, guest]) {
+      fs.writeFileSync(path.join(dir, filename), Buffer.alloc(8));
+    }
+    fs.writeFileSync(
+      path.join(dir, `${host}.participant.json`),
+      JSON.stringify({ displayName: 'host', clientId: 'local', isPerUser: true }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${guest}.participant.json`),
+      JSON.stringify({ displayName: 'Peer2', clientId: 'guest-1', isPerUser: true }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${host}.transcript.json`),
+      JSON.stringify({
+        schemaVersion: 1,
+        audioFile: host,
+        language: 'en',
+        lines: [{ startMs: 2000, endMs: 2500, clientId: 'local', name: 'host', text: 'second', confidence: 0.9 }],
+        words: [],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${guest}.transcript.json`),
+      JSON.stringify({
+        schemaVersion: 1,
+        audioFile: guest,
+        language: 'en',
+        lines: [{ startMs: 1000, endMs: 1500, clientId: 'guest-1', name: 'Peer2', text: 'first', confidence: 0.9 }],
+        words: [],
+      }),
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    const res = await request(createApp(db))
+      .get(`/api/recordings/named-transcript/${sessionId}`)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(res.body.speakers).toEqual(expect.arrayContaining(['host', 'Peer2']));
+    expect(res.body.transcript.map((line: { name: string }) => line.name)).toEqual(['Peer2', 'host']);
+    expect(res.body.transcript.some((line: { name: string }) => line.name === '?')).toBe(false);
+  });
+
+  it('B1b normalizes mocked OpenRouter output with owner-only labels', () => {
+    const filename = 'host.webm';
+    const owner = { clientId: 'host-1', name: 'Host' };
+    const payload = normalizeOpenRouterTranscript(
+      {
+        words: [
+          { word: 'Kumusta', start: 0.0, end: 0.4, probability: 0.91 },
+          { word: 'team', start: 0.5, end: 0.9, probability: 0.88 },
+        ],
+      },
+      filename,
+      owner,
+      'openai/whisper-1',
+    );
+
+    expect(payload.provider).toBe('openrouter');
+    expect(payload.model).toBe('openai/whisper-1');
+    expect(payload.lines).toHaveLength(1);
+    expect(payload.lines[0].name).toBe('Host');
+    expect(payload.lines[0].clientId).toBe('host-1');
+    expect(payload.words.every((word) => word.name === 'Host')).toBe(true);
+    expect(payload.words.some((word) => word.name === '?')).toBe(false);
+  });
+
+  it('B1b mocked OpenRouter HTTP writes a versioned owner-labeled transcript', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-06-23T06-00-00-000Z_aaa111aaa111_Mine_111111.webm';
+    const filepath = path.join(dir, filename);
+    fs.writeFileSync(filepath, Buffer.alloc(32));
+    fs.writeFileSync(
+      path.join(dir, `${filename}.participant.json`),
+      JSON.stringify({ displayName: 'Host', clientId: 'host-1', isPerUser: true }),
+    );
+    delete process.env.MEET_TRANSCRIBE_DISABLED;
+    process.env.OPENROUTER_API_KEY = 'test-key';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({
+          words: [
+            { word: 'hello', start: 0.0, end: 0.4, probability: 0.95 },
+            { word: 'world', start: 0.5, end: 0.9, probability: 0.93 },
+          ],
+        }),
+      })),
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    await request(app)
+      .put('/api/llm/settings')
+      .set('Cookie', cookie)
+      .send({ transcriptionProvider: 'openrouter' })
+      .expect(200);
+
+    await request(app)
+      .post(`/api/recordings/${filename}/transcribe`)
+      .set('Cookie', cookie)
+      .send({ force: true, provider: 'openrouter', model: 'openai/whisper-1' })
+      .expect(200, { ok: true, status: 'started' });
+
+    const versionPath = path.join(dir, `${filename}.transcript.openrouter-openai-whisper-1.json`);
+    await waitForFile(versionPath);
+    const transcript = JSON.parse(fs.readFileSync(versionPath, 'utf8'));
+    expect(transcript.provider).toBe('openrouter');
+    expect(transcript.model).toBe('openai/whisper-1');
+    expect(transcript.lines[0].name).toBe('Host');
+    expect(transcript.words.every((word: { name: string }) => word.name === 'Host')).toBe(true);
+  });
+
+  it('B1b missing OPENROUTER_API_KEY is a logged no-op that never errors transcribe', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-06-23T06-01-00-000Z_aaa111aaa111_Mine_222222.webm';
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(32));
+    fs.writeFileSync(
+      path.join(dir, `${filename}.participant.json`),
+      JSON.stringify({ displayName: 'Host', clientId: 'host-1', isPerUser: true }),
+    );
+    delete process.env.MEET_TRANSCRIBE_DISABLED;
+    delete process.env.OPENROUTER_API_KEY;
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    await request(app)
+      .put('/api/llm/settings')
+      .set('Cookie', cookie)
+      .send({ transcriptionProvider: 'openrouter' })
+      .expect(200);
+
+    await request(app)
+      .post(`/api/recordings/${filename}/transcribe`)
+      .set('Cookie', cookie)
+      .send({ force: true, provider: 'openrouter', model: 'openai/whisper-1' })
+      .expect(200, { ok: true, status: 'started' });
+
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(fs.existsSync(path.join(dir, `${filename}.transcript.openrouter-openai-whisper-1.json`))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${filename}.transcribe.lock`))).toBe(false);
+  });
+
+  it('B1b versioned transcripts coexist, delete one, and primary resolves', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'aaa111aaa111', 'Mine');
+    const filename = '2026-06-23T06-02-00-000Z_aaa111aaa111_Mine_333333.webm';
+    fs.writeFileSync(path.join(dir, filename), Buffer.alloc(8));
+    const smallPath = path.join(dir, `${filename}.transcript.local-small.json`);
+    const mediumPath = path.join(dir, `${filename}.transcript.local-medium.json`);
+    fs.writeFileSync(
+      smallPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        provider: 'local',
+        model: 'small',
+        audioFile: filename,
+        lines: [{ startMs: 0, endMs: 500, clientId: 'host', name: 'Host', text: 'small run', confidence: 0.9 }],
+        words: [],
+      }),
+    );
+    fs.writeFileSync(
+      mediumPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        provider: 'local',
+        model: 'medium',
+        audioFile: filename,
+        lines: [{ startMs: 0, endMs: 500, clientId: 'host', name: 'Host', text: 'medium run', confidence: 0.9 }],
+        words: [],
+      }),
+    );
+    fs.writeFileSync(path.join(dir, `${filename}.transcript.primary.json`), JSON.stringify({ provider: 'local', model: 'small' }));
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    const versions = await request(app)
+      .get(`/api/recordings/${filename}/transcript/versions`)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    expect(versions.body.versions).toHaveLength(2);
+
+    const primary = await request(app).get(`/api/recordings/${filename}/transcript`).set('Cookie', cookie).expect(200);
+    expect(primary.body.model).toBe('small');
+    expect(primary.body.lines[0].text).toBe('small run');
+
+    await request(app)
+      .delete(`/api/recordings/${filename}/transcript/versions`)
+      .query({ provider: 'local', model: 'small' })
+      .set('Cookie', cookie)
+      .expect(204);
+
+    expect(fs.existsSync(smallPath)).toBe(false);
+    expect(fs.existsSync(mediumPath)).toBe(true);
+
+    await request(app)
+      .put(`/api/recordings/${filename}/transcript/primary`)
+      .set('Cookie', cookie)
+      .send({ provider: 'local', model: 'medium' })
+      .expect(200, { ok: true, provider: 'local', model: 'medium' });
+
+    const resolved = await request(app).get(`/api/recordings/${filename}/transcript`).set('Cookie', cookie).expect(200);
+    expect(resolved.body.model).toBe('medium');
+    expect(resolved.body.lines[0].text).toBe('medium run');
   });
 });
 

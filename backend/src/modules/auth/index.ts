@@ -63,7 +63,12 @@ export function authRouter(database: Database.Database = getDb()): Router {
     const user = getSessionUser(cookies.session, database);
     if (!user) return res.json({ user: null, diagnosticsGloballyEnabled: getDiagnosticsGloballyEnabled(database) });
     return res.json({
-      user: { email: user.email, displayName: user.displayName, isAdmin: user.isAdmin },
+      user: {
+        email: user.email,
+        displayName: user.displayName,
+        isAdmin: user.isAdmin,
+        isSuperuser: user.isSuperuser,
+      },
       diagnosticsGloballyEnabled: getDiagnosticsGloballyEnabled(database),
     });
   });

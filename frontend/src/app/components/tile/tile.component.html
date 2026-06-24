@@ -13,9 +13,13 @@
   <div class="tile-content">
     @if (showVideo()) {
       <video #video autoplay playsinline [muted]="true" [class.is-mirrored-self-view]="isMirroredSelfView()"></video>
+    } @else if (camOffBackdropUrl()) {
+      <div class="camera-off-avatar has-bg-image" [style.background-image]="'url(' + camOffBackdropUrl() + ')'">
+        <span class="initials-chip">{{ initials() }}</span>
+      </div>
     } @else {
-      <div class="camera-off-avatar" [style.background]="avatarColor()">
-        <span>{{ initials() }}</span>
+      <div class="camera-off-avatar">
+        <span class="avatar-initials" [style.background]="avatarColor()">{{ initials() }}</span>
       </div>
     }
 

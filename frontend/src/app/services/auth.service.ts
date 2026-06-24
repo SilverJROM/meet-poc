@@ -6,6 +6,7 @@ export type User = {
   email: string;
   displayName: string;
   isAdmin: boolean;
+  isSuperuser?: boolean;
 };
 
 type MeResponse = {
@@ -17,6 +18,7 @@ type LoginResponse = {
   email: string;
   displayName: string;
   isAdmin: boolean;
+  isSuperuser?: boolean;
 };
 
 @Injectable({ providedIn: 'root' })
@@ -67,7 +69,12 @@ export class AuthService {
       const res = await firstValueFrom(
         this.http.post<LoginResponse>('/api/auth/telegram', { initData }),
       );
-      return { email: res.email, displayName: res.displayName, isAdmin: res.isAdmin };
+      return {
+        email: res.email,
+        displayName: res.displayName,
+        isAdmin: res.isAdmin,
+        isSuperuser: res.isSuperuser,
+      };
     } catch {
       return null;
     }
@@ -75,7 +82,12 @@ export class AuthService {
 
   async login(email: string, password: string): Promise<User> {
     const res = await firstValueFrom(this.http.post<LoginResponse>('/api/login', { email, password }));
-    const user: User = { email: res.email, displayName: res.displayName, isAdmin: res.isAdmin };
+    const user: User = {
+      email: res.email,
+      displayName: res.displayName,
+      isAdmin: res.isAdmin,
+      isSuperuser: res.isSuperuser,
+    };
     this.user.set(user);
     return user;
   }
@@ -83,6 +95,14 @@ export class AuthService {
   async logout(): Promise<void> {
     await firstValueFrom(this.http.post('/api/logout', {})).catch(() => undefined);
     this.user.set(null);
+  }
+
+  async refreshSession(): Promise<User | null> {
+    this.sessionPromise.set(null);
+    const res = await firstValueFrom(this.http.get<MeResponse>('/api/me'));
+    this.diagnosticsGloballyEnabled.set(res.diagnosticsGloballyEnabled ?? true);
+    this.user.set(res.user);
+    return res.user;
   }
 
   patchUser(partial: Partial<User>): void {

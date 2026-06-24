@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B2a
+status=IDLE
+source=pane
+line_no=0
+note=STOPPED-UNKNOWN (no 'Worked for …' marker — possible crash/exit)

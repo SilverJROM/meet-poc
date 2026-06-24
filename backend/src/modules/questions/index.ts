@@ -7,6 +7,7 @@ import { requireAuth, type AuthenticatedRequest } from '../auth/middleware.js';
 import { LlmService, type LlmProviderId, type LlmResponse } from '../llm/index.js';
 import { getRoom } from '../rooms/store.js';
 import { ensureRecordingsDir, getRecordingsDir, parseRecordingFilename } from '../recording/index.js';
+import { resolvePrimaryTranscriptPath } from '../recording/transcript-versions.js';
 import {
   DEFAULT_OLLAMA_MODEL,
   createQuestion,
@@ -210,7 +211,7 @@ async function analyzeRecordingQuestion(options: {
   llmService: LlmInvoker;
 }): Promise<AnalysisResult> {
   assertOwnedRecording(options.filename, options.ownerEmail, options.database);
-  const transcriptPath = transcriptPathFor(options.filename);
+  const transcriptPath = resolvePrimaryTranscriptPath(options.filename);
   if (!transcriptPath || !fs.existsSync(transcriptPath)) throw new Error('transcript not found');
   const transcript = JSON.parse(fs.readFileSync(transcriptPath, 'utf8')) as { lines?: unknown };
   const transcriptText = formatTranscriptText(transcript);
@@ -291,11 +292,6 @@ function safeRecordingPath(filename: string): string | null {
   const prefix = dir.endsWith(path.sep) ? dir : `${dir}${path.sep}`;
   if (filepath !== dir && !filepath.startsWith(prefix)) return null;
   return filepath;
-}
-
-function transcriptPathFor(filename: string): string | null {
-  const filepath = safeRecordingPath(filename);
-  return filepath ? `${filepath}.transcript.json` : null;
 }
 
 function analysisPathFor(filename: string, slug: string): string | null {

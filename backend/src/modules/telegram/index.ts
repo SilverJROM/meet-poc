@@ -5,8 +5,8 @@ import { getDb } from '../../db.js';
 import { parseCookies, serializeSessionCookie } from '../../lib/cookies.js';
 import { SESSION_TTL_MS, createSession, getSessionUser } from '../auth/sessions.js';
 import { listOwnedRooms } from '../rooms/store.js';
+import { handleCallbackQuery } from './tg-passwordless.js';
 
-const BOT_TOKEN = process.env.TG_APP_TOKEN || '';
 const PUBLIC_URL = (process.env.PUBLIC_URL || 'https://voice.silverjrom.app').replace(/\/$/, '');
 const LINK_TOKEN_TTL_MS = 15 * 60 * 1000;
 const INIT_DATA_MAX_AGE_MS = 24 * 60 * 60 * 1000;
@@ -14,18 +14,56 @@ const INIT_DATA_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 type TelegramUser = { id: number; first_name?: string; last_name?: string; username?: string };
 type TelegramChat = { id: number; type: string };
 type TelegramMessage = { chat: TelegramChat; from?: TelegramUser; text?: string };
-type TelegramUpdate = { update_id: number; message?: TelegramMessage };
+type TelegramCallbackQuery = {
+  id: string;
+  from: { id: number; first_name?: string; username?: string };
+  message?: { message_id: number; chat: { id: number } };
+  data?: string;
+};
+type TelegramUpdate = {
+  update_id: number;
+  message?: TelegramMessage;
+  callback_query?: TelegramCallbackQuery;
+};
 
 type LinkRow = { tg_user_id: number; email: string; tg_username: string | null; tg_first_name: string | null };
 type TokenRow = { token: string; tg_user_id: number; tg_username: string | null; tg_first_name: string | null; expires_at: number };
+
+// Constant-time comparison of the incoming webhook secret header vs TG_WEBHOOK_SECRET.
+// When TG_WEBHOOK_SECRET is not configured, all requests pass (dev mode).
+function verifyWebhookSecret(header: string | string[] | undefined): boolean {
+  const secret = process.env.TG_WEBHOOK_SECRET || '';
+  if (!secret) return true; // dev mode
+
+  const headerStr = typeof header === 'string' ? header : '';
+  const secretBuf = Buffer.from(secret, 'utf8');
+  const headerBuf = Buffer.from(headerStr, 'utf8');
+
+  // timingSafeEqual requires equal-length buffers.
+  // Build a fixed-size working buffer; if lengths differ, comparison will still run
+  // (constant-time) but the bitwise length-mismatch flag ensures false is returned.
+  const padded = Buffer.alloc(secretBuf.length, 0);
+  headerBuf.copy(padded, 0, 0, Math.min(headerBuf.length, padded.length));
+
+  const lengthMatch = headerBuf.length === secretBuf.length ? 1 : 0;
+  const contentMatch = crypto.timingSafeEqual(secretBuf, padded) ? 1 : 0;
+  return (lengthMatch & contentMatch) === 1;
+}
 
 export function telegramRouter(database: Database.Database = getDb()): Router {
   const router = Router();
 
   router.post('/telegram/webhook', async (req, res) => {
-    if (!BOT_TOKEN) {
+    // Secret-token gate — constant-time; returns 401 when TG_WEBHOOK_SECRET is set and wrong.
+    if (!verifyWebhookSecret(req.headers['x-telegram-bot-api-secret-token'])) {
+      return res.status(401).json({ error: 'unauthorized' });
+    }
+
+    const botToken = process.env.TG_APP_TOKEN || '';
+    if (!botToken) {
       return res.status(503).json({ error: 'telegram not configured' });
     }
+
     const update = req.body as TelegramUpdate | undefined;
     try {
       await handleUpdate(update, database);
@@ -39,11 +77,12 @@ export function telegramRouter(database: Database.Database = getDb()): Router {
   // we verify the HMAC against the bot token, then issue a session cookie for
   // the linked email. If the tg user isn't linked yet, returns 403.
   router.post('/auth/telegram', (req, res) => {
-    if (!BOT_TOKEN) return res.status(503).json({ error: 'telegram not configured' });
+    const botToken = process.env.TG_APP_TOKEN || '';
+    if (!botToken) return res.status(503).json({ error: 'telegram not configured' });
     const initData = String(req.body?.initData || '');
     if (!initData) return res.status(400).json({ error: 'missing initData' });
 
-    const verified = verifyInitData(initData, BOT_TOKEN);
+    const verified = verifyInitData(initData, botToken);
     if (!verified.ok) {
       console.log(`[telegram] initData rejected: ${verified.reason}`);
       return res.status(401).json({ error: 'invalid initData' });
@@ -106,7 +145,6 @@ export function telegramRouter(database: Database.Database = getDb()): Router {
 
     console.log(`[telegram] linked tg ${row.tg_user_id} -> ${user.email}`);
 
-    // Best-effort confirmation DM. Don't fail the request if Telegram is slow.
     void sendMessage(row.tg_user_id, `✅ Linked to *${user.email}*. Open the menu button to launch VoiceLokal — you're auto-signed-in from now on.`).catch(
       (err) => console.warn('[telegram] confirmation DM failed', err),
     );
@@ -118,6 +156,12 @@ export function telegramRouter(database: Database.Database = getDb()): Router {
 }
 
 async function handleUpdate(update: TelegramUpdate | undefined, database: Database.Database): Promise<void> {
+  // Inline-button tap — dispatch to passwordless handler (vlk: prefix)
+  if (update?.callback_query) {
+    await handleCallbackQuery(update.callback_query, database);
+    return;
+  }
+
   const message = update?.message;
   if (!message || !message.text || !message.from) {
     console.log('[telegram] update ignored (no message/text/from):', JSON.stringify(update));
@@ -128,7 +172,6 @@ async function handleUpdate(update: TelegramUpdate | undefined, database: Databa
   const text = message.text.trim();
   console.log(`[telegram] update from tg ${from.id} (${from.username ?? from.first_name ?? '?'}) chat ${chatId}: ${text}`);
 
-  // Strip bot mention (e.g. /link@MyBot -> /link).
   const command = text.split(/\s+/)[0].split('@')[0].toLowerCase();
 
   if (command === '/start' || command === '/help') {
@@ -197,7 +240,8 @@ export async function notifyOwnerLobbyPending(
   waiterName: string,
   database: Database.Database = getDb(),
 ): Promise<void> {
-  if (!BOT_TOKEN) return;
+  const botToken = process.env.TG_APP_TOKEN || '';
+  if (!botToken) return;
   const links = database
     .prepare('SELECT tg_user_id FROM telegram_links WHERE email = ?')
     .all(ownerEmail) as { tg_user_id: number }[];
@@ -251,8 +295,9 @@ function verifyInitData(initData: string, botToken: string): InitDataResult {
 }
 
 async function sendMessage(chatId: number, text: string): Promise<void> {
-  if (!BOT_TOKEN) return;
-  const res = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+  const botToken = process.env.TG_APP_TOKEN || '';
+  if (!botToken) return;
+  const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'Markdown', disable_web_page_preview: true }),

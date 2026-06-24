@@ -33,10 +33,16 @@
             }
           </div>
           <div class="recording-actions">
-            @if (recording.hasTranscript) {
-              <button type="button" class="primary-btn" (click)="viewTranscript(recording)" [disabled]="busyFilename() === recording.filename">
+            @if (recording.sessionId) {
+              <button type="button" class="primary-btn" (click)="viewMeetingTranscript(recording)" [disabled]="busyFilename() === recording.filename">
                 <ion-icon name="eye-outline"></ion-icon>
-                View
+                Meeting transcript
+              </button>
+            }
+            @if (recording.hasTranscript) {
+              <button type="button" class="secondary-btn" (click)="viewTranscript(recording)" [disabled]="busyFilename() === recording.filename">
+                <ion-icon name="eye-outline"></ion-icon>
+                Track
               </button>
               <button type="button" class="secondary-btn" (click)="downloadTranscript(recording)" [disabled]="busyFilename() === recording.filename">
                 <ion-icon name="download-outline"></ion-icon>
@@ -58,12 +64,109 @@
     </ul>
   }
 
+  @if (selectedNamedTranscript(); as named) {
+    <section class="viewer" aria-label="Meeting transcript viewer">
+      <div class="viewer-head">
+        <div>
+          <h3>Meeting transcript</h3>
+          <span>{{ named.speakers.join(', ') }} · session {{ named.sessionId }}</span>
+        </div>
+      </div>
+      <div class="line-stream">
+        @for (line of named.transcript; track line.startMs + '-' + (line.endMs ?? 0) + '-' + line.name) {
+          <div class="transcript-line">
+            <span class="time">[{{ timestamp(line.startMs) }}]</span>
+            <strong [style.color]="speakerColor(line.name)">{{ line.name }}:</strong>
+            <span class="text">{{ line.text }}</span>
+          </div>
+        }
+      </div>
+    </section>
+  }
+
   @if (selectedTranscript(); as transcript) {
+    <section class="versions-panel" aria-label="Transcript versions">
+      <div class="viewer-head">
+        <div>
+          <h3>Versions</h3>
+          <span>{{ transcriptVersions().length }} saved transcription{{ transcriptVersions().length === 1 ? '' : 's' }}</span>
+        </div>
+      </div>
+      <div class="versions-list">
+        @for (version of transcriptVersions(); track versionKey(version)) {
+          <div class="version-row" [class.primary]="version.isPrimary">
+            <div class="version-main">
+              <strong>{{ versionLabel(version) }}</strong>
+              @if (version.isPrimary) {
+                <span class="status-badge ready">Primary</span>
+              }
+            </div>
+            <div class="version-actions">
+              @if (!version.isPrimary) {
+                <button
+                  type="button"
+                  class="secondary-btn"
+                  (click)="setPrimary(version)"
+                  [disabled]="busyVersionKey() === versionKey(version)"
+                >
+                  <ion-icon name="star-outline"></ion-icon>
+                  Set primary
+                </button>
+              }
+              <button
+                type="button"
+                class="danger-btn"
+                (click)="deleteVersion(version)"
+                [disabled]="busyVersionKey() === versionKey(version)"
+              >
+                <ion-icon name="trash-outline"></ion-icon>
+                Delete
+              </button>
+            </div>
+          </div>
+        } @empty {
+          <p class="empty">No transcript versions yet.</p>
+        }
+      </div>
+      <div class="add-transcription">
+        <label>
+          Provider
+          <select [value]="addProvider()" (change)="onAddProviderChange($any($event.target).value)">
+            <option value="local">local</option>
+            <option value="openrouter">openrouter</option>
+          </select>
+        </label>
+        <label>
+          Model
+          <select [value]="addModel()" (change)="addModel.set($any($event.target).value)">
+            @if (addProvider() === 'local') {
+              @for (model of localModels; track model) {
+                <option [value]="model">{{ model }}</option>
+              }
+            } @else {
+              @for (model of openrouterModels; track model) {
+                <option [value]="model">{{ model }}</option>
+              }
+            }
+          </select>
+        </label>
+        <button
+          type="button"
+          class="primary-btn"
+          (click)="addTranscription()"
+          [disabled]="busyFilename() === selectedFilename()"
+        >
+          <ion-icon name="add-circle-outline"></ion-icon>
+          Add transcription
+        </button>
+      </div>
+    </section>
+
     <section class="viewer" aria-label="Transcript viewer">
       <div class="viewer-head">
         <div>
           <h3>{{ selectedFilename() }}</h3>
-          <span>{{ transcript.language || 'unknown' }} · {{ transcript.model || 'local' }}</span>
+          <span>{{ transcript.provider || 'local' }} / {{ transcript.model || 'unknown' }} · {{ transcript.language || 'unknown' }}</span>
         </div>
       </div>
       <div class="line-stream">

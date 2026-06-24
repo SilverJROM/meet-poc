@@ -1,9 +1,28 @@
 import { DatePipe } from '@angular/common';
 import { Component, CUSTOM_ELEMENTS_SCHEMA, OnDestroy, computed, inject, signal } from '@angular/core';
 import { addIcons } from 'ionicons';
-import { downloadOutline, eyeOutline, playCircleOutline, refreshOutline, sparklesOutline, trashOutline } from 'ionicons/icons';
+import {
+  addCircleOutline,
+  downloadOutline,
+  eyeOutline,
+  playCircleOutline,
+  refreshOutline,
+  sparklesOutline,
+  starOutline,
+  trashOutline,
+} from 'ionicons/icons';
 import { Analysis, Question, QuestionsService } from '../../services/questions.service';
-import { Recording, RecordingsService, Transcript } from '../../services/recordings.service';
+import {
+  NamedTranscript,
+  Recording,
+  RecordingsService,
+  Transcript,
+  TranscriptProvider,
+  TranscriptVersion,
+} from '../../services/recordings.service';
+
+const LOCAL_MODELS = ['small', 'medium', 'large-v3'] as const;
+const OPENROUTER_MODELS = ['openai/whisper-1', 'openai/gpt-4o-transcribe'] as const;
 
 @Component({
   selector: 'app-transcripts-page',
@@ -22,13 +41,21 @@ export class TranscriptsPage implements OnDestroy {
   readonly questions = signal<Question[]>([]);
   readonly analyses = signal<Analysis[]>([]);
   readonly selectedFilename = signal<string | null>(null);
+  readonly selectedSessionId = signal<string | null>(null);
   readonly selectedTranscript = signal<Transcript | null>(null);
+  readonly selectedNamedTranscript = signal<NamedTranscript | null>(null);
+  readonly transcriptVersions = signal<TranscriptVersion[]>([]);
   readonly loading = signal(true);
   readonly busyFilename = signal<string | null>(null);
   readonly busyQuestionId = signal<string | null>(null);
+  readonly busyVersionKey = signal<string | null>(null);
   readonly error = signal<string | null>(null);
   readonly status = signal<string | null>(null);
+  readonly addProvider = signal<TranscriptProvider>('local');
+  readonly addModel = signal<string>(LOCAL_MODELS[0]);
   readonly hasRows = computed(() => this.recordings().length > 0);
+  readonly localModels = LOCAL_MODELS;
+  readonly openrouterModels = OPENROUTER_MODELS;
   readonly analysisByQuestionId = computed(() => {
     const map = new Map<string, Analysis>();
     for (const analysis of this.analyses()) map.set(analysis.questionId, analysis);
@@ -36,7 +63,16 @@ export class TranscriptsPage implements OnDestroy {
   });
 
   constructor() {
-    addIcons({ downloadOutline, eyeOutline, playCircleOutline, refreshOutline, sparklesOutline, trashOutline });
+    addIcons({
+      addCircleOutline,
+      downloadOutline,
+      eyeOutline,
+      playCircleOutline,
+      refreshOutline,
+      sparklesOutline,
+      starOutline,
+      trashOutline,
+    });
     void this.refreshRecordings();
     void this.loadQuestions();
   }
@@ -66,12 +102,38 @@ export class TranscriptsPage implements OnDestroy {
     this.error.set(null);
     this.status.set(null);
     try {
-      const transcript = await this.recordingsService.getTranscript(recording.filename);
+      const [transcript, versions] = await Promise.all([
+        this.recordingsService.getTranscript(recording.filename),
+        this.recordingsService.listTranscriptVersions(recording.filename),
+      ]);
       this.selectedFilename.set(recording.filename);
+      this.selectedSessionId.set(null);
+      this.selectedNamedTranscript.set(null);
       this.selectedTranscript.set(transcript);
+      this.transcriptVersions.set(versions.versions);
       await this.refreshAnalyses(recording.filename);
     } catch {
       this.error.set('Transcript could not be opened');
+    } finally {
+      this.busyFilename.set(null);
+    }
+  }
+
+  async viewMeetingTranscript(recording: Recording): Promise<void> {
+    if (!recording.sessionId) return;
+    this.busyFilename.set(recording.filename);
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      const named = await this.recordingsService.getNamedTranscript(recording.sessionId);
+      this.selectedFilename.set(null);
+      this.selectedSessionId.set(recording.sessionId);
+      this.selectedTranscript.set(null);
+      this.selectedNamedTranscript.set(named);
+      this.transcriptVersions.set([]);
+      this.analyses.set([]);
+    } catch {
+      this.error.set('Meeting transcript could not be opened');
     } finally {
       this.busyFilename.set(null);
     }
@@ -89,6 +151,68 @@ export class TranscriptsPage implements OnDestroy {
       this.error.set('Transcription could not be started');
     } finally {
       this.busyFilename.set(null);
+    }
+  }
+
+  onAddProviderChange(provider: TranscriptProvider): void {
+    this.addProvider.set(provider);
+    this.addModel.set(provider === 'local' ? LOCAL_MODELS[0] : OPENROUTER_MODELS[0]);
+  }
+
+  async addTranscription(): Promise<void> {
+    const filename = this.selectedFilename();
+    if (!filename) return;
+    const provider = this.addProvider();
+    const model = this.addModel();
+    this.busyFilename.set(filename);
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      await this.recordingsService.transcribe(filename, { force: true, provider, model });
+      this.status.set(`Transcription started (${provider} / ${model})`);
+      await this.refreshRecordings();
+      this.updatePolling();
+    } catch {
+      this.error.set('Transcription could not be started');
+    } finally {
+      this.busyFilename.set(null);
+    }
+  }
+
+  async deleteVersion(version: TranscriptVersion): Promise<void> {
+    const filename = this.selectedFilename();
+    if (!filename) return;
+    const label = `${version.provider} / ${version.model}`;
+    if (!window.confirm(`Delete transcript version ${label}? Other versions will stay available.`)) return;
+    this.busyVersionKey.set(this.versionKey(version));
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      await this.recordingsService.deleteTranscriptVersion(filename, version.provider, version.model);
+      await this.reloadSelectedTranscript(filename);
+      this.status.set(`Deleted ${label}`);
+      await this.refreshRecordings();
+    } catch {
+      this.error.set('Transcript version could not be deleted');
+    } finally {
+      this.busyVersionKey.set(null);
+    }
+  }
+
+  async setPrimary(version: TranscriptVersion): Promise<void> {
+    const filename = this.selectedFilename();
+    if (!filename || version.isPrimary) return;
+    this.busyVersionKey.set(this.versionKey(version));
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      await this.recordingsService.setPrimaryTranscript(filename, version.provider, version.model);
+      await this.reloadSelectedTranscript(filename);
+      this.status.set(`Primary set to ${version.provider} / ${version.model}`);
+    } catch {
+      this.error.set('Primary transcript could not be updated');
+    } finally {
+      this.busyVersionKey.set(null);
     }
   }
 
@@ -114,9 +238,7 @@ export class TranscriptsPage implements OnDestroy {
     try {
       await this.recordingsService.deleteTranscript(recording.filename);
       if (this.selectedFilename() === recording.filename) {
-        this.selectedFilename.set(null);
-        this.selectedTranscript.set(null);
-        this.analyses.set([]);
+        this.clearSelectedTranscript();
       }
       this.status.set('Transcript deleted');
       await this.refreshRecordings();
@@ -146,6 +268,14 @@ export class TranscriptsPage implements OnDestroy {
     let hash = 0;
     for (let i = 0; i < name.length; i += 1) hash = (hash * 31 + name.charCodeAt(i)) % 360;
     return `hsl(${hash} 64% 42%)`;
+  }
+
+  versionLabel(version: TranscriptVersion): string {
+    return `${version.provider} / ${version.model}`;
+  }
+
+  versionKey(version: TranscriptVersion): string {
+    return `${version.provider}:${version.model}`;
   }
 
   async runAnalysis(question: Question): Promise<void> {
@@ -181,13 +311,34 @@ export class TranscriptsPage implements OnDestroy {
     }
   }
 
+  private async reloadSelectedTranscript(filename: string): Promise<void> {
+    const [transcript, versions] = await Promise.all([
+      this.recordingsService.getTranscript(filename),
+      this.recordingsService.listTranscriptVersions(filename),
+    ]);
+    this.selectedTranscript.set(transcript);
+    this.transcriptVersions.set(versions.versions);
+  }
+
+  private clearSelectedTranscript(): void {
+    this.selectedFilename.set(null);
+    this.selectedSessionId.set(null);
+    this.selectedTranscript.set(null);
+    this.selectedNamedTranscript.set(null);
+    this.transcriptVersions.set([]);
+    this.analyses.set([]);
+  }
+
   private updatePolling(): void {
     const hasPending = this.recordings().some((recording) => recording.transcribeStatus === 'pending');
     if (hasPending && !this.pollTimer) {
       this.pollTimer = window.setInterval(() => {
         void this.refreshRecordings();
         const filename = this.selectedFilename();
-        if (filename) void this.refreshAnalyses(filename);
+        if (filename) {
+          void this.refreshAnalyses(filename);
+          void this.reloadSelectedTranscript(filename);
+        }
       }, 5000);
     } else if (!hasPending) {
       this.stopPolling();

@@ -29,3 +29,14 @@ export function requireAdmin(database: Database.Database = getDb()) {
     });
   };
 }
+
+export function requireSuperuser(database: Database.Database = getDb()) {
+  const auth = requireAuth(database);
+  return (req: Request, res: Response, next: NextFunction) => {
+    auth(req, res, () => {
+      const { user } = req as AuthenticatedRequest;
+      if (!user.isSuperuser) return res.status(403).json({ error: 'forbidden' });
+      return next();
+    });
+  };
+}

@@ -126,7 +126,41 @@ video.is-mirrored-self-view {
   justify-content: center;
 }
 
-.camera-off-avatar span {
+.camera-off-avatar.has-bg-image {
+  display: block;
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(0, 0, 0, 0.5) 0%, rgba(0, 0, 0, 0.08) 42%, transparent 68%);
+    pointer-events: none;
+  }
+}
+
+.initials-chip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 1;
+  min-width: 44px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  color: #fff;
+  background: rgba(10, 12, 16, 0.72);
+  backdrop-filter: blur(10px);
+  font-size: clamp(16px, 2.4vw, 22px);
+  font-weight: 900;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  text-align: center;
+}
+
+.avatar-initials {
   width: clamp(84px, 20%, 128px);
   aspect-ratio: 1;
   display: grid;
@@ -134,7 +168,6 @@ video.is-mirrored-self-view {
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.16);
   color: #fff;
-  background: rgba(255, 255, 255, 0.22);
   font-size: clamp(40px, 6vw, 64px);
   font-weight: 900;
 }
@@ -281,10 +314,19 @@ video.is-mirrored-self-view {
   inset: 8px;
 }
 
-.strip-tile .camera-off-avatar span,
-.self-pip-tile .camera-off-avatar span {
+.strip-tile .avatar-initials,
+.self-pip-tile .avatar-initials {
   width: 52px;
   font-size: 24px;
+}
+
+.strip-tile .initials-chip,
+.self-pip-tile .initials-chip {
+  top: 8px;
+  left: 8px;
+  min-width: 36px;
+  padding: 4px 8px;
+  font-size: 14px;
 }
 
 .strip-tile .name-label,

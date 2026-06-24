@@ -1,4 +1,4 @@
-import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, HostListener, OnDestroy, Signal, computed, effect, inject, signal, viewChild } from '@angular/core';
+import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, HostListener, OnDestroy, Signal, computed, effect, inject, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
@@ -36,7 +36,7 @@ import { localAudioRecoveryTerminalMessage } from '../../services/local-media-re
 import { permissionBlockHint } from '../../services/media-toggle';
 import { IceConfigService, type TurnHealthResult } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
-import { PeerState } from '../../services/peer-state';
+import { PeerBackground, PeerState } from '../../services/peer-state';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
 import {
   AUDIO_OUTPUT_DEVICE_STORAGE_KEY,
@@ -151,6 +151,7 @@ interface PeerIdentity {
   camEnabled: boolean;
   screenOn: boolean;
   reconnecting: boolean;
+  background?: PeerBackground;
 }
 
 @Component({
@@ -353,6 +354,8 @@ export class RoomPage implements OnDestroy {
         isMobile: false,
         quality: 'good',
         audioOnlyReason: null,
+        background: this.backgroundEffects.backgroundDescriptor(),
+        backgroundImageUrl: this.backgroundEffects.localBackgroundImageUrl(),
       });
     }
     const identities = this.peerIdentities();
@@ -377,6 +380,7 @@ export class RoomPage implements OnDestroy {
         isMobile: identity.isMobile,
         quality: 'good',
         audioOnlyReason: null,
+        background: identity.background,
       });
     }
     return result;
@@ -754,6 +758,11 @@ export class RoomPage implements OnDestroy {
     });
     effect(() => {
       syncRecorderPeerStreams(this.peers(), this.recorder);
+    });
+    effect(() => {
+      this.backgroundEffects.backgroundDescriptor();
+      if (this.state() !== 'in-call') return;
+      untracked(() => this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn()));
     });
     effect(() => {
       const publishStatus = this.sfuClient.localPublishState()?.status ?? null;
@@ -1419,6 +1428,8 @@ export class RoomPage implements OnDestroy {
           participants: this.participantSnapshot(),
         });
         this.ws.send({ type: 'recording-state', state: 'started' });
+        const startSessionId = this.currentSessionId();
+        if (startSessionId) localStorage.setItem(`recording-pending-${startSessionId}`, '1');
         this.status.set('Recording (audio mix: you + admitted peers).');
         return;
       }
@@ -1430,13 +1441,15 @@ export class RoomPage implements OnDestroy {
         return;
       }
       this.status.set(`Uploading recording (${Math.round(blob.size / 1024)} KB)...`);
-      const upload = await withTimeout(this.recorder.upload(blob, this.roomId), 8000, null);
+      const upload = await withTimeout(this.recorder.upload(blob, this.roomId), 300_000, null);
       if (!upload) {
         this.status.set('Recording stopped, but upload timed out.');
         return;
       }
+      const uploadSessionId = this.currentSessionId();
+      if (uploadSessionId) localStorage.removeItem(`recording-pending-${uploadSessionId}`);
       this.status.set(`Recording saved: ${upload.file}`);
-      void this.recorder.uploadPerUser(this.roomId);
+      await this.recorder.uploadPerUser(this.roomId);
     } catch (err) {
       this.status.set(`Recording failed: ${err instanceof Error ? err.message : 'unknown error'}`);
       this.recorder.discard();
@@ -1558,28 +1571,66 @@ export class RoomPage implements OnDestroy {
 
   async justLeave(): Promise<void> {
     this.leaveDialogOpen.set(false);
+    const uploadFailed = await this.flushRecordingForExit();
+    if (uploadFailed) {
+      this.recordCallIssue('Recording could not be saved — upload failed or timed out.');
+      queueMicrotask(() => this.leaveDialogOpen.set(true));
+      return;
+    }
     await this.directLeave(true);
   }
 
   async endForAll(): Promise<void> {
+    let uploadFailed = false;
     try {
-      if (this.recorder.isRecording()) {
-        try {
-          const blob = await withTimeout(this.recorder.stop(), 8000, null);
-          this.ws.send({ type: 'recording-state', state: 'stopped' });
-          if (blob) {
-            await withTimeout(this.recorder.upload(blob, this.roomId), 8000, null);
-            void this.recorder.uploadPerUser(this.roomId);
-          }
-        } catch (err) {
-          console.warn('[end-for-all] recorder flush failed', err);
-        }
-      }
+      // T2: flush recording (stop + await both uploads) BEFORE close-room.
+      uploadFailed = await this.flushRecordingForExit();
       this.ws.send({ type: 'close-room' });
       await delay(1000);
     } finally {
+      // Close dialog first to destroy the component (resets its internal busy flag).
       this.leaveDialogOpen.set(false);
-      await this.directLeave(false);
+      if (uploadFailed) {
+        // T6: surface failure in the leave dialog so the host can acknowledge before leaving.
+        this.recordCallIssue('Recording could not be saved — upload failed or timed out.');
+        // queueMicrotask gives Angular one tick to destroy + flush the previous dialog
+        // instance, so the re-opened dialog has a clean busy=false state.
+        queueMicrotask(() => this.leaveDialogOpen.set(true));
+      } else {
+        await this.directLeave(false);
+      }
+    }
+  }
+
+  // Shared flush used by both justLeave and endForAll: stops the recorder, awaits
+  // the main upload (5-min cap) and per-user uploads concurrently, then clears the
+  // T7 reconciliation key on success. Returns true if the upload failed/timed out
+  // so callers can surface the T6 host notice.
+  private async flushRecordingForExit(): Promise<boolean> {
+    if (!this.recorder.isRecording()) return false;
+    this.status.set("Saving recording… don't close the tab.");
+    try {
+      const blob = await withTimeout(this.recorder.stop(), 8000, null);
+      this.ws.send({ type: 'recording-state', state: 'stopped' });
+      if (!blob) {
+        // MediaRecorder timed out without producing data; T7 reconciliation key stays
+        // set so the banner appears on the next rooms-page load.
+        return false;
+      }
+      const [mainResult] = await Promise.allSettled([
+        withTimeout(this.recorder.upload(blob, this.roomId), 300_000, null),
+        this.recorder.uploadPerUser(this.roomId),
+      ]);
+      const upload = mainResult.status === 'fulfilled' ? mainResult.value : null;
+      if (upload) {
+        const sessionId = this.currentSessionId();
+        if (sessionId) localStorage.removeItem(`recording-pending-${sessionId}`);
+        return false;
+      }
+      return true; // upload failed or timed out
+    } catch (err) {
+      console.warn('[rec-flush] recorder flush failed', err);
+      return true;
     }
   }
 
@@ -2131,6 +2182,7 @@ export class RoomPage implements OnDestroy {
       if (identity) {
         const patch: Partial<PeerIdentity> = { micEnabled: msg.mic, camEnabled: msg.cam, screenOn: !!msg.screenOn };
         if (msg.isMobile !== undefined) patch.isMobile = !!msg.isMobile;
+        if (msg.background) patch.background = msg.background;
         const next = new Map(this.peerIdentities());
         next.set(msg.clientId, { ...identity, ...patch });
         this.peerIdentities.set(next);
@@ -3133,6 +3185,15 @@ export class RoomPage implements OnDestroy {
   }
 
   private readonly handlePageLifecycleLeave = (event: PageTransitionEvent | BeforeUnloadEvent): void => {
+    // T5: if a recording upload is in flight, ask the browser to confirm before closing.
+    // Only effective on 'beforeunload' — pagehide cannot be prevented by spec.
+    // Angular SPA navigation (directLeave → router.navigate) does not fire beforeunload,
+    // so this guard never blocks the programmatic end-call path.
+    if (event.type === 'beforeunload' && this.recorder.isUploading()) {
+      event.preventDefault();
+      (event as BeforeUnloadEvent).returnValue = '';
+      return;
+    }
     const action = decideRoomLifecycleLeave({
       eventType: event.type === 'beforeunload' ? 'beforeunload' : 'pagehide',
       persisted: 'persisted' in event ? event.persisted : false,
@@ -3565,7 +3626,13 @@ export class RoomPage implements OnDestroy {
   }
 
   private broadcastMediaState(mic: boolean, cam: boolean, screenOn = this.media.screenOn()): void {
-    this.ws.send({ type: 'media-state', mic, cam, screenOn });
+    this.ws.send({
+      type: 'media-state',
+      mic,
+      cam,
+      screenOn,
+      background: this.backgroundEffects.backgroundDescriptor(),
+    });
     this.queueDiagnosticsLog('state-change');
   }
 

@@ -1,11 +1,13 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { CUSTOM_ELEMENTS_SCHEMA, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { CUSTOM_ELEMENTS_SCHEMA, Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router } from '@angular/router';
 import { addIcons } from 'ionicons';
 import { keyOutline, linkOutline, mailOutline, personOutline, saveOutline, unlinkOutline } from 'ionicons/icons';
 import { AccountService } from '../../services/account.service';
 import { AuthService } from '../../services/auth.service';
 import { readDiagnosticsLoggingEnabled, writeDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
+import { TelegramPasswordlessService } from '../../services/telegram-passwordless.service';
 
 @Component({
   selector: 'app-account-settings',
@@ -15,9 +17,11 @@ import { readDiagnosticsLoggingEnabled, writeDiagnosticsLoggingEnabled } from '.
   templateUrl: './account-settings.component.html',
   styleUrl: './account-settings.component.scss',
 })
-export class AccountSettingsComponent implements OnInit {
+export class AccountSettingsComponent implements OnInit, OnDestroy {
   private readonly account = inject(AccountService);
   private readonly auth = inject(AuthService);
+  private readonly passwordless = inject(TelegramPasswordlessService);
+  private readonly router = inject(Router);
 
   readonly user = this.auth.user;
   readonly email = computed(() => this.auth.user()?.email ?? '');
@@ -51,6 +55,19 @@ export class AccountSettingsComponent implements OnInit {
   // (absent key -> ON). Persists locally on change; no backend.
   readonly diagnosticsLogging = signal(readDiagnosticsLoggingEnabled());
 
+  readonly pwdlessLoading = signal(true);
+  readonly pwdlessBusy = signal(false);
+  readonly pwdlessLinked = signal(false);
+  readonly pwdlessStatus = signal<'off' | 'active' | 'pending'>('off');
+  readonly pwdlessDisplayNumber = signal<number | null>(null);
+  readonly pwdlessError = signal<string | null>(null);
+  readonly pwdlessStatusMsg = signal<string | null>(null);
+  readonly pwdlessDisablePassword = signal('');
+  readonly pwdlessShowDisable = signal(false);
+
+  private enrollChallengeToken: string | null = null;
+  private enrollPollTimer: ReturnType<typeof setInterval> | null = null;
+
   constructor() {
     addIcons({ keyOutline, linkOutline, mailOutline, personOutline, saveOutline, unlinkOutline });
     const current = this.auth.user();
@@ -59,6 +76,11 @@ export class AccountSettingsComponent implements OnInit {
 
   ngOnInit(): void {
     void this.loadTelegram();
+    void this.loadPasswordless();
+  }
+
+  ngOnDestroy(): void {
+    this.stopEnrollPolling();
   }
 
   private async loadTelegram(): Promise<void> {
@@ -71,6 +93,148 @@ export class AccountSettingsComponent implements OnInit {
       this.tgError.set('Could not load Telegram status.');
     } finally {
       this.tgLoading.set(false);
+    }
+  }
+
+  private async loadPasswordless(): Promise<void> {
+    this.pwdlessLoading.set(true);
+    this.pwdlessError.set(null);
+    try {
+      const settings = await this.passwordless.settings();
+      this.pwdlessLinked.set(settings.linked);
+      this.pwdlessStatus.set(settings.status);
+      if (settings.status === 'pending' && settings.displayNumber !== undefined) {
+        this.pwdlessDisplayNumber.set(settings.displayNumber);
+      }
+    } catch {
+      this.pwdlessError.set('Could not load passwordless login status.');
+    } finally {
+      this.pwdlessLoading.set(false);
+    }
+  }
+
+  async enablePasswordless(): Promise<void> {
+    if (!this.pwdlessLinked()) return;
+    this.pwdlessBusy.set(true);
+    this.pwdlessError.set(null);
+    this.pwdlessStatusMsg.set(null);
+    this.stopEnrollPolling();
+    this.enrollChallengeToken = null;
+    this.pwdlessDisplayNumber.set(null);
+
+    try {
+      const result = await this.passwordless.enroll();
+      this.enrollChallengeToken = result.challengeToken;
+      this.pwdlessDisplayNumber.set(result.displayNumber);
+      this.pwdlessStatus.set('pending');
+      this.pwdlessStatusMsg.set('Tap the number in Telegram to finish activation.');
+      this.startEnrollPolling(result.pollAfterMs);
+    } catch (err) {
+      const message = err instanceof HttpErrorResponse && typeof err.error?.error === 'string'
+        ? err.error.error
+        : 'Could not start activation test.';
+      this.pwdlessError.set(message);
+    } finally {
+      this.pwdlessBusy.set(false);
+    }
+  }
+
+  showDisablePasswordless(): void {
+    this.pwdlessShowDisable.set(true);
+    this.pwdlessDisablePassword.set('');
+    this.pwdlessError.set(null);
+    this.pwdlessStatusMsg.set(null);
+  }
+
+  cancelDisablePasswordless(): void {
+    this.pwdlessShowDisable.set(false);
+    this.pwdlessDisablePassword.set('');
+  }
+
+  async disablePasswordless(): Promise<void> {
+    const password = this.pwdlessDisablePassword();
+    if (!password) {
+      this.pwdlessError.set('Enter your password to disable passwordless login.');
+      return;
+    }
+    this.pwdlessBusy.set(true);
+    this.pwdlessError.set(null);
+    this.pwdlessStatusMsg.set(null);
+    try {
+      await this.passwordless.disable(password);
+      this.pwdlessStatus.set('off');
+      this.pwdlessShowDisable.set(false);
+      this.pwdlessDisablePassword.set('');
+      this.pwdlessStatusMsg.set('Passwordless Telegram login disabled.');
+      this.auth.user.set(null);
+      await this.router.navigate(['/login']);
+    } catch (err) {
+      const message = err instanceof HttpErrorResponse && err.status === 401
+        ? 'Password is incorrect.'
+        : err instanceof HttpErrorResponse && typeof err.error?.error === 'string'
+          ? err.error.error
+          : 'Could not disable passwordless login.';
+      this.pwdlessError.set(message);
+    } finally {
+      this.pwdlessBusy.set(false);
+    }
+  }
+
+  private startEnrollPolling(intervalMs: number): void {
+    this.stopEnrollPolling();
+    this.enrollPollTimer = setInterval(() => {
+      void this.pollEnrollStatus();
+    }, intervalMs);
+    void this.pollEnrollStatus();
+  }
+
+  private async pollEnrollStatus(): Promise<void> {
+    const token = this.enrollChallengeToken;
+    if (!token || this.pwdlessBusy()) return;
+
+    try {
+      const { status } = await this.passwordless.status(token);
+      if (status === 'pending') return;
+
+      this.stopEnrollPolling();
+
+      if (status === 'approved') {
+        this.pwdlessBusy.set(true);
+        try {
+          await this.passwordless.verifyActivate(token);
+          this.pwdlessStatus.set('active');
+          this.pwdlessDisplayNumber.set(null);
+          this.enrollChallengeToken = null;
+          this.pwdlessStatusMsg.set('Passwordless Telegram login is now active.');
+        } catch {
+          this.pwdlessError.set('Activation could not be completed.');
+          this.pwdlessStatus.set('off');
+          this.pwdlessDisplayNumber.set(null);
+          this.enrollChallengeToken = null;
+        } finally {
+          this.pwdlessBusy.set(false);
+        }
+        return;
+      }
+
+      this.enrollChallengeToken = null;
+      this.pwdlessDisplayNumber.set(null);
+      this.pwdlessStatus.set('off');
+      this.pwdlessError.set(
+        status === 'denied'
+          ? 'Activation denied. Wrong number tapped — try again.'
+          : 'Activation test expired — try again.',
+      );
+    } catch {
+      this.stopEnrollPolling();
+      this.pwdlessError.set('Activation status check failed.');
+    }
+  }
+
+  private stopEnrollPolling(): void {
+    if (this.enrollPollTimer !== null) {
+      clearInterval(this.enrollPollTimer);
+      this.enrollPollTimer = null;
     }
   }
 
