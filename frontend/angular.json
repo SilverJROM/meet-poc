@@ -64,6 +64,16 @@
             }
           },
           "defaultConfiguration": "development"
+        },
+        "test": {
+          "builder": "@angular/build:unit-test",
+          "options": {
+            "buildTarget": "meet-poc-frontend:build:development",
+            "tsConfig": "tsconfig.tile-spec.json",
+            "runner": "vitest",
+            "include": ["src/app/components/tile/tile.component.spec.ts"],
+            "watch": false
+          }
         }
       }
     }

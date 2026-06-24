@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./out-tsc/tile-spec",
+    "types": ["node", "vitest/globals"]
+  },
+  "include": [
+    "src/app/components/tile/tile.component.spec.ts",
+    "src/**/*.d.ts"
+  ]
+}

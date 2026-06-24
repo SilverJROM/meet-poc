@@ -154,3 +154,12 @@ batch-B3b dispatched_at: 2026-06-23T10:21:19Z estimate_min: 30 bucket: SHORT —
 [overmind] 2026-06-23T10:42:20+00:00 complete OK
 
 [projcore LIVE CAPSTONE 2026-06-23T12:02:53Z] PH↔US call VALIDATED: Peer2US (US/Maryland egress 100.16.57.177) joined AGENTROOM, audio bytesSent 799k→822k + video 19.08M→19.65M rising US→PH; host received. R1.10/R3.10 VERIFIED. App was DOWN (brought up via pm2 ecosystem). Peer2 self-fixed missing finale-client.js. CAVEAT: automated recording-on-call blocked by stale host selector (Record moved to More menu in this run UI refactor) — app recording is locally regression-tested (B5); test tool needs update.
+[overmind] 2026-06-24T00:47:05+00:00 sync OK current='' tasks=5
+[overmind] 2026-06-24T00:47:05+00:00 complete OK
+[overmind] 2026-06-24T01:19:25+00:00 sync OK current='Add a CI-wired test so reverting the transcript phantom-? fix fails the build' tasks=8
+[overmind] 2026-06-24T01:27:40+00:00 sync OK current='Independent validator proves each guard goes RED when its fix is reverted' tasks=8
+[overmind] 2026-06-24T01:30:10+00:00 sync OK current='Independent validator proves each guard goes RED when its fix is reverted' tasks=8
+[overmind] 2026-06-24T01:30:37+00:00 register OK run_dir=/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23 wf=77
+[overmind] 2026-06-24T01:31:36+00:00 register OK run_dir=/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-23 wf=77
+[overmind] 2026-06-24T01:31:37+00:00 sync OK current='Independent validator proves each guard goes RED when its fix is reverted' tasks=8
+[overmind] 2026-06-24T01:35:05+00:00 sync OK current='' tasks=8

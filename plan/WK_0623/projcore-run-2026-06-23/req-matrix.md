@@ -70,3 +70,13 @@ All rows below are **PLANNED** — implementation is gated behind JROM's post-ca
 | R5.5 | If a recording cannot be saved, the host is told clearly at end-of-call (not a transient status line). | Forced-fail path surfaces a host notice (reuse leave-dialog/callIssues). | VERIFIED (batch-B5) |
 | R5.6 | Post-session reconciliation/check: `recording-state started` with no saved file is flagged (log + notice). | Simulated loss → flagged, never silent. | VERIFIED (batch-B5) |
 | R5.7 | No regression: short recordings + the existing save path still work; international call path unaffected. | Short record saves; PH↔US unaffected. | VERIFIED (batch-B5) |
+
+## Follow-up — Regression-guard coverage (2026-06-24, impl=codex55, validate=sonnet)
+
+Closes the 2 silent-regression gaps from `validation/codex55-revert-audit.md`: every guard proven RED-on-revert by the independent validator (`validation/sonnet-gap-closure-verdict.md`), zero production edits left behind.
+
+| ID | Requirement | Acceptance evidence | Status |
+|----|-------------|---------------------|--------|
+| RG1 | Reverting the transcript phantom-`?` / mixed-skip / versioned-sidecar fix in `transcribe.py` fails the build (Python guard now CI-wired into `npm test -w backend`). | `transcribe-python.test.ts` runs `test_owner_labeling.py` (4 sub-tests); sabotage (`name="?"`) → RED at `transcribe-python.test.ts:24` / `assertNotIn("?", names)`. | VERIFIED (gap-closure) |
+| RG2 | Reverting the cam-off image-background + initials-chip tile render fails the build. | `tile.component.spec.ts` (local + remote-relayed paths); removing `has-bg-image` → RED at spec `:52,:73`. | VERIFIED (gap-closure) |
+| RG3 | Reverting the `media-state.background` relay fails the build. | `signaling-background-relay.test.ts`; stripping the `background` spread → RED at `:36` (`toMatchObject` missing key). | VERIFIED (gap-closure) |

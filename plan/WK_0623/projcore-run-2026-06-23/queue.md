@@ -9,6 +9,12 @@ Build order: B5 → B1 → B2 → B4 → B3 (B5 first = silent recording data lo
 - B4 [done] — Keep your background and initials showing when your camera is off
 - B3 [done] — Let people sign in with a Telegram tap instead of a password
 
+## Follow-up: regression-guard gap closure (2026-06-24) — impl=codex55, validate=sonnet
+Source: `validation/codex55-revert-audit.md` (2 gaps where reverting a fix would NOT be caught by tests).
+- G1 [done] — Add a CI-wired test so reverting the transcript phantom-? fix fails the build
+- G2 [done] — Add a test so removing the cam-off background + initials render fails the build
+- G3 [done] — Independent validator proves each guard goes RED when its fix is reverted
+
 ## Batch → docs map (engineering detail; labels above stay user-POV)
 | ID | Issue | Decision / plan / req | Complexity |
 |----|-------|----------------------|------------|
