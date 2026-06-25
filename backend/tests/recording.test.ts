@@ -34,6 +34,7 @@ function insertUser(db: ReturnType<typeof createTestDb>, email: string): void {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
   delete process.env.MEET_RECORDINGS_DIR;
   delete process.env.MEET_TRANSCRIBE_DISABLED;
@@ -74,6 +75,7 @@ describe('recording API', () => {
     insertRoom(db, 'abc123abc123', 'Team Sync!');
     openSession('abc123abc123', 'jrom@silverjrom.app', db);
     const cookie = `session=${createSession('other@silverjrom.app', db)}`;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await request(createApp(db))
       .post('/upload')
@@ -83,6 +85,8 @@ describe('recording API', () => {
       .set('X-Room', 'abc123abc123')
       .send(Buffer.from('webm-bytes'))
       .expect(403, { error: 'forbidden' });
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[rec] rejected owner-mismatch room=abc123abc123 user=other@silverjrom.app'));
   });
 
   it('S2.3 upload rejects an owner when no meeting session is open', async () => {
@@ -91,6 +95,7 @@ describe('recording API', () => {
     const dir = createRecordingDir();
     insertRoom(db, 'abc123abc123', 'Team Sync!');
     const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     await request(createApp(db))
       .post('/upload')
@@ -102,6 +107,7 @@ describe('recording API', () => {
       .expect(409, { error: 'no open meeting session' });
 
     expect(fs.readdirSync(dir)).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('[rec] rejected no-open-or-recent-session room=abc123abc123 user=jrom@silverjrom.app'));
   });
 
   it('S2.4 upload writes a webm file with the open meeting session id', async () => {
@@ -124,6 +130,81 @@ describe('recording API', () => {
     expect(res.body).toMatchObject({ ok: true, bytes: 10 });
     expect(res.body.file).toMatch(new RegExp(`^\\d{4}-.*_${session.id}_abc123abc123_Team_Sync_[a-f0-9]{6}\\.webm$`));
     expect(fs.readFileSync(path.join(dir, res.body.file), 'utf8')).toBe('webm-bytes');
+  });
+
+  it('B2 accepts an owner upload for a session ended within the recording grace window', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'abc123abc123', 'Team Sync!');
+    const session = openSession('abc123abc123', 'jrom@silverjrom.app', db);
+    db.prepare('UPDATE meeting_sessions SET ended_at = ?, ended_reason = ? WHERE id = ?').run(
+      Date.now() - 10_000,
+      'host-close-room',
+      session.id,
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    const res = await request(createApp(db))
+      .post('/upload')
+      .set('Cookie', cookie)
+      .set('Content-Type', 'audio/webm')
+      .set('X-Ext', 'webm')
+      .set('X-Room', 'abc123abc123')
+      .send(Buffer.from('webm-bytes'))
+      .expect(200);
+
+    expect(res.body.file).toContain(`_${session.id}_abc123abc123_`);
+    expect(fs.readFileSync(path.join(dir, res.body.file), 'utf8')).toBe('webm-bytes');
+  });
+
+  it('B2 rejects an owner upload for a session ended outside the recording grace window', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'abc123abc123', 'Team Sync!');
+    const session = openSession('abc123abc123', 'jrom@silverjrom.app', db);
+    db.prepare('UPDATE meeting_sessions SET ended_at = ?, ended_reason = ? WHERE id = ?').run(
+      Date.now() - 301_000,
+      'host-close-room',
+      session.id,
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    await request(createApp(db))
+      .post('/upload')
+      .set('Cookie', cookie)
+      .set('Content-Type', 'audio/webm')
+      .set('X-Ext', 'webm')
+      .set('X-Room', 'abc123abc123')
+      .send(Buffer.from('webm-bytes'))
+      .expect(409, { error: 'no open meeting session' });
+
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+
+  it('B2 keeps wrong-owner upload rejected even inside the recording grace window', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    insertUser(db, 'other@silverjrom.app');
+    createRecordingDir();
+    insertRoom(db, 'abc123abc123', 'Team Sync!');
+    const session = openSession('abc123abc123', 'jrom@silverjrom.app', db);
+    db.prepare('UPDATE meeting_sessions SET ended_at = ?, ended_reason = ? WHERE id = ?').run(
+      Date.now() - 10_000,
+      'host-close-room',
+      session.id,
+    );
+    const cookie = `session=${createSession('other@silverjrom.app', db)}`;
+
+    await request(createApp(db))
+      .post('/upload')
+      .set('Cookie', cookie)
+      .set('Content-Type', 'audio/webm')
+      .set('X-Ext', 'webm')
+      .set('X-Room', 'abc123abc123')
+      .send(Buffer.from('webm-bytes'))
+      .expect(403, { error: 'forbidden' });
   });
 
   it('S6.2 upload/list/download accepts mp4 extension from X-Ext', async () => {

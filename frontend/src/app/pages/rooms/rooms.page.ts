@@ -5,6 +5,8 @@ import { Subscription } from 'rxjs';
 import { addIcons } from 'ionicons';
 import { checkmarkOutline, chevronDownOutline, chevronUpOutline, clipboardOutline, closeOutline, createOutline, ellipsisHorizontal, keyOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline } from 'ionicons/icons';
 import { PaginationComponent } from '../../components/pagination/pagination.component';
+import { pendingRecordingSessionIds, reconcilePendingRecordings } from '../../services/recording-pending';
+import { RecordingsService } from '../../services/recordings.service';
 import { Room, RoomsService } from '../../services/rooms.service';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -19,6 +21,7 @@ const DEFAULT_PAGE_SIZE = 20;
 })
 export class RoomsPage implements OnDestroy {
   private readonly roomsService = inject(RoomsService);
+  private readonly recordingsService = inject(RecordingsService);
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly querySub: Subscription;
@@ -55,12 +58,8 @@ export class RoomsPage implements OnDestroy {
 
   constructor() {
     addIcons({ checkmarkOutline, chevronDownOutline, chevronUpOutline, clipboardOutline, closeOutline, createOutline, ellipsisHorizontal, keyOutline, lockClosedOutline, lockOpenOutline, searchOutline, trashOutline, videocamOutline });
-    for (let i = 0; i < localStorage.length; i++) {
-      if (localStorage.key(i)?.startsWith('recording-pending-')) {
-        this.pendingRecordingWarning.set(true);
-        break;
-      }
-    }
+    this.pendingRecordingWarning.set(pendingRecordingSessionIds().length > 0);
+    void this.reconcilePendingRecordingMarkers();
     this.querySub = this.route.queryParamMap.subscribe((params) => {
       this.page.set(readPositiveInt(params.get('page'), 1));
       this.pageSize.set(Math.min(readPositiveInt(params.get('pageSize'), DEFAULT_PAGE_SIZE), 100));
@@ -75,12 +74,11 @@ export class RoomsPage implements OnDestroy {
 
   dismissRecordingWarning(): void {
     this.pendingRecordingWarning.set(false);
-    const keysToRemove: string[] = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k?.startsWith('recording-pending-')) keysToRemove.push(k);
-    }
-    for (const k of keysToRemove) localStorage.removeItem(k);
+  }
+
+  private async reconcilePendingRecordingMarkers(): Promise<void> {
+    const result = await reconcilePendingRecordings(this.recordingsService);
+    this.pendingRecordingWarning.set(result.pendingSessionIds.length > 0);
   }
 
   toggleMenu(roomId: string, event?: Event): void {

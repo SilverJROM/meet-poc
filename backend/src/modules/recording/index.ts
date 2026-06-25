@@ -25,7 +25,9 @@ import {
   transcriptVersionPathFor,
 } from './transcript-versions.js';
 import { getRoom, isOwnerOf } from '../rooms/store.js';
-import { getOpenSessionFor } from '../sessions/store.js';
+import { getRecentSessionFor } from '../sessions/store.js';
+
+const RECORDING_UPLOAD_SESSION_GRACE_MS = 5 * 60 * 1000;
 
 export type RecordingEntry = {
   filename: string;
@@ -55,6 +57,11 @@ type TranscribeJobOptions = {
   model?: string;
 };
 
+function warnRecordingUploadRejected(reason: string, roomId: string, email: string, detail?: string): void {
+  const suffix = detail ? ` detail=${detail}` : '';
+  console.warn(`[rec] rejected ${reason} room=${roomId || '<missing>'} user=${email}${suffix}`);
+}
+
 export function getRecordingsDir(): string {
   return process.env.MEET_RECORDINGS_DIR || path.join(getRepoRoot(), 'recordings');
 }
@@ -74,10 +81,19 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     const ext = sanitizeExt(req.header('X-Ext'));
     const roomId = sanitizeRoomId(req.header('X-Room'));
     const room = getRoom(roomId, database);
-    if (!room) return res.status(404).json({ error: 'room not found' });
-    if (room.ownerEmail !== authReq.user.email) return res.status(403).json({ error: 'forbidden' });
-    const session = getOpenSessionFor(room.id, authReq.user.email, database);
-    if (!session) return res.status(409).json({ error: 'no open meeting session' });
+    if (!room) {
+      warnRecordingUploadRejected('room-not-found', roomId, authReq.user.email);
+      return res.status(404).json({ error: 'room not found' });
+    }
+    if (room.ownerEmail !== authReq.user.email) {
+      warnRecordingUploadRejected('owner-mismatch', room.id, authReq.user.email, `owner=${room.ownerEmail}`);
+      return res.status(403).json({ error: 'forbidden' });
+    }
+    const session = getRecentSessionFor(room.id, authReq.user.email, RECORDING_UPLOAD_SESSION_GRACE_MS, database);
+    if (!session) {
+      warnRecordingUploadRejected('no-open-or-recent-session', room.id, authReq.user.email);
+      return res.status(409).json({ error: 'no open meeting session' });
+    }
     const roomSlug = sanitizeSlug(room.title);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const rand = crypto.randomBytes(3).toString('hex');
@@ -92,7 +108,7 @@ export function recordingRouter(database: Database.Database = getDb()): express.
 
     fs.writeFile(filepath, body, (err) => {
       if (err) {
-        console.error('[rec] write error', err);
+        warnRecordingUploadRejected('write-error', room.id, authReq.user.email, String(err));
         res.status(500).json({ ok: false, error: String(err) });
         return;
       }

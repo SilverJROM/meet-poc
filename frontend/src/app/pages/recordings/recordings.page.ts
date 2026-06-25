@@ -5,6 +5,7 @@ import { Subscription } from 'rxjs';
 import { addIcons } from 'ionicons';
 import { trashOutline } from 'ionicons/icons';
 import { PaginationComponent } from '../../components/pagination/pagination.component';
+import { reconcilePendingRecordings } from '../../services/recording-pending';
 import { Recording, RecordingsService } from '../../services/recordings.service';
 
 const DEFAULT_PAGE_SIZE = 20;
@@ -67,6 +68,7 @@ export class RecordingsPage implements OnDestroy {
       });
       this.recordings.set(result.recordings);
       this.total.set(result.total);
+      await this.reconcilePendingRecordingMarkers();
     } catch {
       this.recordings.set([]);
       this.total.set(0);
@@ -158,6 +160,15 @@ export class RecordingsPage implements OnDestroy {
     const next = new Set(this.selectedFilenames());
     next.delete(filename);
     this.selectedFilenames.set(next);
+  }
+
+  private async reconcilePendingRecordingMarkers(): Promise<void> {
+    const result = await reconcilePendingRecordings(this.recordingsService);
+    if (result.pendingSessionIds.length > 0) {
+      this.status.set('A recording upload is still unconfirmed. Check this page again after the background upload finishes.');
+    } else if (result.confirmedSessionIds.length > 0) {
+      this.status.set(`Confirmed ${result.confirmedSessionIds.length} pending recording upload${result.confirmedSessionIds.length === 1 ? '' : 's'}.`);
+    }
   }
 }
 

@@ -163,6 +163,31 @@ export function getOpenSessionFor(
   return row ? toSession(row) : null;
 }
 
+export function getRecentSessionFor(
+  roomId: string,
+  hostEmail: string,
+  graceMs: number,
+  database: Database.Database = getDb(),
+): MeetingSession | null {
+  const recentEndedAfter = Date.now() - graceMs;
+  const row = database
+    .prepare(
+      `
+        SELECT id, room_id, host_email, started_at, ended_at, ended_reason, admitted_peak
+        FROM meeting_sessions
+        WHERE room_id = ?
+          AND host_email = ?
+          AND (ended_at IS NULL OR ended_at >= ?)
+        ORDER BY
+          CASE WHEN ended_at IS NULL THEN 1 ELSE 0 END DESC,
+          COALESCE(ended_at, started_at) DESC
+        LIMIT 1
+      `,
+    )
+    .get(roomId, hostEmail, recentEndedAfter) as SessionRow | undefined;
+  return row ? toSession(row) : null;
+}
+
 export function getOpenSessionByRoom(roomId: string, database: Database.Database = getDb()): MeetingSession | null {
   const row = database
     .prepare(
