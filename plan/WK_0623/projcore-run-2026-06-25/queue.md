@@ -21,3 +21,4 @@ Overmind-parseable (`- <id> [status] — <friendly label>`). 3-agent: impl A=cod
 ## Standing
 - Grace window = 5 min (north-star D1). Owner-gate stays (security).
 - Acceptance = real long call (Peer2), per real-call rule.
+- B6 [done] — Capture call diagnostics for the whole call, not just the first few minutes

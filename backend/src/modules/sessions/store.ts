@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { getDb } from '../../db.js';
 
-const MAX_DIAGNOSTIC_ENTRIES_PER_SESSION = 720;
+const MAX_DIAGNOSTIC_ENTRIES_PER_PARTICIPANT = 720;
 const ALLOWED_DIAGNOSTIC_KINDS = new Set(['sample', 'state-change', 'reconnect', 'error', 'call-end']);
 
 export type MeetingSession = {
@@ -312,6 +312,12 @@ export function appendDiagnosticsEntry(
     participantName: coerceIdentity(payload.clientName),
     participantClientKey,
   };
+  const retentionIdentityFilter = entry.participantClientKey
+    ? 'participant_client_key = ?'
+    : entry.participantId
+      ? 'participant_id = ?'
+      : 'participant_client_key IS NULL AND participant_id IS NULL';
+  const retentionIdentityParams = entry.participantClientKey ? [entry.participantClientKey] : entry.participantId ? [entry.participantId] : [];
 
   const insert = database.transaction(() => {
     database
@@ -342,16 +348,18 @@ export function appendDiagnosticsEntry(
         `
           DELETE FROM meeting_session_diagnostics
           WHERE session_id = ?
+            AND ${retentionIdentityFilter}
             AND id NOT IN (
               SELECT id
               FROM meeting_session_diagnostics
               WHERE session_id = ?
+                AND ${retentionIdentityFilter}
               ORDER BY created_at DESC
               LIMIT ?
             )
         `,
       )
-      .run(sessionId, sessionId, MAX_DIAGNOSTIC_ENTRIES_PER_SESSION);
+      .run(sessionId, ...retentionIdentityParams, sessionId, ...retentionIdentityParams, MAX_DIAGNOSTIC_ENTRIES_PER_PARTICIPANT);
   });
   insert();
 

@@ -14,7 +14,7 @@ import { runMigrations } from '../src/db.js';
 import { createTestDb } from './helpers.js';
 import { closeServer, closeWs, connectWs, nextMessage, startWsServer } from './signaling-helpers.js';
 
-const MAX_DIAGNOSTIC_ENTRIES_PER_SESSION = 720;
+const MAX_DIAGNOSTIC_ENTRIES_PER_PARTICIPANT = 720;
 
 function insertUser(db: Database.Database, email: string): void {
   db.prepare('INSERT INTO users (email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?)').run(
@@ -293,25 +293,38 @@ describe('meeting session diagnostics API', () => {
     await closeServer(server);
   });
 
-  it('DR-28 retains a bounded number of diagnostics entries per session', async () => {
+  it('DR-28 retains a bounded number of diagnostics entries per participant', async () => {
     const db = createTestDb();
     seedUser(db);
     const room = createRoom('Bounded diagnostics', 'jrom@silverjrom.app', db);
     const session = openSession(room.id, 'jrom@silverjrom.app', db);
 
-    for (let i = 0; i < MAX_DIAGNOSTIC_ENTRIES_PER_SESSION + 5; i += 1) {
+    for (let i = 0; i < MAX_DIAGNOSTIC_ENTRIES_PER_PARTICIPANT + 5; i += 1) {
       const entry = appendDiagnosticsEntry(
         session.id,
         'jrom@silverjrom.app',
-        samplePayload({ kind: i % 2 === 0 ? 'sample' : 'state-change', sequence: i }),
+        samplePayload({ kind: i % 2 === 0 ? 'sample' : 'state-change', sequence: i, participantId: 'host-participant', clientKey: 'host-key' }),
+        db,
+      );
+      expect(entry).not.toBeNull();
+    }
+    for (let i = 0; i < 3; i += 1) {
+      const entry = appendDiagnosticsEntry(
+        session.id,
+        'jrom@silverjrom.app',
+        samplePayload({ sequence: `guest-${i}`, participantId: 'guest-participant', clientKey: 'guest-key', clientName: 'Guest' }),
         db,
       );
       expect(entry).not.toBeNull();
     }
 
     const detail = getDiagnosticsForSession('jrom@silverjrom.app', session.id, db);
-    expect(detail?.entries).toHaveLength(MAX_DIAGNOSTIC_ENTRIES_PER_SESSION);
-    expect(detail?.entries[0].payload.sequence).toBe(5);
+    expect(detail?.entries).toHaveLength(MAX_DIAGNOSTIC_ENTRIES_PER_PARTICIPANT + 3);
+    const hostEntries = detail!.entries.filter((entry) => entry.participantId === 'host-participant');
+    const guestEntries = detail!.entries.filter((entry) => entry.participantId === 'guest-participant');
+    expect(hostEntries).toHaveLength(MAX_DIAGNOSTIC_ENTRIES_PER_PARTICIPANT);
+    expect(hostEntries[0].payload.sequence).toBe(5);
+    expect(guestEntries.map((entry) => entry.payload.sequence)).toEqual(['guest-0', 'guest-1', 'guest-2']);
   });
 
   it('P-1 migration 0013 adds three nullable columns + index; applies exactly once', () => {

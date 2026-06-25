@@ -71,6 +71,7 @@ import {
   type PeerAudioHealthInput,
   type PreflightGateStatus,
 } from './room-decisions';
+import { collectWithTimeout, DiagnosticsPostGate } from './room-diagnostics';
 import { decideRoomLifecycleLeave } from './room-lifecycle';
 import { recordPeerResumed, syncRecorderPeerStreams } from './room-recording';
 
@@ -504,7 +505,7 @@ export class RoomPage implements OnDestroy {
   // B5 — lobby self-test poller: its own ~1s interval, gated on lobby + mic-on.
   private lobbySelfTestTimer: number | null = null;
   private lastDiagnosticsEventAt = 0;
-  private diagnosticsLogInFlight = false;
+  private readonly diagnosticsPostGate = new DiagnosticsPostGate();
   private connectionQualityInFlight = false;
   private relayedConnectionSamples = 0;
   private poorConnectionSamples = 0;
@@ -3647,7 +3648,7 @@ export class RoomPage implements OnDestroy {
     if (this.diagnosticsLogTimer) window.clearInterval(this.diagnosticsLogTimer);
     this.diagnosticsLogTimer = null;
     this.lastDiagnosticsEventAt = 0;
-    this.diagnosticsLogInFlight = false;
+    this.diagnosticsPostGate.clear();
   }
 
   // B2b — continuous in-call silent-mic watchdog (R2, the safety net on top of
@@ -3856,18 +3857,11 @@ export class RoomPage implements OnDestroy {
   ): Promise<void> {
     const sessionId = this.currentSessionId();
     if (!sessionId || !this.effectiveDiagnosticsEnabled()) return;
-    const sfuDiagnostics = (await this.sfuClient.collectDiagnostics()) ?? undefined;
+    const sfuDiagnostics = await collectWithTimeout(() => this.sfuClient.collectDiagnostics());
     const payload = this.buildDiagnosticsPayload(kind, options.error, sfuDiagnostics);
     if (options.useBeacon && this.meetingSessions.sendDiagnosticsBeacon(sessionId, payload)) return;
-    if (this.diagnosticsLogInFlight) return;
-    this.diagnosticsLogInFlight = true;
-    try {
-      await this.meetingSessions.appendDiagnostics(sessionId, payload);
-    } catch (err) {
-      console.debug('[diagnostics-log] append failed', err);
-    } finally {
-      this.diagnosticsLogInFlight = false;
-    }
+    const result = await this.diagnosticsPostGate.run(() => this.meetingSessions.appendDiagnostics(sessionId, payload));
+    if (result === 'failed' || result === 'timeout') console.debug(`[diagnostics-log] append ${result}`);
   }
 
   private buildDiagnosticsPayload(kind: DiagnosticsPayload['kind'], error?: string, sfuDiagnostics?: SfuDiagnosticsSnapshot): DiagnosticsPostPayload {

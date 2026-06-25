@@ -8,3 +8,6 @@
 [overmind] 2026-06-25T07:04:31+00:00 sync OK current='' tasks=5
 [overmind] 2026-06-25T07:07:22+00:00 sync OK current='' tasks=5
 [overmind] 2026-06-25T07:07:23+00:00 complete OK
+[overmind] 2026-06-25T07:11:02+00:00 register OK run_dir=/home/agjrom/websites/meet-poc/plan/WK_0623/projcore-run-2026-06-25 wf=90
+[overmind] 2026-06-25T07:11:18+00:00 sync OK current='Capture call diagnostics for the whole call, not just the first few minutes' tasks=6
+[overmind] 2026-06-25T07:20:32+00:00 sync OK current='Capture call diagnostics for the whole call, not just the first few minutes' tasks=6
