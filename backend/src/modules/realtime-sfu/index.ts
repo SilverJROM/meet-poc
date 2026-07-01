@@ -1,6 +1,14 @@
 import { Router } from 'express';
 import type { Response } from 'express';
 import { isAdmittedDiagnosticPoster } from '../signaling/index.js';
+import {
+  buildSfuFaultInjectResponse,
+  matchSfuFaultInject,
+  parseSfuFaultInjectRules,
+  type SfuFaultInjectEndpoint,
+} from './sfu-fault-inject.js';
+
+export { clearSfuFaultInjectForTests, setSfuFaultInjectRulesForTests } from './sfu-fault-inject.js';
 
 const CF_BASE = 'https://rtc.live.cloudflare.com/v1/apps';
 
@@ -9,6 +17,13 @@ const sessionOwners = new Map<string, { clientKey: string; participantId: string
 
 export function clearSfuSessionOwnersForTests(): void {
   sessionOwners.clear();
+}
+
+export function setSfuSessionOwnerForTests(
+  cfSessionId: string,
+  owner: { clientKey: string; participantId: string },
+): void {
+  sessionOwners.set(cfSessionId, owner);
 }
 
 function getCfCredentials(env: NodeJS.ProcessEnv = process.env): { appId: string; token: string } | null {
@@ -79,6 +94,20 @@ function cfSidFrom(body: Record<string, unknown>): string | null {
   return id || null;
 }
 
+function maybeInjectSfuFault(
+  endpoint: SfuFaultInjectEndpoint,
+  caller: Caller,
+  body: Record<string, unknown>,
+  res: Response,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  const match = matchSfuFaultInject(parseSfuFaultInjectRules(env), endpoint, caller, body);
+  if (!match) return false;
+  const injected = buildSfuFaultInjectResponse(match);
+  res.status(injected.status).json({ error: injected.body.errorDescription, ...injected.body });
+  return true;
+}
+
 export function realtimeSfuRouter(): Router {
   const router = Router();
 
@@ -122,6 +151,7 @@ export function realtimeSfuRouter(): Router {
     const cfSid = cfSidFrom(body);
     if (!cfSid) return res.status(400).json({ error: 'cfSessionId required' });
     if (!ownsSession(cfSid, caller)) return res.status(403).json({ error: 'forbidden' });
+    if (maybeInjectSfuFault('tracks', caller, body, res)) return;
 
     let result: CfResult;
     try {

@@ -6,7 +6,12 @@ import { createSession } from '../src/modules/auth/sessions.js';
 import { createRoom } from '../src/modules/rooms/store.js';
 import { createTestDb } from './helpers.js';
 import { closeServer, closeWs, connectWs, nextMessage, startWsServer } from './signaling-helpers.js';
-import { clearSfuSessionOwnersForTests } from '../src/modules/realtime-sfu/index.js';
+import {
+  clearSfuFaultInjectForTests,
+  clearSfuSessionOwnersForTests,
+  setSfuFaultInjectRulesForTests,
+  setSfuSessionOwnerForTests,
+} from '../src/modules/realtime-sfu/index.js';
 
 // .env lives at the project root, one level up from backend/
 loadEnv({ path: '../.env' });
@@ -27,6 +32,7 @@ async function admitOwner(url: string, roomId: string, clientKey: string, ownerC
 describe('realtime-sfu proxy', () => {
   afterEach(() => {
     clearSfuSessionOwnersForTests();
+    clearSfuFaultInjectForTests();
     vi.unstubAllGlobals();
   });
 
@@ -108,6 +114,99 @@ describe('realtime-sfu proxy', () => {
         cfSessionId: 'foreign-session-not-in-owners',
       });
     expect(resForeign.status).toBe(403);
+
+    closeWs(caller.ws);
+    await closeServer(server);
+  });
+
+  it('B1-R1-a fault inject: matching participant on POST /api/sfu/tracks returns 406 without calling Cloudflare', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('SFU fault inject', 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+
+    const caller = await admitOwner(url, room.id, 'ck-fault-1', ownerCookie);
+    setSfuSessionOwnerForTests('owned-cf-session', {
+      clientKey: caller.clientKey,
+      participantId: caller.participantId,
+    });
+    setSfuFaultInjectRulesForTests([
+      {
+        endpoint: 'tracks',
+        matchParticipantId: caller.participantId,
+        matchTrackName: 'bob-audio',
+        status: 406,
+        errorDescription: 'session_not_found',
+        errorCode: 'session_not_found',
+      },
+    ]);
+
+    const fetchSpy = vi.fn(async () => {
+      throw new Error('Cloudflare fetch must not run when fault injection matches');
+    });
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const res = await request(server)
+      .post('/api/sfu/tracks')
+      .send({
+        clientKey: caller.clientKey,
+        participantId: caller.participantId,
+        sessionId: caller.sessionId,
+        cfSessionId: 'owned-cf-session',
+        tracks: [{ location: 'remote', sessionId: 'bob-cf', trackName: 'bob-audio' }],
+      });
+
+    expect(res.status).toBe(406);
+    expect(res.body.error).toBe('session_not_found');
+    expect(res.body.errorCode).toBe('session_not_found');
+    expect(res.body.faultInjected).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+
+    closeWs(caller.ws);
+    await closeServer(server);
+  });
+
+  it('B1-R1-a fault inject: non-matching participant does not inject and reaches CF passthrough', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('SFU fault inject miss', 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+
+    const caller = await admitOwner(url, room.id, 'ck-fault-2', ownerCookie);
+    setSfuSessionOwnerForTests('owned-cf-session-2', {
+      clientKey: caller.clientKey,
+      participantId: caller.participantId,
+    });
+    setSfuFaultInjectRulesForTests([
+      {
+        endpoint: 'tracks',
+        matchParticipantId: 'someone-else',
+        status: 406,
+        errorDescription: 'session_not_found',
+      },
+    ]);
+
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ tracks: [{ trackName: 'bob-audio', mid: '1' }] }),
+    }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const res = await request(server)
+      .post('/api/sfu/tracks')
+      .send({
+        clientKey: caller.clientKey,
+        participantId: caller.participantId,
+        sessionId: caller.sessionId,
+        cfSessionId: 'owned-cf-session-2',
+        tracks: [{ location: 'remote', sessionId: 'bob-cf', trackName: 'bob-audio' }],
+      });
+
+    expect(res.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
 
     closeWs(caller.ws);
     await closeServer(server);

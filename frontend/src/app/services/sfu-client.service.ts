@@ -14,6 +14,7 @@ import {
 } from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
 import { extractOutboundAudioSource, type OutboundAudioSourceStat } from './mic-energy';
+import { extractSubscribeFailureEvidence, type SubscribeFailureEvidence } from './sfu-subscribe-failure-evidence.js';
 import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair, SfuConnectionQuality } from './meeting-sessions.service';
 export type { RemotePublisher } from './sfu-roster-utils.js';
 
@@ -96,6 +97,7 @@ export class SfuClientService {
   readonly connectionQuality = signal<SfuConnectionQuality | null>(null);
   // Bumped on doSubscribe failure so the subscription effect re-fires for a retry
   readonly subscribeRetryVersion = signal(0);
+  readonly lastSubscribeFailureEvidence = signal<SubscribeFailureEvidence | null>(null);
 
   private pc: RTCPeerConnection | null = null;
   private audioSender: RTCRtpSender | null = null;
@@ -177,6 +179,16 @@ export class SfuClientService {
         this.scheduleLiveMidConflictRenegotiationRetry(publisher, publisher.tracks, 'initial-subscribe', err);
         return;
       }
+      this.lastSubscribeFailureEvidence.set(
+        extractSubscribeFailureEvidence(err, {
+          operation: 'subscribe',
+          endpoint: 'POST /api/sfu/tracks',
+          publisher,
+          localCfSessionId: this.localPublishState()?.cfSessionId ?? null,
+          remoteCfSessionId: publisher.cfSessionId,
+          pcSignalingState: this.pc?.signalingState ?? null,
+        }),
+      );
       const retry = this.nextSubscribeRetry(publisher.clientId, false);
       if (!retry.shouldRetry) return;
       this.subscribedClientIds.delete(publisher.clientId);

@@ -297,6 +297,38 @@ assert.strictEqual(
   assert.strictEqual(decision.nextAttemptsThisWindow, 4);
 }
 
+// BUG-REPRO-R1-mark-stalled-give-up — after mark-stalled latches, further polls stay stalled and never escalate to SFU recovery.
+// PASSES today (documents give-up). B3/B2 coordinator should replace this terminal latch with escalation.
+{
+  const stalledFixture = voiceSamples([
+    [1_000, 7],
+    [2_000, 7],
+    [3_000, 7],
+    [4_000, 7],
+  ]);
+  const latched = decideRemoteVoiceWatchdogAction({
+    previousSamples: stalledFixture.slice(0, 3),
+    attemptsThisWindow: 4,
+    sample: stalledFixture[3],
+    mutedAll: false,
+  });
+
+  assert.strictEqual(latched.kind, 'mark-stalled', 'BUG-REPRO-R1-mark-stalled: attempt cap latches mark-stalled');
+  assert.strictEqual(latched.nextAttemptsThisWindow, 4);
+
+  for (let poll = 0; poll < 3; poll += 1) {
+    const decision = decideRemoteVoiceWatchdogAction({
+      previousSamples: latched.nextSamples,
+      attemptsThisWindow: latched.nextAttemptsThisWindow,
+      sample: stalledFixture[3],
+      mutedAll: false,
+    });
+    assert.strictEqual(decision.kind, 'mark-stalled', `BUG-REPRO-R1-mark-stalled: polled give-up stays mark-stalled on poll ${poll + 1}`);
+    assert.notStrictEqual(decision.kind, 'recover', `BUG-REPRO-R1-mark-stalled: poll ${poll + 1} must not escalate after cap`);
+    assert.strictEqual(decision.nextAttemptsThisWindow, 4, `BUG-REPRO-R1-mark-stalled: attempts remain capped on poll ${poll + 1}`);
+  }
+}
+
 {
   const decision = decideRemoteVoiceWatchdogAction({
     previousSamples: [
