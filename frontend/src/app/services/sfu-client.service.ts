@@ -39,6 +39,12 @@ type SfuDiagnosticsWithPublishDebug = SfuDiagnosticsSnapshot & {
   hasPc: boolean;
   publishStatus: LocalPublishState['status'] | null;
   publishError: string | null;
+  recoveryLadder: {
+    lastRung: SfuRecoveryDiagnosticsEvent['rung'] | null;
+    lastEpoch: number;
+    rejoinAttemptsInWindow: number;
+    throttled: boolean;
+  };
 };
 
 export interface SubscribedTrackEntry {
@@ -51,7 +57,9 @@ export interface SubscribedTrackEntry {
 // Emitted once per recovery-ladder step (B0 consensus rungs 1-2; needs-rejoin/throttled mark the
 // bounded never-give-up continuation pending B2b's rung-3 full rejoin).
 export type SfuRecoveryDiagnosticsEvent = {
-  rung: 'subscribe-retry' | 'subscribe-renegotiate' | 'needs-rejoin' | 'throttled';
+  // 'sfu-rejoin' and 'unrecovered-visible' are rung-3/4 (B2b) — not scoped to one publisher (a coalesced
+  // rejoin serves every advertised publisher at once), so publisherClientId is the sentinel '*' for these.
+  rung: 'subscribe-retry' | 'subscribe-renegotiate' | 'needs-rejoin' | 'throttled' | 'sfu-rejoin' | 'unrecovered-visible';
   publisherClientId: string;
   epoch: number;
   attempt: number;
@@ -110,6 +118,9 @@ export class SfuClientService {
   readonly subscribeRetryVersion = signal(0);
   readonly lastSubscribeFailureEvidence = signal<SubscribeFailureEvidence | null>(null);
   readonly lastRecoveryEvent = signal<SfuRecoveryDiagnosticsEvent | null>(null);
+  // Rung-4 (B2b): true once the rung-3 rejoin throttle is exceeded — drives the visible
+  // "audio unrecovered" affordance. Cleared as soon as a fresh (non-throttled) rejoin attempt fires.
+  readonly sfuRejoinThrottled = signal(false);
 
   private pc: RTCPeerConnection | null = null;
   private audioSender: RTCRtpSender | null = null;
@@ -120,6 +131,10 @@ export class SfuClientService {
   // Bumped every time opQueue is abandoned/reset (leave/reconnect/rejoin) — an async subscribe path
   // that captured an older epoch must no-op its bind (see shouldBindSubscribeResponse usage below).
   private recoveryEpoch = 0;
+  // Rung-3 (B2b) full local SFU rejoin coalescing lock + throttle window (timestamps of past rejoins,
+  // pruned to the 2-min window). ≤1 rejoin/15s AND ≤2/2min — see runFullSfuRejoin().
+  private rejoinScheduled = false;
+  private sfuRejoinTimestamps: number[] = [];
 
   private callerCreds: { clientKey: string; participantId: string; sessionId: string } | null = null;
   private subscribedClientIds = new Set<string>();
@@ -303,6 +318,7 @@ export class SfuClientService {
     // local SFU rejoin) and keep the publisher alive via a bounded low-frequency same-session retry.
     this.emitRecoveryEvent('needs-rejoin', publisherClientId, rung2.nextAttempts);
     this.armSubscribeRecoveryLowFrequencyRetry(publisherClientId);
+    this.handleNeedsRejoinTrigger();
   }
 
   private runRecoverySubscribeAttempt(
@@ -381,6 +397,123 @@ export class SfuClientService {
   private emitRecoveryEvent(rung: SfuRecoveryDiagnosticsEvent['rung'], publisherClientId: string, attempt: number): void {
     this.lastRecoveryEvent.set({ rung, publisherClientId, epoch: this.recoveryEpoch, attempt, atMs: Date.now() });
     this.subscribeRetryVersion.update((v) => v + 1);
+  }
+
+  // Test-overridable clock (the fake-timed coordinator spec fakes setTimeout, not Date) so the
+  // 15s/2min throttle window in runFullSfuRejoin() is deterministically testable.
+  private nowMs(): number {
+    return Date.now();
+  }
+
+  private pruneRejoinTimestamps(now: number): void {
+    this.sfuRejoinTimestamps = this.sfuRejoinTimestamps.filter((t) => now - t < 120_000);
+  }
+
+  // Rung-3 (B2b) coalescing entry point: fired from every needs-rejoin emission site. Multiple
+  // publishers hitting needs-rejoin in the same synchronous tick all see rejoinScheduled already
+  // true after the first — exactly ONE full rejoin, never N (B0 consensus §Coalescing).
+  private handleNeedsRejoinTrigger(): void {
+    if (this.rejoinScheduled) return;
+    this.rejoinScheduled = true;
+    void this.runFullSfuRejoin().finally(() => {
+      this.rejoinScheduled = false;
+    });
+  }
+
+  // Manual "Retry" affordance for the rung-4 UI — re-runs the same coalescing/throttle-gated
+  // trigger (still throttle-safe against repeated clicks), rather than bypassing the safety cap.
+  retryFullSfuRejoinNow(): void {
+    this.handleNeedsRejoinTrigger();
+  }
+
+  /**
+   * Test-only: force the rung-4 visible-unrecovered state without driving a real throttle
+   * exhaustion, so a screenshot/e2e proof can render the banner deterministically. Guarded to
+   * localhost at the call site (room.page.ts debug object), same convention as
+   * RemoteAudioService.injectRemoteSourceForTest.
+   */
+  debugForceRejoinThrottledForTest(): void {
+    this.sfuRejoinThrottled.set(true);
+  }
+
+  // Rung-3 (B0 consensus §Full SFU Rejoin Mechanism): one coalesced full local SFU transport/session
+  // rotation. Deliberately reuses the EXISTING full-republish path (resetForTransportRecovery() +
+  // transportRecoveryHandler) that ICE-transport-recovery already exercises in production — that path
+  // already (a) reuses MediaService's live mic/cam/screen tracks (no re-getUserMedia) and (b) announces
+  // the fresh sfu-publish over WS (room.page.ts's announceSfuPublishState()). This method only adds the
+  // coalescing/throttle wrapper around it plus the explicit, testable remote-resubscribe step.
+  private async runFullSfuRejoin(): Promise<void> {
+    if (!this.callerCreds) return;
+    if (this.localPublishState()?.status !== 'published') return;
+    // A genuine ICE-transport-recovery full-republish is already in flight/scheduled — defer to it
+    // rather than double-rotating the PC. The low-freq per-publisher continuation keeps trying either way.
+    if (this.transportRecoveryInFlight || this.transportRecoveryScheduled) return;
+
+    const now = this.nowMs();
+    this.pruneRejoinTimestamps(now);
+    const within15s = this.sfuRejoinTimestamps.some((t) => now - t < 15_000);
+    const within2MinCapReached = this.sfuRejoinTimestamps.length >= 2;
+    if (within15s || within2MinCapReached) {
+      this.emitRecoveryEvent('unrecovered-visible', '*', this.sfuRejoinTimestamps.length);
+      this.sfuRejoinThrottled.set(true);
+      return;
+    }
+
+    const handler = this.transportRecoveryHandler;
+    if (!handler) {
+      console.error('[sfu] rung-3 full rejoin skipped: no republish handler registered');
+      return;
+    }
+
+    this.sfuRejoinTimestamps.push(now);
+    this.emitRecoveryEvent('sfu-rejoin', '*', this.sfuRejoinTimestamps.length);
+    this.sfuRejoinThrottled.set(false);
+
+    this.resetForTransportRecovery();
+    const freshEpoch = this.recoveryEpoch;
+    try {
+      await handler();
+    } catch (err) {
+      console.warn('[sfu] rung-3 full rejoin republish failed — low-frequency continuation keeps retrying', err);
+      return;
+    }
+    if (freshEpoch !== this.recoveryEpoch) return; // superseded by a newer reset mid-flight
+
+    await this.subscribeAllAdvertisedRemotes(freshEpoch);
+  }
+
+  // Rung-3 step 8: resubscribe every currently-advertised remote publisher on the fresh PC/session —
+  // ALL of them, not just the one(s) that triggered the rejoin, since the rotation drops every existing
+  // subscription. Sequential + per-publisher enqueue() avoids cross-publisher mid races; the epoch check
+  // before each iteration bails out immediately if superseded by a later reset.
+  private async subscribeAllAdvertisedRemotes(capturedEpoch: number): Promise<void> {
+    const myCfSessionId = this.localPublishState()?.cfSessionId;
+    const targets = [...this.remotePublishers().entries()].filter(
+      ([, publisher]) => publisher.cfSessionId !== myCfSessionId && publisher.tracks.length > 0,
+    );
+
+    for (const [clientId, publisher] of targets) {
+      if (capturedEpoch !== this.recoveryEpoch) return;
+      if (this.subscribedClientIds.has(clientId)) continue; // already (re)subscribed via a racing presence update
+      this.subscribedClientIds.add(clientId);
+      this.armSubscribeStuckWatchdog(clientId);
+      try {
+        await this.enqueue(() => this.doSubscribeTracks(publisher, publisher.tracks, { capturedEpoch }));
+      } catch (err) {
+        this.subscribedClientIds.delete(clientId);
+        this.lastSubscribeFailureEvidence.set(
+          extractSubscribeFailureEvidence(err, {
+            operation: 'subscribe',
+            endpoint: 'POST /api/sfu/tracks',
+            publisher,
+            localCfSessionId: this.localPublishState()?.cfSessionId ?? null,
+            remoteCfSessionId: publisher.cfSessionId,
+            pcSignalingState: this.pc?.signalingState ?? null,
+          }),
+        );
+        if (capturedEpoch === this.recoveryEpoch) this.scheduleRecoveryEscalation(clientId, false);
+      }
+    }
   }
 
   private withJitter(backoffMs: number): number {
@@ -488,6 +621,7 @@ export class SfuClientService {
       if (this.canRunSubscribeRecovery(publisher)) {
         this.emitRecoveryEvent('needs-rejoin', publisher.clientId, nextAttempts);
         this.armSubscribeRecoveryLowFrequencyRetry(publisher.clientId);
+        this.handleNeedsRejoinTrigger();
       }
       return;
     }
@@ -538,6 +672,7 @@ export class SfuClientService {
               this.subscribedClientIds.delete(current.clientId);
               this.emitRecoveryEvent('needs-rejoin', current.clientId, retry.nextAttempts);
               this.armSubscribeRecoveryLowFrequencyRetry(current.clientId);
+              this.handleNeedsRejoinTrigger();
             }
             return;
           }
@@ -1145,7 +1280,7 @@ export class SfuClientService {
   private publishDiagnosticsDebug(
     pc: RTCPeerConnection | null,
     publishState: LocalPublishState | null,
-  ): Pick<SfuDiagnosticsWithPublishDebug, 'publishPhase' | 'publishPhaseAtMs' | 'hasPc' | 'publishStatus' | 'publishError'> {
+  ): Pick<SfuDiagnosticsWithPublishDebug, 'publishPhase' | 'publishPhaseAtMs' | 'hasPc' | 'publishStatus' | 'publishError' | 'recoveryLadder'> {
     const phase = this.localPublishPhase();
     return {
       publishPhase: phase.phase,
@@ -1153,6 +1288,12 @@ export class SfuClientService {
       hasPc: !!pc,
       publishStatus: publishState?.status ?? null,
       publishError: publishState?.error ?? null,
+      recoveryLadder: {
+        lastRung: this.lastRecoveryEvent()?.rung ?? null,
+        lastEpoch: this.recoveryEpoch,
+        rejoinAttemptsInWindow: this.sfuRejoinTimestamps.length,
+        throttled: this.sfuRejoinThrottled(),
+      },
     };
   }
 
@@ -1530,6 +1671,7 @@ export class SfuClientService {
           if (this.canRunSubscribeRecovery(publisher)) {
             this.emitRecoveryEvent('needs-rejoin', publisher.clientId, retry.nextAttempts);
             this.armSubscribeRecoveryLowFrequencyRetry(publisher.clientId);
+            this.handleNeedsRejoinTrigger();
           }
         }
         this.midCallSubscribeRetryTimers.delete(key);
@@ -1901,6 +2043,9 @@ export class SfuClientService {
     this.setPublishPhase(null);
     this.resetOpQueue();
     this.recoveryPublishIceServers = null;
+    this.rejoinScheduled = false;
+    this.sfuRejoinTimestamps = [];
+    this.sfuRejoinThrottled.set(false);
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
     this.remoteScreenStreams.set(new Map());

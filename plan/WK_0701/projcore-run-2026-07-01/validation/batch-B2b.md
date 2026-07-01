@@ -1,0 +1,4 @@
+# B2b Gate — PASS (2026-07-01) — completes R2
+Batch B2b (rung-3 full SFU rejoin + rung-4 UI). Implementer Sonnet; adversarial red-team codex55 + Opus inline.
+7-gate: artifacts ✓ · diff review ✓ (reuse-heavy: resetForTransportRecovery+handler; only new = subscribeAllAdvertisedRemotes + rung-4 banner) · ng build ✓ · coordinator spec (4 new B2b tests) green under timeout ✓ · evidence: ELITE RED-TEAM all 5 regression classes SAFE (dup-subs/ghost-streams/healthy-clobber/retry-storms/silent-UI) with per-lens code cites + test-honesty; rung-4 e2e screenshot verified real ✓ · Req R2 VERIFIED (B2a+B2b) · decisions logged (redteam-tier), test-only debugForceRejoinThrottledForTest gated to localhost ✓.
+Verdict: PASS. R2 → VERIFIED. Red-team tier: staged elite (codex55 all-lens adversarial + opus inline; grok-build 3rd voice skipped given clean convergence + reuse-heavy risk profile — decisions/2026-07-01-b2b-redteam-tier.md).

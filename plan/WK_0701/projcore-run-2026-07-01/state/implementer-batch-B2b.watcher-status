@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B2b
+status=PROPOSED
+source=callback
+line_no=33
+note=Rung-3 reuses resetForTransportRecovery()+transportRecoveryHandler (no new gUM/WS code) + new subscribeAllAdvertisedRemotes(); coalesce+throttle wrapper; rung-4 banner+debug hook. Full plan in pane.

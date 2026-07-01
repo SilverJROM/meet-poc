@@ -487,6 +487,13 @@ export class RoomPage implements OnDestroy {
   readonly actionNotice = signal<string | null>(null);
   readonly initialPublishFailureNotice = signal<string | null>(null);
   readonly initialPublishRetrying = signal(false);
+  // Rung-4 (B2b): visible "audio unrecovered" affordance once the rung-3 full-rejoin throttle
+  // (<=1/15s, <=2/2min) is exceeded — never a silent latched guard.
+  readonly sfuRejoinUnrecoveredNotice = computed(() =>
+    this.sfuClient.sfuRejoinThrottled()
+      ? 'Audio for one or more participants could not be restored automatically.'
+      : null,
+  );
   private readonly callStartMs = signal<number | null>(null);
   private readonly clockTick = signal(0);
   private clockInterval: number | null = null;
@@ -677,6 +684,9 @@ export class RoomPage implements OnDestroy {
       if (window.location.hostname === 'localhost') {
         debug.injectActiveSpeakerStream = (id: string, stream: MediaStream) => this.activeSpeaker.injectDebugStream(id, stream);
         debug.forceActiveSpeakerForTest = (id: string | null) => this.activeSpeaker.forceActivePeerForTest(id);
+        // B2b test-only: force the rung-4 visible-unrecovered state so an e2e can render + screenshot
+        // the banner deterministically, without driving a real rejoin-throttle exhaustion.
+        debug.forceSfuRejoinThrottledForTest = () => this.sfuClient.debugForceRejoinThrottledForTest();
         // B1 test-only: drive the live remote-audio AudioContext into 'suspended' so
         // an e2e can model the autoplay-blocked / suspended-with-sources negative path.
         // Attached to the remoteAudioMixer debug object (next to debugSnapshot()).
@@ -1680,6 +1690,12 @@ export class RoomPage implements OnDestroy {
     this.relayUnavailableWarning.set(false);
     this.setupWarning.set(null);
     await this.join();
+  }
+
+  // Rung-4 "Retry" affordance — re-runs the same coalescing/throttle-gated rung-3 trigger (still
+  // throttle-safe against repeated clicks).
+  retrySfuRejoin(): void {
+    this.sfuClient.retryFullSfuRejoinNow();
   }
 
   async rejoinAfterInitialPublishFailure(): Promise<void> {
@@ -4550,6 +4566,7 @@ declare global {
       isAndroid?: () => boolean;
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
       forceActiveSpeakerForTest?: (id: string | null) => void;
+      forceSfuRejoinThrottledForTest?: () => void;
     };
   }
 }

@@ -235,6 +235,12 @@
           </div>
         </div>
       }
+      @if (sfuRejoinUnrecoveredNotice(); as unrecoveredNotice) {
+        <div class="device-notice sfu-rejoin-unrecovered-notice" role="status" aria-live="polite">
+          <span>{{ unrecoveredNotice }}</span>
+          <button type="button" (click)="retrySfuRejoin()">Retry</button>
+        </div>
+      }
       @if (screenShareHelp()) {
         <div class="screen-share-help" role="alert" aria-label="Screen share permission help">
           <h2>Screen sharing needs macOS permission</h2>

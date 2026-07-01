@@ -1,0 +1,22 @@
+{
+  "schema_version": 4,
+  "dispatch_status": "ready",
+  "batch_id": "batch-B2b",
+  "role": "implementer",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01",
+  "session": "01_impl_sonnet_meetpoc",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/prompts/batch-B2b.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/batch-B2b.implementer.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/callbacks.md",
+  "dispatched_at": "2026-07-01T08:22:50Z",
+  "estimate_min": 30,
+  "bucket": "MEDIUM",
+  "wakeup_delay_sec": 3600,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/batch-B2b.wakeup-required",
+  "watcher_pid": 2510404,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/batch-B2b.watcher-implementer.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/watcher-batch-B2b-implementer.log",
+  "dispatch_marker": "DISPATCH-batch-B2b-implementer-2510294-1782894170",
+  "wakeup_acked_at": null,
+  "wakeup_acked_by": null
+}

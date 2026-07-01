@@ -78,6 +78,34 @@ function makeSingleTrackSubscribePc(): RTCPeerConnection {
   } as unknown as RTCPeerConnection;
 }
 
+// Rung-3 rejoin tests subscribe MULTIPLE publishers sequentially onto the SAME mock pc — unlike
+// makeSingleTrackSubscribePc (which always pushes a hardcoded mid '1'), this assigns a fresh
+// incrementing mid per setRemoteDescription call so back-to-back subscribes don't collide.
+function makeMultiSubscribePc(): RTCPeerConnection {
+  let nextMid = 1;
+  const transceivers = [{ mid: '0', receiver: { track: { kind: 'audio' } } }];
+  return {
+    signalingState: 'have-local-offer',
+    localDescription: { type: 'offer', sdp: 'offer-sdp' },
+    getTransceivers(): RTCRtpTransceiver[] {
+      return transceivers as unknown as RTCRtpTransceiver[];
+    },
+    async setRemoteDescription(): Promise<void> {
+      transceivers.push({ mid: `${nextMid}`, receiver: { track: { kind: 'audio' } } });
+      nextMid += 1;
+    },
+    async createAnswer(): Promise<RTCSessionDescriptionInit> {
+      return { type: 'answer', sdp: 'answer-sdp' };
+    },
+    async setLocalDescription(): Promise<void> {},
+    close(): void {},
+  } as unknown as RTCPeerConnection;
+}
+
+async function flushMicrotasks(times = 30): Promise<void> {
+  for (let i = 0; i < times; i += 1) await Promise.resolve();
+}
+
 function installPublishedSfuState(sfu: SfuClientService, pc: RTCPeerConnection): void {
   const privateSfu = sfu as unknown as {
     pc: RTCPeerConnection;
@@ -355,6 +383,230 @@ function make406Error(): HttpErrorResponse {
     sfu.destroy();
     assert.equal(privateSfu.subscribeRecoveryLowFreqTimers.size, 0, 'LIVE-MID-CONFLICT-FALLBACK: destroy() clears all armed timers — no leaked state');
   });
+}
+
+// B2b — rung-3 full local SFU rejoin coordinator (coalescing lock, ≤1/15s + ≤2/2min throttle, epoch
+// safety across the rotation, resubscribe-ALL-advertised — not just the trigger publisher). These reuse
+// the SAME resetForTransportRecovery()+transportRecoveryHandler production path via a mocked handler
+// (installPublishedSfuState simulates a completed republish) so the coalescing/throttle/resubscribe
+// wrapper is proven without driving doPublish's real HTTP flow.
+
+// COALESCING + RESUBSCRIBE-ALL — bob and alice both exhaust rung-2 in the same synchronous tick (two
+// needs-rejoin triggers, no await between them) → exactly ONE full rejoin, and the rejoin resubscribes
+// EVERY advertised publisher afterward (not only the one whose exhaustion triggered it) — the rotation
+// drops every existing subscription, so a previously-healthy peer must come back too (elite-redteam #1).
+{
+  const postCalls: string[] = [];
+  const http = {
+    post: (url: string, body: { tracks?: { trackName: string }[] }) => {
+      if (url !== '/api/sfu/tracks') throw new Error(`REJOIN-RESUBSCRIBE-ALL: unexpected POST ${url}`);
+      const trackName = body.tracks?.[0]?.trackName ?? 'unknown';
+      postCalls.push(trackName);
+      return of({ tracks: [{ trackName, mid: '' }] });
+    },
+  } as unknown as Partial<HttpClient>;
+
+  const sfu = createSfuClient(http);
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc);
+
+  const bob = makeBobPublisher();
+  const alice: RemotePublisher = {
+    clientId: 'alice',
+    participantId: 'p-alice',
+    cfSessionId: 'alice-cf',
+    revision: 1,
+    tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
+  };
+  sfu.remotePublishers.set(new Map([[bob.clientId, bob], [alice.clientId, alice]]));
+
+  let handlerCalls = 0;
+  sfu.setTransportRecoveryHandler(async () => {
+    handlerCalls += 1;
+    installPublishedSfuState(sfu, pc); // simulate a completed full republish (fresh session, same mock pc)
+  });
+
+  const privateSfu = sfu as unknown as {
+    subscribeRecoveryRung1Attempts: Map<string, number>;
+    subscribeRecoveryRung2Attempts: Map<string, number>;
+    scheduleRecoveryEscalation: (clientId: string, hasFirstFrame: boolean) => void;
+    rejoinScheduled: boolean;
+  };
+  // Pre-seed both publishers at the rung-1/rung-2 cap boundary so a single scheduleRecoveryEscalation
+  // call for each lands directly on "rung-2 exhausted" → needs-rejoin, synchronously, in the same tick.
+  for (const clientId of ['bob', 'alice']) {
+    privateSfu.subscribeRecoveryRung1Attempts.set(clientId, 3);
+    privateSfu.subscribeRecoveryRung2Attempts.set(clientId, 2);
+  }
+
+  privateSfu.scheduleRecoveryEscalation('bob', false);
+  privateSfu.scheduleRecoveryEscalation('alice', false);
+
+  await flushMicrotasks();
+
+  assert.equal(handlerCalls, 1, 'COALESCING: two same-tick needs-rejoin triggers cause exactly one full rejoin, not two');
+  assert.deepEqual(
+    postCalls.slice().sort(),
+    ['alice-audio', 'bob-audio'],
+    'RESUBSCRIBE-ALL: the rejoin resubscribes every advertised publisher, not only the one that triggered it',
+  );
+  assert.equal(privateSfu.rejoinScheduled, false, 'COALESCING: the lock releases once the rejoin completes');
+
+  sfu.destroy();
+}
+
+// NO-DUPLICATE-SUBSCRIBE — if a publisher is already claimed by a racing subscribe path (e.g. a
+// handleSfuPresence-driven direct subscribeIfNeeded landing concurrently on the fresh session) by the
+// time subscribeAllAdvertisedRemotes reaches it, the rejoin must skip it rather than double-POST
+// (elite-redteam #2: no duplicate subscriptions surviving the rotation).
+{
+  const postCalls: string[] = [];
+  const http = {
+    post: (url: string, body: { tracks?: { trackName: string }[] }) => {
+      if (url !== '/api/sfu/tracks') throw new Error(`NO-DUPLICATE-SUBSCRIBE: unexpected POST ${url}`);
+      const trackName = body.tracks?.[0]?.trackName ?? 'unknown';
+      postCalls.push(trackName);
+      return of({ tracks: [{ trackName, mid: '' }] });
+    },
+  } as unknown as Partial<HttpClient>;
+
+  const sfu = createSfuClient(http);
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc);
+
+  const bob = makeBobPublisher();
+  const alice: RemotePublisher = {
+    clientId: 'alice',
+    participantId: 'p-alice',
+    cfSessionId: 'alice-cf',
+    revision: 1,
+    tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
+  };
+  sfu.remotePublishers.set(new Map([[bob.clientId, bob], [alice.clientId, alice]]));
+
+  sfu.setTransportRecoveryHandler(async () => {
+    installPublishedSfuState(sfu, pc);
+    // Simulate the race: alice's guard is already claimed by another in-flight subscribe path on the
+    // same fresh epoch by the time our loop would reach her.
+    (sfu as unknown as { subscribedClientIds: Set<string> }).subscribedClientIds.add('alice');
+  });
+
+  const privateSfu = sfu as unknown as { handleNeedsRejoinTrigger: () => void };
+  privateSfu.handleNeedsRejoinTrigger();
+  await flushMicrotasks();
+
+  assert.deepEqual(
+    postCalls,
+    ['bob-audio'],
+    'NO-DUPLICATE-SUBSCRIBE: a publisher already claimed by a racing subscribe path is skipped, not double-subscribed',
+  );
+
+  sfu.destroy();
+}
+
+// EPOCH-SAFETY-DURING-REJOIN — a rejoin whose republish is still in flight gets superseded by an
+// unrelated concurrent reset (recoveryEpoch bumped underneath it): the rejoin must NOT resubscribe on
+// the now-stale epoch once its republish resolves (elite-redteam: no ghost/duplicate binds across a
+// rotation race).
+{
+  const pendingRepublish: { resolve: () => void }[] = [];
+  const sfu = createSfuClient();
+  const pc = makeSingleTrackSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  const bob = makeBobPublisher();
+  sfu.remotePublishers.set(new Map([[bob.clientId, bob]]));
+
+  sfu.setTransportRecoveryHandler(
+    () =>
+      new Promise<void>((resolve) => {
+        pendingRepublish.push({
+          resolve: () => {
+            installPublishedSfuState(sfu, pc);
+            resolve();
+          },
+        });
+      }),
+  );
+
+  const privateSfu = sfu as unknown as {
+    handleNeedsRejoinTrigger: () => void;
+    recoveryEpoch: number;
+    doSubscribeTracks: (...args: unknown[]) => Promise<void>;
+  };
+  let subscribeCalls = 0;
+  privateSfu.doSubscribeTracks = async () => {
+    subscribeCalls += 1;
+  };
+
+  privateSfu.handleNeedsRejoinTrigger();
+  await flushMicrotasks();
+  assert.equal(pendingRepublish.length, 1, 'EPOCH-SAFETY-DURING-REJOIN: republish handler is in flight');
+
+  // An unrelated reset (e.g. a second overlapping rejoin, or ICE transport recovery) lands while our
+  // rejoin's republish is still pending.
+  privateSfu.recoveryEpoch += 1;
+
+  pendingRepublish[0].resolve();
+  await flushMicrotasks();
+
+  assert.equal(
+    subscribeCalls,
+    0,
+    'EPOCH-SAFETY-DURING-REJOIN: a rejoin superseded by a newer reset mid-flight must not resubscribe on the stale epoch',
+  );
+
+  sfu.destroy();
+}
+
+// THROTTLE — ≤1 full rejoin/15s AND ≤2/2min; once exceeded, rung-4's visible unrecovered state is set,
+// and it clears again the moment a fresh (non-throttled) rejoin actually fires. nowMs() is overridden
+// (not real Date/setTimeout) so the 15s/2min windows are deterministic without real elapsed time.
+{
+  const sfu = createSfuClient();
+  const pc = makeSingleTrackSubscribePc();
+  installPublishedSfuState(sfu, pc);
+
+  let handlerCalls = 0;
+  sfu.setTransportRecoveryHandler(async () => {
+    handlerCalls += 1;
+    installPublishedSfuState(sfu, pc);
+  });
+
+  const privateSfu = sfu as unknown as { handleNeedsRejoinTrigger: () => void; nowMs: () => number };
+  let simulatedNow = 0;
+  privateSfu.nowMs = () => simulatedNow;
+
+  privateSfu.handleNeedsRejoinTrigger();
+  await flushMicrotasks();
+  assert.equal(handlerCalls, 1, 'THROTTLE: the first rejoin proceeds');
+  assert.equal(sfu.sfuRejoinThrottled(), false, 'THROTTLE: not throttled after the 1st rejoin');
+
+  simulatedNow += 5_000; // +5s: inside the 15s window
+  privateSfu.handleNeedsRejoinTrigger();
+  await flushMicrotasks();
+  assert.equal(handlerCalls, 1, 'THROTTLE: a 2nd rejoin inside the 15s window is blocked');
+  assert.equal(sfu.sfuRejoinThrottled(), true, 'THROTTLE: rung-4 visible-unrecovered state set once the 15s cap is hit');
+  assert.equal(sfu.lastRecoveryEvent()?.rung, 'unrecovered-visible', 'THROTTLE: unrecovered-visible rung emitted on cap-exceeded');
+
+  simulatedNow += 20_000; // +25s total: past 15s, still inside 2min
+  privateSfu.handleNeedsRejoinTrigger();
+  await flushMicrotasks();
+  assert.equal(handlerCalls, 2, 'THROTTLE: a 2nd real rejoin proceeds once past the 15s window');
+  assert.equal(sfu.sfuRejoinThrottled(), false, 'THROTTLE: throttled flag clears once a fresh rejoin actually fires');
+
+  simulatedNow += 20_000; // +45s total: still inside 2min, 2 rejoins already fired in that window
+  privateSfu.handleNeedsRejoinTrigger();
+  await flushMicrotasks();
+  assert.equal(handlerCalls, 2, 'THROTTLE: a 3rd rejoin inside the 2min window (2 already fired) is blocked by the <=2/2min cap');
+  assert.equal(sfu.sfuRejoinThrottled(), true, 'THROTTLE: still visibly unrecovered while capped');
+
+  simulatedNow += 180_000; // +225s total: past the 2min window
+  privateSfu.handleNeedsRejoinTrigger();
+  await flushMicrotasks();
+  assert.equal(handlerCalls, 3, 'THROTTLE: once the 2min window clears, rejoin proceeds again — never a permanent stop');
+  assert.equal(sfu.sfuRejoinThrottled(), false, 'THROTTLE: unrecovered state clears again once the rejoin fires');
+
+  sfu.destroy();
 }
 
 console.log('sfu-recovery-coordinator: all assertions passed');

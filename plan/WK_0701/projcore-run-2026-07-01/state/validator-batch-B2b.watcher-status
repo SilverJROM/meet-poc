@@ -1,0 +1,6 @@
+role=validator
+batch=batch-B2b
+status=REPRO-CLEARED-ON-LOCAL
+source=callback
+line_no=39
+note=All five B2b red-team classes safe; mandated coordinator spec passed; screenshot verified real

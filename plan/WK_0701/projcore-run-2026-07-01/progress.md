@@ -154,3 +154,52 @@ batch-B2a dispatched_at: 2026-07-01T08:19:28Z estimate_min: 12 bucket: SHORT —
 [overmind] 2026-07-01T08:20:32+00:00 sync OK current='Stop giving up after retries: escalate to renegotiate instead of quitting' tasks=11
 [overmind] 2026-07-01T08:20:52+00:00 sync OK current='Stop giving up after retries: escalate to renegotiate instead of quitting' tasks=11
 [overmind] 2026-07-01T08:20:52+00:00 sync OK current='Stop giving up after retries: escalate to renegotiate instead of quitting' tasks=11
+
+## B2a — PASS (commit e33a98d) [2026-07-01]
+- 3 send-backs (mid-call, live-mid-conflict fallback, its own cap) all converged; iter3 REPRO-CLEARED-ON-LOCAL. Never-give-up class fully closed for subscribe path.
+- R2 PARTIAL (same-session escalation). R2 stays IN-PROGRESS pending B2b rung-3 rejoin. /clear Sonnet+validator.
+[overmind] 2026-07-01T08:21:58+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+batch-B2b dispatched_at: 2026-07-01T08:54:42Z estimate_min: 20 bucket: SHORT — Elite red-team: break the full rejoin (5 lenses)
+[overmind] 2026-07-01T08:22:53+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:22:53+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:22:53+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:23:13+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:23:34+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:23:54+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:24:14+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:24:34+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:24:55+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:25:15+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:25:35+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:25:55+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:26:15+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:26:36+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:26:56+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:27:16+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:27:36+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:27:57+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:28:17+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:28:37+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:28:57+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:29:17+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:29:38+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:29:58+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:30:18+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:30:38+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:30:59+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:30:59+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+
+## B2b — Rung-3 full rejoin + rung-4 UI [IN-PROGRESS 2026-07-01]
+- Sonnet, high effort. PROPOSED: reuse resetForTransportRecovery()+transportRecoveryHandler (proven prod path, no new gUM/WS) + new subscribeAllAdvertisedRemotes(epoch); coalescing lock (one rejoin/N triggers); injectable-nowMs throttle ≤1/15s ≤2/2min; rung-4 banner (initialPublishFailureNotice pattern) + retry; diagnostics recoveryLadder block. Epoch/ghost-stream safety inherited from B2a + RemoteAudioService identity-diff. complexity high confirmed.
+- APPROVED-PLAN with 5 elite-red-team surfaces to nail (healthy-peer resubscribe / no ghost streams / coalesce=1 / no double-PC-rotate / throttle-exhaust visible+low-freq-continues).
+[overmind] 2026-07-01T08:54:45+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:54:46+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:55:06+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:55:26+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:55:46+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:56:06+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:56:27+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:56:47+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:57:07+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:57:27+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+[overmind] 2026-07-01T08:57:28+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11

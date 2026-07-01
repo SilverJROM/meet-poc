@@ -28,3 +28,13 @@
 [projcore callback] validator batch-B2a STATUS: WORKING — Starting final iter-3 validation for subscribe-path never-give-up closure.
 [projcore callback] validator batch-B2a STATUS: REPRO-CLEARED-ON-LOCAL — Iter 3 final validation cleared: live-mid-conflict fallback and own cap now escalate to needs-rejoin plus low-frequency retry; mandated timed specs pass.
 [projcore ACK] validator batch-B2a RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T08:21:27Z
+[projcore DISPATCH] implementer batch-B2b DISPATCH-batch-B2b-implementer-2510294-1782894170
+[projcore callback] implementer batch-B2b STATUS: WORKING — Reading brief, consensus.md, and B2a coordinator code before proposing plan
+[projcore callback] implementer batch-B2b STATUS: PROPOSED — Rung-3 reuses resetForTransportRecovery()+transportRecoveryHandler (no new gUM/WS code) + new subscribeAllAdvertisedRemotes(); coalesce+throttle wrapper; rung-4 banner+debug hook. Full plan in pane.
+[projcore callback] implementer batch-B2b STATUS: WORKING — APPROVED-PLAN received. Implementing rung-3 rejoin coordinator + rung-4 UI at high effort.
+[projcore callback] implementer batch-B2b STATUS: DONE — Rung-3 rejoin (reuses resetForTransportRecovery+handler) + rung-4 UI done. tsc/build/3 specs green, 4 new tests, e2e screenshot captured.
+[projcore ACK] implementer batch-B2b RECEIVED DONE 2026-07-01T08:52:15Z
+[projcore DISPATCH] validator batch-B2b DISPATCH-batch-B2b-validator-2536160-1782896082
+[projcore callback] validator batch-B2b STATUS: WORKING — Starting adversarial B2b red-team validation for DISPATCH-batch-B2b-validator-2536160-1782896082
+[projcore callback] validator batch-B2b STATUS: REPRO-CLEARED-ON-LOCAL — All five B2b red-team classes safe; mandated coordinator spec passed; screenshot verified real
+[projcore ACK] validator batch-B2b RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T08:57:39Z
