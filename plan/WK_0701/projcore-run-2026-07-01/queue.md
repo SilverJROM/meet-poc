@@ -11,7 +11,7 @@ Run complete when queue empty AND every req-matrix row VERIFIED.
 - B3 [done] — Notice when someone's audio has silently died and fix it
 - B4 [done] — Recover a person whose mic never actually connected
 - B5 [done] — Make the diagnostics tell the truth about what failed
-- B6 [pending] — Prove it holds for both 2-person and 5-person calls
+- B6 [done] — Prove it holds for both 2-person and 5-person calls
 - B7 [pending] — Prove Peer2 and JROM hear each other on a real remote call
 - B8 [pending] — Prove a 3-way call heals, then power down the dev machine
 - B9 [pending] — JROM opens a room and hears Peer2's machine play a sound (final acceptance)

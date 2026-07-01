@@ -211,4 +211,78 @@ describe('realtime-sfu proxy', () => {
     closeWs(caller.ws);
     await closeServer(server);
   });
+
+  it('B6 test-only fault-inject-rules: sets rules at runtime, then clears them', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('SFU B6 test-only route', 'jrom@silverjrom.app', db);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+
+    const caller = await admitOwner(url, room.id, 'ck-b6-testonly-1', ownerCookie);
+    setSfuSessionOwnerForTests('owned-cf-session-b6', {
+      clientKey: caller.clientKey,
+      participantId: caller.participantId,
+    });
+
+    const setRes = await request(server)
+      .post('/api/sfu/test-only/fault-inject-rules')
+      .send({ rules: [{ endpoint: 'tracks', matchParticipantId: caller.participantId, status: 406 }] });
+    expect(setRes.status).toBe(200);
+
+    const failRes = await request(server)
+      .post('/api/sfu/tracks')
+      .send({
+        clientKey: caller.clientKey,
+        participantId: caller.participantId,
+        sessionId: caller.sessionId,
+        cfSessionId: 'owned-cf-session-b6',
+        tracks: [{ location: 'remote', sessionId: 'bob-cf', trackName: 'bob-audio' }],
+      });
+    expect(failRes.status).toBe(406);
+    expect(failRes.body.faultInjected).toBe(true);
+
+    const clearRes = await request(server).post('/api/sfu/test-only/fault-inject-rules').send({ rules: null });
+    expect(clearRes.status).toBe(200);
+
+    const fetchSpy = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ tracks: [{ trackName: 'bob-audio', mid: '1' }] }),
+    }));
+    vi.stubGlobal('fetch', fetchSpy);
+
+    const passRes = await request(server)
+      .post('/api/sfu/tracks')
+      .send({
+        clientKey: caller.clientKey,
+        participantId: caller.participantId,
+        sessionId: caller.sessionId,
+        cfSessionId: 'owned-cf-session-b6',
+        tracks: [{ location: 'remote', sessionId: 'bob-cf', trackName: 'bob-audio' }],
+      });
+    expect(passRes.status).toBe(200);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+
+    closeWs(caller.ws);
+    await closeServer(server);
+  });
+
+  it('B6 test-only fault-inject-rules: disabled (404) when NODE_ENV=production', async () => {
+    const db = createTestDb();
+    const { server } = await startWsServer(db);
+
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      const res = await request(server)
+        .post('/api/sfu/test-only/fault-inject-rules')
+        .send({ rules: [{ endpoint: 'tracks', matchParticipantId: 'x', status: 406 }] });
+      expect(res.status).toBe(404);
+    } finally {
+      process.env.NODE_ENV = originalEnv;
+    }
+
+    await closeServer(server);
+  });
 });

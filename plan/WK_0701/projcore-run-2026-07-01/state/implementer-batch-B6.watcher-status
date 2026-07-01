@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B6
+status=PROPOSED
+source=callback
+line_no=79
+note=2p+5p WS-reconnect-driven subscribe fault via test-only fault-inject route + __meetDebug recovery exposure; awaiting APPROVED-PLAN

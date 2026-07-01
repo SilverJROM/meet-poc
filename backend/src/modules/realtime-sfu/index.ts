@@ -3,8 +3,11 @@ import type { Response } from 'express';
 import { isAdmittedDiagnosticPoster } from '../signaling/index.js';
 import {
   buildSfuFaultInjectResponse,
+  clearSfuFaultInjectForTests,
   matchSfuFaultInject,
   parseSfuFaultInjectRules,
+  sanitizeSfuFaultInjectRules,
+  setSfuFaultInjectRulesForTests,
   type SfuFaultInjectEndpoint,
 } from './sfu-fault-inject.js';
 
@@ -260,6 +263,25 @@ export function realtimeSfuRouter(): Router {
 
     if (!result.ok) return res.status(result.status).json({ error: sanitizeCfError(result.data), status: result.status });
     return res.json(result.data);
+  });
+
+  // B6 test-only: lets a running e2e Playwright test set/clear SFU_FAULT_INJECT rules live against
+  // the shared e2e backend process (env vars are read once at process start, so per-scenario targeting
+  // needs a runtime hook). Same non-production gate as SFU_FAULT_INJECT itself — never present in a
+  // production build.
+  router.post('/sfu/test-only/fault-inject-rules', (req, res) => {
+    if (process.env.NODE_ENV === 'production') return res.status(404).json({ error: 'not found' });
+
+    const body = safeBody(req.body);
+    if (body.rules === null) {
+      clearSfuFaultInjectForTests();
+      return res.json({ cleared: true });
+    }
+
+    const rules = sanitizeSfuFaultInjectRules(body.rules);
+    if (!rules) return res.status(400).json({ error: 'invalid rules' });
+    setSfuFaultInjectRulesForTests(rules);
+    return res.json({ rules });
   });
 
   return router;

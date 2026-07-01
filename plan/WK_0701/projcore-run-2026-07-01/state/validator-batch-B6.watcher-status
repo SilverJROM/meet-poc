@@ -1,0 +1,6 @@
+role=validator
+batch=batch-B6
+status=REPRO-CLEARED-ON-LOCAL
+source=callback
+line_no=85
+note=B6 independent validation passed: 2p+5p e2e real recovery, one coalesced rejoin, prod-gated route, no sfu-client recovery diff

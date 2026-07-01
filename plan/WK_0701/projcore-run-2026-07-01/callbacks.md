@@ -74,3 +74,13 @@
 [projcore callback] validator batch-B5 STATUS: WORKING — Starting independent B5 validation audit
 [projcore callback] validator batch-B5 STATUS: REPRO-CLEARED-ON-LOCAL — R5a/b/c pass; tests honest; screenshot valid; no recovery scope creep
 [projcore ACK] validator batch-B5 RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T10:10:15Z
+[projcore DISPATCH] implementer batch-B6 DISPATCH-batch-B6-implementer-2592826-1782900701
+[projcore callback] implementer batch-B6 STATUS: WORKING — reading brief+specs+existing e2e/fault-inject/diagnostics infra to formulate 2p/5p recovery plan
+[projcore callback] implementer batch-B6 STATUS: PROPOSED — 2p+5p WS-reconnect-driven subscribe fault via test-only fault-inject route + __meetDebug recovery exposure; awaiting APPROVED-PLAN
+[projcore callback] implementer batch-B6 STATUS: WORKING — APPROVED-PLAN received. Implementing test-only fault-inject route + __meetDebug exposure + 2p/5p scenarios at high effort.
+[projcore callback] implementer batch-B6 STATUS: DONE — R6a+R6b e2e green (13.2s+51.1s); test-only fault-inject route (404 in prod)+matchLocation fix+3 __meetDebug getters; backend 244/245+e2e regression green
+[projcore ACK] implementer batch-B6 RECEIVED DONE 2026-07-01T10:53:15Z
+[projcore DISPATCH] validator batch-B6 DISPATCH-batch-B6-validator-2618192-1782903254
+[projcore callback] validator batch-B6 STATUS: WORKING — Started independent B6 validation; reading diffs and will rerun required e2e/backend checks
+[projcore callback] validator batch-B6 STATUS: REPRO-CLEARED-ON-LOCAL — B6 independent validation passed: 2p+5p e2e real recovery, one coalesced rejoin, prod-gated route, no sfu-client recovery diff
+[projcore ACK] validator batch-B6 RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T10:58:50Z

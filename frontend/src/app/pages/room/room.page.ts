@@ -679,6 +679,9 @@ export class RoomPage implements OnDestroy {
         sfuVideoEncodings: () => this.sfuClient.getVideoEncodings(),
         sfuUpdateCameraLayer: () => this.sfuClient.updateCameraLayer(),
         sfuSubscribedTracks: () => Object.fromEntries(this.sfuClient.subscribedTracks()),
+        sfuLastRecoveryEvent: () => this.sfuClient.lastRecoveryEvent(),
+        sfuRejoinThrottled: () => this.sfuClient.sfuRejoinThrottled(),
+        sfuPublishRecoveryFailed: () => this.sfuClient.publishRecoveryFailed(),
         sfuPcStates: () => {
           const pc = (this.sfuClient as any)?.pc ?? null;
           return pc ? {
@@ -4592,6 +4595,9 @@ declare global {
       sfuVideoEncodings?: () => RTCRtpEncodingParameters[];
       sfuUpdateCameraLayer?: () => Promise<void>;
       sfuSubscribedTracks?: () => Record<string, import('../../services/sfu-client.service').SubscribedTrackEntry>;
+      sfuLastRecoveryEvent?: () => import('../../services/sfu-client.service').SfuRecoveryDiagnosticsEvent | null;
+      sfuRejoinThrottled?: () => boolean;
+      sfuPublishRecoveryFailed?: () => boolean;
       forceRelayDiagnostics?: () => Promise<TurnHealthResult>;
       closeSignalingForTest?: () => void;
       isMobile?: () => boolean;

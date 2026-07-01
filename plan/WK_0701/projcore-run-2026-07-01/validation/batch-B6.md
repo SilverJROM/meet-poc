@@ -1,0 +1,5 @@
+# B6 Gate — PASS (2026-07-01) — R6 local capstone done (R6 stays IN-PROGRESS for B7/B8/B9)
+Batch B6 (local 2p+5p multi-participant capstone). Implementer Sonnet; validator+std-red-team codex55 (re-ran e2e).
+7-gate: artifacts+diagnostics dumps ✓ · diff review ✓ (test infra only: test-only fault-inject route + matchLocation targeting + 3 __meetDebug getters + e2e scenarios; sfu-client recovery logic 0 lines changed) · ng build ✓ · backend realtime-sfu 7/7 ✓ · e2e: R6a 2p green (13.2s) + R6b 5p green (51.1s), REAL recovery (advertised-not-subscribed clears + inbound RTP advances) + ONE coalesced rejoin ✓ · evidence: codex55 INDEPENDENTLY RE-RAN both scenarios → REPRO-CLEARED-ON-LOCAL; prod-gated route (404 in prod) confirmed ✓ · decisions: none-new.
+Verdict: PASS. R6 local part done. R6 stays IN-PROGRESS pending B7 (Peer2) / B8 (3-way) / B9 (human-audible).
+NEXT: DEV deploy required before B7 (FE is a prebuilt static bundle — committed fix isn't live until rebuilt+shipped to voice.silverjrom.app).

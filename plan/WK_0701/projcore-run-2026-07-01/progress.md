@@ -321,3 +321,57 @@ batch-B5 dispatched_at: 2026-07-01T10:07:57Z estimate_min: 12 bucket: SHORT — 
 [overmind] 2026-07-01T10:09:21+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
 [overmind] 2026-07-01T10:09:41+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
 [overmind] 2026-07-01T10:09:41+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+
+## B5 — PASS (f59a38f) — R5 VERIFIED [2026-07-01]
+- Diagnostics honesty (grok): 406→subscribe not lastGumError, per-layer fields, advertised-not-subscribed surfaced. codex55 audit clean, no recovery scope creep. R1-R5 ALL VERIFIED.
+- B6 (local 2p+5p capstone, TEST-HEAVY) routed to Sonnet.
+[overmind] 2026-07-01T10:10:51+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+batch-B6 dispatched_at: 2026-07-01T10:54:14Z estimate_min: 20 bucket: TEST-HEAVY — Re-run 2p+5p capstone; prove real recovery
+[overmind] 2026-07-01T10:11:45+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:11:45+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:11:45+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:12:05+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:12:25+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:12:46+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:13:06+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:13:26+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:13:46+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:14:06+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:14:27+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:14:47+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:15:07+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:15:27+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:15:48+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:16:08+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:16:28+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:16:48+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:17:08+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:17:29+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:17:49+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:18:09+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:18:29+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:18:49+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:19:10+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:19:30+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:19:50+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:20:10+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:20:11+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+
+## B6 — Multi-participant capstone [IN-PROGRESS 2026-07-01]
+- Sonnet, high. PROPOSED: 2 additive test-gated infra pieces (HTTP test-only fault-inject route gated NODE_ENV!=production; 3 __meetDebug getters for recovery signals) + 2p/5p e2e scenarios asserting real recovery via diagnostics. complexity high. APPROVED-PLAN (4 nail-points: prod-disabled route, real recovery assertions, deterministic, NEEDS-INFO on real bug).
+[overmind] 2026-07-01T10:54:17+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:54:18+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:54:18+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:54:38+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:54:58+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:55:18+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:55:39+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:55:59+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:56:19+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:56:39+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:56:59+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:57:20+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:57:40+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:58:00+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:58:20+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+[overmind] 2026-07-01T10:58:20+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11

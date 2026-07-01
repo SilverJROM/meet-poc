@@ -9,6 +9,10 @@ export type SfuFaultInjectRule = {
   endpoint: SfuFaultInjectEndpoint;
   matchParticipantId?: string;
   matchTrackName?: string;
+  // 'tracks' carries both local (own publish) and remote (subscribe) track-new calls in the same
+  // endpoint, distinguished by each track entry's `location`. Lets a rule target only the subscribe
+  // direction without needing to predict a not-yet-generated remote track name (B6).
+  matchLocation?: 'local' | 'remote';
   status: number;
   errorDescription?: string;
   errorCode?: string;
@@ -36,19 +40,7 @@ function faultInjectEnabled(env: NodeJS.ProcessEnv): boolean {
   return env.SFU_FAULT_INJECT === '1';
 }
 
-export function parseSfuFaultInjectRules(env: NodeJS.ProcessEnv = process.env): SfuFaultInjectRule[] | null {
-  if (testRulesOverride !== undefined) return testRulesOverride;
-  if (!faultInjectEnabled(env)) return null;
-
-  const raw = env.SFU_FAULT_INJECT_RULES?.trim();
-  if (!raw) return null;
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return null;
-  }
+export function sanitizeSfuFaultInjectRules(parsed: unknown): SfuFaultInjectRule[] | null {
   if (!Array.isArray(parsed)) return null;
 
   const rules: SfuFaultInjectRule[] = [];
@@ -67,16 +59,34 @@ export function parseSfuFaultInjectRules(env: NodeJS.ProcessEnv = process.env): 
     ) {
       continue;
     }
+    const matchLocation = rule.matchLocation === 'local' || rule.matchLocation === 'remote' ? rule.matchLocation : undefined;
     rules.push({
       endpoint,
       matchParticipantId: typeof rule.matchParticipantId === 'string' ? rule.matchParticipantId : undefined,
       matchTrackName: typeof rule.matchTrackName === 'string' ? rule.matchTrackName : undefined,
+      matchLocation,
       status: Math.trunc(status),
       errorDescription: typeof rule.errorDescription === 'string' ? rule.errorDescription : undefined,
       errorCode: typeof rule.errorCode === 'string' ? rule.errorCode : undefined,
     });
   }
   return rules.length ? rules : null;
+}
+
+export function parseSfuFaultInjectRules(env: NodeJS.ProcessEnv = process.env): SfuFaultInjectRule[] | null {
+  if (testRulesOverride !== undefined) return testRulesOverride;
+  if (!faultInjectEnabled(env)) return null;
+
+  const raw = env.SFU_FAULT_INJECT_RULES?.trim();
+  if (!raw) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  return sanitizeSfuFaultInjectRules(parsed);
 }
 
 function trackNamesFromBody(body: Record<string, unknown>): string[] {
@@ -91,6 +101,20 @@ function trackNamesFromBody(body: Record<string, unknown>): string[] {
   return names;
 }
 
+// Track entries within a single tracks-new call are homogeneous (all 'local' or all 'remote') —
+// the caller either publishes its own tracks or subscribes to a peer's, never both in one call.
+function trackLocationsFromBody(body: Record<string, unknown>): string[] {
+  const tracks = body.tracks;
+  if (!Array.isArray(tracks)) return [];
+  const locations: string[] = [];
+  for (const track of tracks) {
+    if (!track || typeof track !== 'object') continue;
+    const location = (track as Record<string, unknown>).location;
+    if (typeof location === 'string' && location) locations.push(location);
+  }
+  return locations;
+}
+
 function ruleMatches(
   rule: SfuFaultInjectRule,
   endpoint: SfuFaultInjectEndpoint,
@@ -102,6 +126,10 @@ function ruleMatches(
   if (rule.matchTrackName) {
     const trackNames = trackNamesFromBody(body);
     if (!trackNames.includes(rule.matchTrackName)) return false;
+  }
+  if (rule.matchLocation) {
+    const locations = trackLocationsFromBody(body);
+    if (!locations.includes(rule.matchLocation)) return false;
   }
   return true;
 }

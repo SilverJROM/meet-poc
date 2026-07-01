@@ -1,0 +1,23 @@
+{
+  "hostParticipantId": "b442011c-5956-477c-9fa5-8ed63e729307",
+  "reconnectedGuestNames": [
+    "Guest1",
+    "Guest2",
+    "Guest3"
+  ],
+  "rejoinEpochs": [
+    [
+      0,
+      1782903347166
+    ]
+  ],
+  "recoveredEvent": {
+    "rung": "unrecovered-visible",
+    "publisherClientId": "*",
+    "epoch": 2,
+    "attempt": 1,
+    "atMs": 1782903359722
+  },
+  "hostInboundAudioBytesAfterRecovery": 26063,
+  "hostSubscribedCountAfterRecovery": 4
+}

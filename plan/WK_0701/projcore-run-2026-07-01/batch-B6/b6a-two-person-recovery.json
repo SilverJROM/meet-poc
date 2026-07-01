@@ -1,0 +1,20 @@
+{
+  "hostParticipantId": "1ca8e1b0-ff5f-4819-a018-1ead9024c727",
+  "cfSessionIdBefore": "faf70cde88f9e8cdcfb11296aaa41c7a05fbe329e7ff3f2be9e09ad8810fec9f",
+  "escalatingEvent": {
+    "rung": "sfu-rejoin",
+    "publisherClientId": "*",
+    "epoch": 0,
+    "attempt": 1,
+    "atMs": 1782903323600
+  },
+  "recoveredEvent": {
+    "rung": "subscribe-retry",
+    "publisherClientId": "5a5ea16ac6bb5f4b",
+    "epoch": 1,
+    "attempt": 1,
+    "atMs": 1782903325775
+  },
+  "hostInboundAudioBytesAfterRecovery": 6530,
+  "hostSubscribedCountAfterRecovery": 1
+}
