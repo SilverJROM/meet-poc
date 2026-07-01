@@ -526,6 +526,10 @@ export class RecorderService {
       const blob = new Blob(entry.chunks, { type: this.mimeType || 'audio/webm' });
       const { mimeType, extension } = resolveRecordingMime(blob.type, this.mimeType, this.extension);
       const sanitized = entry.displayName.replace(/[^\w\s\-]/g, '').trim().slice(0, 64) || 'participant';
+      // joinedAtMs = ms from recording start to this participant's join (0 if present at start).
+      // The backend stores it in the sidecar so the combined transcript can shift this speaker's
+      // file-relative timestamps onto the shared call timeline (mid-joiner sync).
+      const joinedAtMs = this.participants.get(clientId)?.joinedAtMs ?? 0;
       try {
         await fetch('/upload', {
           method: 'POST',
@@ -536,6 +540,7 @@ export class RecorderService {
             'X-PerUser': '1',
             'X-DisplayName': sanitized,
             'X-ClientId': clientId,
+            'X-JoinedAtMs': String(joinedAtMs),
           },
           body: blob,
         });

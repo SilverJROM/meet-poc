@@ -115,9 +115,14 @@ export function recordingRouter(database: Database.Database = getDb()): express.
       if (isPerUser) {
         const displayName = rawDisplayName.replace(/[^\w\s\-]/g, '').trim().slice(0, 64) || 'participant';
         const clientId = rawClientId.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+        // Persist this participant's join offset (ms since recording start) so the combined
+        // transcript can shift their file-relative timestamps onto the shared call timeline —
+        // critical for mid-call joiners. See readParticipantJoinOffsetMs.
+        const rawJoined = Number(req.header('X-JoinedAtMs'));
+        const joinedAtMs = Number.isFinite(rawJoined) && rawJoined >= 0 ? Math.round(rawJoined) : 0;
         const participantPath = participantPathFor(filename);
         if (participantPath) {
-          try { fs.writeFileSync(participantPath, JSON.stringify({ displayName, clientId, isPerUser: true })); } catch {}
+          try { fs.writeFileSync(participantPath, JSON.stringify({ displayName, clientId, joinedAtMs, isPerUser: true })); } catch {}
         }
       }
       console.log(`[rec] saved ${filename} (${(body.length / 1024).toFixed(1)} KB)${isPerUser ? ' [per-user]' : ''}`);
@@ -171,7 +176,7 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     const sessionId = String(req.params.sessionId || '');
     if (!sessionId || !/^[0-9a-f-]{8,}$/i.test(sessionId)) return res.status(400).json({ error: 'invalid sessionId' });
     const dir = ensureRecordingsDir();
-    const perUserFiles: Array<{ filename: string; displayName: string }> = [];
+    const perUserFiles: Array<{ filename: string; displayName: string; joinOffsetMs: number }> = [];
     for (const f of fs.readdirSync(dir).filter((f) => isRecordingFilename(f) && isSafeFilename(f))) {
       const parsed = parseRecordingFilename(f);
       if (!parsed || parsed.sessionId !== sessionId) continue;
@@ -180,14 +185,14 @@ export function recordingRouter(database: Database.Database = getDb()): express.
       const pPath = participantPathFor(f);
       if (!pPath || !fs.existsSync(pPath)) continue;
       try {
-        const p = JSON.parse(fs.readFileSync(pPath, 'utf8')) as { displayName?: string; isPerUser?: boolean };
-        if (p.isPerUser) perUserFiles.push({ filename: f, displayName: p.displayName || 'Participant' });
+        const p = JSON.parse(fs.readFileSync(pPath, 'utf8')) as { displayName?: string; isPerUser?: boolean; clientId?: string; joinedAtMs?: number };
+        if (p.isPerUser) perUserFiles.push({ filename: f, displayName: p.displayName || 'Participant', joinOffsetMs: readParticipantJoinOffsetMs(f, p) });
       } catch { /* skip unreadable sidecar */ }
     }
     if (perUserFiles.length === 0) return res.status(404).json({ error: 'no per-user recordings for session' });
     const allLines: Array<{ startMs: number; endMs?: number; name: string; text: string }> = [];
     let hasAny = false;
-    for (const { filename, displayName } of perUserFiles) {
+    for (const { filename, displayName, joinOffsetMs } of perUserFiles) {
       const tPath = resolvePrimaryTranscriptPath(filename);
       if (!tPath || !fs.existsSync(tPath)) continue;
       try {
@@ -196,7 +201,9 @@ export function recordingRouter(database: Database.Database = getDb()): express.
         hasAny = true;
         for (const line of t.lines) {
           const l = line as { startMs?: number; endMs?: number; text?: string };
-          allLines.push({ startMs: typeof l.startMs === 'number' ? l.startMs : 0, endMs: typeof l.endMs === 'number' ? l.endMs : undefined, name: displayName, text: typeof l.text === 'string' ? l.text : '' });
+          // Shift this speaker's file-relative timestamps onto the shared call timeline.
+          const baseStart = typeof l.startMs === 'number' ? l.startMs : 0;
+          allLines.push({ startMs: baseStart + joinOffsetMs, endMs: typeof l.endMs === 'number' ? l.endMs + joinOffsetMs : undefined, name: displayName, text: typeof l.text === 'string' ? l.text : '' });
         }
       } catch { /* skip unreadable transcript */ }
     }
@@ -397,6 +404,32 @@ function metadataPathFor(filename: string): string | null {
   const filepath = safeRecordingPath(filename);
   if (!filepath) return null;
   return `${filepath}.meta.json`;
+}
+
+// A per-user recording begins when that participant's stream first arrives — for a mid-call
+// joiner that is their JOIN moment, not the recording start. Whisper therefore timestamps each
+// per-user file from 0 (= that speaker's join), so to place a speaker's lines on the shared call
+// timeline we must add their joinedAtMs (ms since recording start). Without this, a mid-joiner's
+// lines land at ~0 and collide with the host's opening. Prefer the value persisted into the
+// per-user sidecar; fall back to this file's .meta.json (participants[].joinedAtMs by clientId)
+// for recordings written before the sidecar carried it; default 0 (no offset, no regression).
+function readParticipantJoinOffsetMs(filename: string, sidecar: { clientId?: string; joinedAtMs?: number }): number {
+  if (typeof sidecar.joinedAtMs === 'number' && Number.isFinite(sidecar.joinedAtMs) && sidecar.joinedAtMs >= 0) {
+    return Math.round(sidecar.joinedAtMs);
+  }
+  if (!sidecar.clientId) return 0;
+  const metaPath = metadataPathFor(filename);
+  if (!metaPath || !fs.existsSync(metaPath)) return 0;
+  try {
+    const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as {
+      participants?: Array<{ clientId?: string; joinedAtMs?: number }>;
+    };
+    const participant = (meta.participants || []).find((p) => p.clientId === sidecar.clientId);
+    if (participant && typeof participant.joinedAtMs === 'number' && Number.isFinite(participant.joinedAtMs) && participant.joinedAtMs >= 0) {
+      return Math.round(participant.joinedAtMs);
+    }
+  } catch { /* unreadable meta — fall through to no offset */ }
+  return 0;
 }
 
 function transcriptPathFor(filename: string): string | null {
