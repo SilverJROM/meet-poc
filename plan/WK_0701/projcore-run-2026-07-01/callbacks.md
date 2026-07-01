@@ -65,3 +65,12 @@
 [projcore callback] validator batch-B4 STATUS: WORKING — iter 2 re-validation started
 [projcore callback] validator batch-B4 STATUS: REPRO-CLEARED-ON-LOCAL — R4b terminal publish exits now mark failed then escalate; required specs pass
 [projcore ACK] validator batch-B4 RECEIVED REPRO-CLEARED-ON-LOCAL(iter2) 2026-07-01T09:59:37Z
+[projcore DISPATCH] implementer batch-B5 DISPATCH-batch-B5-implementer-2584340-1782900052
+[projcore callback] implementer batch-B5 STATUS: PROPOSED — Gate 406 from lastGumError; add per-layer DiagnosticsPayload fields; surface advertised-not-subscribed on diagnostics page
+[projcore callback] implementer batch-B5 STATUS: WORKING — Implementing layerDiagnostics payload, lastGumError gate, diagnostics page surfacing
+[projcore callback] implementer batch-B5 STATUS: DONE — Build green; diagnostics-layer-honesty spec PASS (406→subscribe not lastGumError); e2e screenshot captured
+[projcore ACK] implementer batch-B5 RECEIVED DONE 2026-07-01T10:06:54Z
+[projcore DISPATCH] validator batch-B5 DISPATCH-batch-B5-validator-2589228-1782900477
+[projcore callback] validator batch-B5 STATUS: WORKING — Starting independent B5 validation audit
+[projcore callback] validator batch-B5 STATUS: REPRO-CLEARED-ON-LOCAL — R5a/b/c pass; tests honest; screenshot valid; no recovery scope creep
+[projcore ACK] validator batch-B5 RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T10:10:15Z

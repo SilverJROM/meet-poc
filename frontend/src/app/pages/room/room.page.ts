@@ -29,6 +29,8 @@ import {
   type EnergySample,
   type SweepHooks,
 } from '../../services/mic-energy';
+import { diagnosticsGumError } from '../../services/diagnostics-gum-error';
+import { buildLayerDiagnostics } from '../../services/diagnostics-layer-snapshot';
 import { computeEffectiveDiagnosticsEnabled, readDiagnosticsLoggingEnabled } from '../../services/diagnostics-prefs';
 import { isGenericAudioDeviceId, resolveSelectedAudioId } from '../../services/device-selection';
 import { resolvedAcquiredDeviceId, type MediaAcquireStage } from '../../services/media-acquisition';
@@ -3917,6 +3919,8 @@ export class RoomPage implements OnDestroy {
       hasLiveAudioTrack: !!audioTrack && audioTrack.readyState === 'live',
       micEnabled: audioTrack?.enabled ?? false,
     });
+    const peers = this.advertisedRemotePublisherDiagnostics();
+    const playout = this.remoteAudio.playoutDiagnostics();
     const payload: DiagnosticsPostPayload = {
       kind,
       roomId: this.roomId,
@@ -3943,8 +3947,19 @@ export class RoomPage implements OnDestroy {
       outboundAudioLevel: micFields.outboundAudioLevel,
       outboundAudioEnergy: micFields.outboundAudioEnergy,
       micSilent: micFields.micSilent,
-      peers: this.advertisedRemotePublisherDiagnostics(),
-      remoteAudioPlayout: this.remoteAudio.playoutDiagnostics(),
+      peers,
+      remoteAudioPlayout: playout,
+      layerDiagnostics: buildLayerDiagnostics({
+        lastGumError: this.lastGumError(),
+        localPublishState: this.sfuClient.localPublishState(),
+        publishRecoveryFailed: this.sfuClient.publishRecoveryFailed(),
+        lastSubscribeFailureEvidence: this.sfuClient.lastSubscribeFailureEvidence(),
+        lastRecoveryEvent: this.sfuClient.lastRecoveryEvent(),
+        sfuRejoinThrottled: this.sfuClient.sfuRejoinThrottled(),
+        remoteAudioPlayout: playout,
+        inboundTracks: sfuDiagnostics?.inboundTracks ?? [],
+        peers,
+      }),
       publishTriggerCount: this.publishTriggerCount,
       roomState: this.state(),
     };
@@ -4257,18 +4272,6 @@ function toLobbyError(error: MediaError): LobbyError {
   if (error.code === 'no-devices') return { kind: 'no-devices' };
   if (error.code === 'in-use') return { kind: 'in-use' };
   return { kind: 'unknown', message: error.message || 'Media access failed' };
-}
-
-function diagnosticsGumError(error: unknown): DiagnosticsPayload['lastGumError'] {
-  const value = error as { code?: unknown; name?: unknown; message?: unknown };
-  const name = typeof value?.code === 'string'
-    ? value.code
-    : typeof value?.name === 'string' && value.name
-      ? value.name
-      : 'MediaError';
-  const message = typeof value?.message === 'string' && value.message ? value.message : String(error || '');
-  if (!message) return null;
-  return { name, message };
 }
 
 function delay(ms: number): Promise<void> {

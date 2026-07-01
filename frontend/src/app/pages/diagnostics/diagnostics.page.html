@@ -95,6 +95,33 @@
               </div>
             </div>
 
+            @if (layerDiagnosticsRows(latest).length) {
+              <div class="layer-diagnostics-block" aria-label="Layer diagnostics">
+                <span class="label">Layer diagnostics</span>
+                <div class="layer-diagnostics-grid">
+                  @for (row of layerDiagnosticsRows(latest); track row.layer) {
+                    <div>
+                      <span class="label">{{ row.layer }}</span>
+                      <strong [class]="row.class">{{ row.value }}</strong>
+                    </div>
+                  }
+                </div>
+              </div>
+            }
+
+            @if (subscriptionGapRows(latest).length) {
+              <div class="subscription-gaps-block" aria-label="Advertised not subscribed">
+                <span class="label">Advertised not subscribed</span>
+                @for (gap of subscriptionGapRows(latest); track gap.publisherClientId) {
+                  <div class="subscription-gap-row" [class]="gap.class">
+                    <span class="peer-name">{{ gap.name }}</span>
+                    <span>{{ gap.tracks }}</span>
+                    <span>{{ gap.hint }}</span>
+                  </div>
+                }
+              </div>
+            }
+
             @if (sfuDiag(latest); as sfu) {
               <div class="network-path-block" aria-label="International network path latest">
                 <span class="label">International / Network path</span>

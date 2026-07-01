@@ -1,20 +1,22 @@
-## Accepted: B1(R1), B2a+B2b(R2), B3(R3) — all VERIFIED. Commits: 6643a02, e33a98d, 5f4a6bf, fc05c58.
-Branch: fix/sfu-selfheal-20260701.
-Recovery coordinator (subscribe ladder rung-1→2→rejoin, never-give-up) + stalled-audio escalation + epoch guard
-+ full SFU rejoin (rung-3) + rung-4 UI are all shipped and validated.
-Open: R4(B4), R5(B5), R6(B6-B9).
-Key APIs: scheduleRecoveryEscalation(id,hasFirstFrame) · escalateStalledRemoteAudio(id) · handleNeedsRejoinTrigger/runFullSfuRejoin (rung-3) · canRunSubscribeRecovery() gate · lastRecoveryEvent/sfuRejoinThrottled signals · resetForTransportRecovery bumps recoveryEpoch.
-Gotchas: frontend specs via `npx tsx` WRAP IN `timeout 25`; recovery tests → fake-timed sfu-recovery-coordinator.spec.ts.
-Pre-existing out-of-scope failure: room-decisions.spec L434 missingPreflightPrereqs (logged plan/WK_0701/list/).
+## Accepted: B1(R1) B2a+B2b(R2) B3(R3) B4(R4) — ALL VERIFIED. Commits: 6643a02 e33a98d 5f4a6bf fc05c58 8b6825d.
+Branch: fix/sfu-selfheal-20260701. The full self-heal ladder is shipped: subscribe never-give-up + full rejoin
++ stalled-audio escalation + publish/PC recovery, all epoch-guarded, throttled, with visible fallback UI.
+Open: R5(B5 diagnostics honesty), R6(B6-B9 multi-participant + real calls).
 
-## Ready for Batch-B4 (publish/PC-failure recovery, R4) — [REDTEAM:standard], complexity high
-The Glory case (call 2): an admitted client with hasPc:false / publishStatus null|error after joining —
-media never published, so peers see them advertised-not-subscribed AND they hear no one.
-Consensus: reuse existing infra. Relevant existing code:
-- handleTransportStateChange 'capped' (~sfu-client.service.ts L805, planSfuTransportRecovery / SFU_TRANSPORT_RECOVERY_CAP)
-  — B2b red-team confirmed this is R4/B4 territory (publish/PC), currently "defers to publish recovery path". B4 owns it.
-- rejoinAfterInitialPublishFailure() + publishInitialSfuWithRetry() + initialPublishFailureNotice in room.page.ts.
-- localPublishState signal (status: 'publishing'|'published'|'error'), isLocalPublishHealthy().
-Acceptance (R4): (a) identify media-not-published state (hasPc:false / publish null|error post-join);
-(b) retry publish or rejoin SFU WITHOUT the user manually leaving; (c) if unrecoverable, UI states exactly
-what failed. Reuse rung-3 rejoin path where sensible; don't clobber a healthy publish. Routing: Sonnet.
+## Ready for Batch-B5 (diagnostics honesty, R5) — no red-team, complexity medium
+R5 acceptance: (a) /api/sfu/tracks failures NOT recorded as lastGumError; (b) diagnostics have SEPARATE fields
+for device / publish / subscribe / recovery / playout / remote-inbound stats; (c) advertised-not-subscribed is
+obvious+actionable in the payload/page.
+Existing infra to build on:
+- B1 added `lastSubscribeFailureEvidence` (SubscribeFailureEvidence) + `isLastGumErrorCandidate()` in
+  sfu-subscribe-failure-evidence.ts — the 406-not-GUM separation primitive already exists; B5 wires it into the
+  diagnostics PAYLOAD + page.
+- B2a/B2b/B3/B4 emit `lastRecoveryEvent` (rung/publisher/epoch) + `sfuRejoinThrottled` + `publishRecoveryFailed`.
+- Diagnostics: room.page.ts collectDiagnostics()/DiagnosticsPayload + lastGumError signal (room.page.ts:535,
+  set at ~3898/4002 + diagnosticsGumError()); advertisedRemotePublisherDiagnostics() already computes
+  quality 'advertised-not-subscribed'. frontend/src/app/pages/diagnostics/diagnostics.page.ts renders it.
+- meeting-sessions.service.ts DiagnosticsPayload type (lastGumError, peers, advertisedSubscribed etc).
+Task: ensure /api/sfu/tracks 406 lands in a SUBSCRIBE-error field, not lastGumError (which is device/GUM only);
+add the per-layer fields (device/publish/subscribe/recovery/playout/inbound) to the payload + surface
+advertised-not-subscribed clearly. Reproduce-first: show a 406 currently mislabeled as lastGumError, then fixed.
+Routing: grok composer (mechanical) — codex55 validates hard (grok self-report untrusted).

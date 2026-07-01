@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B5
+status=PROPOSED
+source=callback
+line_no=69
+note=Gate 406 from lastGumError; add per-layer DiagnosticsPayload fields; surface advertised-not-subscribed on diagnostics page

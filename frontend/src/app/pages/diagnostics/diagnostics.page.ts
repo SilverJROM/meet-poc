@@ -6,6 +6,7 @@ import {
   DiagnosticsInboundVideo,
   DiagnosticSessionSummary,
   DiagnosticsDetailResponse,
+  DiagnosticsLayerSnapshot,
   DiagnosticsPeerSample,
   RemoteAudioPlayoutDiagnostics,
   DiagnosticsTrackInfo,
@@ -49,6 +50,20 @@ export type CallWideMediaPlayoutRow = {
   audioLevel: string;
   totalAudioEnergy: string;
   totalSamplesDuration: string;
+};
+
+export type LayerDiagnosticsRow = {
+  layer: string;
+  value: string;
+  class: 'layer-ok' | 'layer-bad' | 'layer-neutral';
+};
+
+export type SubscriptionGapRow = {
+  publisherClientId: string;
+  name: string;
+  tracks: string;
+  hint: string;
+  class: 'subscription-gap-bad';
 };
 
 export function rttPathHint(rttMs: number | null | undefined): string {
@@ -141,6 +156,65 @@ export function buildRemoteAudioPlayoutRows(
       totalAudioEnergy: `energy ${decimalLabel(inbound?.totalAudioEnergy, 6)}`,
     };
   });
+}
+
+export function buildLayerDiagnosticsRows(layers: DiagnosticsLayerSnapshot | null | undefined): LayerDiagnosticsRow[] {
+  if (!layers) return [];
+  const deviceError = layers.device.lastGumError;
+  const subscribe = layers.subscribe;
+  const recovery = layers.recovery.lastRecoveryEvent;
+  const playoutCount = layers.playout?.perPublisher.length ?? 0;
+  const inboundCount = layers.remoteInbound.length;
+  return [
+    {
+      layer: 'Device (GUM)',
+      value: deviceError ? `${deviceError.name}: ${deviceError.message}` : 'no device error',
+      class: deviceError ? 'layer-bad' : 'layer-ok',
+    },
+    {
+      layer: 'Publish',
+      value: `status ${layers.publish.status ?? 'n/a'} · cf ${layers.publish.cfSessionId || 'none'}${layers.publish.publishRecoveryFailed ? ' · recovery failed' : ''}${layers.publish.error ? ` · ${layers.publish.error}` : ''}`,
+      class: layers.publish.publishRecoveryFailed || layers.publish.status === 'error' ? 'layer-bad' : layers.publish.status === 'published' ? 'layer-ok' : 'layer-neutral',
+    },
+    {
+      layer: 'Subscribe',
+      value: subscribe
+        ? `HTTP ${subscribe.httpStatus ?? 'n/a'} · ${subscribe.endpoint} · ${subscribe.errorCode ?? subscribe.errorDescription ?? 'subscribe failure'}`
+        : 'no subscribe failure recorded',
+      class: subscribe ? 'layer-bad' : 'layer-ok',
+    },
+    {
+      layer: 'Recovery',
+      value: recovery
+        ? `rung ${recovery.rung} · publisher ${recovery.publisherClientId} · attempt ${recovery.attempt}${layers.recovery.sfuRejoinThrottled ? ' · throttled' : ''}`
+        : layers.recovery.sfuRejoinThrottled
+          ? 'throttled (no recent rung)'
+          : 'idle',
+      class: layers.recovery.sfuRejoinThrottled || recovery?.rung === 'unrecovered-visible' ? 'layer-bad' : recovery ? 'layer-neutral' : 'layer-ok',
+    },
+    {
+      layer: 'Playout',
+      value: playoutCount ? `${playoutCount} publisher playout row(s)` : 'no playout rows',
+      class: playoutCount ? 'layer-ok' : 'layer-neutral',
+    },
+    {
+      layer: 'Remote inbound',
+      value: inboundCount
+        ? layers.remoteInbound.map((track) => `${track.publisherClientId.slice(0, 8)} ${track.trackName} bytes ${track.bytesReceived ?? 'n/a'} concealed ${track.concealedSamples ?? 'n/a'}`).join(' · ')
+        : 'no inbound audio stats',
+      class: inboundCount ? 'layer-ok' : 'layer-neutral',
+    },
+  ];
+}
+
+export function buildSubscriptionGapRows(layers: DiagnosticsLayerSnapshot | null | undefined): SubscriptionGapRow[] {
+  return (layers?.advertisedNotSubscribed ?? []).map((gap) => ({
+    publisherClientId: gap.publisherClientId,
+    name: gap.name,
+    tracks: gap.advertisedAudioTrackNames.length ? gap.advertisedAudioTrackNames.join(', ') : 'no advertised audio',
+    hint: gap.actionHint,
+    class: 'subscription-gap-bad',
+  }));
 }
 
 export function buildCallWideMediaPlayoutRow(mediaPlayout: SfuMediaPlayoutStats | null | undefined): CallWideMediaPlayoutRow | null {
@@ -538,6 +612,14 @@ export class DiagnosticsPage {
 
   callWideMediaPlayoutRow(entry: DiagnosticEntry): CallWideMediaPlayoutRow | null {
     return buildCallWideMediaPlayoutRow(entry.payload.sfuDiagnostics?.mediaPlayout ?? null);
+  }
+
+  layerDiagnosticsRows(entry: DiagnosticEntry): LayerDiagnosticsRow[] {
+    return buildLayerDiagnosticsRows(entry.payload.layerDiagnostics ?? null);
+  }
+
+  subscriptionGapRows(entry: DiagnosticEntry): SubscriptionGapRow[] {
+    return buildSubscriptionGapRows(entry.payload.layerDiagnostics ?? null);
   }
 
   private booleanSetting(value: boolean | null | undefined): string {

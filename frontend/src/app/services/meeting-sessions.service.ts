@@ -1,6 +1,7 @@
 import { HttpClient } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
+import type { SubscribeFailureEvidence } from './sfu-subscribe-failure-evidence.js';
 
 export type MeetingSession = {
   id: string;
@@ -352,6 +353,52 @@ export type SfuDiagnosticsSnapshot = {
   mediaPlayout?: SfuMediaPlayoutStats;
 };
 
+export type DiagnosticsGumError = { name: string; message: string } | null;
+
+export type DiagnosticsRemoteInboundPublisher = {
+  publisherClientId: string;
+  trackName: string;
+  bytesReceived: number | null;
+  packetsReceived: number | null;
+  packetsLost: number | null;
+  audioLevel: number | null;
+  totalAudioEnergy: number | null;
+  concealedSamples: number | null;
+};
+
+export type DiagnosticsAdvertisedNotSubscribedGap = {
+  publisherClientId: string;
+  name: string;
+  advertisedAudioTrackNames: string[];
+  actionHint: string;
+};
+
+export type DiagnosticsRecoveryEvent = {
+  rung: 'subscribe-retry' | 'subscribe-renegotiate' | 'needs-rejoin' | 'throttled' | 'sfu-rejoin' | 'unrecovered-visible';
+  publisherClientId: string;
+  epoch: number;
+  attempt: number;
+  atMs: number;
+};
+
+export type DiagnosticsLayerSnapshot = {
+  device: { lastGumError: DiagnosticsGumError };
+  publish: {
+    cfSessionId: string | null;
+    status: 'publishing' | 'published' | 'error' | null;
+    error: string | null;
+    publishRecoveryFailed: boolean;
+  };
+  subscribe: SubscribeFailureEvidence | null;
+  recovery: {
+    lastRecoveryEvent: DiagnosticsRecoveryEvent | null;
+    sfuRejoinThrottled: boolean;
+  };
+  playout: RemoteAudioPlayoutDiagnostics | null;
+  remoteInbound: DiagnosticsRemoteInboundPublisher[];
+  advertisedNotSubscribed: DiagnosticsAdvertisedNotSubscribedGap[];
+};
+
 export type RemoteAudioPlayoutDiagnostics = {
   selectedAudioOutputId: string | null;
   effectiveSinkId: string | null;
@@ -387,7 +434,8 @@ export type DiagnosticsPayload = {
   selectedAudioDeviceId?: string;
   selectedAudioOutputId?: string;
   selectedVideoDeviceId?: string;
-  lastGumError?: { name: string; message: string } | null;
+  lastGumError?: DiagnosticsGumError;
+  layerDiagnostics?: DiagnosticsLayerSnapshot;
   wsStatus: string;
   wsReconnectAttempts: number;
   wsHealth: DiagnosticsWsHealth;

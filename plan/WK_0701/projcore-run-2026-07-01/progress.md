@@ -298,3 +298,26 @@ batch-B4 dispatched_at: 2026-07-01T09:58:19Z estimate_min: 10 bucket: SHORT — 
 [overmind] 2026-07-01T09:59:03+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
 [overmind] 2026-07-01T09:59:23+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
 [overmind] 2026-07-01T09:59:24+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+
+## B4 — PASS (8b6825d) — R4 VERIFIED [2026-07-01]
+- Publish/PC recovery (Glory case): escalatePublishFailure reuses extracted throttled rejoin, guarded (no clobber), capped-branch + terminal exits wired via markPublishAttemptFailed. std red-team clean, 1 send-back (converging). R1-R4 all VERIFIED.
+- B5 routed to grok composer (mechanical diagnostics separation).
+[overmind] 2026-07-01T10:00:06+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+batch-B5 dispatched_at: 2026-07-01T10:07:57Z estimate_min: 12 bucket: SHORT — Audit diagnostics honesty (grok work)
+[overmind] 2026-07-01T10:00:56+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:00:56+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:00:56+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:01:16+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:01:16+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+
+## B5 — Diagnostics honesty [IN-PROGRESS 2026-07-01]
+- grok composer, medium. PROPOSED: gate lastGumError w/ isLastGumErrorCandidate (device-only); add per-layer layerDiagnostics payload from existing signals; surface advertised-not-subscribed on diagnostics page. complexity medium. APPROVED-PLAN (no recovery changes; 406→subscribe-field test; R5c screenshot).
+[overmind] 2026-07-01T10:08:00+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:08:00+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:08:00+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:08:20+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:08:40+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:09:01+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:09:21+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:09:41+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11
+[overmind] 2026-07-01T10:09:41+00:00 sync OK current='Make the diagnostics tell the truth about what failed' tasks=11

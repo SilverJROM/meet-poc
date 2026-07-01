@@ -1,0 +1,6 @@
+role=validator
+batch=batch-B5
+status=REPRO-CLEARED-ON-LOCAL
+source=callback
+line_no=75
+note=R5a/b/c pass; tests honest; screenshot valid; no recovery scope creep
