@@ -770,6 +770,96 @@ describe('recording API', () => {
     expect(res.body.transcript.some((line: { name: string }) => line.name === '?')).toBe(false);
   });
 
+  it('shifts a mid-joiner transcript onto the call timeline using sidecar joinedAtMs', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'd98896162f09', 'AGENTROOM');
+    const sessionId = 'aaaaaaaa-1111-2222-3333-444444444444';
+    const host = `2026-07-01T05-00-00-000Z_${sessionId}_d98896162f09_AGENTROOM_host_a0a0a0.webm`;
+    const joiner = `2026-07-01T05-00-00-001Z_${sessionId}_d98896162f09_AGENTROOM_peer2_b1b1b1.webm`;
+    for (const filename of [host, joiner]) fs.writeFileSync(path.join(dir, filename), Buffer.alloc(8));
+    // Host present at recording start → offset 0. Peer2 joins 2 minutes in → offset 120000ms.
+    fs.writeFileSync(
+      path.join(dir, `${host}.participant.json`),
+      JSON.stringify({ displayName: 'host', clientId: 'local', joinedAtMs: 0, isPerUser: true }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${joiner}.participant.json`),
+      JSON.stringify({ displayName: 'Peer2', clientId: 'guest-1', joinedAtMs: 120000, isPerUser: true }),
+    );
+    // Whisper timestamps each file from ~0 (its own recording start).
+    fs.writeFileSync(
+      path.join(dir, `${host}.transcript.json`),
+      JSON.stringify({ schemaVersion: 1, audioFile: host, language: 'en', lines: [{ startMs: 1000, endMs: 1500, clientId: 'local', name: 'host', text: 'hello at start', confidence: 0.9 }], words: [] }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${joiner}.transcript.json`),
+      JSON.stringify({ schemaVersion: 1, audioFile: joiner, language: 'en', lines: [{ startMs: 500, endMs: 1200, clientId: 'guest-1', name: 'Peer2', text: 'joining late', confidence: 0.9 }], words: [] }),
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    const res = await request(createApp(db))
+      .get(`/api/recordings/named-transcript/${sessionId}`)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    const peer2 = res.body.transcript.find((l: { name: string }) => l.name === 'Peer2');
+    const hostLine = res.body.transcript.find((l: { name: string }) => l.name === 'host');
+    // The mid-joiner's line is shifted by joinedAtMs (500 + 120000), NOT left at ~500.
+    expect(peer2.startMs).toBe(120500);
+    expect(peer2.endMs).toBe(121200);
+    // Host offset is 0 → unchanged.
+    expect(hostLine.startMs).toBe(1000);
+    // Ordering now reflects the real call timeline: host (1s) before Peer2 (2m0.5s).
+    expect(res.body.transcript.map((l: { name: string }) => l.name)).toEqual(['host', 'Peer2']);
+  });
+
+  it('falls back to meta.json joinedAtMs when the sidecar predates the field', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'd98896162f09', 'AGENTROOM');
+    const sessionId = 'bbbbbbbb-5555-6666-7777-888888888888';
+    const joiner = `2026-07-01T06-00-00-001Z_${sessionId}_d98896162f09_AGENTROOM_peer2_c2c2c2.webm`;
+    fs.writeFileSync(path.join(dir, joiner), Buffer.alloc(8));
+    // Legacy sidecar: no joinedAtMs.
+    fs.writeFileSync(
+      path.join(dir, `${joiner}.participant.json`),
+      JSON.stringify({ displayName: 'Peer2', clientId: 'guest-1', isPerUser: true }),
+    );
+    // But the file's meta.json carries participants[].joinedAtMs.
+    fs.writeFileSync(
+      path.join(dir, `${joiner}.meta.json`),
+      JSON.stringify({
+        schemaVersion: 1,
+        sessionId,
+        roomId: 'd98896162f09',
+        recordingStartedAtIso: '2026-07-01T06:00:00.000Z',
+        recordingDurationMs: 180000,
+        participants: [
+          { clientId: 'local', displayName: 'host', isHost: true, joinedAtMs: 0, leftAtMs: null },
+          { clientId: 'guest-1', displayName: 'Peer2', isHost: false, joinedAtMs: 90000, leftAtMs: null },
+        ],
+        segments: [],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${joiner}.transcript.json`),
+      JSON.stringify({ schemaVersion: 1, audioFile: joiner, language: 'en', lines: [{ startMs: 500, endMs: 1200, clientId: 'guest-1', name: 'Peer2', text: 'joining late', confidence: 0.9 }], words: [] }),
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+
+    const res = await request(createApp(db))
+      .get(`/api/recordings/named-transcript/${sessionId}`)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    const peer2 = res.body.transcript.find((l: { name: string }) => l.name === 'Peer2');
+    expect(peer2.startMs).toBe(90500);
+    expect(peer2.endMs).toBe(91200);
+  });
+
   it('B1b normalizes mocked OpenRouter output with owner-only labels', () => {
     const filename = 'host.webm';
     const owner = { clientId: 'host-1', name: 'Host' };
