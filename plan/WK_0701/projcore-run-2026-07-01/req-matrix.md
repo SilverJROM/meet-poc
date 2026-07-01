@@ -16,4 +16,4 @@ Final acceptance: every row VERIFIED. No row may be non-VERIFIED at run complete
 - R6 spans local capstone (B6) → agent-measured remote (B7/B8) → human-audible (B9).
 - R6 is NOT VERIFIED until JROM confirms he heard Peer2's sound in B9.
 | R7   | Screen-share no infinite-mirror: presenter sees "You're presenting" placeholder, remote sees share | SS | validation/batch-SS.md | VERIFIED |
-| R8   | Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off | R8 | — | ASSIGNED |
+| R8   | Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off | R8 | validation/batch-R8.md | VERIFIED |

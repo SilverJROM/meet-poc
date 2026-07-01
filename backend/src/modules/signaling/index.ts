@@ -141,6 +141,7 @@ type IncomingMessage = {
   tracks?: unknown;
   approved?: unknown;
   kind?: unknown;
+  image?: unknown;
 };
 
 const MAX_ADMITTED = 30; // SFU-era product cap; was mesh DR-50 = 5
@@ -150,6 +151,11 @@ const DISCONNECT_GRACE_MS = RECONNECT_TOKEN_TTL_MS;
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 20_000;
 const DEFAULT_HEARTBEAT_MISSES_BEFORE_TERMINATE = 2;
 const REACTION_KINDS = new Set(['raise-hand', 'thumbs-up', 'clap', 'heart']);
+// A broadcast background is a compressed thumbnail (client caps it well under this), never the
+// full-resolution asset used for local compositing — this is a hard server-side DoS/size boundary,
+// not a hint, so it must not simply trust client-side compression.
+const MAX_BACKGROUND_IMAGE_CHARS = 200_000;
+const BACKGROUND_IMAGE_DATA_URL_RE = /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/]+=*$/;
 
 type HeartbeatOptions = {
   intervalMs?: number;
@@ -513,6 +519,13 @@ function parsePeerBackground(value: unknown): RelayPeerBackground | undefined {
     if (trimmed.length > 0 && trimmed.length <= 128) result.id = trimmed;
   }
   return result;
+}
+
+function parseBackgroundImage(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (value.length === 0 || value.length > MAX_BACKGROUND_IMAGE_CHARS) return undefined;
+  if (!BACKGROUND_IMAGE_DATA_URL_RE.test(value)) return undefined;
+  return value;
 }
 
 function peerSummaries(live: LiveRoom, roomId: string, database: Database.Database): { id: string; participantId: string; name: string; host: boolean; isMobile: boolean }[] {
@@ -1149,6 +1162,18 @@ export function attachSignaling(server: http.Server, database: Database.Database
               ...(background ? { background } : {}),
             });
           }
+        }
+        return;
+      }
+
+      if (msg.type === 'background-image') {
+        if (state !== 'admitted') return;
+        const live = currentRoom ? liveRooms.get(currentRoom) : null;
+        if (!live) return;
+        const image = parseBackgroundImage(msg.image);
+        if (!image) return;
+        for (const [id, peer] of live.admitted) {
+          if (id !== clientId) send(peer.ws, { type: 'background-image', clientId, image });
         }
         return;
       }

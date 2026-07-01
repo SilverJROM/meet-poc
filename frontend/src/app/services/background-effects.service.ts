@@ -19,6 +19,10 @@ export class BackgroundEffectsService {
   readonly mode = signal<BackgroundEffectMode>('none');
   readonly backgroundDescriptor = signal<PeerBackground>({ kind: 'none' });
   readonly localBackgroundImageUrl = signal<string | null>(null);
+  /** Compressed thumbnail broadcast to peers so a custom/account background renders on their cam-off tile. */
+  readonly broadcastImage = signal<string | null>(null);
+  /** Guards the R8a join-time restore so it applies exactly once, whichever caller reaches it first. */
+  readonly restoredFromStorage = signal(false);
   readonly modelReady = signal(false);
   readonly lastError = signal<string | null>(null);
 
@@ -37,6 +41,10 @@ export class BackgroundEffectsService {
   setBackgroundDescriptor(descriptor: PeerBackground, localImageUrl: string | null = null): void {
     this.backgroundDescriptor.set(descriptor);
     this.localBackgroundImageUrl.set(descriptor.kind === 'image' ? localImageUrl : null);
+  }
+
+  setBroadcastImage(image: string | null): void {
+    this.broadcastImage.set(image);
   }
 
   async setMode(next: BackgroundEffectMode): Promise<void> {
@@ -129,6 +137,8 @@ export class BackgroundEffectsService {
   dispose(): void {
     this.mode.set('none');
     this.setBackgroundDescriptor({ kind: 'none' });
+    this.setBroadcastImage(null);
+    this.restoredFromStorage.set(false);
     this.modelReady.set(false);
     this.stopProcessing();
     if (this.model) void this.model.close();

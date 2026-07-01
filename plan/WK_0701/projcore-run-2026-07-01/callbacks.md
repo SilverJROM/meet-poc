@@ -95,3 +95,13 @@
 [projcore callback] validator batch-SS STATUS: WORKING — DISPATCH-batch-SS-validator-2877458-1782914769 validation started
 [projcore callback] validator batch-SS STATUS: REPRO-CLEARED-ON-LOCAL — R7 validated: placeholder/no mirror, remote live share, stop grid, spec honest, swaps legit, rot pre-existing
 [projcore ACK] validator batch-SS RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T14:10:50Z
+[projcore DISPATCH] implementer batch-R8 DISPATCH-batch-R8-implementer-2907822-1782915099
+[projcore callback] implementer batch-R8 STATUS: PROPOSED — Read brief; investigating R8a/b/c mechanisms before proposing plan.
+[projcore callback] implementer batch-R8 STATUS: PROPOSED — Investigation done. Mechanism chosen: broadcast custom-bg image data over existing WS signaling channel (not a new/loosened backend endpoint) to sidestep the RBAC question. Full plan in reply.
+[projcore callback] implementer batch-R8 STATUS: WORKING — APPROVED-PLAN received. Starting implementation: server-side size cap, dedicated background-image message (not piggybacked on media-state), idempotent R8a restore.
+[projcore callback] implementer batch-R8 STATUS: DONE — R8a/b/c done: idempotent restore, WS-broadcast bg thumbnail w/ server cap, isLocal gate removed. Build+all tests green. e2e descoped to unit/component per redirect. R1-R7 zero-diff.
+[projcore ACK] implementer batch-R8 RECEIVED DONE 2026-07-01T15:09:46Z
+[projcore DISPATCH] validator batch-R8 DISPATCH-batch-R8-validator-3020947-1782918754
+[projcore callback] validator batch-R8 STATUS: WORKING — Starting independent R8 validation
+[projcore callback] validator batch-R8 STATUS: REPRO-CLEARED-ON-LOCAL — R8 pass: restore-on-join, remote custom background relay/render, server cap, no R1-R7 regression
+[projcore ACK] validator batch-R8 RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T15:15:32Z

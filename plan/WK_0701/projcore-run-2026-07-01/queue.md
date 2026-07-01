@@ -16,7 +16,7 @@ Run complete when queue empty AND every req-matrix row VERIFIED.
 - B8 [superseded] — (dev_machine shut down; JROM opted for direct human test over scripted 3-way)
 - B9 [done] — JROM live human-audible test with actual Peer2 — PASSED (call success confirmed by JROM)
 - SS [done] — Stop screen-share infinite-mirror: show Google-Meet-style "You're presenting" to the presenter (Req R7 injected)
-- R8 [pending] — Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)
+- R8 [done] — Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)
 
 ## Batch metadata (internal routing — not shown in ovm)
 

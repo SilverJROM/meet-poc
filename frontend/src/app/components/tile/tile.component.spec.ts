@@ -74,4 +74,23 @@ describe('TileComponent camera-off background avatar', () => {
     expect(avatar?.style.backgroundImage).toContain('/assets/backgrounds/city.svg');
     expect(chip?.textContent?.trim()).toBe('BC');
   });
+
+  it('renders a remote peer\'s custom/account background image (R8b) instead of falling back to initials', async () => {
+    const fixture = await renderTile(
+      peer({
+        id: 'remote-2',
+        participantId: 'remote-participant-2',
+        name: 'Dee Rivera',
+        isLocal: false,
+        background: { kind: 'image', id: 'acct:custom-1' },
+        backgroundImageUrl: 'data:image/jpeg;base64,AAAA',
+      }),
+    );
+
+    const avatar = fixture.nativeElement.querySelector('.camera-off-avatar.has-bg-image') as HTMLElement | null;
+
+    expect(avatar).not.toBeNull();
+    expect(avatar?.style.backgroundImage).toContain('data:image/jpeg;base64,AAAA');
+    expect(fixture.nativeElement.querySelector('.avatar-initials')).toBeNull();
+  });
 });

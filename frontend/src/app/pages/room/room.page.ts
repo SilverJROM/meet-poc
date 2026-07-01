@@ -4,6 +4,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
 import { arrowBackOutline, colorWandOutline, desktopOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
 import { BackgroundPickerComponent } from '../../components/background-picker/background-picker.component';
+import { restoreBackgroundFromStorage } from '../../components/background-picker/background-restore';
 import { ControlsBarComponent } from '../../components/controls-bar/controls-bar.component';
 import { DeviceDialogComponent } from '../../components/device-dialog/device-dialog.component';
 import { LeaveDialogComponent } from '../../components/leave-dialog/leave-dialog.component';
@@ -16,6 +17,7 @@ import { TileComponent } from '../../components/tile/tile.component';
 import { ActiveSpeakerService } from '../../services/active-speaker.service';
 import { AuthService } from '../../services/auth.service';
 import { BackgroundEffectsService } from '../../services/background-effects.service';
+import { BackgroundLibraryService } from '../../services/background-library.service';
 import { MediaError, MediaService, ScreenShareUnsupportedError } from '../../services/media.service';
 import { MeetingSessionsService } from '../../services/meeting-sessions.service';
 import type { DiagnosticsPayload, DiagnosticsPeerSample, DiagnosticsPostPayload, DiagnosticsTrackInfo, SfuConnectionQuality, SfuDiagnosticsSnapshot, SfuInboundTrackStats } from '../../services/meeting-sessions.service';
@@ -38,7 +40,7 @@ import { localAudioRecoveryTerminalMessage } from '../../services/local-media-re
 import { permissionBlockHint } from '../../services/media-toggle';
 import { IceConfigService, type TurnHealthResult } from '../../services/ice-config.service';
 import { PlatformService } from '../../services/platform.service';
-import { PeerBackground, PeerState } from '../../services/peer-state';
+import { isBuiltinBackgroundId, PeerBackground, PeerState } from '../../services/peer-state';
 import { ParticipantSnapshot, RecorderService } from '../../services/recorder.service';
 import {
   AUDIO_OUTPUT_DEVICE_STORAGE_KEY,
@@ -155,6 +157,8 @@ interface PeerIdentity {
   screenOn: boolean;
   reconnecting: boolean;
   background?: PeerBackground;
+  /** Broadcast thumbnail for a peer's custom/account background (R8b) — cleared whenever their background switches away from a non-builtin image. */
+  backgroundImage?: string | null;
 }
 
 @Component({
@@ -194,6 +198,7 @@ export class RoomPage implements OnDestroy {
   private readonly viewport = inject(ViewportService);
   readonly sfuClient = inject(SfuClientService);
   readonly backgroundEffects = inject(BackgroundEffectsService);
+  private readonly backgroundLibrary = inject(BackgroundLibraryService);
 
   readonly roomKey = this.route.snapshot.paramMap.get('slug') ?? this.route.snapshot.paramMap.get('id') ?? '';
   roomId = this.roomKey;
@@ -384,6 +389,7 @@ export class RoomPage implements OnDestroy {
         quality: 'good',
         audioOnlyReason: null,
         background: identity.background,
+        backgroundImageUrl: identity.backgroundImage ?? null,
       });
     }
     return result;
@@ -793,6 +799,13 @@ export class RoomPage implements OnDestroy {
       if (this.state() !== 'in-call') return;
       untracked(() => this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn()));
     });
+    // Separate from media-state on purpose: the heavy thumbnail payload only goes out when it
+    // actually changes (background set / cleared / join), never on mic/cam toggles.
+    effect(() => {
+      const image = this.backgroundEffects.broadcastImage();
+      if (this.state() !== 'in-call' || !image) return;
+      untracked(() => this.broadcastBackgroundImage(image));
+    });
     effect(() => {
       const publishStatus = this.sfuClient.localPublishState()?.status ?? null;
       const state = this.state();
@@ -810,6 +823,10 @@ export class RoomPage implements OnDestroy {
   }
 
   async bootstrap(): Promise<void> {
+    // R8a: apply the persisted background before join so it's already active for the lobby
+    // preview and the first published frame — independent of whether the (lazily-mounted)
+    // picker panel is ever opened. Fire-and-forget: must not block room lookup below.
+    void restoreBackgroundFromStorage(this.backgroundEffects, this.backgroundLibrary, this.viewport.isMobile());
     await this.auth.checkSession();
     const user = this.auth.user();
     const storedName = readGuestDisplayName();
@@ -2174,6 +2191,8 @@ export class RoomPage implements OnDestroy {
       this.peerIdentities.set(next);
       if (this.state() === 'in-call') {
         this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+        const broadcastImage = this.backgroundEffects.broadcastImage();
+        if (broadcastImage) this.broadcastBackgroundImage(broadcastImage);
       }
       this.recorder.notifyParticipantJoined({
         clientId: msg.clientId,
@@ -2225,6 +2244,8 @@ export class RoomPage implements OnDestroy {
       this.peerIdentities.set(next);
       if (this.state() === 'in-call') {
         this.broadcastMediaState(this.media.micOn(), this.media.cameraOn(), this.media.screenOn());
+        const broadcastImage = this.backgroundEffects.broadcastImage();
+        if (broadcastImage) this.broadcastBackgroundImage(broadcastImage);
       }
       this.queueDiagnosticsLog('reconnect');
       return;
@@ -2235,12 +2256,30 @@ export class RoomPage implements OnDestroy {
       if (identity) {
         const patch: Partial<PeerIdentity> = { micEnabled: msg.mic, camEnabled: msg.cam, screenOn: !!msg.screenOn };
         if (msg.isMobile !== undefined) patch.isMobile = !!msg.isMobile;
-        if (msg.background) patch.background = msg.background;
+        if (msg.background) {
+          patch.background = msg.background;
+          // A non-image (or builtin-image) descriptor means whatever broadcast thumbnail we hold
+          // for this peer is stale — clear it so resolveCamOffBackdropUrl falls through correctly
+          // instead of showing a background this peer switched away from.
+          if (msg.background.kind !== 'image' || isBuiltinBackgroundId(msg.background.id ?? '')) {
+            patch.backgroundImage = null;
+          }
+        }
         const next = new Map(this.peerIdentities());
         next.set(msg.clientId, { ...identity, ...patch });
         this.peerIdentities.set(next);
       }
       this.queueDiagnosticsLog('state-change');
+      return;
+    }
+    if (msg.type === 'background-image') {
+      if (msg.clientId === this.myId()) return;
+      const identity = this.peerIdentities().get(msg.clientId);
+      if (identity) {
+        const next = new Map(this.peerIdentities());
+        next.set(msg.clientId, { ...identity, backgroundImage: msg.image });
+        this.peerIdentities.set(next);
+      }
       return;
     }
     if (msg.type === 'chat') {
@@ -3690,6 +3729,10 @@ export class RoomPage implements OnDestroy {
       background: this.backgroundEffects.backgroundDescriptor(),
     });
     this.queueDiagnosticsLog('state-change');
+  }
+
+  private broadcastBackgroundImage(image: string): void {
+    this.ws.send({ type: 'background-image', image });
   }
 
   private startDiagnosticsLogger(): void {

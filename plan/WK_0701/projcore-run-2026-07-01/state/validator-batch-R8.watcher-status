@@ -1,0 +1,6 @@
+role=validator
+batch=batch-R8
+status=REPRO-CLEARED-ON-LOCAL
+source=callback
+line_no=106
+note=R8 pass: restore-on-join, remote custom background relay/render, server cap, no R1-R7 regression

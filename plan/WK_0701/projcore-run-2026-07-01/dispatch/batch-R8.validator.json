@@ -1,0 +1,22 @@
+{
+  "schema_version": 4,
+  "dispatch_status": "ready",
+  "batch_id": "batch-R8",
+  "role": "validator",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01",
+  "session": "01_validator_codex55_meetpoc",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/prompts/batch-R8-validate.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/batch-R8.validator.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/callbacks.md",
+  "dispatched_at": "2026-07-01T15:12:34Z",
+  "estimate_min": 15,
+  "bucket": "SHORT",
+  "wakeup_delay_sec": 1800,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/batch-R8.wakeup-required",
+  "watcher_pid": 3021162,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/batch-R8.watcher-validator.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/watcher-batch-R8-validator.log",
+  "dispatch_marker": "DISPATCH-batch-R8-validator-3020947-1782918754",
+  "wakeup_acked_at": null,
+  "wakeup_acked_by": null
+}

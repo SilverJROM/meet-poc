@@ -434,3 +434,26 @@ batch-SS dispatched_at: 2026-07-01T14:06:09Z estimate_min: 15 bucket: SHORT — 
 [overmind] 2026-07-01T14:09:55+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
 [overmind] 2026-07-01T14:10:15+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
 [overmind] 2026-07-01T14:10:15+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+batch-R8 dispatched_at: 2026-07-01T15:12:34Z estimate_min: 15 bucket: SHORT — Validate backgrounds (persist + all-peers visibility)
+[overmind] 2026-07-01T14:11:42+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:11:42+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:11:42+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:12:02+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:12:03+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+
+## R8 — Backgrounds [IN-PROGRESS 2026-07-01]
+- Sonnet. PROPOSED: R8a extract join-time restore from lazy-mounted picker (idempotent); R8b/c WS-broadcast custom-bg image data URL to call peers (sidesteps new backend RBAC) + parsePeerBackground size cap in signaling. complexity medium. APPROVED-PLAN (6 nail-points: server size cap, efficient send not per-toggle, CSS-bg-only render, idempotent restore, no R1-R7 touch, e2e remote-sees-custom-bg).
+
+## R8 — redirect (e2e flake) [2026-07-01]
+- Sonnet ~60min, stuck on headless-MediaPipe 2-participant custom-bg e2e. Code done + unit-tested; assertion correct. Bounded redirect: prove R8b/c deterministically (resolveCamOffBackdropUrl unit + tile has-bg-image component + backend cap); e2e best-effort for the segmentation-dependent sub-case.
+[overmind] 2026-07-01T15:12:37+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:12:37+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:12:37+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:12:57+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:13:17+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:13:38+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:13:58+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:14:18+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:14:38+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:14:59+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T15:14:59+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12

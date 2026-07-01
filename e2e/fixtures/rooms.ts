@@ -59,8 +59,11 @@ export async function createRoomFromDashboard(page: Page, title: string): Promis
   await page.getByRole('button', { name: 'Create room' }).click();
   const row = page.locator('.room-row').filter({ hasText: title }).first();
   await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'Open' }).click();
-  await expect(row).toContainText('Open for guests');
+  // The open/closed toggle lives in the row's overflow menu, not an inline "Open" button.
+  await row.getByRole('button', { name: 'More room settings' }).click();
+  await row.locator('.menu-row').filter({ hasText: 'Open for guests' }).locator('.mini-toggle').click();
+  await expect(row.locator('.status-chip')).toHaveText('Open');
+  await row.getByRole('button', { name: 'More room settings' }).click();
   const href = await row.getByRole('link', { name: 'Join' }).getAttribute('href');
   if (!href) throw new Error('room href missing');
   const key = href.split('/').pop() ?? '';

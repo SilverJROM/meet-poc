@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-R8
+status=PROPOSED
+source=callback
+line_no=99
+note=Read brief; investigating R8a/b/c mechanisms before proposing plan.

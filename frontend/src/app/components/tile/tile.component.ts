@@ -28,7 +28,7 @@ export class TileComponent {
   readonly showVideo = computed(() => this.forceVideo() || (!this.peer().screenOn && this.peer().camEnabled && !!this.videoStream()?.getVideoTracks()?.length));
   readonly camOffBackdropUrl = computed(() => {
     const peer = this.peer();
-    return resolveCamOffBackdropUrl(peer.background, peer.isLocal ? peer.backgroundImageUrl : null);
+    return resolveCamOffBackdropUrl(peer.background, peer.backgroundImageUrl);
   });
   readonly isMirroredSelfView = computed(() => this.peer().isLocal && this.showVideo() && !this.displayStream() && this.variant() !== 'share-main');
   readonly avatarColor = computed(() => {
