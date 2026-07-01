@@ -241,6 +241,12 @@
           <button type="button" (click)="retrySfuRejoin()">Retry</button>
         </div>
       }
+      @if (publishRecoveryUnrecoverableNotice(); as unrecoverablePublishNotice) {
+        <div class="device-notice publish-recovery-unrecoverable-notice" role="status" aria-live="polite">
+          <span>{{ unrecoverablePublishNotice }}</span>
+          <button type="button" (click)="rejoinAfterInitialPublishFailure()">Rejoin</button>
+        </div>
+      }
       @if (screenShareHelp()) {
         <div class="screen-share-help" role="alert" aria-label="Screen share permission help">
           <h2>Screen sharing needs macOS permission</h2>

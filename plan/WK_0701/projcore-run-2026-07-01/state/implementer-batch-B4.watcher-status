@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B4
+status=PROPOSED
+source=callback
+line_no=53
+note=Reuse rung-3 throttled-rejoin (extract shared helper) via new escalatePublishFailure()+publishRecoveryFailed signal; wire capped branch; new terminal notice. Awaiting approval.

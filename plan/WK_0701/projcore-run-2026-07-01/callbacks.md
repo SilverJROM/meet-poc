@@ -48,3 +48,20 @@
 [projcore callback] validator batch-B3 STATUS: WORKING — Independent validation started for R3 stalled remote-audio detection
 [projcore callback] validator batch-B3 STATUS: REPRO-CLEARED-ON-LOCAL — R3 validation passed; known room-decisions preflight failure is pre-existing/out of scope
 [projcore ACK] validator batch-B3 RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T09:16:34Z
+[projcore DISPATCH] implementer batch-B4 DISPATCH-batch-B4-implementer-2554510-1782897464
+[projcore callback] implementer batch-B4 STATUS: WORKING — Brief read; researching sfu-client publish state + B2b rung-3 rejoin before PROPOSED
+[projcore callback] implementer batch-B4 STATUS: PROPOSED — Reuse rung-3 throttled-rejoin (extract shared helper) via new escalatePublishFailure()+publishRecoveryFailed signal; wire capped branch; new terminal notice. Awaiting approval.
+[projcore callback] implementer batch-B4 STATUS: WORKING — APPROVED-PLAN received. Implementing escalatePublishFailure + capped-branch wiring + terminal notice at high effort.
+[projcore callback] implementer batch-B4 STATUS: DONE — escalatePublishFailure()+publishRecoveryFailed wired (capped branch, retry-exhaustion choke point); B2a/B2b regression green; tsc/build/e2e screenshot all pass.
+[projcore ACK] implementer batch-B4 RECEIVED DONE 2026-07-01T09:42:40Z
+[projcore DISPATCH] validator batch-B4 DISPATCH-batch-B4-validator-2571721-1782899025
+[projcore callback] validator batch-B4 STATUS: WORKING — starting independent validation for R4 publish recovery
+[projcore callback] validator batch-B4 STATUS: REPRO-STILL-PRESENT — initial-publish terminal failures that set audio-failed skip automatic publish recovery
+[projcore ACK] validator batch-B4 RECEIVED REPRO-STILL-PRESENT 2026-07-01T09:46:07Z
+[projcore callback] implementer batch-B4 STATUS: WORKING — SEND-BACK iter1 received, reading corrections doc
+[projcore callback] implementer batch-B4 STATUS: DONE — iter1: both terminal exits now call markPublishAttemptFailed()+escalatePublishFailure (fixed a silent no-op the naive fix would've had); 2 new tests; regression+e2e green.
+[projcore ACK] implementer batch-B4 RECEIVED DONE(iter1) 2026-07-01T09:57:40Z
+[projcore DISPATCH] validator batch-B4 DISPATCH-batch-B4-validator-2580772-1782899899
+[projcore callback] validator batch-B4 STATUS: WORKING — iter 2 re-validation started
+[projcore callback] validator batch-B4 STATUS: REPRO-CLEARED-ON-LOCAL — R4b terminal publish exits now mark failed then escalate; required specs pass
+[projcore ACK] validator batch-B4 RECEIVED REPRO-CLEARED-ON-LOCAL(iter2) 2026-07-01T09:59:37Z

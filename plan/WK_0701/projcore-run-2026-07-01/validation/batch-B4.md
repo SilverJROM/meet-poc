@@ -1,0 +1,4 @@
+# B4 Gate — PASS (2026-07-01) — R4 VERIFIED
+Batch B4 (publish/PC-failure recovery, Glory case). Implementer Sonnet; validator+std-red-team codex55.
+7-gate: artifacts+screenshot ✓ · diff review ✓ (extract executeThrottledFullRejoin, runFullSfuRejoin untouched; guarded escalatePublishFailure; markPublishAttemptFailed de-stales; capped branch wired) · ng build ✓ · tsc clean ✓ · targeted+regression (coordinator B2a/b/B3/B4 + sfu-client.spec) green ✓ · evidence: codex55 val+std red-team — iter1 REPRO-STILL-PRESENT (terminal exits skipped auto-recovery) → fixed; iter2 REPRO-CLEARED-ON-LOCAL. Red-team lenses all PASS (no clobber, no regression, no stuck banner, no storm). R4c UI screenshot real. · R4 VERIFIED · decisions: tier-conflict→high logged.
+Verdict: PASS. R4 → VERIFIED. 1 send-back (converging).

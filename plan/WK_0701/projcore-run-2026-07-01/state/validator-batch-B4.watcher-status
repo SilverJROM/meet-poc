@@ -1,0 +1,6 @@
+role=validator
+batch=batch-B4
+status=REPRO-CLEARED-ON-LOCAL
+source=callback
+line_no=66
+note=R4b terminal publish exits now mark failed then escalate; required specs pass

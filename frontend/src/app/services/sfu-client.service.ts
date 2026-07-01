@@ -121,6 +121,10 @@ export class SfuClientService {
   // Rung-4 (B2b): true once the rung-3 rejoin throttle is exceeded — drives the visible
   // "audio unrecovered" affordance. Cleared as soon as a fresh (non-throttled) rejoin attempt fires.
   readonly sfuRejoinThrottled = signal(false);
+  // R4/B4 (Glory case): true once an escalated publish-recovery rejoin attempt completes and the
+  // local publish is STILL unhealthy — drives a host-agnostic "couldn't restore your audio" notice.
+  // Cleared the moment a publish actually reaches 'published' again.
+  readonly publishRecoveryFailed = signal(false);
 
   private pc: RTCPeerConnection | null = null;
   private audioSender: RTCRtpSender | null = null;
@@ -443,6 +447,12 @@ export class SfuClientService {
     this.sfuRejoinThrottled.set(true);
   }
 
+  // Test-only: force the R4/B4 publish-recovery-unrecoverable state without driving a real
+  // escalate+throttle exhaustion, so a screenshot/e2e proof can render the notice deterministically.
+  debugForcePublishRecoveryFailedForTest(): void {
+    this.publishRecoveryFailed.set(true);
+  }
+
   // Rung-3 (B0 consensus §Full SFU Rejoin Mechanism): one coalesced full local SFU transport/session
   // rotation. Deliberately reuses the EXISTING full-republish path (resetForTransportRecovery() +
   // transportRecoveryHandler) that ICE-transport-recovery already exercises in production — that path
@@ -450,8 +460,44 @@ export class SfuClientService {
   // the fresh sfu-publish over WS (room.page.ts's announceSfuPublishState()). This method only adds the
   // coalescing/throttle wrapper around it plus the explicit, testable remote-resubscribe step.
   private async runFullSfuRejoin(): Promise<void> {
-    if (!this.callerCreds) return;
     if (this.localPublishState()?.status !== 'published') return;
+    await this.executeThrottledFullRejoin('subscribe');
+  }
+
+  // R4/B4 (send-back iter1): room.page.ts's two terminal publish-failure exits can each reach here
+  // with localPublishState STILL 'published' — e.g. the transceiver-check-failure exit fires after
+  // publish() itself already succeeded (hasOutboundAudioTrack failed afterward), and the permanent/
+  // retry-cap exit can too if the failure came from republishLiveScreenTrackIfNeeded() rather than
+  // from doPublish's own catch. isLocalPublishHealthy() only inspects status/PC/ICE state, so without
+  // this it would read 'published' as healthy and make the escalatePublishFailure() call below it a
+  // silent no-op. A no-op here (status already null/'error') is the common, harmless case — this only
+  // corrects the state when it's stale. Does not touch escalatePublishFailure's own guard/throttle/
+  // notice logic.
+  markPublishAttemptFailed(reason: string): void {
+    const current = this.localPublishState();
+    if (current?.status !== 'published') return;
+    this.localPublishState.set({ ...current, status: 'error', error: reason });
+  }
+
+  // R4/B4: publish-side counterpart of rung-3, for an admitted client whose publish never reached
+  // 'published' (hasPc:false / status null|'error') — the Glory case. Shares the IDENTICAL throttled
+  // executor (and its ≤1/15s + ≤2/2min budget) with the subscribe-side rung-3 trigger above, so the
+  // two never combine into a rejoin storm. Guards are the ones the B0/B4 handshake called out:
+  // never touch a healthy publish, and never clobber a publish attempt already in flight.
+  escalatePublishFailure(): void {
+    if (this.isLocalPublishHealthy()) return;
+    if (this.localPublishState()?.status === 'publishing') return;
+    if (this.rejoinScheduled) return;
+
+    this.rejoinScheduled = true;
+    void this.executeThrottledFullRejoin('publish').finally(() => {
+      this.rejoinScheduled = false;
+      this.publishRecoveryFailed.set(!this.isLocalPublishHealthy());
+    });
+  }
+
+  private async executeThrottledFullRejoin(reason: 'subscribe' | 'publish'): Promise<void> {
+    if (!this.callerCreds) return;
     // A genuine ICE-transport-recovery full-republish is already in flight/scheduled — defer to it
     // rather than double-rotating the PC. The low-freq per-publisher continuation keeps trying either way.
     if (this.transportRecoveryInFlight || this.transportRecoveryScheduled) return;
@@ -468,7 +514,7 @@ export class SfuClientService {
 
     const handler = this.transportRecoveryHandler;
     if (!handler) {
-      console.error('[sfu] rung-3 full rejoin skipped: no republish handler registered');
+      console.error(`[sfu] full rejoin (${reason}) skipped: no republish handler registered`);
       return;
     }
 
@@ -481,7 +527,7 @@ export class SfuClientService {
     try {
       await handler();
     } catch (err) {
-      console.warn('[sfu] rung-3 full rejoin republish failed — low-frequency continuation keeps retrying', err);
+      console.warn(`[sfu] full rejoin (${reason}) republish failed — bounded retry budget consumed`, err);
       return;
     }
     if (freshEpoch !== this.recoveryEpoch) return; // superseded by a newer reset mid-flight
@@ -963,11 +1009,12 @@ export class SfuClientService {
       this.startTransportRecovery(decision);
     } else if (decision.action === 'capped') {
       this.transportRecoveryAttempts = decision.nextAttempts;
-      console.error('[sfu] transport recovery capped; leaving retry/rejoin UI to publish recovery path', {
+      console.error('[sfu] transport recovery capped; escalating to publish recovery path', {
         connectionState: pc.connectionState,
         iceConnectionState: pc.iceConnectionState,
         attempts: decision.nextAttempts,
       });
+      this.escalatePublishFailure();
     }
   }
 
@@ -2155,6 +2202,7 @@ export class SfuClientService {
         status: 'live',
       }));
       this.localPublishState.set({ cfSessionId, status: 'published', tracks });
+      this.publishRecoveryFailed.set(false);
       this.setPublishPhase('done');
     } catch (err) {
       this.localPublishState.set({ cfSessionId: '', status: 'error', tracks: [], error: String(err) });

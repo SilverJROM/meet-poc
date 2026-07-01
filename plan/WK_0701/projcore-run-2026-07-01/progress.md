@@ -239,3 +239,62 @@ batch-B3 dispatched_at: 2026-07-01T09:13:28Z estimate_min: 15 bucket: SHORT — 
 [overmind] 2026-07-01T09:15:53+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
 [overmind] 2026-07-01T09:16:13+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
 [overmind] 2026-07-01T09:16:14+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+
+## B3 — PASS (fc05c58) — R3 VERIFIED [2026-07-01]
+- Stalled-audio detection escalates into coordinator (mic-off=clear, broken=escalate); std red-team clean. mark-stalled fully removed. Pre-existing preflight failure logged to weekly list. /clear Sonnet+validator. R1+R2+R3 done.
+[overmind] 2026-07-01T09:17:02+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+batch-B4 dispatched_at: 2026-07-01T09:58:19Z estimate_min: 10 bucket: SHORT — Confirm R4b auto-recovery gap closed
+[overmind] 2026-07-01T09:17:47+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:17:47+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:17:47+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:18:07+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:18:28+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:18:48+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:19:08+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:19:28+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:19:48+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:20:09+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:20:29+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:20:49+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:21:09+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:21:30+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:21:50+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:22:10+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:22:30+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:22:50+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:23:11+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:23:31+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:23:51+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:24:11+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:24:32+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:24:52+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:25:12+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:25:32+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:25:52+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:26:13+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:26:33+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:26:33+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[projcore TIER-CONFLICT batch=batch-B4 codex/sonnet=medium projcore=high resolved=high (B0-consensus participant-breaking upgrade + capped-branch wiring)]
+
+## B4 — Publish/PC recovery [IN-PROGRESS 2026-07-01]
+- Sonnet, high. PROPOSED: extract executeThrottledFullRejoin() (runFullSfuRejoin untouched), new guarded escalatePublishFailure() (healthy/publishing no-op → no clobber), wire capped-transport branch, publishRecoveryFailed signal + host-agnostic R4c notice + Rejoin button. Composition of existing primitives. APPROVED-PLAN (tier→high; 4 nail-points incl. B2a/B2b regression check).
+[overmind] 2026-07-01T09:43:48+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:43:48+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:43:48+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:44:09+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:44:29+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:44:49+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:45:09+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:45:30+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:45:50+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:45:50+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+
+## B4 — send-back iter1 (converging) [2026-07-01]
+- Validator: all PASS except R4b — terminal initial-publish exits (room.page.ts 1802-1812, 1830-1841) set audio-failed + return without escalatePublishFailure → only manual recovery. Correction: call escalatePublishFailure at both exits. corrections/batch-B4-iter1.md.
+[overmind] 2026-07-01T09:58:23+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:58:23+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:58:23+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:58:43+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:59:03+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:59:23+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11
+[overmind] 2026-07-01T09:59:24+00:00 sync OK current='Recover a person whose mic never actually connected' tasks=11

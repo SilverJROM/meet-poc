@@ -494,6 +494,12 @@ export class RoomPage implements OnDestroy {
       ? 'Audio for one or more participants could not be restored automatically.'
       : null,
   );
+  // R4/B4 (Glory case): distinct from the notice above — this is YOUR OWN publish that couldn't be
+  // restored after an automatic retry+rejoin escalation. Host-agnostic on purpose: the affected user
+  // is exactly who needs to see it, not just the host (unlike the interim initialPublishFailureNotice).
+  readonly publishRecoveryUnrecoverableNotice = computed(() =>
+    this.sfuClient.publishRecoveryFailed() ? "We couldn't restore your audio automatically. Please rejoin to reconnect." : null,
+  );
   private readonly callStartMs = signal<number | null>(null);
   private readonly clockTick = signal(0);
   private clockInterval: number | null = null;
@@ -687,6 +693,9 @@ export class RoomPage implements OnDestroy {
         // B2b test-only: force the rung-4 visible-unrecovered state so an e2e can render + screenshot
         // the banner deterministically, without driving a real rejoin-throttle exhaustion.
         debug.forceSfuRejoinThrottledForTest = () => this.sfuClient.debugForceRejoinThrottledForTest();
+        // R4/B4 test-only: force the publish-recovery-unrecoverable notice so an e2e can render +
+        // screenshot it deterministically, without driving a real escalate-then-throttle exhaustion.
+        debug.forcePublishRecoveryFailedForTest = () => this.sfuClient.debugForcePublishRecoveryFailedForTest();
         // B1 test-only: drive the live remote-audio AudioContext into 'suspended' so
         // an e2e can model the autoplay-blocked / suspended-with-sources negative path.
         // Attached to the remoteAudioMixer debug object (next to debugSnapshot()).
@@ -1794,6 +1803,13 @@ export class RoomPage implements OnDestroy {
             console.error('[sfu-client] outbound-rtp audio stat absent after publish — transceiver not established');
             this.status.set('Audio/video did not start.');
             this.preflightGateStatus.set('audio-failed');
+            // R4/B4: a terminal exit here already sets 'audio-failed', so the finally block's
+            // shouldSurfacePublishFailure choke point never fires for it — escalate directly.
+            // localPublishState is still 'published' at this point (publish() itself succeeded);
+            // mark it as the transceiver failure it actually is first, or escalatePublishFailure's
+            // own healthy-publish guard would see 'published' and silently no-op.
+            this.sfuClient.markPublishAttemptFailed('outbound-rtp audio transceiver not established');
+            this.sfuClient.escalatePublishFailure();
             if (shouldShowAudioFailNotice({ isHost: this.isHost() })) {
               this.initialPublishFailureNotice.set("Your audio wasn't accepted by the call. Check your network and try again.");
             }
@@ -1823,6 +1839,14 @@ export class RoomPage implements OnDestroy {
             this.status.set('Audio/video did not start.');
             this.actionNotice.set(null);
             this.preflightGateStatus.set('audio-failed');
+            // R4/B4: same reasoning as the transceiver-check exit above — this terminal exit
+            // already sets 'audio-failed', so escalate directly rather than relying on the
+            // finally block's shouldSurfacePublishFailure choke point (it won't fire here).
+            // markPublishAttemptFailed is a no-op if doPublish's own catch already set 'error'
+            // (the common case); it only corrects the rarer case where the thrown error came from
+            // a step after a successful publish() (e.g. republishLiveScreenTrackIfNeeded).
+            this.sfuClient.markPublishAttemptFailed(String(err));
+            this.sfuClient.escalatePublishFailure();
             if (shouldShowAudioFailNotice({ isHost: this.isHost() })) {
               this.initialPublishFailureNotice.set(this.initialPublishFailureMessage(retry.reason));
             }
@@ -1861,6 +1885,9 @@ export class RoomPage implements OnDestroy {
           if (shouldOpenDeviceDialogOnAudioFail({ isHost: this.isHost() })) {
             this.inCallDeviceDialogOpen.set(true);
           }
+          // R4/B4: single choke point for every silent exit out of the retry loop above — escalate
+          // to a full SFU rejoin (host and guest alike) rather than leaving recovery to a manual click.
+          this.sfuClient.escalatePublishFailure();
         }
       }
     }
@@ -4570,6 +4597,7 @@ declare global {
       injectActiveSpeakerStream?: (id: string, stream: MediaStream) => void;
       forceActiveSpeakerForTest?: (id: string | null) => void;
       forceSfuRejoinThrottledForTest?: () => void;
+      forcePublishRecoveryFailedForTest?: () => void;
     };
   }
 }

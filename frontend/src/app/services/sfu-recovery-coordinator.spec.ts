@@ -648,4 +648,220 @@ function make406Error(): HttpErrorResponse {
   });
 }
 
+// B4 — publish-side escalation (the Glory case: admitted client whose publish never reached
+// 'published', hasPc:false / status null|'error'). escalatePublishFailure() reuses the IDENTICAL
+// throttled full-rejoin executor proven above for rung-3 — same coalescing lock, same ≤1/15s +
+// ≤2/2min throttle — via a guard that (unlike runFullSfuRejoin) does NOT require a prior
+// 'published' status, since that status is exactly what never happened in this failure class.
+{
+  // NEVER-PUBLISHED-ESCALATE — status null triggers the shared rejoin executor and clears once
+  // the simulated republish succeeds.
+  const sfu = createSfuClient();
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  sfu.localPublishState.set(null); // never-published Glory case
+
+  let handlerCalls = 0;
+  sfu.setTransportRecoveryHandler(async () => {
+    handlerCalls += 1;
+    installPublishedSfuState(sfu, pc); // simulate a completed full republish
+  });
+
+  sfu.escalatePublishFailure();
+  await flushMicrotasks();
+
+  assert.equal(handlerCalls, 1, 'NEVER-PUBLISHED-ESCALATE: escalatePublishFailure reuses the shared throttled rejoin executor');
+  assert.equal(sfu.publishRecoveryFailed(), false, 'NEVER-PUBLISHED-ESCALATE: publish healthy again after republish — not flagged unrecoverable');
+
+  sfu.destroy();
+}
+
+{
+  // NO-CLOBBER-HEALTHY — a genuinely healthy 'published' state must never trigger a rejoin
+  // (B4 handshake concern #1).
+  const sfu = createSfuClient();
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc);
+
+  let handlerCalls = 0;
+  sfu.setTransportRecoveryHandler(async () => {
+    handlerCalls += 1;
+  });
+
+  sfu.escalatePublishFailure();
+  await flushMicrotasks();
+
+  assert.equal(handlerCalls, 0, 'NO-CLOBBER-HEALTHY: escalatePublishFailure is a no-op against a healthy publish');
+  assert.equal(sfu.publishRecoveryFailed(), false, 'NO-CLOBBER-HEALTHY: never flags a healthy publish as failed');
+
+  sfu.destroy();
+}
+
+{
+  // NO-CLOBBER-IN-FLIGHT — a publish attempt already in flight ('publishing') must not be
+  // interrupted by an escalation (B4 handshake concern #1).
+  const sfu = createSfuClient();
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  sfu.localPublishState.set({ cfSessionId: '', status: 'publishing', tracks: [] });
+
+  let handlerCalls = 0;
+  sfu.setTransportRecoveryHandler(async () => {
+    handlerCalls += 1;
+  });
+
+  sfu.escalatePublishFailure();
+  await flushMicrotasks();
+
+  assert.equal(handlerCalls, 0, 'NO-CLOBBER-IN-FLIGHT: escalatePublishFailure never interrupts a publish attempt already in flight');
+
+  sfu.destroy();
+}
+
+{
+  // UNRECOVERABLE-ON-FAILURE — the rejoin handler fails to republish; publishRecoveryFailed flips
+  // true so room.page's host-agnostic terminal notice can render (R4c, handshake concern #3).
+  const sfu = createSfuClient();
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  sfu.localPublishState.set({ cfSessionId: '', status: 'error', tracks: [], error: 'boom' });
+
+  sfu.setTransportRecoveryHandler(async () => {
+    throw new Error('republish failed');
+  });
+
+  sfu.escalatePublishFailure();
+  await flushMicrotasks();
+
+  assert.equal(sfu.publishRecoveryFailed(), true, 'UNRECOVERABLE-ON-FAILURE: a failed republish attempt flags the terminal notice');
+
+  sfu.destroy();
+}
+
+{
+  // CAPPED-WIRES-TO-ESCALATE — the previously dead-end handleTransportStateChange 'capped' branch
+  // (B4 item 2b) now escalates into publish recovery instead of silently stopping.
+  const sfu = createSfuClient();
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  sfu.localPublishState.set({ cfSessionId: '', status: 'error', tracks: [], error: 'transport dead' });
+  (pc as unknown as { connectionState: string }).connectionState = 'failed';
+  (pc as unknown as { iceConnectionState: string }).iceConnectionState = 'failed';
+
+  let handlerCalls = 0;
+  sfu.setTransportRecoveryHandler(async () => {
+    handlerCalls += 1;
+    installPublishedSfuState(sfu, pc);
+  });
+
+  const privateSfu = sfu as unknown as {
+    transportRecoveryAttempts: number;
+    handleTransportStateChange: () => void;
+  };
+  privateSfu.transportRecoveryAttempts = 3; // already at SFU_TRANSPORT_RECOVERY_CAP — next decision is 'capped'
+  privateSfu.handleTransportStateChange();
+  await flushMicrotasks();
+
+  assert.equal(handlerCalls, 1, "CAPPED-WIRES-TO-ESCALATE: the capped transport branch now escalates instead of dead-ending");
+
+  sfu.destroy();
+}
+
+{
+  // THROTTLE-SHARED — no publish/rejoin storm: a publish-triggered escalation shares the SAME
+  // timestamp budget as prior subscribe-triggered rejoins, so it can be capped out too (B4
+  // handshake concern #4 — no separate/parallel storm guard).
+  const sfu = createSfuClient();
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc);
+
+  sfu.setTransportRecoveryHandler(async () => {
+    installPublishedSfuState(sfu, pc);
+  });
+
+  // Consume the ≤2/2min budget via two ordinary (subscribe-side) rung-3 rejoins, spaced past the
+  // ≤1/15s gate.
+  const privateSfu = sfu as unknown as { sfuRejoinTimestamps: number[] };
+  sfu.retryFullSfuRejoinNow();
+  await flushMicrotasks();
+  // Backdate the just-recorded timestamp so the next call clears the 15s gate without a real sleep.
+  privateSfu.sfuRejoinTimestamps = privateSfu.sfuRejoinTimestamps.map((t) => t - 20_000);
+  sfu.retryFullSfuRejoinNow();
+  await flushMicrotasks();
+
+  assert.equal(sfu.sfuRejoinThrottled(), false, 'THROTTLE-SHARED sanity: two spaced rejoins are not yet throttled');
+
+  // Now drive the publish-never-established Glory case — the shared budget is already at 2/2min,
+  // so this escalation must be throttled, not executed as a third rejoin.
+  sfu.localPublishState.set(null);
+  sfu.escalatePublishFailure();
+  await flushMicrotasks();
+
+  assert.equal(sfu.sfuRejoinThrottled(), true, 'THROTTLE-SHARED: publish-triggered escalation shares the subscribe-side throttle budget — no storm');
+  assert.equal(sfu.publishRecoveryFailed(), true, 'THROTTLE-SHARED: a throttled escalation still surfaces as unrecoverable, not silently latched');
+
+  sfu.destroy();
+}
+
+// B4 send-back iter1 — room.page.ts's TWO terminal initial-publish-failure exits (transceiver-check
+// failure, and permanent/retry-cap exhaustion) now call escalatePublishFailure() so the Glory case
+// gets automatic recovery, not just the manual Rejoin button. These tests mirror each exit's EXACT
+// state sequence, because a naive "just add the call" fix is a silent no-op for the transceiver-check
+// exit: publish() itself already succeeded there (localPublishState is still 'published'), and
+// isLocalPublishHealthy() only inspects status/PC/ICE — it would read that as healthy and skip the
+// rejoin entirely. room.page.ts now calls markPublishAttemptFailed() first to correct the state.
+{
+  // TERMINAL-TRANSCEIVER-FAILURE-ESCALATES — mirrors publishInitialSfuWithRetry's transceiver-check-
+  // failure exit: publish() succeeded (status 'published'), hasOutboundAudioTrack() then failed.
+  const sfu = createSfuClient();
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc); // status: 'published' — publish() itself succeeded
+
+  let handlerCalls = 0;
+  sfu.setTransportRecoveryHandler(async () => {
+    handlerCalls += 1;
+    installPublishedSfuState(sfu, pc);
+  });
+
+  // Exact sequence room.page.ts's transceiver-check-failure branch now runs.
+  sfu.markPublishAttemptFailed('outbound-rtp audio transceiver not established');
+  sfu.escalatePublishFailure();
+  await flushMicrotasks();
+
+  assert.equal(
+    handlerCalls,
+    1,
+    'TERMINAL-TRANSCEIVER-FAILURE-ESCALATES: without markPublishAttemptFailed, escalatePublishFailure would see status still "published" and no-op — this proves the fix actually fires',
+  );
+  assert.equal(sfu.publishRecoveryFailed(), false, 'TERMINAL-TRANSCEIVER-FAILURE-ESCALATES: clears once the republish succeeds');
+
+  sfu.destroy();
+}
+
+{
+  // TERMINAL-RETRY-CAP-ESCALATES — mirrors publishInitialSfuWithRetry's permanent/retry-cap-exhaustion
+  // exit: doPublish's own catch already set status:'error' before this branch runs (the common case).
+  const sfu = createSfuClient();
+  const pc = makeMultiSubscribePc();
+  installPublishedSfuState(sfu, pc);
+  sfu.localPublishState.set({ cfSessionId: '', status: 'error', tracks: [], error: 'publish failed permanently' });
+
+  let handlerCalls = 0;
+  sfu.setTransportRecoveryHandler(async () => {
+    handlerCalls += 1;
+    installPublishedSfuState(sfu, pc);
+  });
+
+  // Exact sequence room.page.ts's retry-cap-exhaustion branch now runs (markPublishAttemptFailed is a
+  // no-op here since status is already 'error' — proves it doesn't interfere with the common case).
+  sfu.markPublishAttemptFailed('publish failed permanently');
+  sfu.escalatePublishFailure();
+  await flushMicrotasks();
+
+  assert.equal(handlerCalls, 1, 'TERMINAL-RETRY-CAP-ESCALATES: retry-cap exhaustion now triggers automatic full-rejoin escalation');
+  assert.equal(sfu.publishRecoveryFailed(), false, 'TERMINAL-RETRY-CAP-ESCALATES: clears once the republish succeeds');
+
+  sfu.destroy();
+}
+
 console.log('sfu-recovery-coordinator: all assertions passed');

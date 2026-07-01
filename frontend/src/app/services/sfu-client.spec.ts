@@ -1040,6 +1040,28 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
   }
 }
 
+// R4/B4 — a real successful publish() clears a prior publishRecoveryFailed=true (no stuck-true
+// terminal notice once the underlying publish is actually healthy again — B4 handshake concern #3).
+{
+  const http = {
+    post: (url: string) => {
+      if (url === '/api/sfu/session') return of({ sessionId: 'cf-session' });
+      if (url === '/api/sfu/tracks') return of({ sessionDescription: { type: 'answer', sdp: 'answer-sdp' } });
+      throw new Error(`unexpected POST ${url}`);
+    },
+  } as unknown as Partial<HttpClient>;
+  const sfu = createSfuClient(http);
+  sfu.localPublishState.set({ cfSessionId: '', status: 'error', tracks: [], error: 'boom' });
+  sfu.publishRecoveryFailed.set(true);
+
+  await withPublishPeerConnectionRecorder(async () => {
+    await sfu.publish({ clientKey: 'ck', participantId: 'local-p', sessionId: 'room-1', localStream: null });
+  });
+
+  assert.equal(sfu.localPublishState()?.status, 'published', 'sanity: the driven publish() actually reached published');
+  assert.equal(sfu.publishRecoveryFailed(), false, 'a real successful publish clears publishRecoveryFailed — no stuck-true terminal notice');
+}
+
 // collectDiagnostics — international stats are parsed from one getStats report and null-safe when absent
 {
   const { diagnostics, getStatsCalls } = await collectDiagnosticsFromStats(
