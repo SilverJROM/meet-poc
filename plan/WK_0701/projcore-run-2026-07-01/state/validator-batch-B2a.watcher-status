@@ -1,0 +1,6 @@
+role=validator
+batch=batch-B2a
+status=REPRO-CLEARED-ON-LOCAL
+source=callback
+line_no=29
+note=Iter 3 final validation cleared: live-mid-conflict fallback and own cap now escalate to needs-rejoin plus low-frequency retry; mandated timed specs pass.

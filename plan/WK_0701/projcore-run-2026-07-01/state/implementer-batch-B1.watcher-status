@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B1
+status=PROPOSED
+source=callback
+line_no=2
+note=Fault-injection hooks + 4 failing repro tests (406, advertised-not-subscribed, mark-stalled, stale-in-flight guard)

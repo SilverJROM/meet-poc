@@ -15,6 +15,7 @@ import {
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
 import { extractOutboundAudioSource, type OutboundAudioSourceStat } from './mic-energy';
 import { extractSubscribeFailureEvidence, type SubscribeFailureEvidence } from './sfu-subscribe-failure-evidence.js';
+import { shouldBindSubscribeResponse } from './sfu-recovery-epoch.js';
 import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair, SfuConnectionQuality } from './meeting-sessions.service';
 export type { RemotePublisher } from './sfu-roster-utils.js';
 
@@ -46,6 +47,16 @@ export interface SubscribedTrackEntry {
   kind: string;
   mid: string;
 }
+
+// Emitted once per recovery-ladder step (B0 consensus rungs 1-2; needs-rejoin/throttled mark the
+// bounded never-give-up continuation pending B2b's rung-3 full rejoin).
+export type SfuRecoveryDiagnosticsEvent = {
+  rung: 'subscribe-retry' | 'subscribe-renegotiate' | 'needs-rejoin' | 'throttled';
+  publisherClientId: string;
+  epoch: number;
+  attempt: number;
+  atMs: number;
+};
 
 const VIDEO_SIMULCAST_ENCODINGS: RTCRtpEncodingParameters[] = [
   { rid: 'h', scaleResolutionDownBy: 1, maxBitrate: 1_200_000 },
@@ -98,6 +109,7 @@ export class SfuClientService {
   // Bumped on doSubscribe failure so the subscription effect re-fires for a retry
   readonly subscribeRetryVersion = signal(0);
   readonly lastSubscribeFailureEvidence = signal<SubscribeFailureEvidence | null>(null);
+  readonly lastRecoveryEvent = signal<SfuRecoveryDiagnosticsEvent | null>(null);
 
   private pc: RTCPeerConnection | null = null;
   private audioSender: RTCRtpSender | null = null;
@@ -105,6 +117,9 @@ export class SfuClientService {
   private screenSender: RTCRtpSender | null = null;
   // Single serialized queue — all PC-mutating ops run through enqueue() (publish/subscribe/close/renegotiate)
   private opQueue: Promise<void> = Promise.resolve();
+  // Bumped every time opQueue is abandoned/reset (leave/reconnect/rejoin) — an async subscribe path
+  // that captured an older epoch must no-op its bind (see shouldBindSubscribeResponse usage below).
+  private recoveryEpoch = 0;
 
   private callerCreds: { clientKey: string; participantId: string; sessionId: string } | null = null;
   private subscribedClientIds = new Set<string>();
@@ -115,6 +130,22 @@ export class SfuClientService {
   private readonly SUBSCRIBE_RETRY_CAP = 7;
   private readonly SUBSCRIBE_RETRY_BASE_BACKOFF_MS = 250;
   private readonly SUBSCRIBE_RETRY_MAX_BACKOFF_MS = 4000;
+  // Recovery ladder (B0 consensus): rung-1 same-session retry + rung-2 forced renegotiated retry,
+  // kept separate from the legacy subscribeRetryAttempts map above (still used by the live-mid-conflict
+  // fallback at its original cap/backoff — out of B2a scope, unchanged).
+  private subscribeRecoveryRung1Attempts = new Map<string, number>();
+  private subscribeRecoveryRung2Attempts = new Map<string, number>();
+  private subscribeRecoveryLowFreqTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly SUBSCRIBE_RECOVERY_RUNG1_CAP = 3;
+  private readonly SUBSCRIBE_RECOVERY_RUNG1_BASE_BACKOFF_MS = 250;
+  private readonly SUBSCRIBE_RECOVERY_RUNG1_MAX_BACKOFF_MS = 1000;
+  private readonly SUBSCRIBE_RECOVERY_RUNG2_CAP = 2;
+  private readonly SUBSCRIBE_RECOVERY_RUNG2_BASE_BACKOFF_MS = 500;
+  private readonly SUBSCRIBE_RECOVERY_RUNG2_MAX_BACKOFF_MS = 1000;
+  private readonly SUBSCRIBE_RECOVERY_JITTER_MAX_MS = 50;
+  // No terminal give-up: once rung-2 exhausts, keep retrying same-session at low frequency while
+  // admitted+advertised (B2b hooks the actual rejoin into this continuation).
+  private readonly SUBSCRIBE_RECOVERY_LOW_FREQUENCY_MS = 30_000;
   // Subscribe-latency: time from subscribe issued → first ontrack arrival per publisher
   private subscribeInitiatedAt = new Map<string, number>();
   private subscribeFirstFrameAt = new Map<string, number>();
@@ -147,6 +178,14 @@ export class SfuClientService {
     return result;
   }
 
+  // Abandons the serialized op queue (leave/reconnect/rejoin) and bumps the recovery epoch so any
+  // async subscribe op already in flight — dispatched under the old queue, not cancelled by this —
+  // no-ops its bind instead of landing on the new session.
+  private resetOpQueue(): void {
+    this.opQueue = Promise.resolve();
+    this.recoveryEpoch += 1;
+  }
+
   isLocalPublishHealthy(): boolean {
     const publishState = this.localPublishState();
     const pc = this.pc;
@@ -174,7 +213,8 @@ export class SfuClientService {
     // Mark before enqueue to prevent double-subscribe
     this.subscribedClientIds.add(publisher.clientId);
     this.armSubscribeStuckWatchdog(publisher.clientId);
-    void this.enqueue(() => this.doSubscribe(publisher)).catch((err) => {
+    const capturedEpoch = this.recoveryEpoch;
+    void this.enqueue(() => this.doSubscribe(publisher, capturedEpoch)).catch((err) => {
       if (err instanceof LiveMidConflictError) {
         this.scheduleLiveMidConflictRenegotiationRetry(publisher, publisher.tracks, 'initial-subscribe', err);
         return;
@@ -189,10 +229,8 @@ export class SfuClientService {
           pcSignalingState: this.pc?.signalingState ?? null,
         }),
       );
-      const retry = this.nextSubscribeRetry(publisher.clientId, false);
-      if (!retry.shouldRetry) return;
       this.subscribedClientIds.delete(publisher.clientId);
-      this.scheduleSubscribeRetryBackoff(retry.backoffMs);
+      this.scheduleRecoveryEscalation(publisher.clientId, false);
     });
   }
 
@@ -201,8 +239,7 @@ export class SfuClientService {
     const initiatedAt = this.subscribeInitiatedAt.get(publisherClientId) ?? Date.now();
     const timer = setTimeout(() => {
       this.subscribeStuckTimers.delete(publisherClientId);
-      const retry = this.nextSubscribeRetry(publisherClientId, this.subscribeFirstFrameAt.has(publisherClientId));
-      if (!retry.shouldRetry) return;
+      const hasFirstFrame = this.subscribeFirstFrameAt.has(publisherClientId);
       console.warn('[sfu] subscribe stuck >10s — no ontrack from publisher', {
         publisherClientId,
         initiatedAtMs: initiatedAt,
@@ -210,13 +247,144 @@ export class SfuClientService {
         subscribedClientIds: [...this.subscribedClientIds],
         pcConnectionState: this.pc?.connectionState ?? null,
         pcIceConnectionState: this.pc?.iceConnectionState ?? null,
-        retryAttempts: retry.nextAttempts,
-        retryBackoffMs: retry.backoffMs,
       });
-      this.clearPublisherSubscriptionStateForRetry(publisherClientId);
-      this.scheduleSubscribeRetryBackoff(retry.backoffMs);
+      this.scheduleRecoveryEscalation(publisherClientId, hasFirstFrame);
     }, this.SUBSCRIBE_STUCK_THRESHOLD_MS);
     this.subscribeStuckTimers.set(publisherClientId, timer);
+  }
+
+  // Recovery coordinator (B0 consensus, R2): rung-1 same-session retry → rung-2 forced renegotiated
+  // retry → bounded low-frequency continuation. Coalesces via the same "one timer per publisherClientId"
+  // pattern as the stuck watchdog; never latches a terminal give-up while canRunSubscribeRecovery() holds.
+  private scheduleRecoveryEscalation(publisherClientId: string, hasFirstFrame: boolean): void {
+    const publisher = this.remotePublishers().get(publisherClientId);
+    if (!publisher || !this.canRunSubscribeRecovery(publisher)) return;
+
+    const rung1 = planSubscribeRetry({
+      currentAttempts: this.subscribeRecoveryRung1Attempts.get(publisherClientId) ?? 0,
+      cap: this.SUBSCRIBE_RECOVERY_RUNG1_CAP,
+      hasFirstFrame,
+      baseBackoffMs: this.SUBSCRIBE_RECOVERY_RUNG1_BASE_BACKOFF_MS,
+      maxBackoffMs: this.SUBSCRIBE_RECOVERY_RUNG1_MAX_BACKOFF_MS,
+    });
+    if (rung1.reason === 'healthy') return;
+
+    if (!rung1.capped) {
+      this.subscribeRecoveryRung1Attempts.set(publisherClientId, rung1.nextAttempts);
+      this.emitRecoveryEvent('subscribe-retry', publisherClientId, rung1.nextAttempts);
+      const timer = setTimeout(() => {
+        this.subscribeBackoffTimers.delete(timer);
+        this.runRecoverySubscribeAttempt(publisherClientId, { forceRenegotiation: false, source: 'rung1' });
+      }, this.withJitter(rung1.backoffMs ?? 0));
+      this.subscribeBackoffTimers.add(timer);
+      return;
+    }
+
+    const rung2 = planSubscribeRetry({
+      currentAttempts: this.subscribeRecoveryRung2Attempts.get(publisherClientId) ?? 0,
+      cap: this.SUBSCRIBE_RECOVERY_RUNG2_CAP,
+      hasFirstFrame: false,
+      baseBackoffMs: this.SUBSCRIBE_RECOVERY_RUNG2_BASE_BACKOFF_MS,
+      maxBackoffMs: this.SUBSCRIBE_RECOVERY_RUNG2_MAX_BACKOFF_MS,
+    });
+
+    if (!rung2.capped) {
+      this.subscribeRecoveryRung2Attempts.set(publisherClientId, rung2.nextAttempts);
+      this.emitRecoveryEvent('subscribe-renegotiate', publisherClientId, rung2.nextAttempts);
+      const timer = setTimeout(() => {
+        this.subscribeBackoffTimers.delete(timer);
+        this.runRecoverySubscribeAttempt(publisherClientId, { forceRenegotiation: true, source: 'rung2' });
+      }, this.withJitter(rung2.backoffMs ?? 0));
+      this.subscribeBackoffTimers.add(timer);
+      return;
+    }
+
+    // Rung-2 exhausted: NOT a terminal stop. Mark needs-rejoin (B2b consumes this to fire the full
+    // local SFU rejoin) and keep the publisher alive via a bounded low-frequency same-session retry.
+    this.emitRecoveryEvent('needs-rejoin', publisherClientId, rung2.nextAttempts);
+    this.armSubscribeRecoveryLowFrequencyRetry(publisherClientId);
+  }
+
+  private runRecoverySubscribeAttempt(
+    publisherClientId: string,
+    options: { forceRenegotiation: boolean; source: 'rung1' | 'rung2' | 'low-freq' },
+  ): void {
+    const publisher = this.remotePublishers().get(publisherClientId);
+    if (!publisher || !this.canRunSubscribeRecovery(publisher)) return;
+
+    this.clearPublisherSubscriptionStateForRetry(publisherClientId);
+    this.subscribedClientIds.add(publisherClientId);
+    this.armSubscribeStuckWatchdog(publisherClientId);
+    const capturedEpoch = this.recoveryEpoch;
+
+    void this.enqueue(() => this.doSubscribeTracks(publisher, publisher.tracks, { forceRenegotiation: options.forceRenegotiation, capturedEpoch }))
+      .catch((err) => {
+        if (err instanceof LiveMidConflictError) {
+          this.scheduleLiveMidConflictRenegotiationRetry(publisher, publisher.tracks, 'initial-subscribe', err);
+          return;
+        }
+        this.lastSubscribeFailureEvidence.set(
+          extractSubscribeFailureEvidence(err, {
+            operation: 'subscribe',
+            endpoint: 'POST /api/sfu/tracks',
+            publisher,
+            localCfSessionId: this.localPublishState()?.cfSessionId ?? null,
+            remoteCfSessionId: publisher.cfSessionId,
+            pcSignalingState: this.pc?.signalingState ?? null,
+          }),
+        );
+        this.subscribedClientIds.delete(publisherClientId);
+        if (options.source !== 'low-freq') this.scheduleRecoveryEscalation(publisherClientId, false);
+      });
+  }
+
+  private armSubscribeRecoveryLowFrequencyRetry(publisherClientId: string): void {
+    if (this.subscribeRecoveryLowFreqTimers.has(publisherClientId)) return;
+    const timer = setTimeout(() => {
+      this.subscribeRecoveryLowFreqTimers.delete(publisherClientId);
+      const publisher = this.remotePublishers().get(publisherClientId);
+      if (!publisher || !this.canRunSubscribeRecovery(publisher)) return;
+      this.emitRecoveryEvent('throttled', publisherClientId, 0);
+      this.runRecoverySubscribeAttempt(publisherClientId, { forceRenegotiation: false, source: 'low-freq' });
+      // Re-arm unconditionally — this is the never-give-up continuation until B2b's rejoin lands.
+      this.armSubscribeRecoveryLowFrequencyRetry(publisherClientId);
+    }, this.SUBSCRIBE_RECOVERY_LOW_FREQUENCY_MS);
+    this.subscribeRecoveryLowFreqTimers.set(publisherClientId, timer);
+  }
+
+  private clearSubscribeRecoveryLowFrequencyTimer(publisherClientId: string): void {
+    const timer = this.subscribeRecoveryLowFreqTimers.get(publisherClientId);
+    if (timer) clearTimeout(timer);
+    this.subscribeRecoveryLowFreqTimers.delete(publisherClientId);
+  }
+
+  private clearAllSubscribeRecoveryLowFrequencyTimers(): void {
+    for (const timer of this.subscribeRecoveryLowFreqTimers.values()) clearTimeout(timer);
+    this.subscribeRecoveryLowFreqTimers.clear();
+  }
+
+  private clearSubscribeRecoveryState(publisherClientId: string): void {
+    this.subscribeRecoveryRung1Attempts.delete(publisherClientId);
+    this.subscribeRecoveryRung2Attempts.delete(publisherClientId);
+    this.clearSubscribeRecoveryLowFrequencyTimer(publisherClientId);
+  }
+
+  // Gates the recovery ladder: admitted+session · local publish 'published' · publisher still
+  // present in remotePublishers · publisher advertises >=1 audio track (R2's failure domain).
+  private canRunSubscribeRecovery(publisher: import('./sfu-roster-utils.js').RemotePublisher): boolean {
+    if (!this.callerCreds) return false;
+    if (this.localPublishState()?.status !== 'published') return false;
+    if (!this.remotePublishers().has(publisher.clientId)) return false;
+    return publisher.tracks.some((track) => track.kind === 'audio');
+  }
+
+  private emitRecoveryEvent(rung: SfuRecoveryDiagnosticsEvent['rung'], publisherClientId: string, attempt: number): void {
+    this.lastRecoveryEvent.set({ rung, publisherClientId, epoch: this.recoveryEpoch, attempt, atMs: Date.now() });
+    this.subscribeRetryVersion.update((v) => v + 1);
+  }
+
+  private withJitter(backoffMs: number): number {
+    return backoffMs + Math.floor(Math.random() * this.SUBSCRIBE_RECOVERY_JITTER_MAX_MS);
   }
 
   private scheduleSubscribeRetryBackoff(backoffMs: number): void {
@@ -305,7 +473,7 @@ export class SfuClientService {
     const nextAttempts = (this.liveMidConflictRetryAttempts.get(key) ?? 0) + 1;
     this.liveMidConflictRetryAttempts.set(key, nextAttempts);
     if (nextAttempts > LIVE_MID_CONFLICT_RENEGOTIATION_CAP) {
-      console.warn('[SFU] live mid conflict renegotiation retry capped without permanent-stop; awaiting fresh roster/publisher state', {
+      console.warn('[SFU] live mid conflict renegotiation retry capped — escalating to low-frequency recovery continuation (no permanent stop)', {
         publisherClientId: publisher.clientId,
         publisherCfSessionId: publisher.cfSessionId,
         trackNames: missingTracks.map((track) => track.trackName),
@@ -314,6 +482,13 @@ export class SfuClientService {
         conflictMid: err.mid,
       });
       if (source === 'initial-subscribe') this.subscribedClientIds.delete(publisher.clientId);
+      // NOT a terminal stop (R2 never-give-up invariant): deleting the guard above only lets the
+      // ambient effect maybe retry on a future roster/presence change — it doesn't guarantee one
+      // arrives. Arm the same shared low-frequency continuation as a proactive safety net.
+      if (this.canRunSubscribeRecovery(publisher)) {
+        this.emitRecoveryEvent('needs-rejoin', publisher.clientId, nextAttempts);
+        this.armSubscribeRecoveryLowFrequencyRetry(publisher.clientId);
+      }
       return;
     }
 
@@ -341,7 +516,8 @@ export class SfuClientService {
         return;
       }
 
-      void this.enqueue(() => this.doSubscribeTracks(current, currentMissingTracks, { forceRenegotiation: true }))
+      const capturedEpoch = this.recoveryEpoch;
+      void this.enqueue(() => this.doSubscribeTracks(current, currentMissingTracks, { forceRenegotiation: true, capturedEpoch }))
         .then(() => this.clearLiveMidConflictRetryKey(key))
         .catch((retryErr) => {
           if (retryErr instanceof LiveMidConflictError) {
@@ -354,7 +530,17 @@ export class SfuClientService {
             return;
           }
           const retry = this.nextSubscribeRetry(current.clientId, false);
-          if (!retry.shouldRetry) return;
+          if (!retry.shouldRetry) {
+            // NOT a terminal stop (R2 never-give-up invariant): nextSubscribeRetry's own cap-exhaust
+            // otherwise leaves subscribedClientIds latched with nothing scheduled. Mirror the mid-call
+            // fix — delete the guard and hand the publisher to the shared low-frequency continuation.
+            if (retry.capped && this.canRunSubscribeRecovery(current)) {
+              this.subscribedClientIds.delete(current.clientId);
+              this.emitRecoveryEvent('needs-rejoin', current.clientId, retry.nextAttempts);
+              this.armSubscribeRecoveryLowFrequencyRetry(current.clientId);
+            }
+            return;
+          }
           this.subscribedClientIds.delete(current.clientId);
           this.scheduleSubscribeRetryBackoff(retry.backoffMs);
         });
@@ -571,13 +757,16 @@ export class SfuClientService {
     this.pendingOntrack.clear();
     this.subscribeMidConflictWarnings.clear();
     this.subscribeRetryAttempts.clear();
+    this.subscribeRecoveryRung1Attempts.clear();
+    this.subscribeRecoveryRung2Attempts.clear();
+    this.clearAllSubscribeRecoveryLowFrequencyTimers();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
     this.clearAllSubscribeBackoffTimers();
     this.clearAllMidCallSubscribeRetryState();
     this.resetConnectionQuality();
-    this.opQueue = Promise.resolve();
+    this.resetOpQueue();
     this.localPublishState.set(null);
     this.setPublishPhase(null);
     this.remoteStreams.set(new Map());
@@ -971,6 +1160,7 @@ export class SfuClientService {
     if (!this.subscribeFirstFrameAt.has(entry.publisherClientId)) {
       this.subscribeFirstFrameAt.set(entry.publisherClientId, Date.now());
       this.subscribeRetryAttempts.delete(entry.publisherClientId);
+      this.clearSubscribeRecoveryState(entry.publisherClientId);
       this.disarmSubscribeStuckWatchdog(entry.publisherClientId);
     }
     if (entry.kind === 'screen') {
@@ -1032,7 +1222,7 @@ export class SfuClientService {
     this.localPublishState.set(null);
     this.setPublishPhase(null);
     this.resetTransportRecoveryState(false);
-    this.opQueue = Promise.resolve();
+    this.resetOpQueue();
   }
 
   updateCameraLayer(): Promise<void> {
@@ -1120,6 +1310,7 @@ export class SfuClientService {
     if (prev && prev.cfSessionId !== msg.cfSessionId) {
       this.clearPublisherSubscriptionStateForRetry(msg.clientId);
       this.subscribeRetryAttempts.delete(msg.clientId);
+      this.clearSubscribeRecoveryState(msg.clientId);
       this.clearMidCallSubscribeRetryState(msg.clientId);
     }
     const samePublisherSession = !!prev && prev.cfSessionId === msg.cfSessionId;
@@ -1150,6 +1341,7 @@ export class SfuClientService {
       if (prev && prev.cfSessionId !== publisher.cfSessionId) {
         this.clearPublisherSubscriptionStateForRetry(publisher.clientId);
         this.subscribeRetryAttempts.delete(publisher.clientId);
+        this.clearSubscribeRecoveryState(publisher.clientId);
         this.clearMidCallSubscribeRetryState(publisher.clientId);
       }
     }
@@ -1195,6 +1387,7 @@ export class SfuClientService {
 
     this.subscribedClientIds.delete(clientId);
     this.subscribeRetryAttempts.delete(clientId);
+    this.clearSubscribeRecoveryState(clientId);
     this.subscribeInitiatedAt.delete(clientId);
     this.subscribeFirstFrameAt.delete(clientId);
     this.disarmSubscribeStuckWatchdog(clientId);
@@ -1286,7 +1479,8 @@ export class SfuClientService {
   ): void {
     const missingTracks = this.missingAdvertisedRemoteTracks(publisher, new Set(tracks.map((track) => track.trackName)));
     if (!missingTracks.length) return;
-    void this.enqueue(() => this.doSubscribeTracks(publisher, missingTracks))
+    const capturedEpoch = this.recoveryEpoch;
+    void this.enqueue(() => this.doSubscribeTracks(publisher, missingTracks, { capturedEpoch }))
       .then(() => {
         for (const track of missingTracks) {
           this.clearMidCallSubscribeRetryKey(this.midCallSubscribeRetryKey(publisher.clientId, publisher.cfSessionId, track.trackName));
@@ -1322,13 +1516,21 @@ export class SfuClientService {
       this.midCallSubscribeRetryAttempts.set(key, retry.nextAttempts);
       if (!retry.shouldRetry) {
         if (retry.capped) {
-          console.warn('[SFU] mid-call subscribe permanently stopped after capped retries', {
+          // NOT a terminal stop (R2 never-give-up invariant applies here too): the mid-call cap has
+          // already burned this track's same-session retry budget, so hand it to the shared
+          // low-frequency continuation instead of replaying rung-1/rung-2 from zero. Coalesces with
+          // the primary path's coordinator — armSubscribeRecoveryLowFrequencyRetry no-ops if already armed.
+          console.warn('[SFU] mid-call subscribe cap exhausted — escalating to low-frequency recovery continuation (no permanent stop)', {
             publisherClientId: publisher.clientId,
             publisherCfSessionId: publisher.cfSessionId,
             trackName: track.trackName,
             retryAttempts: retry.nextAttempts,
             error: String(err),
           });
+          if (this.canRunSubscribeRecovery(publisher)) {
+            this.emitRecoveryEvent('needs-rejoin', publisher.clientId, retry.nextAttempts);
+            this.armSubscribeRecoveryLowFrequencyRetry(publisher.clientId);
+          }
         }
         this.midCallSubscribeRetryTimers.delete(key);
         continue;
@@ -1639,7 +1841,7 @@ export class SfuClientService {
     this.callerCreds = null;
     this.localPublishState.set(null);
     this.setPublishPhase(null);
-    this.opQueue = Promise.resolve();
+    this.resetOpQueue();
     this.recoveryPublishIceServers = null;
     this.pendingOntrack.clear();
     this.subscribeMidConflictWarnings.clear();
@@ -1650,6 +1852,9 @@ export class SfuClientService {
     this.subscribedClientIds.clear();
     this.midToEntry.clear();
     this.subscribeRetryAttempts.clear();
+    this.subscribeRecoveryRung1Attempts.clear();
+    this.subscribeRecoveryRung2Attempts.clear();
+    this.clearAllSubscribeRecoveryLowFrequencyTimers();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
     this.resetTransportRecoveryState(true);
@@ -1682,6 +1887,9 @@ export class SfuClientService {
     this.pendingOntrack.clear();
     this.subscribeMidConflictWarnings.clear();
     this.subscribeRetryAttempts.clear();
+    this.subscribeRecoveryRung1Attempts.clear();
+    this.subscribeRecoveryRung2Attempts.clear();
+    this.clearAllSubscribeRecoveryLowFrequencyTimers();
     this.subscribeInitiatedAt.clear();
     this.subscribeFirstFrameAt.clear();
     this.clearAllSubscribeStuckWatchdogs();
@@ -1691,7 +1899,7 @@ export class SfuClientService {
     this.resetTransportRecoveryState(true);
     this.localPublishState.set(null);
     this.setPublishPhase(null);
-    this.opQueue = Promise.resolve();
+    this.resetOpQueue();
     this.recoveryPublishIceServers = null;
     this.remotePublishers.set(new Map());
     this.remoteStreams.set(new Map());
@@ -1808,15 +2016,16 @@ export class SfuClientService {
     return recoveryIceServers ?? this.iceConfigService.getIceServers();
   }
 
-  private async doSubscribe(publisher: import('./sfu-roster-utils.js').RemotePublisher): Promise<void> {
-    await this.doSubscribeTracks(publisher, publisher.tracks);
+  private async doSubscribe(publisher: import('./sfu-roster-utils.js').RemotePublisher, capturedEpoch: number): Promise<void> {
+    await this.doSubscribeTracks(publisher, publisher.tracks, { capturedEpoch });
   }
 
   private async doSubscribeTracks(
     publisher: import('./sfu-roster-utils.js').RemotePublisher,
     tracks: { trackName: string; kind: string }[],
-    options: { forceRenegotiation?: boolean } = {},
+    options: { forceRenegotiation?: boolean; capturedEpoch?: number } = {},
   ): Promise<void> {
+    const capturedEpoch = options.capturedEpoch ?? this.recoveryEpoch;
     const creds = this.callerCreds;
     const publishState = this.localPublishState();
     if (!creds || !publishState || publishState.status !== 'published' || !this.pc) {
@@ -1892,6 +2101,26 @@ export class SfuClientService {
         publisherClientId: publisher.clientId,
         staleCfSessionId: publisher.cfSessionId,
         currentCfSessionId: publisherCurrent?.cfSessionId ?? 'gone',
+      });
+      return;
+    }
+
+    // Epoch guard (B0 consensus): a local reset/rejoin abandons opQueue and bumps recoveryEpoch —
+    // an older in-flight subscribe op (already dispatched under the previous epoch, not cancelled by
+    // that reset) must not bind onto the new pc/session even though the publisher-side session matches.
+    if (
+      !shouldBindSubscribeResponse({
+        capturedRecoveryEpoch: capturedEpoch,
+        currentRecoveryEpoch: this.recoveryEpoch,
+        inFlightPublisherClientId: publisher.clientId,
+        inFlightPublisherCfSessionId: publisher.cfSessionId,
+        currentPublisher: publisherCurrent,
+      })
+    ) {
+      console.warn('[sfu] doSubscribeTracks: stale recovery epoch — aborting bind after local reset/rejoin', {
+        publisherClientId: publisher.clientId,
+        capturedEpoch,
+        currentEpoch: this.recoveryEpoch,
       });
       return;
     }

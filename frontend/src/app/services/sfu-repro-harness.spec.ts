@@ -3,7 +3,7 @@ import '@angular/compiler';
 import { HttpClient, HttpErrorResponse } from '@angular/common/http';
 import { of, throwError } from 'rxjs';
 import { createEnvironmentInjector, runInInjectionContext, type EnvironmentInjector } from '@angular/core';
-import { SfuClientService } from './sfu-client.service.js';
+import { SfuClientService, type SfuRecoveryDiagnosticsEvent } from './sfu-client.service.js';
 import { IceConfigService } from './ice-config.service.js';
 import { ViewportService } from './viewport.service.js';
 import type { RemotePublisher } from './sfu-roster-utils.js';
@@ -126,96 +126,97 @@ function make406Error(): HttpErrorResponse {
   });
 }
 
-async function driveSubscribeUntilCapGiveUp(sfu: SfuClientService, timers: FakeTimer[], publisher: RemotePublisher): Promise<number> {
+// Drives the recovery ladder (rung-1 same-session retry → rung-2 forced renegotiated retry) by firing
+// each scheduled backoff timer in turn until the coordinator emits `needs-rejoin` (rung-2 exhausted,
+// B2b's rung-3 rejoin not yet wired). Disarms the 10s stuck watchdog each round so the fake-timer queue
+// only ever contains the ladder's own backoff timers — deterministic, no reliance on real elapsed time.
+async function driveSubscribeRecoveryUntilNeedsRejoin(
+  sfu: SfuClientService,
+  timers: FakeTimer[],
+  publisher: RemotePublisher,
+): Promise<SfuRecoveryDiagnosticsEvent[]> {
   const privateSfu = sfu as unknown as {
-    subscribedClientIds: Set<string>;
-    subscribeRetryAttempts: Map<string, number>;
     disarmSubscribeStuckWatchdog: (publisherClientId: string) => void;
   };
-  let postCalls = 0;
-  const maxRounds = 24;
+  const events: SfuRecoveryDiagnosticsEvent[] = [];
+  const maxRounds = 40;
 
   for (let round = 0; round < maxRounds; round += 1) {
     await flushSfuQueue(sfu);
     privateSfu.disarmSubscribeStuckWatchdog(publisher.clientId);
 
-    if ((privateSfu.subscribeRetryAttempts.get(publisher.clientId) ?? 0) > 7) {
-      return postCalls;
-    }
-
-    if (!privateSfu.subscribedClientIds.has(publisher.clientId)) {
-      sfu.subscribeIfNeeded(publisher);
-      postCalls += 1;
-      await flushSfuQueue(sfu);
+    const event = sfu.lastRecoveryEvent();
+    const last = events[events.length - 1];
+    if (event && event.publisherClientId === publisher.clientId && (!last || last.rung !== event.rung || last.attempt !== event.attempt)) {
+      events.push(event);
+      if (event.rung === 'needs-rejoin') return events;
     }
 
     const activeTimers = timers.filter((timer) => timer.active);
     if (!activeTimers.length) {
-      if ((privateSfu.subscribeRetryAttempts.get(publisher.clientId) ?? 0) > 7) return postCalls;
-      sfu.subscribeIfNeeded(publisher);
-      postCalls += 1;
-      await flushSfuQueue(sfu);
-      continue;
+      throw new Error('driveSubscribeRecoveryUntilNeedsRejoin: no active timer and needs-rejoin not yet observed');
     }
-
     fireNextActiveTimer(timers);
-    if (!privateSfu.subscribedClientIds.has(publisher.clientId)) {
-      sfu.subscribeIfNeeded(publisher);
-      postCalls += 1;
-    }
   }
 
-  throw new Error('driveSubscribeUntilCapGiveUp exceeded max rounds');
+  throw new Error('driveSubscribeRecoveryUntilNeedsRejoin exceeded max rounds');
 }
 
-function settleFakeTimers(timers: FakeTimer[]): void {
-  for (let guard = 0; guard < timers.length + 4; guard += 1) {
-    const active = timers.filter((timer) => timer.active);
-    if (!active.length) return;
-    for (const timer of active) {
-      timer.active = false;
-      timer.callback();
-    }
-  }
-}
-
-function assertGiveUpOutcome(
-  sfu: SfuClientService,
-  publisher: RemotePublisher,
-  postCallsAtCap: number,
-  httpPost: { calls: number },
-): void {
-  const privateSfu = sfu as unknown as {
-    subscribedClientIds: Set<string>;
-    subscribeRetryAttempts: Map<string, number>;
-    subscribeBackoffTimers: Set<unknown>;
-    subscribeStuckTimers: Map<string, unknown>;
-  };
+// Was assertGiveUpOutcome (asserted the permanent-stop cap-give-up bug). B2a replaces the terminal
+// give-up with escalation: rung-1 → rung-2 → needs-rejoin, and asserts the never-give-up invariant by
+// proving the low-frequency continuation keeps firing (see the per-test cycles after this call).
+function assertEscalationOutcome(sfu: SfuClientService, publisher: RemotePublisher, events: SfuRecoveryDiagnosticsEvent[]): void {
+  const privateSfu = sfu as unknown as { subscribedClientIds: Set<string> };
   const quality = remotePublisherDiagnosticsQuality(publisher, sfu.subscribedTracks().values());
-  const retryVersionBefore = sfu.subscribeRetryVersion();
 
-  assert.equal(quality, 'advertised-not-subscribed', 'BUG-REPRO-R1: peer remains advertised-not-subscribed after give-up');
-  assert.equal([...sfu.subscribedTracks().values()].some((entry) => entry.publisherClientId === publisher.clientId), false, 'BUG-REPRO-R1: no subscribed track entry after give-up');
-  assert.equal(privateSfu.subscribedClientIds.has(publisher.clientId), true, 'BUG-REPRO-R1: subscribe guard stays latched after cap');
-  assert.ok((privateSfu.subscribeRetryAttempts.get(publisher.clientId) ?? 0) > 7, 'BUG-REPRO-R1: subscribe retry attempts remain above cap after give-up');
-  assert.equal(privateSfu.subscribeStuckTimers.size, 0, 'BUG-REPRO-R1: stuck watchdog disarmed or inactive after cap');
+  assert.equal(quality, 'advertised-not-subscribed', 'RECOVERY-LADDER: peer remains advertised-not-subscribed while the ladder escalates');
+  assert.equal(
+    [...sfu.subscribedTracks().values()].some((entry) => entry.publisherClientId === publisher.clientId),
+    false,
+    'RECOVERY-LADDER: no subscribed track entry bound (mock always 406s)',
+  );
 
-  for (let poll = 0; poll < 3; poll += 1) {
-    const callsBefore = httpPost.calls;
-    sfu.subscribeIfNeeded(publisher);
-    assert.equal(httpPost.calls, callsBefore, `BUG-REPRO-R1: polled subscribeIfNeeded attempt ${poll + 1} does not issue another POST after cap`);
-    assert.equal(
-      remotePublisherDiagnosticsQuality(publisher, sfu.subscribedTracks().values()),
-      'advertised-not-subscribed',
-      `BUG-REPRO-R1: polled quality attempt ${poll + 1} stays advertised-not-subscribed`,
-    );
-  }
+  const retryEvents = events.filter((e) => e.rung === 'subscribe-retry');
+  const renegotiateEvents = events.filter((e) => e.rung === 'subscribe-renegotiate');
+  const needsRejoinEvents = events.filter((e) => e.rung === 'needs-rejoin');
+  assert.ok(retryEvents.length >= 3, 'RECOVERY-LADDER: rung-1 same-session retry fired its bound 3 attempts');
+  assert.ok(renegotiateEvents.length >= 2, 'RECOVERY-LADDER: rung-2 forced-renegotiated retry fired its bound 2 attempts');
+  assert.equal(needsRejoinEvents.length, 1, 'RECOVERY-LADDER: needs-rejoin fires exactly once when rung-2 exhausts');
 
-  assert.equal(sfu.subscribeRetryVersion(), retryVersionBefore, 'BUG-REPRO-R1: subscribeRetryVersion stable after give-up polling');
-  assert.equal(httpPost.calls, postCallsAtCap, 'BUG-REPRO-R1: no additional HTTP subscribe calls after cap');
+  // NOT a permanent stop: unlike the old give-up bug, the guard is not left latched with no further
+  // activity — the low-frequency continuation (asserted by the caller) keeps retrying.
+  assert.equal(
+    privateSfu.subscribedClientIds.has(publisher.clientId),
+    false,
+    'RECOVERY-LADDER: subscribe guard not left latched at needs-rejoin — low-frequency continuation still owns retry',
+  );
 }
 
-// BUG-REPRO-R1-406-subscribe-cap-give-up — forced /api/sfu/tracks 406 exhausts subscribe retries and permanently latches give-up.
+// Fires the ~30s low-frequency continuation `cycles` times and asserts each cycle issues another
+// subscribe POST and emits a `throttled` marker — the concrete proof that rung-2 exhaustion is NOT a
+// terminal stop (this is what replaces the old permanent-latch bug).
+async function assertLowFrequencyContinuationNeverGivesUp(
+  sfu: SfuClientService,
+  timers: FakeTimer[],
+  publisher: RemotePublisher,
+  httpPost: { calls: number },
+  cycles = 3,
+): Promise<void> {
+  const privateSfu = sfu as unknown as { disarmSubscribeStuckWatchdog: (publisherClientId: string) => void };
+  for (let cycle = 0; cycle < cycles; cycle += 1) {
+    const before = httpPost.calls;
+    const activeTimers = timers.filter((timer) => timer.active);
+    assert.ok(activeTimers.length > 0, `RECOVERY-LADDER: low-frequency timer still armed before cycle ${cycle + 1} (never-give-up)`);
+    fireNextActiveTimer(timers);
+    await flushSfuQueue(sfu);
+    privateSfu.disarmSubscribeStuckWatchdog(publisher.clientId);
+    assert.ok(httpPost.calls > before, `RECOVERY-LADDER: low-frequency cycle ${cycle + 1} issues another POST — never permanently stops`);
+    assert.equal(sfu.lastRecoveryEvent()?.rung, 'throttled', `RECOVERY-LADDER: low-frequency cycle ${cycle + 1} emits throttled marker`);
+  }
+}
+
+// BUG-REPRO-R1-406-subscribe-cap-escalates — forced /api/sfu/tracks 406 escalates rung1->rung2->needs-rejoin
+// and keeps retrying at low frequency instead of permanently latching give-up (was cap-give-up pre-B2a).
 {
   await withFakeTimersAsync(async (timers) => {
     const httpPost = { calls: 0 };
@@ -233,24 +234,25 @@ function assertGiveUpOutcome(
     const publisher = makeBobPublisher();
     sfu.remotePublishers.set(new Map([[publisher.clientId, publisher]]));
 
-    const postCallsAtCap = await driveSubscribeUntilCapGiveUp(sfu, timers, publisher);
-    await flushSfuQueue(sfu);
-    settleFakeTimers(timers);
-    await flushSfuQueue(sfu);
-    assert.ok(postCallsAtCap >= 7, 'BUG-REPRO-R1-406: subscribe POST attempts exhaust retry budget before permanent stop');
+    sfu.subscribeIfNeeded(publisher);
+    const callsBeforeDrive = httpPost.calls;
+    const events = await driveSubscribeRecoveryUntilNeedsRejoin(sfu, timers, publisher);
+    assert.ok(httpPost.calls > callsBeforeDrive, 'BUG-REPRO-R1-406: subscribe POST attempts fire while the ladder escalates');
 
-    assertGiveUpOutcome(sfu, publisher, postCallsAtCap, httpPost);
+    assertEscalationOutcome(sfu, publisher, events);
+    await assertLowFrequencyContinuationNeverGivesUp(sfu, timers, publisher, httpPost);
   });
 }
 
-// BUG-REPRO-R1-advertised-not-subscribed-stuck-give-up — subscribe POST hangs without first frame until stuck watchdog caps into the same give-up.
+// BUG-REPRO-R1-advertised-not-subscribed-stuck-escalates — subscribe POST fails at the transport layer;
+// the same coordinator escalates rung1->rung2->needs-rejoin and keeps retrying (was stuck-give-up pre-B2a).
 {
   await withFakeTimersAsync(async (timers) => {
-    let postCalls = 0;
+    const httpPost = { calls: 0 };
     const http = {
       post: (url: string) => {
         if (url !== '/api/sfu/tracks') return of({ sessionDescription: { type: 'answer', sdp: 'answer-sdp' } });
-        postCalls += 1;
+        httpPost.calls += 1;
         return throwError(() => new Error('subscribe transport unavailable'));
       },
     } as unknown as Partial<HttpClient>;
@@ -261,13 +263,12 @@ function assertGiveUpOutcome(
     const publisher = makeBobPublisher();
     sfu.remotePublishers.set(new Map([[publisher.clientId, publisher]]));
 
-    const postCallsAtCap = await driveSubscribeUntilCapGiveUp(sfu, timers, publisher);
-    await flushSfuQueue(sfu);
-    settleFakeTimers(timers);
-    await flushSfuQueue(sfu);
-    assert.ok(postCallsAtCap >= 7, 'BUG-REPRO-R1-stuck: subscribe attempts reach cap via retry/stuck path');
+    sfu.subscribeIfNeeded(publisher);
+    const events = await driveSubscribeRecoveryUntilNeedsRejoin(sfu, timers, publisher);
+    assert.ok(httpPost.calls >= 6, 'BUG-REPRO-R1-stuck: subscribe attempts reach needs-rejoin via the retry/renegotiate ladder');
 
-    assertGiveUpOutcome(sfu, publisher, postCalls, { calls: postCalls });
+    assertEscalationOutcome(sfu, publisher, events);
+    await assertLowFrequencyContinuationNeverGivesUp(sfu, timers, publisher, httpPost);
   });
 }
 
@@ -305,9 +306,9 @@ function assertGiveUpOutcome(
     assert.equal(evidence?.pcSignalingState, 'have-local-offer', 'BUG-REPRO-R1-406-evidence: pc.signalingState captured');
     assert.equal(isLastGumErrorCandidate(make406Error()), false, 'BUG-REPRO-R1-406-evidence: 406 is not a GUM error candidate');
 
-    await driveSubscribeUntilCapGiveUp(sfu, timers, publisher);
+    await driveSubscribeRecoveryUntilNeedsRejoin(sfu, timers, publisher);
     const finalEvidence = sfu.lastSubscribeFailureEvidence();
-    assert.ok(finalEvidence, 'BUG-REPRO-R1-406-evidence: evidence remains available after cap give-up');
+    assert.ok(finalEvidence, 'BUG-REPRO-R1-406-evidence: evidence remains available at needs-rejoin');
     assert.equal(finalEvidence?.httpStatus, 406, 'BUG-REPRO-R1-406-evidence: final evidence retains httpStatus 406');
     assert.equal(isLastGumErrorCandidate(make406Error()), false, 'BUG-REPRO-R1-406-evidence: subscribe 406 must never be classified as GUM');
   });

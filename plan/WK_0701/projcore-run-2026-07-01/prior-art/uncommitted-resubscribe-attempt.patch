@@ -1,0 +1,208 @@
+diff --git a/e2e/fixtures/auth.ts b/e2e/fixtures/auth.ts
+index 533b751..436df84 100644
+--- a/e2e/fixtures/auth.ts
++++ b/e2e/fixtures/auth.ts
+@@ -20,6 +20,6 @@ export async function loginAsJrom(page: Page): Promise<void> {
+   await page.goto('/login');
+   await page.locator('#login-email').fill(email);
+   await page.locator('#login-password').fill(initialPassword());
+-  await page.getByRole('button', { name: 'Sign in' }).click();
++  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+   await expect(page).toHaveURL(/\/app\/rooms$/);
+ }
+diff --git a/e2e/tests/sfu-b7-reconnect/sfu-reconnect.spec.ts b/e2e/tests/sfu-b7-reconnect/sfu-reconnect.spec.ts
+index 34e98ab..d416a68 100644
+--- a/e2e/tests/sfu-b7-reconnect/sfu-reconnect.spec.ts
++++ b/e2e/tests/sfu-b7-reconnect/sfu-reconnect.spec.ts
+@@ -7,7 +7,7 @@ import { createRoomViaApi } from '../../fixtures/rooms';
+ test.setTimeout(300_000);
+ 
+ async function enableCameraAndWait(page: import('@playwright/test').Page): Promise<void> {
+-  await page.locator('input[name="cameraRequested"]').check();
++  await page.locator('label.toggle-row', { has: page.locator('input[name="cameraRequested"]') }).click();
+   await expect
+     .poll(() => page.evaluate(() => !!(window as any).__meetDebug?.localVideoTrackId), { timeout: 8_000 })
+     .toBe(true);
+diff --git a/frontend/src/app/pages/room/room-decisions.spec.ts b/frontend/src/app/pages/room/room-decisions.spec.ts
+index 7c1f95d..651a204 100644
+--- a/frontend/src/app/pages/room/room-decisions.spec.ts
++++ b/frontend/src/app/pages/room/room-decisions.spec.ts
+@@ -226,7 +226,29 @@ assert.strictEqual(
+     mutedAll: false,
+   });
+ 
+-  assert.strictEqual(decision.kind, 'clear', 'CR-FIX-10: bytes-flat clear path clears the voice-stall latch');
++  assert.strictEqual(decision.kind, 'resubscribe', 'AUDIO-RECONNECT: bytes-flat path rebuilds the SFU subscription');
++  if (decision.kind === 'resubscribe') {
++    assert.deepStrictEqual(decision.nextSamples, [sample]);
++    assert.strictEqual(decision.nextAttemptsThisWindow, 4);
++  }
++}
++
++{
++  const previousSamples = voiceSamples([
++    [5_000, 7],
++    [5_000, 7],
++    [5_000, 7],
++  ]);
++  const sample = voiceSamples([[5_000, 7]])[0];
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples,
++    attemptsThisWindow: 1,
++    sample,
++    mutedAll: false,
++    publisherMicEnabled: false,
++  });
++
++  assert.strictEqual(decision.kind, 'clear', 'AUDIO-RECONNECT: muted publishers do not trigger SFU resubscribe');
+   if (decision.kind === 'clear') {
+     assert.strictEqual(decision.deletePeer, false);
+     assert.deepStrictEqual(decision.nextSamples, [sample]);
+@@ -234,6 +256,24 @@ assert.strictEqual(
+   }
+ }
+ 
++{
++  const previousSamples = voiceSamples([
++    [5_000, 7],
++    [5_000, 7],
++    [5_000, 7],
++  ]);
++  const sample = voiceSamples([[5_000, 7]])[0];
++  const decision = decideRemoteVoiceWatchdogAction({
++    previousSamples,
++    attemptsThisWindow: 4,
++    sample,
++    mutedAll: false,
++  });
++
++  assert.strictEqual(decision.kind, 'mark-stalled', 'AUDIO-RECONNECT: flat-byte resubscribe is bounded by the recovery cap');
++  assert.strictEqual(decision.nextAttemptsThisWindow, 4);
++}
++
+ {
+   const decision = decideRemoteVoiceWatchdogAction({
+     previousSamples: voiceSamples([[1_000, 7]]),
+diff --git a/frontend/src/app/pages/room/room-decisions.ts b/frontend/src/app/pages/room/room-decisions.ts
+index 009d9cb..599c481 100644
+--- a/frontend/src/app/pages/room/room-decisions.ts
++++ b/frontend/src/app/pages/room/room-decisions.ts
+@@ -1,6 +1,7 @@
+ import {
+   decideVoiceRecovery,
+   voiceRecoveryWindowExhaustedWhileStalled,
++  VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW,
+   VOICE_RECOVERY_SAMPLE_WINDOW,
+   type VoiceRecoverySample,
+   type VoiceRecoveryStep,
+@@ -75,6 +76,7 @@ export function decideLocalTrackFailureRecovery(input: {
+ export type RemoteVoiceWatchdogAction =
+   | { kind: 'clear'; deletePeer: boolean; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
+   | { kind: 'note-emission-advanced'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
++  | { kind: 'resubscribe'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
+   | { kind: 'recover'; recoveryAction: VoiceRecoveryStep; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
+   | { kind: 'mark-stalled'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
+   | { kind: 'hold'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number };
+@@ -84,6 +86,7 @@ export function decideRemoteVoiceWatchdogAction(input: {
+   attemptsThisWindow: number;
+   sample: VoiceRecoverySample | null;
+   mutedAll: boolean;
++  publisherMicEnabled?: boolean;
+ }): RemoteVoiceWatchdogAction {
+   if (input.mutedAll) return { kind: 'clear', deletePeer: false, nextSamples: [], nextAttemptsThisWindow: 0 };
+   if (!input.sample) return { kind: 'clear', deletePeer: true, nextSamples: [], nextAttemptsThisWindow: 0 };
+@@ -96,7 +99,17 @@ export function decideRemoteVoiceWatchdogAction(input: {
+   }
+ 
+   if (samples.length >= VOICE_RECOVERY_SAMPLE_WINDOW && !remoteVoiceBytesClimbed(samples)) {
+-    return { kind: 'clear', deletePeer: false, nextSamples: [input.sample], nextAttemptsThisWindow: 0 };
++    if (input.publisherMicEnabled === false) {
++      return { kind: 'clear', deletePeer: false, nextSamples: [input.sample], nextAttemptsThisWindow: 0 };
++    }
++    if (input.attemptsThisWindow < VOICE_RECOVERY_MAX_ATTEMPTS_PER_WINDOW) {
++      return {
++        kind: 'resubscribe',
++        nextSamples: [input.sample],
++        nextAttemptsThisWindow: input.attemptsThisWindow + 1,
++      };
++    }
++    return { kind: 'mark-stalled', nextSamples: samples, nextAttemptsThisWindow: input.attemptsThisWindow };
+   }
+ 
+   const action = decideVoiceRecovery({
+diff --git a/frontend/src/app/pages/room/room.page.ts b/frontend/src/app/pages/room/room.page.ts
+index 63c7247..3d7233f 100644
+--- a/frontend/src/app/pages/room/room.page.ts
++++ b/frontend/src/app/pages/room/room.page.ts
+@@ -3090,6 +3090,7 @@ export class RoomPage implements OnDestroy {
+ 
+   private async observeRemoteVoiceTrack(track: SfuInboundTrackStats & { publisherClientId: string }): Promise<void> {
+     const sample = remoteVoiceSample(track);
++    const peer = this.peers().find((candidate) => candidate.id === track.publisherClientId);
+     const state = this.remoteVoiceWatchdogPeers.get(track.publisherClientId) ?? {
+       samples: [],
+       attemptsThisWindow: 0,
+@@ -3099,6 +3100,7 @@ export class RoomPage implements OnDestroy {
+       attemptsThisWindow: state.attemptsThisWindow,
+       sample,
+       mutedAll: this.remoteAudio.mutedAll(),
++      publisherMicEnabled: peer?.micEnabled ?? true,
+     });
+ 
+     switch (decision.kind) {
+@@ -3144,6 +3146,14 @@ export class RoomPage implements OnDestroy {
+         });
+         await this.remoteAudio.recoverVoicePlayout(track.publisherClientId, decision.recoveryAction, this.selectedAudioOutputId() || undefined);
+         return;
++      case 'resubscribe': {
++        const dispatched = this.sfuClient.resubscribePublisher(track.publisherClientId, 'remote-voice-bytes-stalled');
++        this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {
++          samples: decision.nextSamples,
++          attemptsThisWindow: dispatched ? decision.nextAttemptsThisWindow : state.attemptsThisWindow,
++        });
++        return;
++      }
+     }
+   }
+ 
+diff --git a/frontend/src/app/services/sfu-client.service.ts b/frontend/src/app/services/sfu-client.service.ts
+index c0fbd79..9f85d07 100644
+--- a/frontend/src/app/services/sfu-client.service.ts
++++ b/frontend/src/app/services/sfu-client.service.ts
+@@ -184,6 +184,28 @@ export class SfuClientService {
+     });
+   }
+ 
++  resubscribePublisher(clientId: string, reason: string): boolean {
++    const publisher = this.remotePublishers().get(clientId);
++    if (!publisher || !publisher.tracks.length) return false;
++    if (publisher.cfSessionId === this.localPublishState()?.cfSessionId) return false;
++    if (this.localPublishState()?.status !== 'published') return false;
++
++    console.warn('[sfu] resubscribing publisher after stalled inbound audio', {
++      publisherClientId: clientId,
++      publisherCfSessionId: publisher.cfSessionId,
++      reason,
++      pcConnectionState: this.pc?.connectionState ?? null,
++      pcIceConnectionState: this.pc?.iceConnectionState ?? null,
++    });
++
++    this.tearDownPeerSubscription(clientId);
++    this.clearPublisherSubscriptionStateForRetry(clientId);
++    this.subscribeRetryAttempts.delete(clientId);
++    this.subscribeRetryVersion.update((v) => v + 1);
++    this.subscribeIfNeeded(publisher);
++    return true;
++  }
++
+   private armSubscribeStuckWatchdog(publisherClientId: string): void {
+     if (this.subscribeStuckTimers.has(publisherClientId)) return;
+     const initiatedAt = this.subscribeInitiatedAt.get(publisherClientId) ?? Date.now();
+@@ -1156,7 +1178,6 @@ export class SfuClientService {
+ 
+   private tearDownPeerSubscription(clientId: string): void {
+     this.clearMidCallSubscribeRetryState(clientId);
+-    if (!this.subscribedClientIds.has(clientId)) return;
+ 
+     const mids: string[] = [];
+     const nextSubscribed = new Map(this.subscribedTracks());

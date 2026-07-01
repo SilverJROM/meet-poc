@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B1-validate
+status=IDLE
+source=pane
+line_no=0
+note=STOPPED-CLEAN (saw 'Worked for …' — done turn, likely forgot callback or awaiting input)

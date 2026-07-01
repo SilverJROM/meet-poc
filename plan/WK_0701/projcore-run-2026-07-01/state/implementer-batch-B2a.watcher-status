@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B2a
+status=PROPOSED
+source=callback
+line_no=9
+note=Coordinator+epoch-guard plan ready, awaiting APPROVED-PLAN

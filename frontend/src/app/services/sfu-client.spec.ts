@@ -184,6 +184,7 @@ function makeSingleTrackSubscribePc(): RTCPeerConnection & { rollbackCount: numb
     transceiverCount(): number {
       return transceivers.length;
     },
+    close(): void {},
   };
   return pc as unknown as RTCPeerConnection & { rollbackCount: number; transceiverCount: () => number };
 }
@@ -565,38 +566,13 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
   });
 }
 
-// FIX2 — cap exhaustion stops permanently for that mid-call track and leaves no dangling timer.
-{
-  await withFakeTimersAsync(async () => {
-    const sfu = createSfuClient();
-    const publisher: RemotePublisher = {
-      clientId: 'alice',
-      participantId: 'p-alice',
-      cfSessionId: 'alice-cf',
-      revision: 2,
-      tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
-    };
-    sfu.remotePublishers.set(new Map([['alice', publisher]]));
-    const privateSfu = sfu as unknown as {
-      subscribeNewRemoteTracks: (publisher: RemotePublisher, previousTracks: { trackName: string; kind: string }[]) => void;
-      doSubscribeTracks: () => Promise<void>;
-      midCallSubscribeRetryKey: (clientId: string, cfSessionId: string, trackName: string) => string;
-      midCallSubscribeRetryAttempts: Map<string, number>;
-      midCallSubscribeRetryTimers: Map<string, unknown>;
-    };
-    const key = privateSfu.midCallSubscribeRetryKey('alice', 'alice-cf', 'alice-audio');
-    privateSfu.midCallSubscribeRetryAttempts.set(key, 7);
-    privateSfu.doSubscribeTracks = async () => {
-      throw new Error('persistent failure');
-    };
-
-    privateSfu.subscribeNewRemoteTracks(publisher, []);
-    await flushSfuQueue(sfu);
-
-    assert.equal(privateSfu.midCallSubscribeRetryAttempts.get(key), 8, 'cap exhaustion records the capped attempt');
-    assert.equal(privateSfu.midCallSubscribeRetryTimers.size, 0, 'capped mid-call retry leaves no scheduled timer');
-  });
-}
+// FIX2 cap-exhaustion terminal-stop test removed (SEND-BACK iter 1): mid-call cap-exhaust no longer
+// permanently stops — it escalates into the shared recovery coordinator's low-frequency continuation
+// (R2 never-give-up invariant). That behavior is asserted in the dedicated, fake-timed
+// sfu-recovery-coordinator.spec.ts (MID-CALL-NEVER-GIVES-UP) instead of here: this large legacy-style
+// file mixes fake- and real-timer tests, and firing/re-arming the low-frequency timer here risks leaving
+// a real background timer alive after the file's synchronous work finishes (see SFU-R3 below for the
+// same class of pre-existing hazard, now guarded with an explicit teardown).
 
 // FIX2 — successful first mid-call subscribe has no retry timer, no extra enqueue, and no churn.
 {
@@ -1846,6 +1822,12 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
   assert.equal(postedTrack?.trackName, 'alice-new-audio', 'SFU-R3: POST carries new trackName, not stale');
   assert.equal(privateSfu.midToEntry.has('5'), false, 'SFU-R3: stale midToEntry evicted before re-subscribe');
   assert.equal(sfu.subscribedTracks().has('5'), false, 'SFU-R3: stale subscribedTrack evicted before re-subscribe');
+
+  // The http mock above always throws, so the never-give-up recovery ladder (R2) has armed a real
+  // (non-fake-timer) rung-1 backoff timer by this point. This test isn't wrapped in withFakeTimersAsync
+  // and isn't exercising recovery — tear down before it fires so it can't cascade into the low-frequency
+  // continuation and leave a real timer alive after the file finishes (SEND-BACK iter 1 test-hygiene fix).
+  sfu.destroy();
 }
 
 // SFU-R4 — in-flight doSubscribe(oldPublisher) that completes AFTER publisher reconnect MUST NOT
