@@ -268,6 +268,13 @@ export class SfuClientService {
     this.subscribeStuckTimers.set(publisherClientId, timer);
   }
 
+  // R3: entry point for the remote-voice watchdog (subscribed but no usable inbound audio) to join
+  // the same never-give-up ladder subscribe failures use — no separate resubscribe loop.
+  escalateStalledRemoteAudio(publisherClientId: string): void {
+    const hasFirstFrame = this.subscribeFirstFrameAt.has(publisherClientId);
+    this.scheduleRecoveryEscalation(publisherClientId, hasFirstFrame);
+  }
+
   // Recovery coordinator (B0 consensus, R2): rung-1 same-session retry → rung-2 forced renegotiated
   // retry → bounded low-frequency continuation. Coalesces via the same "one timer per publisherClientId"
   // pattern as the stuck watchdog; never latches a terminal give-up while canRunSubscribeRecovery() holds.

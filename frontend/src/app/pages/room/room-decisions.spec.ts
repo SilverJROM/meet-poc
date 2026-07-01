@@ -224,14 +224,46 @@ assert.strictEqual(
     attemptsThisWindow: 3,
     sample,
     mutedAll: false,
+    publisherMicEnabled: false,
   });
 
-  assert.strictEqual(decision.kind, 'clear', 'CR-FIX-10: bytes-flat clear path clears the voice-stall latch');
+  assert.strictEqual(decision.kind, 'clear', 'R3a: mic-off bytes-flat is healthy silence, clears the voice-stall latch');
   if (decision.kind === 'clear') {
     assert.strictEqual(decision.deletePeer, false);
     assert.deepStrictEqual(decision.nextSamples, [sample]);
     assert.strictEqual(decision.nextAttemptsThisWindow, 0);
   }
+}
+
+// R3b: bytes-flat (no inbound RTP at all) with mic on/unknown is NOT healthy silence — it's a
+// subscribed-no-RTP failure that must escalate into the SFU recovery coordinator, never a silent clear.
+{
+  const previousSamples = voiceSamples([
+    [5_000, 7],
+    [5_000, 7],
+    [5_000, 7],
+  ]);
+  const sample = voiceSamples([[5_000, 7]])[0];
+  const decisionMicOn = decideRemoteVoiceWatchdogAction({
+    previousSamples,
+    attemptsThisWindow: 3,
+    sample,
+    mutedAll: false,
+    publisherMicEnabled: true,
+  });
+
+  assert.strictEqual(decisionMicOn.kind, 'escalate-recovery', 'R3b: mic-on bytes-flat escalates to SFU recovery, not clear');
+  assert.deepStrictEqual(decisionMicOn.nextSamples, [sample]);
+  assert.strictEqual(decisionMicOn.nextAttemptsThisWindow, 0);
+
+  const decisionMicUnknown = decideRemoteVoiceWatchdogAction({
+    previousSamples,
+    attemptsThisWindow: 3,
+    sample,
+    mutedAll: false,
+  });
+
+  assert.strictEqual(decisionMicUnknown.kind, 'escalate-recovery', 'R3b: mic-unknown bytes-flat escalates to SFU recovery, not clear');
 }
 
 {
@@ -293,12 +325,12 @@ assert.strictEqual(
     mutedAll: false,
   });
 
-  assert.strictEqual(decision.kind, 'mark-stalled', 'CR-FIX-10: exhausted active stall window keeps the banner latched');
+  assert.strictEqual(decision.kind, 'escalate-recovery', 'R3b: exhausted playout recovery window escalates instead of latching mark-stalled');
   assert.strictEqual(decision.nextAttemptsThisWindow, 4);
 }
 
-// BUG-REPRO-R1-mark-stalled-give-up — after mark-stalled latches, further polls stay stalled and never escalate to SFU recovery.
-// PASSES today (documents give-up). B3/B2 coordinator should replace this terminal latch with escalation.
+// R3: replaces BUG-REPRO-R1-mark-stalled-give-up — the playout-recovery cap must escalate into the SFU
+// recovery coordinator on every subsequent poll, never latch a silent terminal give-up.
 {
   const stalledFixture = voiceSamples([
     [1_000, 7],
@@ -306,26 +338,25 @@ assert.strictEqual(
     [3_000, 7],
     [4_000, 7],
   ]);
-  const latched = decideRemoteVoiceWatchdogAction({
+  const escalated = decideRemoteVoiceWatchdogAction({
     previousSamples: stalledFixture.slice(0, 3),
     attemptsThisWindow: 4,
     sample: stalledFixture[3],
     mutedAll: false,
   });
 
-  assert.strictEqual(latched.kind, 'mark-stalled', 'BUG-REPRO-R1-mark-stalled: attempt cap latches mark-stalled');
-  assert.strictEqual(latched.nextAttemptsThisWindow, 4);
+  assert.strictEqual(escalated.kind, 'escalate-recovery', 'R3-NEVER-GIVE-UP: attempt cap escalates instead of latching mark-stalled');
+  assert.strictEqual(escalated.nextAttemptsThisWindow, 4);
 
   for (let poll = 0; poll < 3; poll += 1) {
     const decision = decideRemoteVoiceWatchdogAction({
-      previousSamples: latched.nextSamples,
-      attemptsThisWindow: latched.nextAttemptsThisWindow,
+      previousSamples: escalated.nextSamples,
+      attemptsThisWindow: escalated.nextAttemptsThisWindow,
       sample: stalledFixture[3],
       mutedAll: false,
     });
-    assert.strictEqual(decision.kind, 'mark-stalled', `BUG-REPRO-R1-mark-stalled: polled give-up stays mark-stalled on poll ${poll + 1}`);
-    assert.notStrictEqual(decision.kind, 'recover', `BUG-REPRO-R1-mark-stalled: poll ${poll + 1} must not escalate after cap`);
-    assert.strictEqual(decision.nextAttemptsThisWindow, 4, `BUG-REPRO-R1-mark-stalled: attempts remain capped on poll ${poll + 1}`);
+    assert.strictEqual(decision.kind, 'escalate-recovery', `R3-NEVER-GIVE-UP: poll ${poll + 1} keeps escalating, never gives up silently`);
+    assert.strictEqual(decision.nextAttemptsThisWindow, 4, `R3-NEVER-GIVE-UP: attempts remain capped on poll ${poll + 1}`);
   }
 }
 

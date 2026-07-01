@@ -3110,11 +3110,13 @@ export class RoomPage implements OnDestroy {
       samples: [],
       attemptsThisWindow: 0,
     };
+    const peer = this.peers().find((candidate) => candidate.id === track.publisherClientId);
     const decision = decideRemoteVoiceWatchdogAction({
       previousSamples: state.samples,
       attemptsThisWindow: state.attemptsThisWindow,
       sample,
       mutedAll: this.remoteAudio.mutedAll(),
+      publisherMicEnabled: peer?.micEnabled,
     });
 
     switch (decision.kind) {
@@ -3136,9 +3138,9 @@ export class RoomPage implements OnDestroy {
           attemptsThisWindow: decision.nextAttemptsThisWindow,
         });
         return;
-      case 'mark-stalled':
+      case 'escalate-recovery':
         this.remoteAudio.markVoiceStalled(track.publisherClientId);
-        console.warn('[media] remote voice watchdog recovery window exhausted; keeping stalled banner latched', {
+        console.warn('[media] remote voice watchdog detected stalled inbound audio; escalating to SFU recovery coordinator', {
           publisherClientId: track.publisherClientId,
           attemptsThisWindow: state.attemptsThisWindow,
         });
@@ -3146,6 +3148,7 @@ export class RoomPage implements OnDestroy {
           samples: decision.nextSamples,
           attemptsThisWindow: decision.nextAttemptsThisWindow,
         });
+        this.sfuClient.escalateStalledRemoteAudio(track.publisherClientId);
         return;
       case 'hold':
         this.remoteVoiceWatchdogPeers.set(track.publisherClientId, {

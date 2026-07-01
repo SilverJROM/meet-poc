@@ -8,7 +8,7 @@ Run complete when queue empty AND every req-matrix row VERIFIED.
 - B1 [done] — Reliably recreate the "can't hear each other" failure on demand
 - B2a [done] — Stop giving up after retries: escalate to renegotiate instead of quitting
 - B2b [done] — Last-resort self-heal: rejoin the media session cleanly when nothing else works
-- B3 [pending] — Notice when someone's audio has silently died and fix it
+- B3 [done] — Notice when someone's audio has silently died and fix it
 - B4 [pending] — Recover a person whose mic never actually connected
 - B5 [pending] — Make the diagnostics tell the truth about what failed
 - B6 [pending] — Prove it holds for both 2-person and 5-person calls

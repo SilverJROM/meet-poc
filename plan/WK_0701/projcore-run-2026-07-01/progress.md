@@ -203,3 +203,39 @@ batch-B2b dispatched_at: 2026-07-01T08:54:42Z estimate_min: 20 bucket: SHORT —
 [overmind] 2026-07-01T08:57:07+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
 [overmind] 2026-07-01T08:57:27+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
 [overmind] 2026-07-01T08:57:28+00:00 sync OK current='Last-resort self-heal: rejoin the media session cleanly when nothing else works' tasks=11
+
+## B2b — PASS (commit 5f4a6bf) — R2 VERIFIED [2026-07-01]
+- Rung-3 full rejoin (reuse transport-recovery path) + rung-4 UI + subscribeAllAdvertisedRemotes. Elite red-team (codex55 all-lens + opus inline): 5 regression classes SAFE; rung-4 e2e screenshot real. R2 VERIFIED (B2a+B2b). /clear Sonnet+validator.
+[overmind] 2026-07-01T08:58:50+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+batch-B3 dispatched_at: 2026-07-01T09:13:28Z estimate_min: 15 bucket: SHORT — Validate + std red-team stalled-audio recovery
+[overmind] 2026-07-01T08:59:37+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T08:59:37+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T08:59:37+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T08:59:58+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:00:18+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:00:38+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:00:58+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:01:18+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:01:39+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:01:59+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:02:19+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:02:39+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:02:59+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:03:20+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:03:40+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:03:40+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+
+## B3 — Stalled remote-audio detection [IN-PROGRESS 2026-07-01]
+- Sonnet, high. PROPOSED: 2 branches in decideRemoteVoiceWatchdogAction (no-bytes-mic-on = subscribed-no-RTP; bytes-but-no-progress = playout-then-escalate), unified escalate-recovery kind → escalateStalledRemoteAudio() → B2a coordinator. Drops terminal mark-stalled. micEnabled healthy-silence guard. Per-publisher via canRunSubscribeRecovery. complexity high. APPROVED-PLAN (4 nail-points + update all mark-stalled consumers).
+[overmind] 2026-07-01T09:13:31+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:13:32+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:13:32+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:13:52+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:14:12+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:14:32+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:14:53+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:15:13+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:15:33+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:15:53+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:16:13+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11
+[overmind] 2026-07-01T09:16:14+00:00 sync OK current='Notice when someone's audio has silently died and fix it' tasks=11

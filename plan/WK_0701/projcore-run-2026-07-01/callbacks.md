@@ -38,3 +38,13 @@
 [projcore callback] validator batch-B2b STATUS: WORKING — Starting adversarial B2b red-team validation for DISPATCH-batch-B2b-validator-2536160-1782896082
 [projcore callback] validator batch-B2b STATUS: REPRO-CLEARED-ON-LOCAL — All five B2b red-team classes safe; mandated coordinator spec passed; screenshot verified real
 [projcore ACK] validator batch-B2b RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T08:57:39Z
+[projcore DISPATCH] implementer batch-B3 DISPATCH-batch-B3-implementer-2541911-1782896374
+[projcore callback] implementer batch-B3 STATUS: WORKING — Brief read, researching consensus.md + prior-art patch + R3 files before PROPOSED
+[projcore callback] implementer batch-B3 STATUS: PROPOSED — Escalate stalled-but-subscribed audio into B2a coordinator; new mic-aware branch + drop terminal mark-stalled
+[projcore callback] implementer batch-B3 STATUS: WORKING — APPROVED-PLAN received. Implementing escalate-recovery branch + wrapper + tests at high effort.
+[projcore callback] implementer batch-B3 STATUS: DONE — Escalate-recovery kind replaces mark-stalled; mic-aware branch + per-publisher no-clobber test; build/tsc/targeted tests green
+[projcore ACK] implementer batch-B3 RECEIVED DONE 2026-07-01T09:11:09Z
+[projcore DISPATCH] validator batch-B3 DISPATCH-batch-B3-validator-2550351-1782897208
+[projcore callback] validator batch-B3 STATUS: WORKING — Independent validation started for R3 stalled remote-audio detection
+[projcore callback] validator batch-B3 STATUS: REPRO-CLEARED-ON-LOCAL — R3 validation passed; known room-decisions preflight failure is pre-existing/out of scope
+[projcore ACK] validator batch-B3 RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T09:16:34Z

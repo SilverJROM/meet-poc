@@ -76,14 +76,18 @@ export type RemoteVoiceWatchdogAction =
   | { kind: 'clear'; deletePeer: boolean; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
   | { kind: 'note-emission-advanced'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
   | { kind: 'recover'; recoveryAction: VoiceRecoveryStep; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
-  | { kind: 'mark-stalled'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
+  | { kind: 'escalate-recovery'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number }
   | { kind: 'hold'; nextSamples: VoiceRecoverySample[]; nextAttemptsThisWindow: number };
 
+// R3: distinguishes healthy silence (publisher mic off) from broken inbound audio (no RTP at all,
+// or bytes arriving with emitted/energy stalled) — both broken shapes now escalate into the shared
+// SFU recovery coordinator (scheduleRecoveryEscalation) instead of a silent terminal give-up.
 export function decideRemoteVoiceWatchdogAction(input: {
   previousSamples: VoiceRecoverySample[];
   attemptsThisWindow: number;
   sample: VoiceRecoverySample | null;
   mutedAll: boolean;
+  publisherMicEnabled?: boolean;
 }): RemoteVoiceWatchdogAction {
   if (input.mutedAll) return { kind: 'clear', deletePeer: false, nextSamples: [], nextAttemptsThisWindow: 0 };
   if (!input.sample) return { kind: 'clear', deletePeer: true, nextSamples: [], nextAttemptsThisWindow: 0 };
@@ -96,7 +100,12 @@ export function decideRemoteVoiceWatchdogAction(input: {
   }
 
   if (samples.length >= VOICE_RECOVERY_SAMPLE_WINDOW && !remoteVoiceBytesClimbed(samples)) {
-    return { kind: 'clear', deletePeer: false, nextSamples: [input.sample], nextAttemptsThisWindow: 0 };
+    // No inbound bytes at all for an advertised audio track past the grace window (this sample
+    // window). mic off ⇒ healthy silence; mic on/unknown ⇒ subscribed-no-RTP failure ⇒ coordinator.
+    if (input.publisherMicEnabled === false) {
+      return { kind: 'clear', deletePeer: false, nextSamples: [input.sample], nextAttemptsThisWindow: 0 };
+    }
+    return { kind: 'escalate-recovery', nextSamples: [input.sample], nextAttemptsThisWindow: 0 };
   }
 
   const action = decideVoiceRecovery({
@@ -113,7 +122,7 @@ export function decideRemoteVoiceWatchdogAction(input: {
         mutedAll: input.mutedAll,
       })
     ) {
-      return { kind: 'mark-stalled', nextSamples: samples, nextAttemptsThisWindow: input.attemptsThisWindow };
+      return { kind: 'escalate-recovery', nextSamples: samples, nextAttemptsThisWindow: input.attemptsThisWindow };
     }
     return { kind: 'hold', nextSamples: samples, nextAttemptsThisWindow: input.attemptsThisWindow };
   }

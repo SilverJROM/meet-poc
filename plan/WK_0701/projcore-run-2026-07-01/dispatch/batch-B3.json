@@ -1,0 +1,22 @@
+{
+  "schema_version": 4,
+  "dispatch_status": "ready",
+  "batch_id": "batch-B3",
+  "role": "validator",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01",
+  "session": "01_validator_codex55_meetpoc",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/prompts/batch-B3-validate.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/batch-B3.validator.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/callbacks.md",
+  "dispatched_at": "2026-07-01T09:13:28Z",
+  "estimate_min": 15,
+  "bucket": "SHORT",
+  "wakeup_delay_sec": 1800,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/batch-B3.wakeup-required",
+  "watcher_pid": 2550577,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/batch-B3.watcher-validator.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0701/projcore-run-2026-07-01/dispatch/watcher-batch-B3-validator.log",
+  "dispatch_marker": "DISPATCH-batch-B3-validator-2550351-1782897208",
+  "wakeup_acked_at": "2026-07-01T09:13:32Z",
+  "wakeup_acked_by": "projcore"
+}

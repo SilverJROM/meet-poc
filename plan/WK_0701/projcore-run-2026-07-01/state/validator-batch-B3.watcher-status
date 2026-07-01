@@ -1,0 +1,6 @@
+role=validator
+batch=batch-B3
+status=REPRO-CLEARED-ON-LOCAL
+source=callback
+line_no=49
+note=R3 validation passed; known room-decisions preflight failure is pre-existing/out of scope

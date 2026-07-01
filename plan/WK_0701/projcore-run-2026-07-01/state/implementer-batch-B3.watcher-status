@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-B3
+status=PROPOSED
+source=callback
+line_no=43
+note=Escalate stalled-but-subscribed audio into B2a coordinator; new mic-aware branch + drop terminal mark-stalled

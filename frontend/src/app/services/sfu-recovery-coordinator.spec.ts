@@ -609,4 +609,43 @@ function make406Error(): HttpErrorResponse {
   sfu.destroy();
 }
 
+// R3 — escalateStalledRemoteAudio (the voice-watchdog's entry point for a subscribed-but-no-usable-audio
+// publisher) joins the SAME per-publisher coordinator subscribe failures use. Proves it is scoped to only
+// the stalled publisher: a healthy neighbor gets no rung state, no timer, no recovery event — no clobbering.
+{
+  await withFakeTimersAsync(async (timers) => {
+    const sfu = createSfuClient();
+    const pc = makeSingleTrackSubscribePc();
+    installPublishedSfuState(sfu, pc);
+
+    const bob = makeBobPublisher();
+    const alice: RemotePublisher = {
+      clientId: 'alice',
+      participantId: 'p-alice',
+      cfSessionId: 'alice-cf',
+      revision: 1,
+      tracks: [{ trackName: 'alice-audio', kind: 'audio' }],
+    };
+    sfu.remotePublishers.set(new Map([[bob.clientId, bob], [alice.clientId, alice]]));
+
+    const privateSfu = sfu as unknown as {
+      subscribeRecoveryRung1Attempts: Map<string, number>;
+      subscribeRecoveryRung2Attempts: Map<string, number>;
+      subscribeRecoveryLowFreqTimers: Map<string, unknown>;
+    };
+
+    sfu.escalateStalledRemoteAudio('bob');
+
+    assert.equal(sfu.lastRecoveryEvent()?.rung, 'subscribe-retry', 'R3-PER-PUBLISHER: stalled-audio escalation fires rung-1 subscribe retry');
+    assert.equal(sfu.lastRecoveryEvent()?.publisherClientId, 'bob', 'R3-PER-PUBLISHER: recovery event is scoped to the stalled publisher only');
+    assert.equal(privateSfu.subscribeRecoveryRung1Attempts.get('bob'), 1, 'R3-PER-PUBLISHER: bob has an armed rung-1 attempt');
+    assert.equal(privateSfu.subscribeRecoveryRung1Attempts.has('alice'), false, 'R3-PER-PUBLISHER: healthy alice gets no rung-1 state — untouched');
+    assert.equal(privateSfu.subscribeRecoveryRung2Attempts.has('alice'), false, 'R3-PER-PUBLISHER: healthy alice gets no rung-2 state either');
+    assert.equal(privateSfu.subscribeRecoveryLowFreqTimers.has('alice'), false, 'R3-PER-PUBLISHER: healthy alice gets no low-frequency continuation timer');
+    assert.equal(timers.filter((t) => t.active).length, 1, 'R3-PER-PUBLISHER: exactly one backoff timer armed (bob only)');
+
+    sfu.destroy();
+  });
+}
+
 console.log('sfu-recovery-coordinator: all assertions passed');
