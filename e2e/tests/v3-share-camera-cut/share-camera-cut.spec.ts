@@ -45,7 +45,9 @@ test('DR-53 suppresses participant cameras during screen share, keeps share/audi
 
   await page.getByRole('button', { name: 'Share screen' }).click();
   await expect(page.locator('.call-panel.share-layout')).toBeVisible();
-  await expect(page.locator('.share-stage app-tile video')).toBeVisible();
+  // R7: host is the local presenter — sees the "You're presenting" placeholder, not a self-view video.
+  await expect(page.locator('.share-stage .presenting-placeholder')).toBeVisible();
+  await expect(page.locator('.share-stage app-tile video')).toHaveCount(0);
   await expect(page.locator('.share-strip app-tile').filter({ hasText: 'host (you)' }).locator('.camera-off-avatar')).toBeVisible();
   await expect(page.locator('app-tile').filter({ hasText: 'guest' }).locator('.camera-off-avatar')).toBeVisible();
   await expect.poll(() => guest.evaluate(() => window.__meetDebug?.anyScreenShareActive)).toBe(true);
@@ -101,11 +103,11 @@ async function joinGuestWithCamera(page: Page, room: TestRoom, name: string): Pr
 }
 
 async function admit(owner: Page, name: string): Promise<void> {
-  const sidebar = owner.locator('app-participant-sidebar .participant-sidebar.open');
-  if ((await sidebar.count()) === 0) await owner.getByRole('button', { name: 'Show participants' }).click();
-  const row = owner.getByLabel('Waiting to join').locator('li').filter({ hasText: name });
-  await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'Admit' }).click();
+  // Admit directly from the knock toast (top-right) — the toast stack visually overlaps the
+  // "Show participants" corner button, so opening the sidebar first is not reliable.
+  const toast = owner.locator('.knock-toast').filter({ hasText: name });
+  await expect(toast).toBeVisible();
+  await toast.getByRole('button', { name: 'Admit' }).click();
 }
 
 async function expectPeerId(page: Page, name: string): Promise<string> {

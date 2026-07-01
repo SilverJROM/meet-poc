@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-SS
+status=PROPOSED
+source=callback
+line_no=89
+note=mechanism: shareStream()->null for local peer + template branch to .presenting-placeholder; 4 existing e2e specs need assertion swap + 1 new e2e spec; complexity: medium

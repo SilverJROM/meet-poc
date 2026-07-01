@@ -2,7 +2,7 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, ElementRef, HostListener, OnDestroy,
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { addIcons } from 'ionicons';
-import { arrowBackOutline, colorWandOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
+import { arrowBackOutline, colorWandOutline, desktopOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline } from 'ionicons/icons';
 import { BackgroundPickerComponent } from '../../components/background-picker/background-picker.component';
 import { ControlsBarComponent } from '../../components/controls-bar/controls-bar.component';
 import { DeviceDialogComponent } from '../../components/device-dialog/device-dialog.component';
@@ -474,10 +474,14 @@ export class RoomPage implements OnDestroy {
 
   readonly shareLayoutActive = computed(() => !!this.sharingPeer());
   readonly effectiveCameraOn = computed(() => this.media.cameraOn() && this.cameraVisibleDuringCurrentShare());
+  // Google-Meet-style anti-mirror (R7): the LOCAL presenter never renders their own live
+  // screenStream() back to themselves — when the shared surface includes this tab, that
+  // self-view feeds into itself. Remote viewers are unaffected: they still read from
+  // remoteScreenStreams over the SFU (see room.page.html's "You're presenting" branch).
   readonly shareStream = computed(() => {
     const peer = this.sharingPeer();
     if (!peer) return null;
-    if (peer.isLocal) return this.media.screenStream();
+    if (peer.isLocal) return null;
     return this.sfuClient.remoteScreenStreams().get(peer.id) ?? null;
   });
   readonly orderedStripPeers = computed(() => this.peers());
@@ -582,7 +586,7 @@ export class RoomPage implements OnDestroy {
   });
 
   constructor() {
-    addIcons({ arrowBackOutline, colorWandOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline });
+    addIcons({ arrowBackOutline, colorWandOutline, desktopOutline, micOffOutline, micOutline, videocamOffOutline, videocamOutline });
     this.sfuClient.setTransportRecoveryHandler(() => this.republishSfuAfterTransportRecovery());
     this.installPageLifecycleCleanup();
     this.installDeviceChangeHandler();

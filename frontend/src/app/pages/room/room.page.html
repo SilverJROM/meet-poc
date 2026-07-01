@@ -264,16 +264,23 @@
       >
         @if (shareLayoutActive() && sharingPeer(); as presenter) {
           <div class="share-stage" aria-label="Shared screen">
-            <app-tile
-              [peer]="presenter"
-              [displayStream]="shareStream()"
-              [forceVideo]="true"
-              [raisedHand]="raisedHands().has(presenter.id)"
-              [reactions]="tileReactions(presenter.id)"
-              variant="share-main"
-              [speaking]="activeSpeaker.activePeerId() === presenter.id"
-              [audioUnhealthy]="isHost() && peerAudioUnhealthy(presenter)"
-            />
+            @if (presenter.isLocal) {
+              <div class="presenting-placeholder" aria-label="You are presenting your screen">
+                <ion-icon name="desktop-outline" aria-hidden="true"></ion-icon>
+                <p>You're presenting</p>
+              </div>
+            } @else {
+              <app-tile
+                [peer]="presenter"
+                [displayStream]="shareStream()"
+                [forceVideo]="true"
+                [raisedHand]="raisedHands().has(presenter.id)"
+                [reactions]="tileReactions(presenter.id)"
+                variant="share-main"
+                [speaking]="activeSpeaker.activePeerId() === presenter.id"
+                [audioUnhealthy]="isHost() && peerAudioUnhealthy(presenter)"
+              />
+            }
           </div>
           <aside class="share-strip" [class.collapsed]="shareStripCollapsed()" aria-label="Participants during screen share">
             <button

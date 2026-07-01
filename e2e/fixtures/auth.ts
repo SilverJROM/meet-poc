@@ -20,6 +20,6 @@ export async function loginAsJrom(page: Page): Promise<void> {
   await page.goto('/login');
   await page.locator('#login-email').fill(email);
   await page.locator('#login-password').fill(initialPassword());
-  await page.getByRole('button', { name: 'Sign in' }).click();
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
   await expect(page).toHaveURL(/\/app\/rooms$/);
 }

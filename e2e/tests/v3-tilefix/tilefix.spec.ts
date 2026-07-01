@@ -38,9 +38,10 @@ test('DR-30 mirrors only the local self-view camera and never remote cameras or 
 
   await page.getByRole('button', { name: 'Share screen' }).click();
   await expect(page.locator('.call-panel.share-layout')).toBeVisible();
-  const shareVideo = page.locator('.share-stage app-tile video');
-  await expect(shareVideo).toBeVisible();
-  await expectNotMirrored(shareVideo, 'presented screen share');
+  // R7: the local presenter's own share is never rendered back to them (no video at all,
+  // mirrored or otherwise) — supersedes the old not-mirrored check with a stronger one.
+  await expect(page.locator('.share-stage .presenting-placeholder')).toBeVisible();
+  await expect(page.locator('.share-stage app-tile video')).toHaveCount(0);
   await expectMirrored(page.locator('.share-strip app-tile').filter({ hasText: 'host' }).locator('video'), 'local self-view camera in share strip');
   await expectNotMirrored(page.locator('.share-strip app-tile').filter({ hasText: 'guest-video' }).locator('video'), 'remote camera in share strip');
   await page.screenshot({ path: `${SCREENSHOT_DIR}/screenshare-not-mirrored.png`, fullPage: true });
@@ -84,21 +85,16 @@ async function admitCameraGuest(browser: Browser, owner: Page, room: TestRoom, n
   await guest.goto(room.url + '?sfu=0');
   await expect(guest.getByRole('heading', { name: room.title })).toBeVisible();
   await guest.locator('#display-name').fill(name);
-  await guest.getByLabel('Start with camera on').check();
+  await guest.getByLabel('Camera off').check({ force: true });
   await guest.getByRole('button', { name: 'Ask to join' }).click();
-  await openParticipants(owner);
-  const row = owner.getByLabel('Waiting to join').locator('li').filter({ hasText: name });
-  await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'Admit' }).click();
+  // Admit directly from the knock toast (top-right) — the toast stack visually overlaps the
+  // "Show participants" corner button, so opening the sidebar first is not reliable.
+  const toast = owner.locator('.knock-toast').filter({ hasText: name });
+  await expect(toast).toBeVisible();
+  await toast.getByRole('button', { name: 'Admit' }).click();
   await expect(guest.locator('.call-panel')).toBeVisible();
   await expect(owner.locator('app-tile').filter({ hasText: name }).locator('.state')).toHaveText(/connected|reconnecting/, { timeout: 15_000 });
   return context;
-}
-
-async function openParticipants(page: Page): Promise<void> {
-  const sidebar = page.locator('app-participant-sidebar .participant-sidebar.open');
-  if ((await sidebar.count()) === 0) await page.getByRole('button', { name: 'Show participants' }).click();
-  await expect(page.locator('app-participant-sidebar .participant-sidebar.open')).toBeVisible();
 }
 
 async function turnCameraOn(page: Page): Promise<void> {

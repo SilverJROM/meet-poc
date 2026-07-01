@@ -99,7 +99,9 @@ test('DR-26 share layout keeps presenter large with participant strip', async ({
 
   await page.getByRole('button', { name: 'Share screen' }).click();
   await expect(page.locator('.call-panel.share-layout')).toBeVisible();
-  await expect(page.locator('.share-stage app-tile')).toHaveCount(1);
+  // R7: local presenter sees a "You're presenting" placeholder, not a self-view app-tile.
+  await expect(page.locator('.share-stage .presenting-placeholder')).toBeVisible();
+  await expect(page.locator('.share-stage app-tile')).toHaveCount(0);
   await expect(page.locator('.share-strip .strip-list app-tile')).toHaveCount(2);
   await page.screenshot({ path: `${SCREENSHOT_DIR}/share-layout.png`, fullPage: true });
 
@@ -139,12 +141,11 @@ async function admitBrowserGuest(browser: Browser, owner: Page, room: TestRoom, 
   const context = await browser.newContext();
   const guest = await context.newPage();
   await joinGuestAndWait(guest, room, name);
-  await openParticipants(owner);
-  const waitingTab = owner.getByRole('tab', { name: 'Waiting' });
-  if ((await waitingTab.count()) > 0) await waitingTab.click();
-  const row = owner.getByLabel('Waiting to join').locator('li').filter({ hasText: name });
-  await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'Admit' }).click();
+  // Admit directly from the knock toast (top-right) — the toast stack visually overlaps the
+  // "Show participants" corner button, so opening the sidebar first is not reliable.
+  const toast = owner.locator('.knock-toast').filter({ hasText: name });
+  await expect(toast).toBeVisible();
+  await toast.getByRole('button', { name: 'Admit' }).click();
   await expect(guest.locator('.call-panel')).toBeVisible();
   await expect(owner.locator('app-tile').filter({ hasText: name }).locator('.state')).toHaveText('connected', { timeout: 12000 });
   return guest;

@@ -29,7 +29,11 @@ test('FIXC3.1 share layout reflows, highlights active speaker without reordering
 
   await page.getByRole('button', { name: 'Share screen' }).click();
   await expect(page.locator('.call-panel.share-layout')).toBeVisible();
-  await expect(page.locator('.share-stage app-tile')).toHaveCount(1);
+  // R7: the local presenter never renders their own live share back to themselves —
+  // the main stage shows a "You're presenting" placeholder instead of a self-view app-tile.
+  await expect(page.locator('.share-stage .presenting-placeholder')).toBeVisible();
+  await expect(page.locator('.share-stage .presenting-placeholder')).toContainText("You're presenting");
+  await expect(page.locator('.share-stage app-tile')).toHaveCount(0);
   await expect(page.locator('.share-strip .strip-list app-tile')).toHaveCount(4);
   await expect.poll(() => page.evaluate(() => window.__meetDebug?.shareLayoutActive)).toBe(true);
 
@@ -140,18 +144,11 @@ async function admitSocketGuest(owner: Page, room: TestRoom, name: string): Prom
 }
 
 async function admitWaiting(owner: Page, name: string): Promise<void> {
-  await openParticipants(owner);
-  const row = owner.getByLabel('Waiting to join').locator('li').filter({ hasText: name });
-  await expect(row).toBeVisible();
-  await row.getByRole('button', { name: 'Admit' }).click();
-}
-
-async function openParticipants(page: Page): Promise<void> {
-  const sidebar = page.locator('app-participant-sidebar .participant-sidebar.open');
-  if ((await sidebar.count()) === 0) {
-    await page.getByRole('button', { name: 'Show participants' }).click();
-  }
-  await expect(page.locator('app-participant-sidebar .participant-sidebar.open')).toBeVisible();
+  // Admit directly from the knock toast (top-right) — the toast stack visually overlaps the
+  // "Show participants" corner button, so opening the sidebar first is not reliable.
+  const toast = owner.locator('.knock-toast').filter({ hasText: name });
+  await expect(toast).toBeVisible();
+  await toast.getByRole('button', { name: 'Admit' }).click();
 }
 
 async function closeParticipants(page: Page): Promise<void> {

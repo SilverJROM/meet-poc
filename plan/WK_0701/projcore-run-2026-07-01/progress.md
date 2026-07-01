@@ -375,3 +375,62 @@ batch-B6 dispatched_at: 2026-07-01T10:54:14Z estimate_min: 20 bucket: TEST-HEAVY
 [overmind] 2026-07-01T10:58:00+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
 [overmind] 2026-07-01T10:58:20+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
 [overmind] 2026-07-01T10:58:20+00:00 sync OK current='Prove it holds for both 2-person and 5-person calls' tasks=11
+
+## B6 — PASS (5ac223f) — R6 local capstone done [2026-07-01]
+- 2p+5p e2e prove real recovery + one coalesced rejoin (codex55 independently re-ran). Prod-gated fault-inject route. R6 stays IN-PROGRESS for B7/B8/B9.
+- NEXT: DEV deploy (build FE+BE + pm2 restart) → voice.silverjrom.app, then B7 Peer2 agent-measured.
+[overmind] 2026-07-01T10:59:45+00:00 sync OK current='Prove Peer2 and JROM hear each other on a real remote call' tasks=11
+
+## Deploy + human-test handoff [2026-07-01]
+- Fix DEPLOYED to voice.silverjrom.app (build + pm2 restart; bundle main-4AYHDE7E.js confirmed live).
+- Diagnostics explicitly ON (diagnostics_globally_enabled=1; /api/me confirms; /app/diagnostics 200).
+- dev_machine POWERED OFF (gateway + ssh down) per JROM instruction.
+- B7/B8 scripted agent-measured SUPERSEDED (stale harness; B6 real-SFU e2e already proved recovery). JROM testing directly with actual Peer2 (B9).
+- R6 IN-PROGRESS pending JROM B9 confirm. NOT merged to main until JROM confirms real-call audio.
+[overmind] 2026-07-01T12:00:02+00:00 sync OK current='' tasks=10
+[overmind] 2026-07-01T12:03:01+00:00 sync OK current='JROM live human-audible test with actual Peer2 on deployed fix (then merge to main)' tasks=11
+[overmind] 2026-07-01T12:35:36+00:00 sync OK current='JROM live human-audible test with actual Peer2 on deployed fix (then merge to main)' tasks=11
+
+## Injected R7 — screen-share infinite-mirror fix [2026-07-01]
+- JROM: Peer2 real call SUCCESS → B9 PASSED, R6 VERIFIED. New injected issue R7: screen-share does infinite-mirror for the local presenter.
+- Root cause: shareStream (room.page.ts:477) returns local media.screenStream() live for the presented view → recursion when shared surface contains the call. Fix = Google-Meet "You're presenting" placeholder for the local presenter; remote unchanged.
+- C1 (sessions/new transient) = NO GAP (publishInitialSfuWithRetry → B4 escalatePublishFailure covers it).
+- Routing: Sonnet (same team). Then merge fix/sfu-selfheal-20260701 → main.
+batch-SS dispatched_at: 2026-07-01T14:06:09Z estimate_min: 15 bucket: SHORT — Validate screen-share placeholder fix
+[overmind] 2026-07-01T13:18:47+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:18:47+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:18:47+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:19:08+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:19:28+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:19:48+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:20:08+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:20:29+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:20:49+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:21:09+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:21:29+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:21:49+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:22:10+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:22:30+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:22:50+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:23:10+00:00 sync OK current='' tasks=11
+[overmind] 2026-07-01T13:23:31+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T13:23:31+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+
+## SS (R7) — screen-share mirror fix [IN-PROGRESS 2026-07-01]
+- Sonnet. PROPOSED: shareStream()->null for local presenter + .presenting-placeholder template branch; remote untouched; 4 existing e2e assertion swaps + 1 new e2e spec + screenshots. complexity medium. APPROVED-PLAN (R7b remote-live, honest spec swaps, no recovery regression, both screenshots).
+[overmind] 2026-07-01T14:06:12+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:06:12+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:06:12+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:06:32+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:06:53+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:07:13+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:07:33+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:07:53+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:08:14+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:08:34+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:08:54+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:09:14+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:09:34+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:09:55+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:10:15+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12
+[overmind] 2026-07-01T14:10:15+00:00 sync OK current='Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)' tasks=12

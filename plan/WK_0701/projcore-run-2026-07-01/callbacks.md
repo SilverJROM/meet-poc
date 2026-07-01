@@ -84,3 +84,14 @@
 [projcore callback] validator batch-B6 STATUS: WORKING — Started independent B6 validation; reading diffs and will rerun required e2e/backend checks
 [projcore callback] validator batch-B6 STATUS: REPRO-CLEARED-ON-LOCAL — B6 independent validation passed: 2p+5p e2e real recovery, one coalesced rejoin, prod-gated route, no sfu-client recovery diff
 [projcore ACK] validator batch-B6 RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T10:58:50Z
+[projcore DISPATCH] implementer batch-SS DISPATCH-batch-SS-implementer-2663339-1782911924
+[projcore callback] implementer batch-SS STATUS: WORKING — starting: reading room.page.ts shareStream/shareLayoutActive + room.page.html share-layout section
+[projcore callback] implementer batch-SS STATUS: PROPOSED — mechanism: shareStream()->null for local peer + template branch to .presenting-placeholder; 4 existing e2e specs need assertion swap + 1 new e2e spec; complexity: medium
+[projcore callback] implementer batch-SS STATUS: WORKING — APPROVED-PLAN received, implementing: shareStream null-for-local + template placeholder branch + scss + 4 e2e swaps + 1 new e2e spec
+[projcore callback] implementer batch-SS STATUS: NEEDS-INFO — R7 fix done+verified (build+new spec green, screenshots). 2/4 swapped specs blocked by unrelated pre-existing defects, out of scope. See decisions/ss-preexisting-e2e-fixture-rot.md + batch-SS/*.md
+[projcore ACK] implementer batch-SS RECEIVED NEEDS-INFO 2026-07-01T14:03:58Z
+[projcore callback] implementer batch-SS STATUS: DONE — R7 accepted: presenting-placeholder.spec.ts passes, build clean, 4 assertion swaps correct+stay. Pre-existing rot confirmed out of scope, logged to weekly list.
+[projcore DISPATCH] validator batch-SS DISPATCH-batch-SS-validator-2877458-1782914769
+[projcore callback] validator batch-SS STATUS: WORKING — DISPATCH-batch-SS-validator-2877458-1782914769 validation started
+[projcore callback] validator batch-SS STATUS: REPRO-CLEARED-ON-LOCAL — R7 validated: placeholder/no mirror, remote live share, stop grid, spec honest, swaps legit, rot pre-existing
+[projcore ACK] validator batch-SS RECEIVED REPRO-CLEARED-ON-LOCAL 2026-07-01T14:10:50Z

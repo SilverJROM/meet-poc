@@ -12,9 +12,11 @@ Run complete when queue empty AND every req-matrix row VERIFIED.
 - B4 [done] — Recover a person whose mic never actually connected
 - B5 [done] — Make the diagnostics tell the truth about what failed
 - B6 [done] — Prove it holds for both 2-person and 5-person calls
-- B7 [pending] — Prove Peer2 and JROM hear each other on a real remote call
-- B8 [pending] — Prove a 3-way call heals, then power down the dev machine
-- B9 [pending] — JROM opens a room and hears Peer2's machine play a sound (final acceptance)
+- B7 [superseded] — (JROM testing directly with actual Peer2; scripted harness stale — see decisions)
+- B8 [superseded] — (dev_machine shut down; JROM opted for direct human test over scripted 3-way)
+- B9 [done] — JROM live human-audible test with actual Peer2 — PASSED (call success confirmed by JROM)
+- SS [done] — Stop screen-share infinite-mirror: show Google-Meet-style "You're presenting" to the presenter (Req R7 injected)
+- R8 [pending] — Backgrounds: persist+auto-apply default; custom backgrounds visible to all peers cam-on/off (Req R8 injected)
 
 ## Batch metadata (internal routing — not shown in ovm)
 

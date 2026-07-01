@@ -1,0 +1,6 @@
+role=validator
+batch=batch-SS
+status=REPRO-CLEARED-ON-LOCAL
+source=callback
+line_no=96
+note=R7 validated: placeholder/no mirror, remote live share, stop grid, spec honest, swaps legit, rot pre-existing
