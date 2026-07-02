@@ -38,67 +38,8 @@
                   Meeting transcript
                 </button>
               }
-              <button
-                type="button"
-                class="icon-btn expand-toggle"
-                (click)="toggleGroup(group)"
-                [attr.aria-expanded]="isGroupExpanded(group)"
-                [attr.aria-label]="isGroupExpanded(group) ? 'Collapse recordings' : 'Expand recordings'"
-              >
-                <ion-icon [name]="isGroupExpanded(group) ? 'chevron-up-outline' : 'chevron-down-outline'"></ion-icon>
-              </button>
             </div>
           </div>
-
-          @if (isGroupExpanded(group)) {
-            <ul class="transcript-list">
-              @for (recording of group.recordings; track recording.filename) {
-                <li class="transcript-row" [class.active]="selectedFilename() === recording.filename">
-                  <div class="recording-main">
-                    <h3>{{ recording.roomTitle }}</h3>
-                    <p>{{ recording.filename }}</p>
-                    <span>{{ formatDuration(recording.durationMs) }} · Speakers: {{ recording.speakerCount ?? 0 }} · {{ recording.uploadedAtIso | date: 'medium' }}</span>
-                  </div>
-                  <div class="recording-state">
-                    @if (recording.transcribeStatus === 'pending') {
-                      <span class="status-badge pending"><span class="spinner"></span>Transcribing...</span>
-                    } @else if (recording.transcribeStatus === 'failed') {
-                      <span class="status-badge failed">Failed</span>
-                    } @else if (recording.transcribeStatus === 'ready') {
-                      <span class="status-badge ready">Ready</span>
-                    }
-                  </div>
-                  <div class="recording-actions">
-                    @if (recording.sessionId) {
-                      <button type="button" class="primary-btn" (click)="viewMeetingTranscript(recording)" [disabled]="busyFilename() === recording.filename">
-                        <ion-icon name="eye-outline"></ion-icon>
-                        Meeting transcript
-                      </button>
-                    }
-                    @if (recording.hasTranscript) {
-                      <button type="button" class="secondary-btn" (click)="viewTranscript(recording)" [disabled]="busyFilename() === recording.filename">
-                        <ion-icon name="eye-outline"></ion-icon>
-                        Track
-                      </button>
-                      <button type="button" class="secondary-btn" (click)="downloadTranscript(recording)" [disabled]="busyFilename() === recording.filename">
-                        <ion-icon name="download-outline"></ion-icon>
-                        Download
-                      </button>
-                      <button type="button" class="danger-btn" (click)="deleteTranscript(recording)" [disabled]="busyFilename() === recording.filename">
-                        <ion-icon name="trash-outline"></ion-icon>
-                        Delete transcript
-                      </button>
-                    } @else {
-                      <button type="button" class="secondary-btn" (click)="transcribe(recording)" [disabled]="recording.transcribeStatus === 'pending' || busyFilename() === recording.filename">
-                        <ion-icon name="play-circle-outline"></ion-icon>
-                        Transcribe
-                      </button>
-                    }
-                  </div>
-                </li>
-              }
-            </ul>
-          }
         </li>
       }
     </ul>

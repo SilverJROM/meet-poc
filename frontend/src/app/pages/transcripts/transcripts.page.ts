@@ -3,8 +3,6 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, OnDestroy, computed, inject, signal 
 import { addIcons } from 'ionicons';
 import {
   addCircleOutline,
-  chevronDownOutline,
-  chevronUpOutline,
   downloadOutline,
   eyeOutline,
   playCircleOutline,
@@ -65,14 +63,11 @@ export class TranscriptsPage implements OnDestroy {
     for (const analysis of this.analyses()) map.set(analysis.questionId, analysis);
     return map;
   });
-  private readonly expandedOverrides = signal<ReadonlyMap<string, boolean>>(new Map());
   readonly meetingGroups = computed<MeetingGroup[]>(() => groupRecordingsByMeeting(this.recordings()));
 
   constructor() {
     addIcons({
       addCircleOutline,
-      chevronDownOutline,
-      chevronUpOutline,
       downloadOutline,
       eyeOutline,
       playCircleOutline,
@@ -284,18 +279,6 @@ export class TranscriptsPage implements OnDestroy {
 
   versionKey(version: TranscriptVersion): string {
     return `${version.provider}:${version.model}`;
-  }
-
-  isGroupExpanded(group: MeetingGroup): boolean {
-    const override = this.expandedOverrides().get(group.key);
-    if (override !== undefined) return override;
-    return group.recordings.length <= 1;
-  }
-
-  toggleGroup(group: MeetingGroup): void {
-    const next = new Map(this.expandedOverrides());
-    next.set(group.key, !this.isGroupExpanded(group));
-    this.expandedOverrides.set(next);
   }
 
   async runAnalysis(question: Question): Promise<void> {

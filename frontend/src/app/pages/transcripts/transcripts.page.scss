@@ -113,41 +113,6 @@ h3 {
   flex-wrap: wrap;
 }
 
-.expand-toggle {
-  width: 36px;
-  height: 36px;
-}
-
-.meeting-card > .transcript-list {
-  border-top: 1px solid var(--line-soft);
-  padding: 10px;
-  margin: 0;
-}
-
-.transcript-list {
-  list-style: none;
-  display: grid;
-  gap: 10px;
-  margin: 0;
-  padding: 0;
-}
-
-.transcript-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 12px;
-  align-items: center;
-  border: 1px solid var(--line-soft);
-  border-radius: 8px;
-  background: var(--page-bg);
-  padding: 14px;
-}
-
-.transcript-row.active {
-  border-color: var(--accent, #4a8df8);
-  background: var(--selected-tint);
-}
-
 .recording-main {
   min-width: 0;
   display: grid;
@@ -398,10 +363,6 @@ h3 {
   .add-transcription select {
     width: 100%;
     min-width: 0;
-  }
-
-  .transcript-row {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .meeting-card-header {
