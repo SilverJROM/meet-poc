@@ -172,44 +172,19 @@ export function recordingRouter(database: Database.Database = getDb()): express.
   });
 
   router.get('/api/recordings/named-transcript/:sessionId', requireAuth(database), (req, res) => {
-    const authReq = req as AuthenticatedRequest;
+    const built = buildNamedTranscript(String(req.params.sessionId || ''), (req as AuthenticatedRequest).user.email, database);
+    if (!built.ok) return res.status(built.status).json({ error: built.error });
+    return res.json(built.result);
+  });
+
+  router.get('/api/recordings/named-transcript/:sessionId/download', requireAuth(database), (req, res) => {
     const sessionId = String(req.params.sessionId || '');
-    if (!sessionId || !/^[0-9a-f-]{8,}$/i.test(sessionId)) return res.status(400).json({ error: 'invalid sessionId' });
-    const dir = ensureRecordingsDir();
-    const perUserFiles: Array<{ filename: string; displayName: string; joinOffsetMs: number }> = [];
-    for (const f of fs.readdirSync(dir).filter((f) => isRecordingFilename(f) && isSafeFilename(f))) {
-      const parsed = parseRecordingFilename(f);
-      if (!parsed || parsed.sessionId !== sessionId) continue;
-      const room = getRoom(parsed.roomId, database);
-      if (!room || !isOwnerOf(room.id, authReq.user.email, database)) continue;
-      const pPath = participantPathFor(f);
-      if (!pPath || !fs.existsSync(pPath)) continue;
-      try {
-        const p = JSON.parse(fs.readFileSync(pPath, 'utf8')) as { displayName?: string; isPerUser?: boolean; clientId?: string; joinedAtMs?: number };
-        if (p.isPerUser) perUserFiles.push({ filename: f, displayName: p.displayName || 'Participant', joinOffsetMs: readParticipantJoinOffsetMs(f, p) });
-      } catch { /* skip unreadable sidecar */ }
-    }
-    if (perUserFiles.length === 0) return res.status(404).json({ error: 'no per-user recordings for session' });
-    const allLines: Array<{ startMs: number; endMs?: number; name: string; text: string }> = [];
-    let hasAny = false;
-    for (const { filename, displayName, joinOffsetMs } of perUserFiles) {
-      const tPath = resolvePrimaryTranscriptPath(filename);
-      if (!tPath || !fs.existsSync(tPath)) continue;
-      try {
-        const t = JSON.parse(fs.readFileSync(tPath, 'utf8')) as { lines?: unknown[] };
-        if (!Array.isArray(t.lines)) continue;
-        hasAny = true;
-        for (const line of t.lines) {
-          const l = line as { startMs?: number; endMs?: number; text?: string };
-          // Shift this speaker's file-relative timestamps onto the shared call timeline.
-          const baseStart = typeof l.startMs === 'number' ? l.startMs : 0;
-          allLines.push({ startMs: baseStart + joinOffsetMs, endMs: typeof l.endMs === 'number' ? l.endMs + joinOffsetMs : undefined, name: displayName, text: typeof l.text === 'string' ? l.text : '' });
-        }
-      } catch { /* skip unreadable transcript */ }
-    }
-    if (!hasAny) return res.status(404).json({ error: 'no transcripts ready yet' });
-    allLines.sort((a, b) => a.startMs - b.startMs);
-    return res.json({ sessionId, speakers: perUserFiles.map((f) => f.displayName), transcript: allLines });
+    const built = buildNamedTranscript(sessionId, (req as AuthenticatedRequest).user.email, database);
+    if (!built.ok) return res.status(built.status).json({ error: built.error });
+    const body = formatNamedTranscriptText(built.result);
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="meeting-transcript-${sessionId}.txt"`);
+    return res.send(body);
   });
 
   router.get('/api/recordings/:filename/transcript/versions', requireAuth(database), (req, res) => {
@@ -430,6 +405,118 @@ function readParticipantJoinOffsetMs(filename: string, sidecar: { clientId?: str
     }
   } catch { /* unreadable meta — fall through to no offset */ }
   return 0;
+}
+
+export type NamedTranscriptLine = {
+  startMs: number;
+  endMs?: number;
+  name: string;
+  text: string;
+  kind: 'speech' | 'event';
+};
+
+export type NamedTranscriptResult = {
+  sessionId: string;
+  speakers: string[];
+  transcript: NamedTranscriptLine[];
+};
+
+type BuildNamedTranscriptResult =
+  | { ok: true; result: NamedTranscriptResult }
+  | { ok: false; status: number; error: string };
+
+// Builds the merged, call-timeline-synced transcript for a session: per-speaker speech lines
+// (each offset by that speaker's real join time — see readParticipantJoinOffsetMs) interleaved
+// with join/leave events read from the session's mixed-recording .meta.json (the only file that
+// carries the full participants[] roster with joinedAtMs/leftAtMs for everyone, not just the
+// per-user recorder's own owner).
+function buildNamedTranscript(sessionId: string, ownerEmail: string, database: Database.Database): BuildNamedTranscriptResult {
+  if (!sessionId || !/^[0-9a-f-]{8,}$/i.test(sessionId)) return { ok: false, status: 400, error: 'invalid sessionId' };
+  const dir = ensureRecordingsDir();
+  const perUserFiles: Array<{ filename: string; displayName: string; joinOffsetMs: number }> = [];
+  let mixedFilename: string | null = null;
+  for (const f of fs.readdirSync(dir).filter((f) => isRecordingFilename(f) && isSafeFilename(f))) {
+    const parsed = parseRecordingFilename(f);
+    if (!parsed || parsed.sessionId !== sessionId) continue;
+    const room = getRoom(parsed.roomId, database);
+    if (!room || !isOwnerOf(room.id, ownerEmail, database)) continue;
+    const pPath = participantPathFor(f);
+    if (pPath && fs.existsSync(pPath)) {
+      try {
+        const p = JSON.parse(fs.readFileSync(pPath, 'utf8')) as { displayName?: string; isPerUser?: boolean; clientId?: string; joinedAtMs?: number };
+        if (p.isPerUser) perUserFiles.push({ filename: f, displayName: p.displayName || 'Participant', joinOffsetMs: readParticipantJoinOffsetMs(f, p) });
+      } catch { /* skip unreadable sidecar */ }
+    } else if (!mixedFilename) {
+      mixedFilename = f;
+    }
+  }
+  if (perUserFiles.length === 0) return { ok: false, status: 404, error: 'no per-user recordings for session' };
+
+  // Events are collected separately and placed BEFORE speech lines in the merge input so that,
+  // at a tied startMs (e.g. everyone shows "joined" at the same moment speech begins), a stable
+  // sort keeps "X joined" ahead of X's first words — matching the real chronology (join, then
+  // speak), not an arbitrary code-path ordering.
+  const eventLines: NamedTranscriptLine[] = [];
+  let hasEvents = false;
+  if (mixedFilename) {
+    const metaPath = metadataPathFor(mixedFilename);
+    if (metaPath && fs.existsSync(metaPath)) {
+      try {
+        const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8')) as {
+          participants?: Array<{ displayName?: string; joinedAtMs?: number; leftAtMs?: number | null }>;
+        };
+        for (const participant of meta.participants || []) {
+          const name = typeof participant.displayName === 'string' && participant.displayName.trim() ? participant.displayName.trim() : 'Participant';
+          if (typeof participant.joinedAtMs === 'number' && Number.isFinite(participant.joinedAtMs)) {
+            eventLines.push({ startMs: participant.joinedAtMs, name, text: `${name} joined`, kind: 'event' });
+            hasEvents = true;
+          }
+          if (typeof participant.leftAtMs === 'number' && Number.isFinite(participant.leftAtMs)) {
+            eventLines.push({ startMs: participant.leftAtMs, name, text: `${name} left`, kind: 'event' });
+            hasEvents = true;
+          }
+        }
+      } catch { /* unreadable meta — proceed without events */ }
+    }
+  }
+
+  const speechLines: NamedTranscriptLine[] = [];
+  let hasSpeech = false;
+  for (const { filename, displayName, joinOffsetMs } of perUserFiles) {
+    const tPath = resolvePrimaryTranscriptPath(filename);
+    if (!tPath || !fs.existsSync(tPath)) continue;
+    try {
+      const t = JSON.parse(fs.readFileSync(tPath, 'utf8')) as { lines?: unknown[] };
+      if (!Array.isArray(t.lines)) continue;
+      hasSpeech = true;
+      for (const line of t.lines) {
+        const l = line as { startMs?: number; endMs?: number; text?: string };
+        // Shift this speaker's file-relative timestamps onto the shared call timeline.
+        const baseStart = typeof l.startMs === 'number' ? l.startMs : 0;
+        speechLines.push({
+          startMs: baseStart + joinOffsetMs,
+          endMs: typeof l.endMs === 'number' ? l.endMs + joinOffsetMs : undefined,
+          name: displayName,
+          text: typeof l.text === 'string' ? l.text : '',
+          kind: 'speech',
+        });
+      }
+    } catch { /* skip unreadable transcript */ }
+  }
+
+  if (!hasSpeech && !hasEvents) return { ok: false, status: 404, error: 'no transcripts ready yet' };
+  const allLines = [...eventLines, ...speechLines].sort((a, b) => a.startMs - b.startMs);
+  return { ok: true, result: { sessionId, speakers: perUserFiles.map((f) => f.displayName), transcript: allLines } };
+}
+
+function formatNamedTranscriptText(named: NamedTranscriptResult): string {
+  const header = `Meeting transcript — session ${named.sessionId}\nSpeakers: ${named.speakers.join(', ') || 'none'}\n\n`;
+  const body = named.transcript
+    .map((line) => (line.kind === 'event'
+      ? `[${formatTranscriptTimestamp(line.startMs)}] — ${line.text} —`
+      : `[${formatTranscriptTimestamp(line.startMs)}] ${line.name || 'Speaker'}: ${line.text.trim()}`))
+    .join('\n');
+  return header + body + (named.transcript.length ? '\n' : '');
 }
 
 function transcriptPathFor(filename: string): string | null {

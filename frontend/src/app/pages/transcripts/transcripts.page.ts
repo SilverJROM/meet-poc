@@ -142,6 +142,17 @@ export class TranscriptsPage implements OnDestroy {
     }
   }
 
+  async downloadNamedTranscript(sessionId: string): Promise<void> {
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      await this.recordingsService.downloadNamedTranscriptTxt(sessionId);
+      this.status.set('Meeting transcript download started');
+    } catch {
+      this.error.set('Meeting transcript could not be downloaded');
+    }
+  }
+
   async transcribe(recording: Recording): Promise<void> {
     this.busyFilename.set(recording.filename);
     this.error.set(null);

@@ -320,6 +320,16 @@ h3 {
   line-height: 1.45;
 }
 
+.transcript-event {
+  grid-template-columns: auto minmax(0, 1fr);
+  color: var(--muted);
+  font-style: italic;
+}
+
+.transcript-event .text {
+  font-style: italic;
+}
+
 .time {
   color: #6b7280;
   font-variant-numeric: tabular-nums;

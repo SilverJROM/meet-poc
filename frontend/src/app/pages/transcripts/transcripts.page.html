@@ -52,14 +52,25 @@
           <h3>Meeting transcript</h3>
           <span>{{ named.speakers.join(', ') }} · session {{ named.sessionId }}</span>
         </div>
+        <button type="button" class="secondary-btn" (click)="downloadNamedTranscript(named.sessionId)">
+          <ion-icon name="download-outline"></ion-icon>
+          Download
+        </button>
       </div>
       <div class="line-stream">
-        @for (line of named.transcript; track line.startMs + '-' + (line.endMs ?? 0) + '-' + line.name) {
-          <div class="transcript-line">
-            <span class="time">[{{ timestamp(line.startMs) }}]</span>
-            <strong [style.color]="speakerColor(line.name)">{{ line.name }}:</strong>
-            <span class="text">{{ line.text }}</span>
-          </div>
+        @for (line of named.transcript; track line.startMs + '-' + (line.endMs ?? 0) + '-' + line.name + '-' + line.kind) {
+          @if (line.kind === 'event') {
+            <div class="transcript-line transcript-event">
+              <span class="time">[{{ timestamp(line.startMs) }}]</span>
+              <span class="text">{{ line.text }}</span>
+            </div>
+          } @else {
+            <div class="transcript-line">
+              <span class="time">[{{ timestamp(line.startMs) }}]</span>
+              <strong [style.color]="speakerColor(line.name)">{{ line.name }}:</strong>
+              <span class="text">{{ line.text }}</span>
+            </div>
+          }
         }
       </div>
     </section>

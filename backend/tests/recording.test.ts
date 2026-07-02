@@ -860,6 +860,77 @@ describe('recording API', () => {
     expect(peer2.endMs).toBe(91200);
   });
 
+  it('named-transcript interleaves join/leave events from the mixed recording meta.json', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'd98896162f09', 'AGENTROOM');
+    const sessionId = 'cccccccc-1111-2222-3333-444444444444';
+    const mixed = `2026-07-02T00-00-00-000Z_${sessionId}_d98896162f09_AGENTROOM_aaaaaa.webm`;
+    const host = `2026-07-02T00-00-00-001Z_${sessionId}_d98896162f09_AGENTROOM_host_b0b0b0.webm`;
+    const guest = `2026-07-02T00-00-00-002Z_${sessionId}_d98896162f09_AGENTROOM_peer2_c0c0c0.webm`;
+    for (const filename of [mixed, host, guest]) fs.writeFileSync(path.join(dir, filename), Buffer.alloc(8));
+    // The mixed (non-per-user) recording carries NO .participant.json — that's how it's
+    // distinguished from per-user files — but DOES carry the full participants[] roster.
+    fs.writeFileSync(
+      path.join(dir, `${mixed}.meta.json`),
+      JSON.stringify({
+        schemaVersion: 1,
+        sessionId,
+        roomId: 'd98896162f09',
+        recordingStartedAtIso: '2026-07-02T00:00:00.000Z',
+        recordingDurationMs: 300000,
+        participants: [
+          { clientId: 'local', displayName: 'host', isHost: true, joinedAtMs: 0, leftAtMs: null },
+          { clientId: 'guest-1', displayName: 'Peer2', isHost: false, joinedAtMs: 123000, leftAtMs: 290000 },
+        ],
+        segments: [],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${host}.participant.json`),
+      JSON.stringify({ displayName: 'host', clientId: 'local', joinedAtMs: 0, isPerUser: true }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${guest}.participant.json`),
+      JSON.stringify({ displayName: 'Peer2', clientId: 'guest-1', joinedAtMs: 123000, isPerUser: true }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${host}.transcript.json`),
+      JSON.stringify({ schemaVersion: 1, audioFile: host, language: 'en', lines: [{ startMs: 1000, endMs: 1500, clientId: 'local', name: 'host', text: 'hello', confidence: 0.9 }], words: [] }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${guest}.transcript.json`),
+      JSON.stringify({ schemaVersion: 1, audioFile: guest, language: 'en', lines: [{ startMs: 500, endMs: 1200, clientId: 'guest-1', name: 'Peer2', text: 'joining now', confidence: 0.9 }], words: [] }),
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    const res = await request(app)
+      .get(`/api/recordings/named-transcript/${sessionId}`)
+      .set('Cookie', cookie)
+      .expect(200);
+
+    const kinds = res.body.transcript.map((l: { kind: string; name: string; text: string; startMs: number }) => ({ kind: l.kind, name: l.name, text: l.text, startMs: l.startMs }));
+    expect(kinds).toEqual([
+      { kind: 'event', name: 'host', text: 'host joined', startMs: 0 },
+      { kind: 'speech', name: 'host', text: 'hello', startMs: 1000 },
+      { kind: 'event', name: 'Peer2', text: 'Peer2 joined', startMs: 123000 },
+      { kind: 'speech', name: 'Peer2', text: 'joining now', startMs: 123500 },
+      { kind: 'event', name: 'Peer2', text: 'Peer2 left', startMs: 290000 },
+    ]);
+
+    const download = await request(app)
+      .get(`/api/recordings/named-transcript/${sessionId}/download`)
+      .set('Cookie', cookie)
+      .expect(200);
+    expect(download.headers['content-disposition']).toContain(`meeting-transcript-${sessionId}.txt`);
+    expect(download.text).toContain('[00:00] — host joined —');
+    expect(download.text).toContain('[00:01] host: hello');
+    expect(download.text).toContain('[02:03] — Peer2 joined —');
+    expect(download.text).toContain('[04:50] — Peer2 left —');
+  });
+
   it('B1b normalizes mocked OpenRouter output with owner-only labels', () => {
     const filename = 'host.webm';
     const owner = { clientId: 'host-1', name: 'Host' };

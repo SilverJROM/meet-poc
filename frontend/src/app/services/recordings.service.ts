@@ -116,6 +116,7 @@ export type NamedTranscriptLine = {
   endMs?: number;
   name: string;
   text: string;
+  kind: 'speech' | 'event';
 };
 
 export type NamedTranscript = {
@@ -178,6 +179,23 @@ export class RecordingsService {
     const anchor = document.createElement('a');
     anchor.href = url;
     anchor.download = downloadName;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async downloadNamedTranscriptTxt(sessionId: string): Promise<void> {
+    const blob = await firstValueFrom(
+      this.http.get(`/api/recordings/named-transcript/${encodeURIComponent(sessionId)}/download`, {
+        observe: 'response',
+        responseType: 'blob',
+      }),
+    );
+    const url = URL.createObjectURL(blob.body ?? new Blob([], { type: 'text/plain' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `meeting-transcript-${sessionId}.txt`;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
