@@ -187,6 +187,31 @@ export function recordingRouter(database: Database.Database = getDb()): express.
     return res.send(body);
   });
 
+  // Deletes the TRANSCRIPT (all provider/model versions) for every per-user recording in a
+  // session — the recordings' audio + metadata are left untouched, only the transcribed text.
+  router.delete('/api/recordings/named-transcript/:sessionId', requireAuth(database), (req, res) => {
+    const authReq = req as AuthenticatedRequest;
+    const sessionId = String(req.params.sessionId || '');
+    if (!sessionId || !/^[0-9a-f-]{8,}$/i.test(sessionId)) return res.status(400).json({ error: 'invalid sessionId' });
+    const { perUserFiles } = listSessionRecordingFiles(sessionId, authReq.user.email, database);
+    if (perUserFiles.length === 0) return res.status(404).json({ error: 'no per-user recordings for session' });
+    let deleted = 0;
+    for (const { filename } of perUserFiles) {
+      const primaryPath = resolvePrimaryTranscriptPath(filename);
+      if (primaryPath && fs.existsSync(primaryPath)) deleted += 1;
+      deleteAllTranscriptSidecars(filename);
+      const lockPath = transcriptLockPathFor(filename);
+      if (lockPath) {
+        try {
+          fs.unlinkSync(lockPath);
+        } catch (err) {
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+        }
+      }
+    }
+    return res.json({ ok: true, deleted });
+  });
+
   router.get('/api/recordings/:filename/transcript/versions', requireAuth(database), (req, res) => {
     const authReq = req as AuthenticatedRequest;
     const filename = String(req.params.filename || '');
@@ -425,13 +450,14 @@ type BuildNamedTranscriptResult =
   | { ok: true; result: NamedTranscriptResult }
   | { ok: false; status: number; error: string };
 
-// Builds the merged, call-timeline-synced transcript for a session: per-speaker speech lines
-// (each offset by that speaker's real join time — see readParticipantJoinOffsetMs) interleaved
-// with join/leave events read from the session's mixed-recording .meta.json (the only file that
-// carries the full participants[] roster with joinedAtMs/leftAtMs for everyone, not just the
-// per-user recorder's own owner).
-function buildNamedTranscript(sessionId: string, ownerEmail: string, database: Database.Database): BuildNamedTranscriptResult {
-  if (!sessionId || !/^[0-9a-f-]{8,}$/i.test(sessionId)) return { ok: false, status: 400, error: 'invalid sessionId' };
+// Lists every recording file belonging to a session that the given owner can access, split into
+// per-user speech files (with displayName + join offset) and the mixed (non-per-user) file, if
+// any. Shared by buildNamedTranscript (read) and the session-transcript delete route (write).
+function listSessionRecordingFiles(
+  sessionId: string,
+  ownerEmail: string,
+  database: Database.Database,
+): { perUserFiles: Array<{ filename: string; displayName: string; joinOffsetMs: number }>; mixedFilename: string | null } {
   const dir = ensureRecordingsDir();
   const perUserFiles: Array<{ filename: string; displayName: string; joinOffsetMs: number }> = [];
   let mixedFilename: string | null = null;
@@ -450,6 +476,17 @@ function buildNamedTranscript(sessionId: string, ownerEmail: string, database: D
       mixedFilename = f;
     }
   }
+  return { perUserFiles, mixedFilename };
+}
+
+// Builds the merged, call-timeline-synced transcript for a session: per-speaker speech lines
+// (each offset by that speaker's real join time — see readParticipantJoinOffsetMs) interleaved
+// with join/leave events read from the session's mixed-recording .meta.json (the only file that
+// carries the full participants[] roster with joinedAtMs/leftAtMs for everyone, not just the
+// per-user recorder's own owner).
+function buildNamedTranscript(sessionId: string, ownerEmail: string, database: Database.Database): BuildNamedTranscriptResult {
+  if (!sessionId || !/^[0-9a-f-]{8,}$/i.test(sessionId)) return { ok: false, status: 400, error: 'invalid sessionId' };
+  const { perUserFiles, mixedFilename } = listSessionRecordingFiles(sessionId, ownerEmail, database);
   if (perUserFiles.length === 0) return { ok: false, status: 404, error: 'no per-user recordings for session' };
 
   // Events are collected separately and placed BEFORE speech lines in the merge input so that,

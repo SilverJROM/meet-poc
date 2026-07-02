@@ -26,6 +26,16 @@ import {
 const LOCAL_MODELS = ['small', 'medium', 'large-v3'] as const;
 const OPENROUTER_MODELS = ['openai/whisper-1', 'openai/gpt-4o-transcribe'] as const;
 
+function buildMeetingTranscriptFilename(roomTitle: string, whenIso: string | null): string {
+  const safeTitle = roomTitle.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '_') || 'Meeting';
+  const date = whenIso ? new Date(whenIso) : null;
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const stamp = date && !Number.isNaN(date.getTime())
+    ? `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}_${pad(date.getHours())}-${pad(date.getMinutes())}`
+    : 'unknown-date';
+  return `${safeTitle}_${stamp}.txt`;
+}
+
 @Component({
   selector: 'app-transcripts-page',
   standalone: true,
@@ -64,6 +74,11 @@ export class TranscriptsPage implements OnDestroy {
     return map;
   });
   readonly meetingGroups = computed<MeetingGroup[]>(() => groupRecordingsByMeeting(this.recordings()));
+  readonly selectedGroup = computed<MeetingGroup | null>(() => {
+    const sessionId = this.selectedSessionId();
+    if (!sessionId) return null;
+    return this.meetingGroups().find((group) => group.sessionId === sessionId) ?? null;
+  });
 
   constructor() {
     addIcons({
@@ -142,14 +157,34 @@ export class TranscriptsPage implements OnDestroy {
     }
   }
 
-  async downloadNamedTranscript(sessionId: string): Promise<void> {
+  async downloadNamedTranscript(): Promise<void> {
+    const named = this.selectedNamedTranscript();
+    if (!named) return;
+    const group = this.selectedGroup();
+    const filename = buildMeetingTranscriptFilename(group?.roomTitle ?? 'Meeting', group?.whenIso ?? null);
     this.error.set(null);
     this.status.set(null);
     try {
-      await this.recordingsService.downloadNamedTranscriptTxt(sessionId);
+      await this.recordingsService.downloadNamedTranscriptTxt(named.sessionId, filename);
       this.status.set('Meeting transcript download started');
     } catch {
       this.error.set('Meeting transcript could not be downloaded');
+    }
+  }
+
+  async deleteMeetingTranscript(): Promise<void> {
+    const named = this.selectedNamedTranscript();
+    if (!named) return;
+    if (!window.confirm('Delete this meeting transcript? The recordings themselves will stay available.')) return;
+    this.error.set(null);
+    this.status.set(null);
+    try {
+      await this.recordingsService.deleteNamedTranscript(named.sessionId);
+      this.clearSelectedTranscript();
+      this.status.set('Meeting transcript deleted');
+      await this.refreshRecordings();
+    } catch {
+      this.error.set('Meeting transcript could not be deleted');
     }
   }
 

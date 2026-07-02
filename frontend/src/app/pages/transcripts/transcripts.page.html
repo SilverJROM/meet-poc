@@ -52,10 +52,16 @@
           <h3>Meeting transcript</h3>
           <span>{{ named.speakers.join(', ') }} · session {{ named.sessionId }}</span>
         </div>
-        <button type="button" class="secondary-btn" (click)="downloadNamedTranscript(named.sessionId)">
-          <ion-icon name="download-outline"></ion-icon>
-          Download
-        </button>
+        <div class="meeting-card-actions">
+          <button type="button" class="secondary-btn" (click)="downloadNamedTranscript()">
+            <ion-icon name="download-outline"></ion-icon>
+            Download
+          </button>
+          <button type="button" class="danger-btn" (click)="deleteMeetingTranscript()">
+            <ion-icon name="trash-outline"></ion-icon>
+            Delete
+          </button>
+        </div>
       </div>
       <div class="line-stream">
         @for (line of named.transcript; track line.startMs + '-' + (line.endMs ?? 0) + '-' + line.name + '-' + line.kind) {

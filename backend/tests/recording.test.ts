@@ -931,6 +931,42 @@ describe('recording API', () => {
     expect(download.text).toContain('[04:50] — Peer2 left —');
   });
 
+  it('DELETE named-transcript removes all speaker transcripts but keeps the recordings', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const dir = createRecordingDir();
+    insertRoom(db, 'd98896162f09', 'AGENTROOM');
+    const sessionId = 'dddddddd-1111-2222-3333-444444444444';
+    const host = `2026-07-02T00-00-00-001Z_${sessionId}_d98896162f09_AGENTROOM_host_b0b0b0.webm`;
+    const guest = `2026-07-02T00-00-00-002Z_${sessionId}_d98896162f09_AGENTROOM_peer2_c0c0c0.webm`;
+    for (const filename of [host, guest]) fs.writeFileSync(path.join(dir, filename), Buffer.alloc(8));
+    fs.writeFileSync(path.join(dir, `${host}.participant.json`), JSON.stringify({ displayName: 'host', clientId: 'local', joinedAtMs: 0, isPerUser: true }));
+    fs.writeFileSync(path.join(dir, `${guest}.participant.json`), JSON.stringify({ displayName: 'Peer2', clientId: 'guest-1', joinedAtMs: 0, isPerUser: true }));
+    fs.writeFileSync(
+      path.join(dir, `${host}.transcript.json`),
+      JSON.stringify({ schemaVersion: 1, audioFile: host, language: 'en', lines: [{ startMs: 0, endMs: 500, clientId: 'local', name: 'host', text: 'hi', confidence: 0.9 }], words: [] }),
+    );
+    fs.writeFileSync(
+      path.join(dir, `${guest}.transcript.json`),
+      JSON.stringify({ schemaVersion: 1, audioFile: guest, language: 'en', lines: [{ startMs: 0, endMs: 500, clientId: 'guest-1', name: 'Peer2', text: 'hey', confidence: 0.9 }], words: [] }),
+    );
+    const cookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const app = createApp(db);
+
+    const del = await request(app).delete(`/api/recordings/named-transcript/${sessionId}`).set('Cookie', cookie).expect(200);
+    expect(del.body).toEqual({ ok: true, deleted: 2 });
+
+    // Transcripts gone.
+    expect(fs.existsSync(path.join(dir, `${host}.transcript.json`))).toBe(false);
+    expect(fs.existsSync(path.join(dir, `${guest}.transcript.json`))).toBe(false);
+    // Recording audio + participant sidecars untouched.
+    expect(fs.existsSync(path.join(dir, host))).toBe(true);
+    expect(fs.existsSync(path.join(dir, guest))).toBe(true);
+    expect(fs.existsSync(path.join(dir, `${host}.participant.json`))).toBe(true);
+
+    await request(app).get(`/api/recordings/named-transcript/${sessionId}`).set('Cookie', cookie).expect(404, { error: 'no transcripts ready yet' });
+  });
+
   it('B1b normalizes mocked OpenRouter output with owner-only labels', () => {
     const filename = 'host.webm';
     const owner = { clientId: 'host-1', name: 'Host' };

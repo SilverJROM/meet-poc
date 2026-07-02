@@ -185,7 +185,7 @@ export class RecordingsService {
     URL.revokeObjectURL(url);
   }
 
-  async downloadNamedTranscriptTxt(sessionId: string): Promise<void> {
+  async downloadNamedTranscriptTxt(sessionId: string, downloadFilename: string): Promise<void> {
     const blob = await firstValueFrom(
       this.http.get(`/api/recordings/named-transcript/${encodeURIComponent(sessionId)}/download`, {
         observe: 'response',
@@ -195,7 +195,7 @@ export class RecordingsService {
     const url = URL.createObjectURL(blob.body ?? new Blob([], { type: 'text/plain' }));
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `meeting-transcript-${sessionId}.txt`;
+    anchor.download = downloadFilename;
     document.body.append(anchor);
     anchor.click();
     anchor.remove();
@@ -204,6 +204,12 @@ export class RecordingsService {
 
   async deleteTranscript(filename: string): Promise<void> {
     await firstValueFrom(this.http.delete<void>(`/api/recordings/${encodeURIComponent(filename)}/transcript`));
+  }
+
+  async deleteNamedTranscript(sessionId: string): Promise<{ deleted: number }> {
+    return firstValueFrom(
+      this.http.delete<{ ok: true; deleted: number }>(`/api/recordings/named-transcript/${encodeURIComponent(sessionId)}`),
+    );
   }
 
   async listTranscriptVersions(filename: string): Promise<TranscriptVersionsResponse> {
