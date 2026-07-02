@@ -23,6 +23,50 @@ export type PaginatedRecordings = {
   total: number;
 };
 
+export type MeetingGroup = {
+  /** Stable identity for the group: sessionId, or `no-session:${filename}` for singleton groups. */
+  key: string;
+  sessionId: string | null;
+  roomTitle: string;
+  /** Earliest uploadedAtIso across the group's recordings — used as the meeting's date/time header. */
+  whenIso: string;
+  recordings: Recording[];
+};
+
+/**
+ * Groups recordings by meeting session (sessionId). Recordings with a null sessionId
+ * (older/edge-case data) each become their own singleton group rather than being dropped
+ * or merged together. Groups are sorted by their representative timestamp, newest first.
+ */
+export function groupRecordingsByMeeting(recordings: Recording[]): MeetingGroup[] {
+  const order: string[] = [];
+  const byKey = new Map<string, Recording[]>();
+  for (const recording of recordings) {
+    const key = recording.sessionId ?? `no-session:${recording.filename}`;
+    const existing = byKey.get(key);
+    if (existing) {
+      existing.push(recording);
+    } else {
+      byKey.set(key, [recording]);
+      order.push(key);
+    }
+  }
+
+  const groups: MeetingGroup[] = order.map((key) => {
+    const members = byKey.get(key)!;
+    const earliest = members.reduce((min, current) => (current.uploadedAtIso < min.uploadedAtIso ? current : min));
+    return {
+      key,
+      sessionId: members[0].sessionId,
+      roomTitle: members[0].roomTitle,
+      whenIso: earliest.uploadedAtIso,
+      recordings: members,
+    };
+  });
+
+  return groups.sort((a, b) => (a.whenIso < b.whenIso ? 1 : a.whenIso > b.whenIso ? -1 : 0));
+}
+
 export type TranscriptLine = {
   startMs: number;
   endMs: number;

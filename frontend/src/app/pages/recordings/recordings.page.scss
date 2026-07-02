@@ -84,6 +84,81 @@ h3 {
   margin-left: auto;
 }
 
+.meeting-list {
+  list-style: none;
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+}
+
+.meeting-card {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--panel-bg);
+  overflow: hidden;
+}
+
+.meeting-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 14px;
+}
+
+.meeting-card-heading {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+
+.meeting-when {
+  color: var(--muted, var(--text));
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.meeting-count-badge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--text);
+  background: var(--page-bg);
+  padding: 3px 9px;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.meeting-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--page-bg);
+  cursor: pointer;
+}
+
+.meeting-card > .recording-list {
+  border-top: 1px solid var(--line-soft);
+  padding: 10px;
+  margin: 0;
+}
+
 .recording-list {
   list-style: none;
   display: grid;
@@ -164,6 +239,15 @@ h3 {
 }
 
 @include bp.max(720px) {
+  .meeting-card-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .meeting-card-actions {
+    justify-content: flex-end;
+  }
+
   .recording-row {
     grid-template-columns: auto 1fr;
   }

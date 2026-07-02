@@ -36,32 +36,61 @@
         </button>
       }
     </div>
-    <ul class="recording-list">
-      @for (recording of recordings(); track recording.filename) {
-        <li class="recording-row" [class.selected]="isSelected(recording.filename)">
-          <label class="recording-select">
-            <input
-              type="checkbox"
-              [checked]="isSelected(recording.filename)"
-              (change)="toggleSelection(recording.filename)"
-              [attr.aria-label]="'Select ' + recording.filename"
-            >
-          </label>
-          <div class="recording-main">
-            <h3>{{ recording.roomTitle }}</h3>
-            <p>{{ recording.filename }}</p>
-            <span>{{ recordingSize(recording) }} · {{ recording.uploadedAtIso | date: 'medium' }}</span>
-            @if (recording.hasMetadata) {
-              <span class="speaker-badge">Speakers: {{ recording.speakerCount ?? 0 }}</span>
-            }
+    <ul class="meeting-list">
+      @for (group of meetingGroups(); track group.key) {
+        <li class="meeting-card">
+          <div class="meeting-card-header">
+            <div class="meeting-card-heading">
+              <h3>{{ group.roomTitle }}</h3>
+              <span class="meeting-when">{{ group.whenIso | date: 'EEE, MMM d, y · h:mm a' }}</span>
+              @if (group.recordings.length > 1) {
+                <span class="meeting-count-badge">{{ group.recordings.length }} files</span>
+              }
+            </div>
+            <div class="meeting-card-actions">
+              <button
+                type="button"
+                class="icon-btn expand-toggle"
+                (click)="toggleGroup(group)"
+                [attr.aria-expanded]="isGroupExpanded(group)"
+                [attr.aria-label]="isGroupExpanded(group) ? 'Collapse recordings' : 'Expand recordings'"
+              >
+                <ion-icon [name]="isGroupExpanded(group) ? 'chevron-up-outline' : 'chevron-down-outline'"></ion-icon>
+              </button>
+            </div>
           </div>
-          <div class="recording-actions">
-            <a class="secondary-btn" [href]="recordingsService.downloadUrl(recording)">Download</a>
-            <button type="button" class="danger-btn" (click)="deleteRecording(recording)" [disabled]="busy()">
-              <ion-icon name="trash-outline"></ion-icon>
-              Delete
-            </button>
-          </div>
+
+          @if (isGroupExpanded(group)) {
+            <ul class="recording-list">
+              @for (recording of group.recordings; track recording.filename) {
+                <li class="recording-row" [class.selected]="isSelected(recording.filename)">
+                  <label class="recording-select">
+                    <input
+                      type="checkbox"
+                      [checked]="isSelected(recording.filename)"
+                      (change)="toggleSelection(recording.filename)"
+                      [attr.aria-label]="'Select ' + recording.filename"
+                    >
+                  </label>
+                  <div class="recording-main">
+                    <h3>{{ recording.roomTitle }}</h3>
+                    <p>{{ recording.filename }}</p>
+                    <span>{{ recordingSize(recording) }} · {{ recording.uploadedAtIso | date: 'medium' }}</span>
+                    @if (recording.hasMetadata) {
+                      <span class="speaker-badge">Speakers: {{ recording.speakerCount ?? 0 }}</span>
+                    }
+                  </div>
+                  <div class="recording-actions">
+                    <a class="secondary-btn" [href]="recordingsService.downloadUrl(recording)">Download</a>
+                    <button type="button" class="danger-btn" (click)="deleteRecording(recording)" [disabled]="busy()">
+                      <ion-icon name="trash-outline"></ion-icon>
+                      Delete
+                    </button>
+                  </div>
+                </li>
+              }
+            </ul>
+          }
         </li>
       }
     </ul>

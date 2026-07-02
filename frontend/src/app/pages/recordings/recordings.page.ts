@@ -3,10 +3,10 @@ import { Component, CUSTOM_ELEMENTS_SCHEMA, OnDestroy, computed, inject, signal 
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription } from 'rxjs';
 import { addIcons } from 'ionicons';
-import { trashOutline } from 'ionicons/icons';
+import { chevronDownOutline, chevronUpOutline, trashOutline } from 'ionicons/icons';
 import { PaginationComponent } from '../../components/pagination/pagination.component';
 import { reconcilePendingRecordings } from '../../services/recording-pending';
-import { Recording, RecordingsService } from '../../services/recordings.service';
+import { groupRecordingsByMeeting, MeetingGroup, Recording, RecordingsService } from '../../services/recordings.service';
 
 const DEFAULT_PAGE_SIZE = 20;
 
@@ -42,9 +42,11 @@ export class RecordingsPage implements OnDestroy {
     const selected = this.selectedFilenames();
     return recordings.every((recording) => selected.has(recording.filename));
   });
+  private readonly expandedOverrides = signal<ReadonlyMap<string, boolean>>(new Map());
+  readonly meetingGroups = computed<MeetingGroup[]>(() => groupRecordingsByMeeting(this.recordings()));
 
   constructor() {
-    addIcons({ trashOutline });
+    addIcons({ chevronDownOutline, chevronUpOutline, trashOutline });
     this.querySub = this.route.queryParamMap.subscribe((params) => {
       this.page.set(readPositiveInt(params.get('page'), 1));
       this.pageSize.set(Math.min(readPositiveInt(params.get('pageSize'), DEFAULT_PAGE_SIZE), 100));
@@ -125,6 +127,18 @@ export class RecordingsPage implements OnDestroy {
 
   clearSelection(): void {
     this.selectedFilenames.set(new Set());
+  }
+
+  isGroupExpanded(group: MeetingGroup): boolean {
+    const override = this.expandedOverrides().get(group.key);
+    if (override !== undefined) return override;
+    return group.recordings.length <= 1;
+  }
+
+  toggleGroup(group: MeetingGroup): void {
+    const next = new Map(this.expandedOverrides());
+    next.set(group.key, !this.isGroupExpanded(group));
+    this.expandedOverrides.set(next);
   }
 
   async bulkDeleteSelected(): Promise<void> {
