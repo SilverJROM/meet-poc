@@ -25,10 +25,13 @@ import {
   classifyMicCapture,
   deriveOutboundAudioFields,
   nextMicWarningState,
+  INITIAL_SWEEP_GATE_STATE,
+  MIC_SWEEP_RETRY_INTERVAL_MS,
   nextSweepGate,
   orderedMicCandidates,
   runMicSweep,
   type EnergySample,
+  type SweepGateState,
   type SweepHooks,
 } from '../../services/mic-energy';
 import { diagnosticsGumError } from '../../services/diagnostics-gum-error';
@@ -573,11 +576,11 @@ export class RoomPage implements OnDestroy {
   // B2a one-shot guard: the post-publish capture-energy gate runs at most once
   // per call. Reset in cleanupCall() so a fresh join re-arms it.
   private initialCaptureEnergyChecked = false;
-  // B2c multi-device sweep guards: re-entrancy lock + one-sweep-per-episode bound.
-  // Both reset in cleanupCall(); micSweepDoneForEpisode re-arms on energy-return /
-  // mute via the watchdog so a fresh silence episode gets exactly one sweep.
+  // B2c multi-device sweep guards: re-entrancy lock + bounded retry gate state.
+  // Both reset in cleanupCall(); micSweepGateState re-arms on energy-return /
+  // mute / devicechange via the watchdog and handleDeviceChangeAsync.
   private micSweepInProgress = false;
-  private micSweepDoneForEpisode = false;
+  private micSweepGateState: SweepGateState = { ...INITIAL_SWEEP_GATE_STATE };
   private readonly displayNameInput = viewChild<ElementRef<HTMLInputElement>>('displayNameInput');
   private readonly chatMessageList = viewChild<ElementRef<HTMLElement>>('chatMessageList');
   readonly formattedElapsed = computed(() => {
@@ -2824,7 +2827,7 @@ export class RoomPage implements OnDestroy {
     this.setSpeakerUnavailable(false);
     this.initialCaptureEnergyChecked = false;
     this.micSweepInProgress = false;
-    this.micSweepDoneForEpisode = false;
+    this.micSweepGateState = { ...INITIAL_SWEEP_GATE_STATE };
     this.media.stopLocal();
     this.peerIdentities.set(new Map());
     this.knockers.set([]);
@@ -3005,6 +3008,7 @@ export class RoomPage implements OnDestroy {
   private async handleDeviceChangeAsync(): Promise<void> {
     try {
       await this.refreshDevices();
+      this.micSweepGateState = { ...INITIAL_SWEEP_GATE_STATE };
       if (this.state() === 'lobby' || this.state() === 'in-call') await this.ensureSelectedAudioDevice('devicechange');
       if (this.state() === 'in-call' && this.selectedAudioOutputId()) {
         const result = await this.applySpeakerDevice(this.selectedAudioOutputId());
@@ -3493,18 +3497,21 @@ export class RoomPage implements OnDestroy {
     // confirmed 'silent' window is sweep-eligible.
     if (classification !== 'silent') return;
 
-    // Confirmed silent: run the bounded multi-device recovery sweep. It re-acquires
-    // the CURRENT device once, then tries each OTHER mic, adopting the first that
-    // produces energy; only when NONE works does it surface the terminal warn (R10).
-    this.micSweepDoneForEpisode = true;
-    await this.runMicRecoverySweep();
+    // Confirmed silent: run the bounded multi-device recovery sweep via the retry gate.
+    const gate = nextSweepGate(this.micSweepGateState, classification, true, Date.now());
+    this.micSweepGateState = {
+      attempts: gate.attempts,
+      episodeStartedAt: gate.episodeStartedAt,
+      nextAllowedAt: gate.nextAllowedAt,
+    };
+    if (gate.shouldSweep && !this.audioRecoveryInFlight) await this.runMicRecoverySweep();
   }
 
   // B2c — the thin ADAPTER over the pure runMicSweep orchestrator (R10). It owns
   // ALL the framework I/O (enumerate, replaceAudioTrack, re-sample, signals) and
   // delegates the never-zero-audio decision walk to the pure orchestrator, which
   // in turn drives the pure decideMicRecovery step fn. Bounded by micSweepInProgress
-  // (re-entrancy) + the caller's micSweepDoneForEpisode (one sweep per episode).
+  // (re-entrancy) + the caller's micSweepGateState (bounded retry per episode).
   private async runMicRecoverySweep(): Promise<void> {
     if (this.micSweepInProgress) return;
     this.micSweepInProgress = true;
@@ -3588,6 +3595,10 @@ export class RoomPage implements OnDestroy {
       this.queueDiagnosticsLog('error', 'mic sweep errored; kept track, warned user');
     } finally {
       this.micSweepInProgress = false;
+      this.micSweepGateState = {
+        ...this.micSweepGateState,
+        nextAllowedAt: Date.now() + MIC_SWEEP_RETRY_INTERVAL_MS,
+      };
       if (this.actionNotice() === 'Checking your microphones for sound…') this.actionNotice.set(null);
     }
   }
@@ -3783,7 +3794,7 @@ export class RoomPage implements OnDestroy {
     const micActive = this.captureTrackLive() && this.captureTrackEnabled() && this.captureTrackUnmuted();
     if (!micActive) {
       this.micSilenceWindow = [];
-      this.micSweepDoneForEpisode = false;
+      this.micSweepGateState = { ...INITIAL_SWEEP_GATE_STATE };
       this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', false));
       return;
     }
@@ -3795,7 +3806,7 @@ export class RoomPage implements OnDestroy {
     const micStillActive = this.captureTrackLive() && this.captureTrackEnabled() && this.captureTrackUnmuted();
     if (!micStillActive) {
       this.micSilenceWindow = [];
-      this.micSweepDoneForEpisode = false;
+      this.micSweepGateState = { ...INITIAL_SWEEP_GATE_STATE };
       this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', false));
       return;
     }
@@ -3807,20 +3818,29 @@ export class RoomPage implements OnDestroy {
 
     const classification = classifyMicCapture(this.micSilenceWindow);
 
-    // Drive the one-sweep-per-episode bound (re-arms on energy-return).
-    const gate = nextSweepGate(this.micSweepDoneForEpisode, classification, true);
-    this.micSweepDoneForEpisode = gate.swept;
+    // Drive the bounded retry gate (re-arms on energy-return / mute / devicechange).
+    const gate = nextSweepGate(this.micSweepGateState, classification, true, Date.now());
+    this.micSweepGateState = {
+      attempts: gate.attempts,
+      episodeStartedAt: gate.episodeStartedAt,
+      nextAllowedAt: gate.nextAllowedAt,
+    };
 
-    // Drive the banner. 'silent' is owned by the sweep (it sets the terminal warn
-    // when no mic works); only 'working'/'indeterminate' are reduced here.
     if (classification === 'working') {
       this.micSilentWarning.set(false);
       this.micSilentWarningMessage.set("We can't detect sound from your microphone");
     } else if (classification === 'indeterminate') {
       this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', true));
+    } else if (classification === 'silent') {
+      this.micSilentWarningMessage.set(
+        gate.exhausted
+          ? 'No working microphone detected — check your mic/permissions'
+          : 'Still trying to restore your microphone…',
+      );
+      this.micSilentWarning.set(true);
     }
 
-    if (gate.shouldSweep) await this.runMicRecoverySweep();
+    if (gate.shouldSweep && !this.audioRecoveryInFlight) await this.runMicRecoverySweep();
   }
 
   // B5 — pre-call lobby self-test poller (R8). Mirrors the in-call watchdog shape

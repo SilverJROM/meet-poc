@@ -1,10 +1,15 @@
 import assert from 'node:assert/strict';
 import {
   runMicSweep,
+  INITIAL_SWEEP_GATE_STATE,
+  MIC_SWEEP_MAX_ATTEMPTS,
+  MIC_SWEEP_MAX_DURATION_MS,
+  MIC_SWEEP_RETRY_INTERVAL_MS,
   nextSweepGate,
   orderedMicCandidates,
   type SweepHooks,
   type SweepResult,
+  type SweepGateState,
 } from './mic-energy.js';
 
 // ---------------------------------------------------------------------------
@@ -13,7 +18,7 @@ import {
 // builder. Framework-free: node/tsx-runnable with injected hooks. Mirrors the
 // behavioral assertions in validation/B2c/scenarios.md, mapped to the actual
 // exported signatures (runMicSweep(originalDeviceId, hooks) /
-// nextSweepGate(swept, classification, micActive) / orderedMicCandidates).
+// nextSweepGate(state, classification, micActive, now) / orderedMicCandidates).
 // ---------------------------------------------------------------------------
 
 type AcquireFn = (deviceId: string) => Promise<{ deviceId: string; label?: string } | null>;
@@ -227,47 +232,111 @@ function makeHooks(opts: {
 }
 
 // ===========================================================================
-// AC-C6 — bounded to ONE sweep per episode (gate reducer)
+// AC-C6 / R1 — bounded retry gate reducer (persistent mic-silence self-heal)
 // ===========================================================================
 
-// scenarios U-15 — first SILENT poll consumes one sweep; second silent poll does NOT re-sweep.
-{
-  let g = nextSweepGate(false, 'silent', true);
-  assert.deepStrictEqual(g, { swept: true, shouldSweep: true }, 'first silent -> sweep consumed');
-  g = nextSweepGate(g.swept, 'silent', true);
-  assert.deepStrictEqual(g, { swept: true, shouldSweep: false }, 'second silent -> no re-sweep');
+function gateState(g: ReturnType<typeof nextSweepGate>): SweepGateState {
+  return { attempts: g.attempts, episodeStartedAt: g.episodeStartedAt, nextAllowedAt: g.nextAllowedAt };
 }
 
-// scenarios U-16 — energy RETURNS ('working') then DROPS ('silent') ⇒ a NEW sweep allowed.
+// U-15 — first SILENT poll fires immediately; second silent poll waits for cooldown.
 {
-  let g = nextSweepGate(true, 'working', true);
-  assert.deepStrictEqual(g, { swept: false, shouldSweep: false }, 'working -> re-arm');
-  g = nextSweepGate(g.swept, 'silent', true);
-  assert.deepStrictEqual(g, { swept: true, shouldSweep: true }, 'new episode -> one sweep');
+  let state = { ...INITIAL_SWEEP_GATE_STATE };
+  let g = nextSweepGate(state, 'silent', true, 1_000);
+  assert.strictEqual(g.shouldSweep, true, 'first silent -> immediate sweep');
+  assert.strictEqual(g.attempts, 1);
+  assert.strictEqual(g.episodeStartedAt, 1_000);
+  state = { ...gateState(g), nextAllowedAt: 8_000 };
+  g = nextSweepGate(state, 'silent', true, 5_000);
+  assert.strictEqual(g.shouldSweep, false, 'second silent before cooldown -> no re-sweep');
+  g = nextSweepGate(state, 'silent', true, 8_000);
+  assert.strictEqual(g.shouldSweep, true, 'second silent after cooldown -> re-sweep');
+  assert.strictEqual(g.attempts, 2);
 }
 
-// scenarios U-17 — indeterminate poll ⇒ gate UNCHANGED, never sweeps.
+// U-16 — energy RETURNS ('working') then DROPS ('silent') ⇒ a NEW sweep allowed.
 {
-  assert.deepStrictEqual(nextSweepGate(true, 'indeterminate', true), { swept: true, shouldSweep: false });
-  assert.deepStrictEqual(nextSweepGate(false, 'indeterminate', true), { swept: false, shouldSweep: false });
+  let state: SweepGateState = { attempts: 3, episodeStartedAt: 500, nextAllowedAt: 7_000 };
+  let g = nextSweepGate(state, 'working', true, 10_000);
+  assert.deepStrictEqual(gateState(g), INITIAL_SWEEP_GATE_STATE, 'working -> re-arm');
+  assert.strictEqual(g.shouldSweep, false);
+  g = nextSweepGate(gateState(g), 'silent', true, 10_500);
+  assert.strictEqual(g.shouldSweep, true, 'new episode -> first sweep');
+  assert.strictEqual(g.attempts, 1);
 }
 
-// scenarios U-18 — muted/disabled (micActive=false) ⇒ disarmed, never sweeps.
+// U-17 — indeterminate poll ⇒ gate UNCHANGED, never sweeps.
 {
+  const state: SweepGateState = { attempts: 2, episodeStartedAt: 1_000, nextAllowedAt: 5_000 };
+  const g = nextSweepGate(state, 'indeterminate', true, 6_000);
+  assert.deepStrictEqual(gateState(g), state, 'indeterminate preserves state');
+  assert.strictEqual(g.shouldSweep, false);
+  assert.strictEqual(g.exhausted, false);
+}
+
+// U-18 — muted/disabled (micActive=false) ⇒ disarmed, never sweeps.
+{
+  const armed: SweepGateState = { attempts: 4, episodeStartedAt: 1_000, nextAllowedAt: 2_000 };
   for (const k of ['silent', 'working', 'indeterminate'] as const) {
-    const g = nextSweepGate(false, k, false);
+    const g = nextSweepGate(armed, k, false, 5_000);
     assert.strictEqual(g.shouldSweep, false, k);
-    assert.strictEqual(g.swept, false, k);
+    assert.deepStrictEqual(gateState(g), INITIAL_SWEEP_GATE_STATE, `${k} re-arms`);
   }
 }
 
-// scenarios U-19 — mute is a PAUSE, not a permanent consume: unmute + silent ⇒ a fresh sweep.
+// U-19 — mute is a PAUSE: unmute + silent ⇒ a fresh sweep.
 {
-  let g = nextSweepGate(false, 'silent', false); // muted -> disarmed, NOT swept
-  assert.strictEqual(g.swept, false);
-  assert.strictEqual(g.shouldSweep, false);
-  g = nextSweepGate(g.swept, 'silent', true); // unmuted, still silent -> one sweep
-  assert.deepStrictEqual(g, { swept: true, shouldSweep: true });
+  let g = nextSweepGate(INITIAL_SWEEP_GATE_STATE, 'silent', false, 1_000);
+  assert.strictEqual(g.shouldSweep, false, 'muted -> no sweep');
+  g = nextSweepGate(gateState(g), 'silent', true, 1_500);
+  assert.strictEqual(g.shouldSweep, true, 'unmuted silent -> fresh sweep');
+}
+
+// R1 — retry-after-cooldown: shouldSweep true once nextAllowedAt elapses.
+{
+  const state: SweepGateState = { attempts: 1, episodeStartedAt: 1_000, nextAllowedAt: 1_000 + MIC_SWEEP_RETRY_INTERVAL_MS };
+  const before = nextSweepGate(state, 'silent', true, 1_000 + MIC_SWEEP_RETRY_INTERVAL_MS - 1);
+  assert.strictEqual(before.shouldSweep, false, 'one ms before cooldown end -> blocked');
+  const after = nextSweepGate(state, 'silent', true, 1_000 + MIC_SWEEP_RETRY_INTERVAL_MS);
+  assert.strictEqual(after.shouldSweep, true, 'at cooldown end -> sweep allowed');
+}
+
+// R1 — dual-bound exhaustion: attempts cap AND wall-clock cap (first-to-fire).
+{
+  const byAttempts = nextSweepGate(
+    { attempts: MIC_SWEEP_MAX_ATTEMPTS, episodeStartedAt: 1_000, nextAllowedAt: 0 },
+    'silent',
+    true,
+    2_000,
+  );
+  assert.strictEqual(byAttempts.exhausted, true, 'max attempts -> exhausted');
+  assert.strictEqual(byAttempts.shouldSweep, false);
+
+  const byDuration = nextSweepGate(
+    { attempts: 2, episodeStartedAt: 1_000, nextAllowedAt: 0 },
+    'silent',
+    true,
+    1_000 + MIC_SWEEP_MAX_DURATION_MS,
+  );
+  assert.strictEqual(byDuration.exhausted, true, 'max duration -> exhausted');
+  assert.strictEqual(byDuration.shouldSweep, false);
+}
+
+// R1 — disjointness: silence watchdog (micActive=true) vs track-failure path (micActive=false).
+{
+  const active = nextSweepGate(INITIAL_SWEEP_GATE_STATE, 'silent', true, 1_000);
+  assert.strictEqual(active.shouldSweep, true, 'watchdog acts when micActive+silent');
+
+  for (const klass of ['silent', 'working', 'indeterminate'] as const) {
+    const inactive = nextSweepGate(
+      { attempts: 5, episodeStartedAt: 1_000, nextAllowedAt: 2_000 },
+      klass,
+      false,
+      10_000,
+    );
+    assert.strictEqual(inactive.shouldSweep, false, `track-failure micActive=false never sweeps on ${klass}`);
+    assert.deepStrictEqual(gateState(inactive), INITIAL_SWEEP_GATE_STATE, `${klass} re-arms when inactive`);
+  }
 }
 
 // ===========================================================================

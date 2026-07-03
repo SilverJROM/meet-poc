@@ -308,30 +308,76 @@ export function orderedMicCandidates(
   return out;
 }
 
+/** Bounded retry cadence for mic-silence recovery sweeps (R1). */
+export const MIC_SWEEP_RETRY_INTERVAL_MS = 7_000;
+export const MIC_SWEEP_MAX_ATTEMPTS = 8;
+export const MIC_SWEEP_MAX_DURATION_MS = 90_000;
+
+export type SweepGateState = { attempts: number; episodeStartedAt: number; nextAllowedAt: number };
+
+export const INITIAL_SWEEP_GATE_STATE: SweepGateState = { attempts: 0, episodeStartedAt: 0, nextAllowedAt: 0 };
+
+function isSweepGateExhausted(
+  state: SweepGateState,
+  now: number,
+  maxAttempts: number,
+  maxDurationMs: number,
+): boolean {
+  return (
+    state.attempts >= maxAttempts ||
+    (state.episodeStartedAt > 0 && now - state.episodeStartedAt >= maxDurationMs)
+  );
+}
+
 /**
- * PURE sweep-GATE reducer (R10 bounded-to-one-sweep-per-episode).
+ * PURE sweep-GATE reducer (R1 persistent mic-silence self-heal).
  *
- * Single `swept` model — `shouldSweep` is true on exactly the FIRST silent poll
- * of an episode. Mute is a PAUSE, not a permanent consume: a muted/disabled poll
- * RE-ARMS (swept:false) so a post-unmute silent episode still gets one sweep.
+ * `now` is caller-injected — Date.now() must never be called here.
+ * Cooldown (`nextAllowedAt`) is set by the caller on sweep COMPLETION.
+ * `exhausted` is derived (never stored) from dual first-to-fire bounds.
  *  - micActive=false (muted/disabled) → re-arm, never sweep.
  *  - 'working' (energy present/returned) → re-arm (new episode may sweep again).
- *  - 'silent' + not-yet-swept → consume the ONE sweep (swept:true, shouldSweep:true).
- *  - 'silent' + already-swept → no re-sweep (no thrash).
+ *  - 'silent' + attempts===0 → immediate first sweep, episodeStartedAt=now.
+ *  - 'silent' + bounds hit → exhausted, passive warn only.
+ *  - 'silent' + now < nextAllowedAt → cooldown, no sweep.
+ *  - 'silent' + eligible → consume (attempts+1), shouldSweep:true.
  *  - 'indeterminate' → unchanged, no flicker.
  */
 export function nextSweepGate(
-  swept: boolean,
+  state: SweepGateState,
   classification: MicCaptureClass,
   micActive: boolean,
-): { swept: boolean; shouldSweep: boolean } {
-  if (!micActive) return { swept: false, shouldSweep: false };
-  if (classification === 'working') return { swept: false, shouldSweep: false };
-  if (classification === 'silent') {
-    if (!swept) return { swept: true, shouldSweep: true };
-    return { swept: true, shouldSweep: false };
+  now: number,
+  opts?: { maxAttempts?: number; maxDurationMs?: number },
+): SweepGateState & { shouldSweep: boolean; exhausted: boolean } {
+  const maxAttempts = opts?.maxAttempts ?? MIC_SWEEP_MAX_ATTEMPTS;
+  const maxDurationMs = opts?.maxDurationMs ?? MIC_SWEEP_MAX_DURATION_MS;
+
+  if (!micActive || classification === 'working') {
+    return { ...INITIAL_SWEEP_GATE_STATE, shouldSweep: false, exhausted: false };
   }
-  return { swept, shouldSweep: false };
+
+  if (classification === 'indeterminate') {
+    const exhausted = isSweepGateExhausted(state, now, maxAttempts, maxDurationMs);
+    return { ...state, shouldSweep: false, exhausted };
+  }
+
+  if (isSweepGateExhausted(state, now, maxAttempts, maxDurationMs)) {
+    return { ...state, shouldSweep: false, exhausted: true };
+  }
+
+  if (state.nextAllowedAt > 0 && now < state.nextAllowedAt) {
+    return { ...state, shouldSweep: false, exhausted: false };
+  }
+
+  const episodeStartedAt = state.attempts === 0 ? now : state.episodeStartedAt;
+  return {
+    attempts: state.attempts + 1,
+    episodeStartedAt,
+    nextAllowedAt: state.nextAllowedAt,
+    shouldSweep: true,
+    exhausted: false,
+  };
 }
 
 /** Acquired-track shape the sweep orchestrator works with (framework-free). */
