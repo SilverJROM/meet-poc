@@ -1,0 +1,1 @@
+B01/B02: Detector fix applied (variance check for flat non-zero level + flat energy = silent). Test added for FROZEN_NONZERO_WINDOW. Root cause: classifyMicCapture blind spot on constant >0 level from Android SFU stats. Real-call evidence in og. Ready for further batches + build.
