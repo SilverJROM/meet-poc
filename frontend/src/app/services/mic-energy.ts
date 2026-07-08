@@ -175,12 +175,22 @@ export function classifyMicCapture(
   const delta = energies[energies.length - 1] - energies[0];
   if (delta >= epsilon) return 'working';
 
-  // Energy is flat — corroborate with the instantaneous level before claiming
-  // silence. A flat-energy window with an above-threshold level is NOT silent.
+  // Energy is flat — check for frozen non-zero level (Mode A blind spot from real Android call 652c1475).
+  // A constant audioLevel (low variance) + flat energy means the stat is stuck (e.g. 0.2289 frozen) or mic truly dead.
+  // Treat flat levels as silent regardless of absolute value above threshold — this closes the "constant non-zero fools detector" gap.
   const levels = window
     .map((s) => s.audioLevel)
     .filter((l): l is number => typeof l === 'number');
   const maxLevel = levels.length ? Math.max(...levels) : 0;
+  if (levels.length >= 2) {
+    const minLevel = Math.min(...levels);
+    const levelVariance = maxLevel - minLevel;
+    if (levelVariance < 0.005) {
+      // Frozen level (constant across window) + flat energy → dead mic / bogus stat. Silent.
+      return 'silent';
+    }
+  }
+  // Legacy corroboration for truly quiet flat.
   if (maxLevel < levelThreshold) return 'silent';
 
   return 'working';

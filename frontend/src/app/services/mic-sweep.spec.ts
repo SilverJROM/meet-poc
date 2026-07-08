@@ -401,6 +401,14 @@ const STALE_SILENT_WINDOW: EnergySample[] = [
 // Post-adopt window hygiene — stale flat samples would re-trigger retry copy without a clear.
 assert.strictEqual(classifyMicCapture(STALE_SILENT_WINDOW), 'silent', 'stale window is silent');
 assert.strictEqual(classifyMicCapture([]), 'indeterminate', 'cleared window cannot false-retry');
+
+// Mode A regression case (real call 652c1475): frozen non-zero constant level must be 'silent' (not fooled by >threshold).
+const FROZEN_NONZERO_WINDOW: EnergySample[] = [
+  { audioLevel: 0.228949858088931, totalAudioEnergy: 42.0 },
+  { audioLevel: 0.228949858088931, totalAudioEnergy: 42.0 },
+  { audioLevel: 0.228949858088931, totalAudioEnergy: 42.0 },
+];
+assert.strictEqual(classifyMicCapture(FROZEN_NONZERO_WINDOW), 'silent', 'frozen non-zero constant (Mode A) is silent');
 assert.strictEqual(
   micSilenceWatchdogBannerMessage('silent', false),
   'Still trying to restore your microphone…',
