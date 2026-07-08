@@ -1,0 +1,333 @@
+diff --git a/frontend/src/app/pages/room/room.page.ts b/frontend/src/app/pages/room/room.page.ts
+index 2dce465..d5519e4 100644
+--- a/frontend/src/app/pages/room/room.page.ts
++++ b/frontend/src/app/pages/room/room.page.ts
+@@ -27,8 +27,9 @@ import {
+   nextMicWarningState,
+   INITIAL_SWEEP_GATE_STATE,
+   MIC_SWEEP_RETRY_INTERVAL_MS,
+-  nextSweepGate,
++  micSilenceWatchdogBannerMessage,
+   orderedMicCandidates,
++  planMicSweepAttempt,
+   runMicSweep,
+   type EnergySample,
+   type SweepGateState,
+@@ -3497,14 +3498,14 @@ export class RoomPage implements OnDestroy {
+     // confirmed 'silent' window is sweep-eligible.
+     if (classification !== 'silent') return;
+ 
+-    // Confirmed silent: run the bounded multi-device recovery sweep via the retry gate.
+-    const gate = nextSweepGate(this.micSweepGateState, classification, true, Date.now());
+-    this.micSweepGateState = {
+-      attempts: gate.attempts,
+-      episodeStartedAt: gate.episodeStartedAt,
+-      nextAllowedAt: gate.nextAllowedAt,
+-    };
+-    if (gate.shouldSweep && !this.audioRecoveryInFlight) await this.runMicRecoverySweep();
++    // Confirmed silent: consume the retry gate only when a sweep can actually launch.
++    const micActive = this.captureGatePasses();
++    const plan = planMicSweepAttempt(this.micSweepGateState, classification, micActive, Date.now(), {
++      sweepInProgress: this.micSweepInProgress,
++      recoveryInFlight: this.audioRecoveryInFlight,
++    });
++    this.micSweepGateState = plan.nextState;
++    if (plan.shouldSweep) await this.runMicRecoverySweep();
+   }
+ 
+   // B2c — the thin ADAPTER over the pure runMicSweep orchestrator (R10). It owns
+@@ -3556,6 +3557,7 @@ export class RoomPage implements OnDestroy {
+ 
+       if (result.outcome === 'adopted') {
+         this.syncSelectedAudioIdToTrack(this.captureAudioTrack());
++        this.micSilenceWindow = [];
+         this.micSilentWarning.set(false);
+         this.micSilentWarningMessage.set("We can't detect sound from your microphone");
+         if (result.deviceId !== originalDeviceId) {
+@@ -3575,10 +3577,8 @@ export class RoomPage implements OnDestroy {
+ 
+       if (result.outcome === 'none-working') {
+         // No candidate produced energy. The orchestrator restored the original
+-        // device; surface the single terminal warn (kept a live track throughout).
++        // device; banner copy is watchdog-authoritative (exhausted vs retry).
+         this.actionNotice.set(null);
+-        this.micSilentWarningMessage.set('No working microphone detected — check your mic/permissions');
+-        this.micSilentWarning.set(true);
+         this.queueDiagnosticsLog('error', 'mic sweep found no working microphone; kept track, warned user');
+         return;
+       }
+@@ -3819,12 +3819,11 @@ export class RoomPage implements OnDestroy {
+     const classification = classifyMicCapture(this.micSilenceWindow);
+ 
+     // Drive the bounded retry gate (re-arms on energy-return / mute / devicechange).
+-    const gate = nextSweepGate(this.micSweepGateState, classification, true, Date.now());
+-    this.micSweepGateState = {
+-      attempts: gate.attempts,
+-      episodeStartedAt: gate.episodeStartedAt,
+-      nextAllowedAt: gate.nextAllowedAt,
+-    };
++    const plan = planMicSweepAttempt(this.micSweepGateState, classification, true, Date.now(), {
++      sweepInProgress: this.micSweepInProgress,
++      recoveryInFlight: this.audioRecoveryInFlight,
++    });
++    this.micSweepGateState = plan.nextState;
+ 
+     if (classification === 'working') {
+       this.micSilentWarning.set(false);
+@@ -3832,15 +3831,12 @@ export class RoomPage implements OnDestroy {
+     } else if (classification === 'indeterminate') {
+       this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', true));
+     } else if (classification === 'silent') {
+-      this.micSilentWarningMessage.set(
+-        gate.exhausted
+-          ? 'No working microphone detected — check your mic/permissions'
+-          : 'Still trying to restore your microphone…',
+-      );
++      const bannerMsg = micSilenceWatchdogBannerMessage(classification, plan.exhausted);
++      if (bannerMsg) this.micSilentWarningMessage.set(bannerMsg);
+       this.micSilentWarning.set(true);
+     }
+ 
+-    if (gate.shouldSweep && !this.audioRecoveryInFlight) await this.runMicRecoverySweep();
++    if (plan.shouldSweep) await this.runMicRecoverySweep();
+   }
+ 
+   // B5 — pre-call lobby self-test poller (R8). Mirrors the in-call watchdog shape
+diff --git a/frontend/src/app/services/mic-energy.ts b/frontend/src/app/services/mic-energy.ts
+index 3f4cd45..8dd7b27 100644
+--- a/frontend/src/app/services/mic-energy.ts
++++ b/frontend/src/app/services/mic-energy.ts
+@@ -380,6 +380,81 @@ export function nextSweepGate(
+   };
+ }
+ 
++/** Blockers that prevent committing a sweep-gate consumption attempt. */
++export type SweepCallerBlockers = {
++  sweepInProgress: boolean;
++  recoveryInFlight: boolean;
++};
++
++export type SweepAttemptPlan = {
++  nextState: SweepGateState;
++  shouldSweep: boolean;
++  exhausted: boolean;
++  /** True only when `attempts` incremented — never on re-arm, cooldown defer, or block. */
++  consumed: boolean;
++};
++
++/**
++ * PURE adapter planner (R1 CR1): wraps `nextSweepGate` so callers never persist a
++ * consumed attempt unless a recovery sweep is eligible to launch. Framework-free
++ * so blocked/in-flight no-consumption is tsx-testable without Angular harnesses.
++ */
++export function planMicSweepAttempt(
++  state: SweepGateState,
++  classification: MicCaptureClass,
++  micActive: boolean,
++  now: number,
++  blockers: SweepCallerBlockers,
++  opts?: { maxAttempts?: number; maxDurationMs?: number },
++): SweepAttemptPlan {
++  const blocked = blockers.sweepInProgress || blockers.recoveryInFlight;
++
++  const gate = nextSweepGate(state, classification, micActive, now, opts);
++  const nextState: SweepGateState = {
++    attempts: gate.attempts,
++    episodeStartedAt: gate.episodeStartedAt,
++    nextAllowedAt: gate.nextAllowedAt,
++  };
++
++  // Non-consuming re-arm paths always apply — even when blockers are present.
++  if (!micActive || classification === 'working') {
++    return {
++      nextState,
++      shouldSweep: false,
++      exhausted: gate.exhausted,
++      consumed: false,
++    };
++  }
++
++  // Blocked silent/indeterminate: never launch or consume; preserve state; report exhaustion.
++  if (blocked) {
++    return {
++      nextState: state,
++      shouldSweep: false,
++      exhausted: gate.exhausted,
++      consumed: false,
++    };
++  }
++
++  return {
++    nextState,
++    shouldSweep: gate.shouldSweep,
++    exhausted: gate.exhausted,
++    consumed: nextState.attempts > state.attempts,
++  };
++}
++
++/**
++ * Watchdog-owned retry/exhausted banner copy for a `'silent'` classification.
++ * Sweep side-effects must not set terminal copy — exhaustion is poll-authoritative.
++ */
++export function micSilenceWatchdogBannerMessage(classification: MicCaptureClass, exhausted: boolean): string | null {
++  if (classification !== 'silent') return null;
++  return exhausted
++    ? 'No working microphone detected — check your mic/permissions'
++    : 'Still trying to restore your microphone…';
++}
++
+ /** Acquired-track shape the sweep orchestrator works with (framework-free). */
+ export type SweepCandidate = { deviceId: string; label?: string };
+ 
+diff --git a/frontend/src/app/services/mic-sweep.spec.ts b/frontend/src/app/services/mic-sweep.spec.ts
+index 625e4df..8ce1e28 100644
+--- a/frontend/src/app/services/mic-sweep.spec.ts
++++ b/frontend/src/app/services/mic-sweep.spec.ts
+@@ -1,12 +1,16 @@
+ import assert from 'node:assert/strict';
+ import {
++  classifyMicCapture,
+   runMicSweep,
+   INITIAL_SWEEP_GATE_STATE,
++  type EnergySample,
+   MIC_SWEEP_MAX_ATTEMPTS,
+   MIC_SWEEP_MAX_DURATION_MS,
+   MIC_SWEEP_RETRY_INTERVAL_MS,
++  micSilenceWatchdogBannerMessage,
+   nextSweepGate,
+   orderedMicCandidates,
++  planMicSweepAttempt,
+   type SweepHooks,
+   type SweepResult,
+   type SweepGateState,
+@@ -339,6 +343,130 @@ function gateState(g: ReturnType<typeof nextSweepGate>): SweepGateState {
+   }
+ }
+ 
++// ===========================================================================
++// R1 CR1 — adapter planner: no consumption while blocked; banner/window hygiene
++// ===========================================================================
++
++const ARMED_GATE: SweepGateState = { attempts: 2, episodeStartedAt: 1_000, nextAllowedAt: 0 };
++const STALE_SILENT_WINDOW: EnergySample[] = [
++  { audioLevel: 0, totalAudioEnergy: 10 },
++  { audioLevel: 0, totalAudioEnergy: 10 },
++];
++
++// Blocked by in-flight sweep — gate unchanged, no consumption.
++{
++  const plan = planMicSweepAttempt(ARMED_GATE, 'silent', true, 5_000, {
++    sweepInProgress: true,
++    recoveryInFlight: false,
++  });
++  assert.deepStrictEqual(plan.nextState, ARMED_GATE, 'sweepInProgress blocks consumption');
++  assert.strictEqual(plan.consumed, false);
++  assert.strictEqual(plan.shouldSweep, false);
++}
++
++// Blocked by audio recovery — gate unchanged, no consumption.
++{
++  const plan = planMicSweepAttempt(ARMED_GATE, 'silent', true, 5_000, {
++    sweepInProgress: false,
++    recoveryInFlight: true,
++  });
++  assert.deepStrictEqual(plan.nextState, ARMED_GATE, 'recoveryInFlight blocks consumption');
++  assert.strictEqual(plan.consumed, false);
++  assert.strictEqual(plan.shouldSweep, false);
++}
++
++// Mute/disable after delayed sample — re-arm without consuming (verifyInitialCaptureEnergy path).
++{
++  const plan = planMicSweepAttempt(ARMED_GATE, 'silent', false, 5_000, {
++    sweepInProgress: false,
++    recoveryInFlight: false,
++  });
++  assert.deepStrictEqual(plan.nextState, INITIAL_SWEEP_GATE_STATE, 'inactive mic re-arms');
++  assert.strictEqual(plan.consumed, false);
++  assert.strictEqual(plan.shouldSweep, false);
++}
++
++// Eligible silent — exactly one consumption and sweep launch.
++{
++  const plan = planMicSweepAttempt(INITIAL_SWEEP_GATE_STATE, 'silent', true, 9_000, {
++    sweepInProgress: false,
++    recoveryInFlight: false,
++  });
++  assert.strictEqual(plan.consumed, true);
++  assert.strictEqual(plan.shouldSweep, true);
++  assert.strictEqual(plan.nextState.attempts, 1);
++  assert.strictEqual(plan.nextState.episodeStartedAt, 9_000);
++}
++
++// Post-adopt window hygiene — stale flat samples would re-trigger retry copy without a clear.
++assert.strictEqual(classifyMicCapture(STALE_SILENT_WINDOW), 'silent', 'stale window is silent');
++assert.strictEqual(classifyMicCapture([]), 'indeterminate', 'cleared window cannot false-retry');
++assert.strictEqual(
++  micSilenceWatchdogBannerMessage('silent', false),
++  'Still trying to restore your microphone…',
++  'non-exhausted retry copy',
++);
++assert.strictEqual(
++  micSilenceWatchdogBannerMessage('silent', true),
++  'No working microphone detected — check your mic/permissions',
++  'exhausted copy is watchdog-owned',
++);
++assert.strictEqual(micSilenceWatchdogBannerMessage('working', false), null, 'working never sets retry copy');
++
++// ===========================================================================
++// R1 CR2 — blocked planner: re-arm under blockers; exhausted reporting preserved
++// ===========================================================================
++
++// working + recoveryInFlight re-arms without consumption.
++{
++  const plan = planMicSweepAttempt(ARMED_GATE, 'working', true, 10_000, {
++    sweepInProgress: false,
++    recoveryInFlight: true,
++  });
++  assert.deepStrictEqual(plan.nextState, INITIAL_SWEEP_GATE_STATE, 'working under recoveryInFlight re-arms');
++  assert.strictEqual(plan.consumed, false);
++  assert.strictEqual(plan.shouldSweep, false);
++}
++
++// working + sweepInProgress re-arms without consumption.
++{
++  const plan = planMicSweepAttempt(ARMED_GATE, 'working', true, 10_000, {
++    sweepInProgress: true,
++    recoveryInFlight: false,
++  });
++  assert.deepStrictEqual(plan.nextState, INITIAL_SWEEP_GATE_STATE, 'working under sweepInProgress re-arms');
++  assert.strictEqual(plan.consumed, false);
++  assert.strictEqual(plan.shouldSweep, false);
++}
++
++// micActive=false + blocker re-arms without consumption.
++{
++  const plan = planMicSweepAttempt(ARMED_GATE, 'silent', false, 10_000, {
++    sweepInProgress: false,
++    recoveryInFlight: true,
++  });
++  assert.deepStrictEqual(plan.nextState, INITIAL_SWEEP_GATE_STATE, 'inactive mic under blocker re-arms');
++  assert.strictEqual(plan.consumed, false);
++  assert.strictEqual(plan.shouldSweep, false);
++}
++
++// Exhausted silent under recoveryInFlight — terminal state preserved, no launch/consume.
++{
++  const exhaustedState: SweepGateState = {
++    attempts: MIC_SWEEP_MAX_ATTEMPTS,
++    episodeStartedAt: 1_000,
++    nextAllowedAt: 0,
++  };
++  const plan = planMicSweepAttempt(exhaustedState, 'silent', true, 5_000, {
++    sweepInProgress: false,
++    recoveryInFlight: true,
++  });
++  assert.deepStrictEqual(plan.nextState, exhaustedState, 'exhausted state unchanged under blocker');
++  assert.strictEqual(plan.exhausted, true, 'exhausted reporting preserved under blocker');
++  assert.strictEqual(plan.consumed, false);
++  assert.strictEqual(plan.shouldSweep, false);
++}
++
+ // ===========================================================================
+ // AC-C7 — candidate hygiene: dedupe by deviceId AND groupId; current-first; skip failed/empty
+ // ===========================================================================

@@ -1,0 +1,7 @@
+{
+  "batch_id": "batch-1",
+  "role": "validator",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-03/callbacks.md",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-03",
+  "dispatch_status": "ready"
+}

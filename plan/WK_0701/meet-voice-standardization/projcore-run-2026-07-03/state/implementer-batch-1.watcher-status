@@ -1,0 +1,6 @@
+role=implementer
+batch=batch-1
+status=HARD-CAP
+source=timer
+line_no=0
+note=elapsed 363min ≥ hard cap 90min (bucket: SHORT, estimate: 30min)

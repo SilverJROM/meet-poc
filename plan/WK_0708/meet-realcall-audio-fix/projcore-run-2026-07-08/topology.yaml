@@ -1,0 +1,57 @@
+contract_version: 1
+run_id: projcore-run-2026-07-08-meet-realcall-audio-fix
+project: meet-poc
+north_star_ref: ./north-star.md
+og_requirements_ref: ./og-requirements.md
+stamped_by: north-session-2026-07-08          # this /north conversation = the consult-handshake contact
+stamped_at: 2026-07-08T12:19:50+00:00
+
+# planning_criticality is also carried in the briefing packet; stamped here for traceability.
+# critical → the deliberation_panel auto-engages at planning to harden the whole plan (JROM: "for the
+# planning i recommend we do a proper deliberation"). No extra approval needed; the tag IS the auth.
+planning_criticality: critical
+
+# NOTE: JROM explicitly ROUTED this run (2026-07-08), overriding the SFU §6 "Claude-implements"
+# default. Implementer is spark/grok-biased with sonnet only at L3; codex55 still validates.
+
+co_planners:                                   # EXACTLY 2 — deliberate the plan (JROM: codex55/opus)
+  - { id: A, model: codex55, launch: "codex --dangerously-bypass-approvals-and-sandbox" }
+  - { id: B, model: opus,    launch: "claude --dangerously-skip-permissions --model opus" }
+
+implementer:                                   # JROM-routed (overrides SFU Claude-implements default)
+  L1: { model: spark,     launch: "codex --dangerously-bypass-approvals-and-sandbox -m gpt-5.3-codex-spark" }  # trivial — spark OR grokcompose (interchangeable, see routing_notes)
+  L2: { model: grokbuild, launch: "grok --always-approve -m grok-build" }                       # default — standard
+  L3: { model: sonnet,    launch: "claude --dangerously-skip-permissions --model sonnet" }      # complex / high-risk capture-path
+
+validator:                                     # JROM: codex55, backup opus when codex55 weekly < 2% (verifier ≠ fixer)
+  L1: { model: codex55, launch: "codex --dangerously-bypass-approvals-and-sandbox" }            # routine gate
+  L2: { model: codex55, launch: "codex --dangerously-bypass-approvals-and-sandbox" }            # default gate
+  L3: { model: opus,    launch: "claude --dangerously-skip-permissions --model opus" }          # hard gate + codex55-depletion backup
+
+deliberation_panel:                            # planning-stage, APPROACH-level — cross-provider (JROM-named)
+  convergence: strict-unanimous
+  max_rounds: 3
+  settle: [opus, codex55]                      # arbitrate if no unanimity by max_rounds
+  panelists:                                   # codex-5.5 + sonnet-5 + grok-build + opus, all read-only
+    - { model: opus,      profile: agj-panelist }
+    - { model: codex55,   profile: agj-panelist }
+    - { model: sonnet,    profile: agj-panelist }
+    - { model: grokbuild, profile: agj-panelist }
+
+redteam_panel:                                 # impl-stage, DIFF-level back-gate (verifier ≠ fixer)
+  convergence: N-consecutive-clean
+  N: 2
+  tiers:
+    budget:   { count: 3, models: [grokbuild, codex55, sonnet] }
+    standard: { count: 3, models: [opus, codex55, grokbuild] }
+    elite:    { count: 6, models: [opus, codex55, sonnet, grokbuild, spark, grokcompose] }
+
+routing_notes:
+  default_impl_tier: L2                         # grokbuild
+  default_validator_tier: L2                    # codex55
+  default_redteam_tier: standard                # client-critical regression; elite available for the final fix diff
+  impl_L1_alternate: "grokcompose — launch: grok --always-approve -m grok-composer (interchangeable with spark)"
+  validator_backup: "when codex55 weekly headroom < 2%, fall back to opus (L3) as the validator — JROM directive"
+  jrom_routing_override: "2026-07-08 — JROM set impl L1=spark/grokcompose, L2=grokbuild, L3=sonnet; validator=codex55(+opus backup); co-planners=codex55/opus. Overrides SFU Claude-implements default."
+  usage_hygiene: "2026-07-08 all buckets healthy (codex55/spark 100%, opus/sonnet 89%) — no depletion routing needed at stamp time"
+  grok_projcore_session: "lkvc-grok"            # coordinator session name (also carried in the briefing packet)

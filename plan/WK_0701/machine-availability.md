@@ -69,6 +69,41 @@ Status checked:
   - `DEV_MACHINE_CODEX_OK`
 - `grok-composer-2.5-fast` session launched but did not respond within 60 seconds; gateway then showed `agent_running:false`. Treat Grok Composer on dev_machine as degraded until revalidated.
 
+### Silverjrom SG Agent
+
+Doc path:
+
+`/home/agjrom/websites/local_dev/silverjrom_agent.md`
+
+Verified SSH target:
+
+```bash
+ssh silverjrom@silverjrom.com
+```
+
+Status checked 2026-07-05T23:36:08Z:
+
+- SSH reachable from this host as `silverjrom@silverjrom.com`.
+- Remote hostname: `mail.silverjrom.com`.
+- Remote OS: Debian 12 bookworm.
+- `tmux` installed and verified: `tmux 3.3a`.
+- Grok installed and verified: `/home/silverjrom/.local/bin/grok`, version `0.2.87`.
+- Verified Grok models:
+  - `grok-composer-2.5-fast`
+  - `grok-build`
+- Headless Grok probes returned `SG_GROK_COMPOSER_OK` and `SG_GROK_BUILD_OK`.
+- Grok-in-tmux probes returned `SG_TMUX_COMPOSER_OK` and `SG_TMUX_BUILD_OK`.
+- From SG, `https://voice.silverjrom.app/login` returned HTTP `200`.
+- Minimal browser automation is installed and verified:
+  - Browser binary: `/usr/bin/chromium-headless-shell`
+  - Node automation package: `/home/silverjrom/meet-poc-test-client/node_modules/playwright-core`
+  - Full `chromium` desktop package was removed after it crashed in headless mode.
+  - Xvfb and Playwright-managed browser downloads were not installed.
+  - Post-cleanup smoke returned `SG_BROWSER_POST_CLEAN_OK`, HTTP `200`, title `VoiceLokal`, and fake mic label `Fake Default Audio Input`.
+  - Final footprint after cleanup: `/home/silverjrom/meet-poc-test-client` 13 MB, `/home/silverjrom/.npm` 19 MB, apt archive cache 24 KB, root filesystem about 11 GB free.
+
+Current verdict: usable now for SSH-driven Grok Composer/Build work, remote network checks, and headless browser-based meet-poc validation with fake microphone input.
+
 ## Required Shutdown
 
 After remote validation is finished, shut down dev_machine so it does not waste power:
@@ -91,4 +126,5 @@ Only skip shutdown if JROM explicitly asks to keep it online.
 - Prefer local/JROM machine for coordination.
 - Use Peer2 machine only for real remote-user reproduction.
 - Use dev_machine Codex for third endpoint automation unless Grok Composer is revalidated.
+- Use the Silverjrom SG agent as an outside-PH Grok endpoint through `ssh silverjrom@silverjrom.com`; for browser validation launch Playwright with `/usr/bin/chromium-headless-shell` and the local `playwright-core` install under `/home/silverjrom/meet-poc-test-client`.
 - If Grok Composer is needed on dev_machine, run a fresh gateway availability check before relying on it.

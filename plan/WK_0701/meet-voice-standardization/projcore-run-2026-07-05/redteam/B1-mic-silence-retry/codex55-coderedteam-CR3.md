@@ -1,0 +1,15 @@
+# codex55 CR3 verdict
+Verdict: CLEAN
+
+## Findings
+- `planMicSweepAttempt()` now preserves the `nextSweepGate()` state machine while blocking only sweep launch/consumption. It delegates first at `frontend/src/app/services/mic-energy.ts:412`, applies non-consuming re-arm paths for `!micActive` and `working` even under blockers at `frontend/src/app/services/mic-energy.ts:419-427`, and preserves blocked silent/indeterminate state while reporting reducer-derived exhaustion at `frontend/src/app/services/mic-energy.ts:429-437`.
+- Blocked silent no longer burns budget. Eligible `nextSweepGate()` output may increment internally, but `planMicSweepAttempt()` returns the original state with `shouldSweep:false` and `consumed:false` when `sweepInProgress` or `recoveryInFlight` is true. That directly closes the CR1 phantom-consumption/double-charge path.
+- The CR2 regression is closed. `working + recoveryInFlight`, `working + sweepInProgress`, and inactive-under-blocker all re-arm to `INITIAL_SWEEP_GATE_STATE` without consumption, and exhausted silent under recovery reports `exhausted:true` without launch. Evidence: `frontend/src/app/services/mic-sweep.spec.ts:420-468`.
+- The room adapter uses the planner at both launch sites. `verifyInitialCaptureEnergy()` re-checks `captureGatePasses()` after the delayed sample and passes both blockers at `frontend/src/app/pages/room/room.page.ts:3501-3508`. `pollMicSilenceWatchdog()` passes `audioRecoveryInFlight` into the planner before persisting state at `frontend/src/app/pages/room/room.page.ts:3821-3826`, and only launches from `plan.shouldSweep` at `frontend/src/app/pages/room/room.page.ts:3839`.
+- Post-recovery banner/window hygiene is sufficient for local B1 acceptance. Adopted recovery clears stale silence samples and warning state at `frontend/src/app/pages/room/room.page.ts:3558-3562`; `none-working` no longer owns terminal copy, so watchdog exhaustion remains authoritative. The no-candidate and unexpected-error branches still warn immediately at `frontend/src/app/pages/room/room.page.ts:3525-3529` and `frontend/src/app/pages/room/room.page.ts:3589-3595`.
+- Proof is adequate for the local state-machine gate. The new CR1 tests would fail on the original budget-consumption/stale-window bugs, and the CR2 tests would fail on the blocked re-arm/exhaustion regression. I re-ran `cd frontend && npx tsx src/app/services/mic-sweep.spec.ts` and `cd frontend && npm run build`; both passed, with only the known Stencil empty-glob and mediapipe CommonJS build warnings.
+
+## Residual Risk
+- The strongest remaining risk is live browser/device behavior: real `getStats()` cadence, actual microphone mute timing, and hardware-device replacement still need dev_machine/Peer2 validation. That does not block local B1 acceptance because the corrected risk was in deterministic gate/planner state and adapter launch semantics, now covered by pure tests plus a successful production build.
+
+STATUS: CLEAN — CR3 preserves reducer semantics while blocking phantom sweep consumption

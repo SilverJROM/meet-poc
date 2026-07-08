@@ -1,0 +1,168 @@
+PROPOSED — Batch-1 R1: Persistent mic-silence self-heal
+========================================================
+
+Requirement: R1 — Persistent mic-silence self-heal (not one-shot)
+Branch: feat/voice-standardization-batch-1-mic-silence-retry
+Design authority: deliberation/T1-mic-silence-retry/consensus.md (AGREED — implement verbatim, do not redesign)
+Effort tier: high (confirmed)
+Estimate: SHORT atomic slice (~30 min)
+
+---
+
+MECHANISM-LEVEL DIAGNOSIS
+-------------------------
+
+Root failure: nextSweepGate (frontend/src/app/services/mic-energy.ts:323-335) is a pure
+one-shot boolean latch (swept). On the first 'silent' poll while micActive, it sets swept:true
+and fires one sweep; every subsequent silent poll returns shouldSweep:false until re-arm via
+'working' or micActive:false. There is no retry interval, attempt counter, or wall-clock bound.
+
+Consumer: pollMicSilenceWatchdog (room.page.ts:3811-3823) calls nextSweepGate every ~700ms via
+the mic-silence watchdog timer. After one failed runMicRecoverySweep(), the watchdog keeps
+classifying silence but never re-sweeps — matching the ~61-minute silent acctg episode from
+this morning's call.
+
+Secondary gap: handleDeviceChangeAsync (room.page.ts:3005-3017) does NOT re-arm sweep state
+after refreshDevices() — a newly plugged mic between retry cycles would not reset the episode
+budget.
+
+Banner gap: room.page.html:201-204 renders micSilentWarningMessage() but the TS layer only sets
+terminal copy inside runMicRecoverySweep on failure; there is no active-retry message phase
+while the watchdog is still attempting recovery.
+
+State field to replace: micSweepDoneForEpisode (boolean, room.page.ts:580) — also reset in
+cleanupCall (~2826-2827) and set in verifyInitialCaptureEnergy (~3499).
+
+---
+
+PLANNED IMPLEMENTATION (per consensus.md)
+-----------------------------------------
+
+1. frontend/src/app/services/mic-energy.ts
+
+   - Add SweepGateState type:
+     { attempts: number; episodeStartedAt: number; nextAllowedAt: number }
+
+   - Add exported constants:
+     MIC_SWEEP_RETRY_INTERVAL_MS = 7_000
+     MIC_SWEEP_MAX_ATTEMPTS = 8
+     MIC_SWEEP_MAX_DURATION_MS = 90_000
+
+   - Rewrite nextSweepGate signature:
+     nextSweepGate(
+       state: SweepGateState,
+       classification: MicCaptureClass,
+       micActive: boolean,
+       now: number,
+       opts?: { maxAttempts?: number; maxDurationMs?: number },
+     ): SweepGateState & { shouldSweep: boolean; exhausted: boolean }
+
+   - Pure reducer rules (Date.now() NEVER called inside):
+     * !micActive or 'working' → re-arm: { attempts:0, episodeStartedAt:0, nextAllowedAt:0 }
+     * 'indeterminate' → state unchanged, shouldSweep:false, exhausted derived
+     * 'silent':
+       - attempts === 0 → immediate first sweep, episodeStartedAt = now
+       - attempts >= maxAttempts OR now - episodeStartedAt >= maxDurationMs → exhausted:true, shouldSweep:false
+       - now < nextAllowedAt → in cooldown, shouldSweep:false
+       - else → consume: attempts+1, shouldSweep:true
+     * exhausted is DERIVED in return value, never stored
+
+   - runMicSweep() unchanged — full non-destructive resweep every retry cycle.
+
+2. frontend/src/app/pages/room/room.page.ts
+
+   - Replace micSweepDoneForEpisode: boolean with micSweepGateState: SweepGateState (init zeros).
+   - Reset micSweepGateState in cleanupCall() alongside micSweepInProgress.
+
+   - pollMicSilenceWatchdog (~3811):
+     * Call new gate with Date.now() injected by caller.
+     * Persist returned state fields back to micSweepGateState.
+     * Banner message branching on silent classification:
+       - silent + !exhausted → "Still trying to restore your microphone…" + show warning
+       - silent + exhausted → "No working microphone detected — check your mic/permissions"
+     * Guard before sweep (NEW, in addition to micSweepInProgress):
+       !this.audioRecoveryInFlight && gate.shouldSweep
+     * Only call runMicRecoverySweep when both guards pass.
+
+   - runMicRecoverySweep finally block (~3590):
+     * Set micSweepGateState.nextAllowedAt = Date.now() + MIC_SWEEP_RETRY_INTERVAL_MS
+       (cooldown measured from sweep COMPLETION, not start).
+
+   - verifyInitialCaptureEnergy (~3499):
+     * Use gate reducer for first-attempt accounting instead of micSweepDoneForEpisode = true.
+
+   - handleDeviceChangeAsync (~3007):
+     * After refreshDevices(), re-arm micSweepGateState to zeros (currently MISSING).
+
+3. frontend/src/app/pages/room/room.page.html
+
+   - No structural change required.
+   - micSilentWarningMessage() signal already drives copy at lines 201-204.
+   - "Switch microphone" button stays visible throughout.
+
+4. frontend/src/app/services/mic-sweep.spec.ts
+
+   - Rewrite AC-C6 section (U-15..U-19) for new reducer signature and state shape.
+   - Add focused tests (plain integer now — no fake timers):
+     * retry-after-cooldown: shouldSweep:true when now >= nextAllowedAt after prior sweep
+     * dual-bound exhaustion: exhausted:true at max attempts AND at max duration (independently)
+     * re-arm conditions: 'working' classification and micActive:false reset all three fields
+     * disjointness: silence gate requires micActive:true; track-failure recovery acts on
+       ended/mute where micActive is false — assert mutual exclusion at reducer/call-site level
+
+---
+
+RISKS AND MITIGATIONS
+---------------------
+
+| Risk | Mitigation |
+|------|------------|
+| Off-by-one on attempts vs exhaustion | Derive exhausted (never store); test both bounds independently |
+| Cooldown measured from start not completion | Set nextAllowedAt only in runMicRecoverySweep finally |
+| Double-recovery race with handleLocalTrackFailure | New !audioRecoveryInFlight guard before silence-triggered sweep |
+| Retry storm on mobile (repeated getUserMedia) | 7s cooldown + dual bound (8 attempts / 90s wall-clock) |
+| Regression to track-ended/devicechange recovery paths | No changes to those handlers; only add gate re-arm in handleDeviceChangeAsync |
+| Stale banner during retry vs exhausted phases | Explicit message branch in pollMicSilenceWatchdog driven by gate.exhausted |
+
+---
+
+SCOPE BOUNDARIES (explicit out-of-scope)
+----------------------------------------
+
+- R2-R7 (other queue items)
+- WK_0701 SFU subscribe-recovery escalation ladder (retry/renegotiate/rejoin)
+- active-speaker.service.ts, remote-audio.service.ts, R5 volume balancer
+- DEV deploy / live voice.silverjrom.app changes (LOCAL only per north-star)
+
+---
+
+EFFORT TIER CONFIRMATION
+------------------------
+
+Confirm HIGH (matches brief PROJCORE-PROPOSED tier).
+
+Why: realtime-media pure-reducer rewrite touching 3 existing recovery paths (watchdog,
+verifyInitialCaptureEnergy, handleDeviceChangeAsync), flagged REDTEAM-CANDIDATE by 2-planner
+deliberation — matches effort-tiering.md high-risk trigger.
+
+Mode chord: /fast OFF · effort high
+Validator topology: 3-agent (validator=codex 5.5)
+
+---
+
+AUTONOMOUS DECISIONS
+--------------------
+
+None — implementing agreed design verbatim. Any genuine design problem found during
+implementation will be flagged in PROPOSED/REVISE-PLAN, not silently deviated.
+
+---
+
+STATUS LINE
+-----------
+
+STATUS: PROPOSED — bounded retry reducer replacing one-shot latch + room.page wiring per consensus
+· complexity: high (confirmed)
+· why: load-bearing pure reducer rewrite across 3 recovery touchpoints, REDTEAM-CANDIDATE
+
+Awaiting APPROVED-PLAN before writing code.

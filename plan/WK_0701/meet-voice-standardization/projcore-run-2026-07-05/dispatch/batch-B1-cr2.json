@@ -1,0 +1,22 @@
+{
+  "schema_version": 4,
+  "dispatch_status": "ready",
+  "batch_id": "batch-B1-cr2",
+  "role": "implementer",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-05",
+  "session": "05_impl_grokcompose_lkvc",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-05/prompts/batch-B1-cr2.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-05/dispatch/batch-B1-cr2.implementer.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-05/callbacks.md",
+  "dispatched_at": "2026-07-05T22:18:45Z",
+  "estimate_min": 20,
+  "bucket": "SHORT",
+  "wakeup_delay_sec": 2400,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-05/dispatch/batch-B1-cr2.wakeup-required",
+  "watcher_pid": 435233,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-05/dispatch/batch-B1-cr2.watcher-implementer.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-05/dispatch/watcher-batch-B1-cr2-implementer.log",
+  "dispatch_marker": "DISPATCH-batch-B1-cr2-implementer-435119-1783289925",
+  "wakeup_acked_at": "2026-07-05T22:18:53Z",
+  "wakeup_acked_by": "projcore"
+}

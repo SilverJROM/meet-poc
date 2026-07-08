@@ -1,0 +1,57 @@
+{
+  "pc": {
+    "connectionState": "connected",
+    "iceConnectionState": "connected",
+    "iceGatheringState": "complete",
+    "signalingState": "stable"
+  },
+  "peers": [
+    {
+      "name": "host-b1-peer2",
+      "state": "local",
+      "audioReadyState": "live"
+    }
+  ],
+  "audio": [
+    {
+      "id": "AP",
+      "type": "media-playout",
+      "kind": "audio",
+      "mediaType": null,
+      "audioLevel": null,
+      "totalAudioEnergy": null,
+      "bytesSent": null,
+      "bytesReceived": null
+    },
+    {
+      "id": "OT01A4120966928",
+      "type": "outbound-rtp",
+      "kind": "audio",
+      "mediaType": "audio",
+      "audioLevel": null,
+      "totalAudioEnergy": null,
+      "bytesSent": 672852,
+      "bytesReceived": null
+    },
+    {
+      "id": "RIA4120966928",
+      "type": "remote-inbound-rtp",
+      "kind": "audio",
+      "mediaType": "audio",
+      "audioLevel": null,
+      "totalAudioEnergy": null,
+      "bytesSent": null,
+      "bytesReceived": null
+    },
+    {
+      "id": "SA2",
+      "type": "media-source",
+      "kind": "audio",
+      "mediaType": null,
+      "audioLevel": 0.06158635212256233,
+      "totalAudioEnergy": 58.87507408643679,
+      "bytesSent": null,
+      "bytesReceived": null
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "transcripts": {
+    "cardCount": 4,
+    "rowCountCollapsed": 2,
+    "rowCountExpanded": 6,
+    "openedAggregate": true
+  },
+  "recordings": {
+    "cardCount": 4,
+    "recRowCountExpanded": 6,
+    "bulkOk": true
+  },
+  "consoleErrors": []
+}

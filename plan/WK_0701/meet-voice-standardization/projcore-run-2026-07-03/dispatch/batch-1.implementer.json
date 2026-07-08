@@ -1,0 +1,9 @@
+{
+  "batch_id": "batch-1",
+  "role": "implementer",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-03/callbacks.md",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0701/meet-voice-standardization/projcore-run-2026-07-03",
+  "dispatch_status": "ready",
+  "session": "03_impl_grokcompose_lkvc",
+  "recovered_manually": true
+}
