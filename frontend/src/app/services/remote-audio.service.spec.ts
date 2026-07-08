@@ -3,6 +3,7 @@ import {
   AUDIO_OUTPUT_DEVICE_STORAGE_KEY,
   applyMediaElementSinkWithDefaultFallback,
   clearStoredAudioOutputDeviceId,
+  computeRemoteAutoGains,
   currentAudioTrack,
   LatestSinkIdApplier,
   RemoteAudioService,
@@ -691,6 +692,19 @@ function peer(id: string, mediaStream: MediaStream): Parameters<RemoteAudioServi
   const service = new RemoteAudioService();
   assert.strictEqual(service.volume(), 1);
   assert.strictEqual(localStorage.get('meet-poc:volume:value'), '1');
+}
+
+// RA-LEVEL-1 — quiet speakers are raised toward the loudest active speaker without clipping.
+{
+  const gains = computeRemoteAutoGains([
+    { publisherClientId: 'quiet', audioLevel: 0.01 },
+    { publisherClientId: 'loud', audioLevel: 0.1 },
+    { publisherClientId: 'noise', audioLevel: 0.0001 },
+  ]);
+  assert.ok(gains.quiet > 1, 'quiet speaker receives gain');
+  assert.ok(gains.quiet <= 2.5, 'quiet gain is capped');
+  assert.strictEqual(gains.loud, 1, 'loudest speaker is not boosted');
+  assert.strictEqual(gains.noise, 1, 'noise-floor samples are not amplified');
 }
 
 console.log('remote-audio.service: all assertions passed');

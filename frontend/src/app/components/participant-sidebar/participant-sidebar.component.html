@@ -47,8 +47,16 @@
             }
           </span>
           <span class="state-icons" aria-label="Media state">
-            <ion-icon [name]="peer.micEnabled ? 'mic-outline' : 'mic-off-outline'" [class.off]="!peer.micEnabled"></ion-icon>
-            <ion-icon [name]="peer.camEnabled ? 'videocam-outline' : 'videocam-off-outline'" [class.off]="!peer.camEnabled"></ion-icon>
+            @if (peer.micEnabled) {
+              <ion-icon name="mic-outline"></ion-icon>
+            } @else {
+              <ion-icon name="mic-off-outline" class="off"></ion-icon>
+            }
+            @if (peer.camEnabled) {
+              <ion-icon name="videocam-outline"></ion-icon>
+            } @else {
+              <ion-icon name="videocam-off-outline" class="off"></ion-icon>
+            }
           </span>
           @if (canManage(peer)) {
             <div class="row-actions">

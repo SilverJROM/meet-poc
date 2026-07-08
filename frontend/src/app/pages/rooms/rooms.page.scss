@@ -30,10 +30,12 @@
 
 .create-form {
   display: flex;
+  align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
-.create-form input {
+.create-form > input {
   min-height: 38px;
   width: 200px;
   border: 1px solid var(--line);
@@ -42,9 +44,24 @@
   padding: 8px 12px;
 }
 
-.create-form input:focus {
+.create-form > input:focus {
   outline: 2px solid rgba(13, 148, 136, 0.25);
   border-color: var(--accent);
+}
+
+.create-policy {
+  min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.create-policy input {
+  width: 16px;
+  height: 16px;
 }
 
 /* Toolbar: search + guest link */

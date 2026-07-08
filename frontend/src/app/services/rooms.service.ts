@@ -11,6 +11,7 @@ export type Room = {
   waitTimeoutMinutes: number;
   createdAt: number;
   passwordRequired: boolean;
+  autoAdmit: boolean;
 };
 
 export type PaginatedRooms = {
@@ -38,8 +39,8 @@ export class RoomsService {
     return res;
   }
 
-  async create(title: string): Promise<Room> {
-    const res = await firstValueFrom(this.http.post<{ room: Room }>('/api/rooms', { title }));
+  async create(title: string, autoAdmit = false): Promise<Room> {
+    const res = await firstValueFrom(this.http.post<{ room: Room }>('/api/rooms', { title, autoAdmit }));
     return res.room;
   }
 
@@ -54,9 +55,9 @@ export class RoomsService {
     return { deleted: res.deleted, requested: res.requested };
   }
 
-  async exists(id: string): Promise<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number; passwordRequired?: boolean; isOwner?: boolean }> {
+  async exists(id: string): Promise<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number; passwordRequired?: boolean; autoAdmit?: boolean; isOwner?: boolean }> {
     return firstValueFrom(
-      this.http.get<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number; passwordRequired?: boolean; isOwner?: boolean }>(
+      this.http.get<{ exists: boolean; id?: string; title?: string; slug?: string; isOpen?: boolean; waitTimeoutMinutes?: number; passwordRequired?: boolean; autoAdmit?: boolean; isOwner?: boolean }>(
         `/api/rooms/${encodeURIComponent(id)}/exists`,
       ),
     );
@@ -88,9 +89,9 @@ export class RoomsService {
     }
   }
 
-  async setAccess(id: string, isOpen: boolean, waitTimeoutMinutes: number): Promise<Room> {
+  async setAccess(id: string, isOpen: boolean, waitTimeoutMinutes: number, autoAdmit?: boolean): Promise<Room> {
     const res = await firstValueFrom(
-      this.http.put<{ room: Room }>(`/api/rooms/${encodeURIComponent(id)}/access`, { isOpen, waitTimeoutMinutes }),
+      this.http.put<{ room: Room }>(`/api/rooms/${encodeURIComponent(id)}/access`, { isOpen, waitTimeoutMinutes, autoAdmit }),
     );
     return res.room;
   }

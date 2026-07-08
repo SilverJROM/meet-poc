@@ -214,6 +214,8 @@ export function nextMicWorkingState(
 // Silent users join; in-call watchdogs surface 'No sound' after admit.
 export type PreflightPrereqsInput = {
   hasMicAccess: boolean;
+  micVerified?: boolean;
+  speakerTested?: boolean;
 };
 
 export function missingPreflightPrereqs(input: PreflightPrereqsInput): ('mic')[] {

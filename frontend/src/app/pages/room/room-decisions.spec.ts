@@ -427,21 +427,21 @@ assert.strictEqual(
   'happy path: trigger fired, no failure → audio-connecting (still in flight)',
 );
 
-// ── Preflight prereqs gate (R1): mic+speaker mandatory, camera optional ───────
+// ── Preflight prereqs gate: mic access is the hard join prerequisite ─────────
 assert.deepStrictEqual(
   missingPreflightPrereqs({ hasMicAccess: false, micVerified: false, speakerTested: false }),
-  ['mic', 'speaker'],
-  'R1: no mic access → mic blocked + speaker untested',
+  ['mic'],
+  'R9: no mic access → mic blocked; speaker state is not double-counted',
 );
 assert.deepStrictEqual(
   missingPreflightPrereqs({ hasMicAccess: true, micVerified: false, speakerTested: false }),
-  ['mic-silent', 'speaker'],
-  'R1: silent/dead mic blocks even with permission granted',
+  [],
+  'R9: silent/dead mic with access can join; in-call watchdog surfaces it',
 );
 assert.deepStrictEqual(
   missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: false }),
-  ['speaker'],
-  'R1: mic verified but speaker untested → speaker blocked',
+  [],
+  'R9: speaker test is visible preflight guidance, not a join blocker',
 );
 assert.deepStrictEqual(
   missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: true }),
@@ -498,12 +498,11 @@ assert.strictEqual(
   'CR-FIX-2 mic: mic off + working cls → false (mic off = unverified)',
 );
 
-// ── Speaker confirm gate: speakerVerified only on explicit Yes (CR-FIX-2) ──
-// missingPreflightPrereqs is the gate function; speakerTested param = speakerVerified signal
+// ── Speaker confirm state: explicit Yes records speakerVerified without hard-blocking join ──
 assert.deepStrictEqual(
   missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: false }),
-  ['speaker'],
-  'CR-FIX-2 speaker: tone played but not confirmed (speakerVerified=false) → gate still blocks',
+  [],
+  'R9: tone not confirmed does not block the access-only join gate',
 );
 assert.deepStrictEqual(
   missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: true }),
@@ -629,8 +628,8 @@ assert.strictEqual(
 // R10(f) — speaker-dead (not verified) → gate blocks join
 assert.deepStrictEqual(
   missingPreflightPrereqs({ hasMicAccess: true, micVerified: true, speakerTested: false }),
-  ['speaker'],
-  'R10(f): speaker not tested/verified → gate blocks with [speaker] (dead speaker caught pre-join)',
+  [],
+  'R10(f)/R9: speaker not tested does not block access-only join gate',
 );
 
 // R10(g) — device-unplugged at gate → config panel / re-acquire (mic missing)
@@ -643,8 +642,8 @@ assert.deepStrictEqual(
 // R10(h) — permission-revoked → friendly green-room block
 assert.deepStrictEqual(
   missingPreflightPrereqs({ hasMicAccess: false, micVerified: false, speakerTested: false }),
-  ['mic', 'speaker'],
-  'R10(h): permission revoked → gate blocks with [mic, speaker] (friendly pre-join block)',
+  ['mic'],
+  'R10(h)/R9: permission revoked → gate blocks on mic access',
 );
 
 // R10(i) — empty-transceiver → throws loudly (not silently swallowed)

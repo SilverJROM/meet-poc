@@ -47,7 +47,7 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
 
   router.post('/rooms', auth, (req, res) => {
     const authed = req as AuthenticatedRequest;
-    const room = createRoom(req.body?.title, authed.user.email, database);
+    const room = createRoom(req.body?.title, authed.user.email, database, { autoAdmit: req.body?.autoAdmit });
     return res.json({ room });
   });
 
@@ -106,7 +106,7 @@ export function roomsRouter(database: Database.Database = getDb()): Router {
     const authed = req as AuthenticatedRequest;
     const result = setRoomAccess(
       String(req.params.id),
-      { isOpen: req.body?.isOpen, waitTimeoutMinutes: req.body?.waitTimeoutMinutes },
+      { isOpen: req.body?.isOpen, waitTimeoutMinutes: req.body?.waitTimeoutMinutes, autoAdmit: req.body?.autoAdmit },
       authed.user.email,
       database,
     );

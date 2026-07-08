@@ -41,7 +41,11 @@
             [attr.aria-label]="showPassword() ? 'Hide password' : 'Show password'"
             [attr.aria-pressed]="showPassword()"
           >
-            <ion-icon [name]="showPassword() ? 'eye-off' : 'eye'"></ion-icon>
+            @if (showPassword()) {
+              <ion-icon name="eye-off"></ion-icon>
+            } @else {
+              <ion-icon name="eye"></ion-icon>
+            }
           </button>
         </div>
       </div>

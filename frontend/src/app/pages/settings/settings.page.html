@@ -41,7 +41,11 @@
       <div class="provider-list">
         @for (provider of providers; track provider.id) {
           <button type="button" class="provider-row" [class.active]="defaultProvider() === provider.id" [disabled]="saving()" (click)="setDefaultProvider(provider.id)">
-            <ion-icon [name]="defaultProvider() === provider.id ? 'star' : 'star-outline'"></ion-icon>
+            @if (defaultProvider() === provider.id) {
+              <ion-icon name="star"></ion-icon>
+            } @else {
+              <ion-icon name="star-outline"></ion-icon>
+            }
             <span>
               <strong>{{ provider.label }}</strong>
               <small>{{ provider.detail }}</small>
@@ -111,7 +115,11 @@
             <span>{{ providerLabel(question.providerOverride) }}</span>
             <span class="row-actions">
               <button type="button" class="icon-btn" [class.starred]="question.isDefault" (click)="starQuestion(question)" [disabled]="saving()" aria-label="Set default question">
-                <ion-icon [name]="question.isDefault ? 'star' : 'star-outline'"></ion-icon>
+                @if (question.isDefault) {
+                  <ion-icon name="star"></ion-icon>
+                } @else {
+                  <ion-icon name="star-outline"></ion-icon>
+                }
               </button>
               <button type="button" class="icon-btn" (click)="edit(question)" [disabled]="saving()" aria-label="Edit question">
                 <ion-icon name="create-outline"></ion-icon>

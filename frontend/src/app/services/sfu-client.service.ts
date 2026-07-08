@@ -71,6 +71,8 @@ const VIDEO_SIMULCAST_ENCODINGS: RTCRtpEncodingParameters[] = [
   { rid: 'm', scaleResolutionDownBy: 2, maxBitrate: 400_000 },
   { rid: 'l', scaleResolutionDownBy: 4, maxBitrate: 120_000 },
 ];
+const AUDIO_MIN_BITRATE = 16_000;
+const AUDIO_MAX_BITRATE = 64_000;
 const SFU_HTTP_TIMEOUT_MS = 6000;
 const SFU_TRANSPORT_DISCONNECTED_GRACE_MS = 8000;
 const SFU_TRANSPORT_RECOVERY_CAP = 3;
@@ -1410,6 +1412,36 @@ export class SfuClientService {
     return this.videoSender?.getParameters().encodings ?? [];
   }
 
+  getAudioEncodings(): RTCRtpEncodingParameters[] {
+    return this.audioSender?.getParameters().encodings ?? [];
+  }
+
+  senderSnapshotForDebug(): Array<Record<string, unknown>> {
+    return [
+      { id: 'audio', sender: this.audioSender },
+      { id: 'video', sender: this.videoSender },
+      { id: 'screen', sender: this.screenSender },
+    ]
+      .filter((entry): entry is { id: string; sender: RTCRtpSender } => !!entry.sender)
+      .map((entry) => {
+        const params = entry.sender.getParameters();
+        const encoding = (params.encodings?.[0] ?? {}) as RTCRtpEncodingParameters & Record<string, unknown>;
+        return {
+          id: entry.id,
+          kind: entry.sender.track?.kind ?? entry.id,
+          trackId: entry.sender.track?.id ?? null,
+          audioPriority: entry.id === 'audio' ? encoding['priority'] ?? null : null,
+          audioNetworkPriority: entry.id === 'audio' ? encoding['networkPriority'] ?? null : null,
+          audioMaxBitrate: entry.id === 'audio' ? encoding.maxBitrate ?? null : null,
+          audioMinBitrate: entry.id === 'audio' ? encoding['minBitrate'] ?? null : null,
+          audioDtx: entry.id === 'audio' ? encoding['dtx'] ?? null : null,
+          videoPriority: entry.id !== 'audio' ? encoding['priority'] ?? null : null,
+          videoNetworkPriority: entry.id !== 'audio' ? encoding['networkPriority'] ?? null : null,
+          videoMaxBitrate: entry.id !== 'audio' ? encoding.maxBitrate ?? null : null,
+        };
+      });
+  }
+
   resetFailedPublishAttempt(): void {
     if (this.localPublishState()?.status === 'published') return;
     this.closePeerConnectionForRecovery();
@@ -1820,6 +1852,7 @@ export class SfuClientService {
   private async doReplaceAudioTrack(track: MediaStreamTrack | null): Promise<void> {
     if (!this.audioSender) return;
     await this.audioSender.replaceTrack(track);
+    await this.applyAudioSenderParameters(this.audioSender);
   }
 
   private async doReplaceVideoTrack(track: MediaStreamTrack | null): Promise<void> {
@@ -1843,6 +1876,7 @@ export class SfuClientService {
       shouldRegisterFirstAddedLocalTrack(publishedState.tracks, kind, !!track);
 
     await sender.replaceTrack(track);
+    if (kind === 'audio') await this.applyAudioSenderParameters(sender);
     if (!shouldPublish || !track || !publishedState || !this.pc || !this.callerCreds) return false;
 
     try {
@@ -2141,6 +2175,8 @@ export class SfuClientService {
         ? this.pc.addTransceiver(audioTrack, { direction: 'sendonly' })
         : this.pc.addTransceiver('audio', { direction: 'sendonly' });
       this.audioSender = audioTransceiver.sender;
+      this.preferHardenedAudioCodecs(audioTransceiver);
+      await this.applyAudioSenderParameters(this.audioSender);
 
       const videoTrack = localStream?.getVideoTracks()[0];
       const videoTransceiver = videoTrack
@@ -2214,6 +2250,58 @@ export class SfuClientService {
     const recoveryIceServers = this.recoveryPublishIceServers;
     this.recoveryPublishIceServers = null;
     return recoveryIceServers ?? this.iceConfigService.getIceServers();
+  }
+
+  private preferHardenedAudioCodecs(transceiver: RTCRtpTransceiver): void {
+    const rtpSender = globalThis.RTCRtpSender;
+    const caps = rtpSender?.getCapabilities?.('audio');
+    if (!caps?.codecs?.length || typeof transceiver.setCodecPreferences !== 'function') return;
+    const opus = caps.codecs.filter((codec) => codec.mimeType.toLowerCase() === 'audio/opus');
+    const red = caps.codecs.filter((codec) => codec.mimeType.toLowerCase() === 'audio/red');
+    const rest = caps.codecs.filter((codec) => !opus.includes(codec) && !red.includes(codec));
+    try {
+      transceiver.setCodecPreferences([...red, ...opus, ...rest]);
+    } catch {
+      try {
+        transceiver.setCodecPreferences([...opus, ...rest]);
+      } catch {
+        // Browser does not accept codec preference mutation for this sender.
+      }
+    }
+  }
+
+  private async applyAudioSenderParameters(sender: RTCRtpSender | null): Promise<void> {
+    if (!sender) return;
+    if (typeof sender.getParameters !== 'function' || typeof sender.setParameters !== 'function') return;
+    const parameters = sender.getParameters() as RTCRtpSendParameters & {
+      encodings?: Array<RTCRtpEncodingParameters & Record<string, unknown>>;
+    };
+    const baseEncodings = parameters.encodings?.length ? parameters.encodings : [{} as RTCRtpEncodingParameters & Record<string, unknown>];
+    parameters.encodings = baseEncodings.map((encoding) => ({
+      ...encoding,
+      minBitrate: AUDIO_MIN_BITRATE,
+      maxBitrate: AUDIO_MAX_BITRATE,
+      priority: 'high',
+      networkPriority: 'high',
+      dtx: 'disabled',
+    }));
+    try {
+      await sender.setParameters(parameters);
+    } catch (err) {
+      const fallback = sender.getParameters() as RTCRtpSendParameters & {
+        encodings?: Array<RTCRtpEncodingParameters & Record<string, unknown>>;
+      };
+      const fallbackEncodings = fallback.encodings?.length ? fallback.encodings : [{} as RTCRtpEncodingParameters & Record<string, unknown>];
+      fallback.encodings = fallbackEncodings.map((encoding) => ({
+        ...encoding,
+        maxBitrate: AUDIO_MAX_BITRATE,
+      }));
+      try {
+        await sender.setParameters(fallback);
+      } catch {
+        console.debug('[sfu] audio sender parameter hardening unsupported', err);
+      }
+    }
   }
 
   private async doSubscribe(publisher: import('./sfu-roster-utils.js').RemotePublisher, capturedEpoch: number): Promise<void> {

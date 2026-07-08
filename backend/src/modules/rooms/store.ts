@@ -118,17 +118,23 @@ export function listOwnedRoomsPage(
   return { rooms, total: totalRow.total };
 }
 
-export function createRoom(titleInput: unknown, email: string, database: Database.Database = getDb()): Room {
+export function createRoom(
+  titleInput: unknown,
+  email: string,
+  database: Database.Database = getDb(),
+  options: { autoAdmit?: unknown } = {},
+): Room {
   const title =
     String(titleInput || '').slice(0, 100).trim() || `Room ${new Date().toISOString().slice(0, 10)}`;
   const slug = generateAvailableSlug(slugBase(title), database);
   for (let i = 0; i < 10; i += 1) {
     const id = crypto.randomBytes(6).toString('hex');
     const createdAt = Date.now();
+    const autoAdmit = options.autoAdmit === true;
     const result = database
-      .prepare('INSERT OR IGNORE INTO rooms (id, title, slug, owner_email, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(id, title, slug, email, createdAt);
-    if (result.changes === 1) return { id, title, slug, ownerEmail: email, isOpen: false, waitTimeoutMinutes: 15, createdAt, passwordRequired: false, autoAdmit: false };
+      .prepare('INSERT OR IGNORE INTO rooms (id, title, slug, owner_email, created_at, auto_admit) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(id, title, slug, email, createdAt, autoAdmit ? 1 : 0);
+    if (result.changes === 1) return { id, title, slug, ownerEmail: email, isOpen: false, waitTimeoutMinutes: 15, createdAt, passwordRequired: false, autoAdmit };
   }
   throw new Error('failed to create unique room id');
 }
@@ -154,7 +160,7 @@ function generateAvailableSlug(base: string, database: Database.Database, exclud
 
 export function setRoomAccess(
   roomId: string,
-  input: { isOpen?: unknown; waitTimeoutMinutes?: unknown },
+  input: { isOpen?: unknown; waitTimeoutMinutes?: unknown; autoAdmit?: unknown },
   email: string,
   database: Database.Database = getDb(),
 ): { ok: true; room: Room } | { ok: false; status: 400 | 403 | 404; error: string } {
@@ -162,13 +168,14 @@ export function setRoomAccess(
   if (!room) return { ok: false, status: 404, error: 'not found' };
   if (!isOwnerOf(room.id, email, database)) return { ok: false, status: 403, error: 'forbidden' };
   const isOpen = typeof input.isOpen === 'boolean' ? input.isOpen : room.isOpen;
+  const autoAdmit = typeof input.autoAdmit === 'boolean' ? input.autoAdmit : room.autoAdmit;
   const waitTimeoutMinutes = input.waitTimeoutMinutes == null ? room.waitTimeoutMinutes : Number(input.waitTimeoutMinutes);
   if (!Number.isFinite(waitTimeoutMinutes) || waitTimeoutMinutes <= 0 || waitTimeoutMinutes > 240) {
     return { ok: false, status: 400, error: 'wait timeout invalid' };
   }
   database
-    .prepare('UPDATE rooms SET is_open = ?, wait_timeout_minutes = ? WHERE id = ?')
-    .run(isOpen ? 1 : 0, waitTimeoutMinutes, room.id);
+    .prepare('UPDATE rooms SET is_open = ?, wait_timeout_minutes = ?, auto_admit = ? WHERE id = ?')
+    .run(isOpen ? 1 : 0, waitTimeoutMinutes, autoAdmit ? 1 : 0, room.id);
   return { ok: true, room: getRoom(room.id, database)! };
 }
 

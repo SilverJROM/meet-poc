@@ -7,15 +7,24 @@ type RemotePublisherEntry = {
   track: MediaStreamTrack;
   trackName: string | null;
   el: HTMLAudioElement;
+  graph: RemoteAudioGraph | null;
   blocked: boolean;
   playbackFailure: 'unsupported' | 'aborted' | null;
   voiceStalled: boolean;
   sinkApplyResult: SinkApplyResult;
   sinkApplyTimedOut: boolean;
+  autoGain: number;
   onEnded: () => void;
   onPlaying: () => void;
   onPaused: () => void;
   generation: number;
+};
+
+type RemoteAudioGraph = {
+  source: MediaStreamAudioSourceNode;
+  gain: GainNode;
+  compressor: DynamicsCompressorNode;
+  destination: MediaStreamAudioDestinationNode;
 };
 
 type SinkIdTargetState = {
@@ -57,6 +66,7 @@ export type RemoteAudioDebugSnapshot = {
   blockedPeerIds: string[];
   unlocked: boolean;
   voiceRecoveryCounters: Record<VoiceRecoveryStep, number>;
+  autoGains: Record<string, number>;
 };
 
 const VOLUME_STORAGE_KEY = 'meet-poc:volume:value';
@@ -70,6 +80,44 @@ export const VOICE_RECOVERY_MIN_BYTES_DELTA = 0;
 export const VOICE_RECOVERY_MAX_EMITTED_DELTA = 0;
 export const VOICE_RECOVERY_MIN_AUDIO_LEVEL = 0.0005;
 export const VOICE_RECOVERY_MIN_TOTAL_AUDIO_ENERGY_DELTA = 0.000001;
+const AUTO_LEVEL_TARGET_RATIO = 0.88;
+const AUTO_LEVEL_NOISE_FLOOR = 0.003;
+const AUTO_LEVEL_MAX_GAIN = 2.5;
+const AUTO_LEVEL_SMOOTHING = 0.35;
+
+export type RemoteAudioLevelSample = {
+  publisherClientId: string;
+  audioLevel: number | null;
+};
+
+export function computeRemoteAutoGains(
+  samples: RemoteAudioLevelSample[],
+  previous: Record<string, number> = {},
+): Record<string, number> {
+  const usable = samples.filter(
+    (sample): sample is { publisherClientId: string; audioLevel: number } =>
+      !!sample.publisherClientId &&
+      typeof sample.audioLevel === 'number' &&
+      Number.isFinite(sample.audioLevel) &&
+      sample.audioLevel >= AUTO_LEVEL_NOISE_FLOOR,
+  );
+  const loudest = usable.reduce((max, sample) => Math.max(max, sample.audioLevel), 0);
+  const next: Record<string, number> = {};
+  for (const sample of samples) {
+    const prev = previous[sample.publisherClientId] ?? 1;
+    let raw = 1;
+    if (
+      loudest > 0 &&
+      typeof sample.audioLevel === 'number' &&
+      Number.isFinite(sample.audioLevel) &&
+      sample.audioLevel >= AUTO_LEVEL_NOISE_FLOOR
+    ) {
+      raw = Math.max(1, Math.min(AUTO_LEVEL_MAX_GAIN, (loudest * AUTO_LEVEL_TARGET_RATIO) / sample.audioLevel));
+    }
+    next[sample.publisherClientId] = Number((prev + (raw - prev) * AUTO_LEVEL_SMOOTHING).toFixed(3));
+  }
+  return next;
+}
 
 export function decideVoiceRecovery(input: VoiceRecoveryDecisionInput): VoiceRecoveryAction {
   if (input.mutedAll) return 'none';
@@ -257,6 +305,7 @@ export class RemoteAudioService {
   private selectedSinkId: string | undefined;
   private effectiveSinkId: string | null = null;
   private usedDefaultSinkFallback = false;
+  private audioContext: AudioContext | null = null;
   private unlocked = false;
   private inCall = false;
   private generation = 0;
@@ -272,7 +321,7 @@ export class RemoteAudioService {
   }
 
   mixerEnabled(): boolean {
-    return false;
+    return true;
   }
 
   setMutedAll(value: boolean): void {
@@ -280,7 +329,7 @@ export class RemoteAudioService {
     if (value) {
       for (const entry of this.registry.values()) entry.voiceStalled = false;
     }
-    for (const entry of this.registry.values()) this.applyVolumeState(entry.el);
+    for (const entry of this.registry.values()) this.applyVolumeState(entry.el, entry);
     this.refreshBlockedState();
   }
 
@@ -289,8 +338,17 @@ export class RemoteAudioService {
     this.volume.set(clamped);
     if (forcePersist || clamped !== value) persistVolume(clamped);
     else persistVolume(clamped);
-    for (const entry of this.registry.values()) this.applyVolumeState(entry.el);
+    for (const entry of this.registry.values()) this.applyVolumeState(entry.el, entry);
     this.refreshBlockedState();
+  }
+
+  updateAutoLevels(samples: RemoteAudioLevelSample[]): void {
+    const previous = Object.fromEntries([...this.registry.entries()].map(([id, entry]) => [id, entry.autoGain]));
+    const next = computeRemoteAutoGains(samples, previous);
+    for (const [id, entry] of this.registry) {
+      entry.autoGain = next[id] ?? 1;
+      this.applyVolumeState(entry.el, entry);
+    }
   }
 
   syncPeers(peers: PeerState[], remoteTrackNames: Map<string, Map<string, string>> = new Map()): void {
@@ -415,7 +473,7 @@ export class RemoteAudioService {
     const registryEntries = [...this.registry.entries()];
     return {
       mixerEnabled: this.mixerEnabled(),
-      contextState: 'none',
+      contextState: this.audioContext?.state ?? 'none',
       outputAttached: registryEntries.length > 0,
       outputPaused: registryEntries.some(([, entry]) => entry.el.paused),
       mutedAll: this.mutedAll(),
@@ -429,6 +487,7 @@ export class RemoteAudioService {
       blockedPeerIds: registryEntries.filter(([, entry]) => remoteAudioBlockingReason(entry) !== null).map(([id]) => id),
       unlocked: this.unlocked,
       voiceRecoveryCounters: { ...this.voiceRecoveryCounters },
+      autoGains: Object.fromEntries(registryEntries.map(([id, entry]) => [id, entry.autoGain])),
     };
   }
 
@@ -475,6 +534,9 @@ export class RemoteAudioService {
     this.selectedSinkId = undefined;
     this.effectiveSinkId = null;
     this.usedDefaultSinkFallback = false;
+    const context = this.audioContext;
+    this.audioContext = null;
+    void context?.close().catch(() => undefined);
     this.mutedAll.set(false);
     this.contextState.set('none');
     this.outputPlaying.set(false);
@@ -489,12 +551,13 @@ export class RemoteAudioService {
     if (!this.inCall || !track || track.readyState === 'ended') return;
     this.removePublisher(id);
     const generation = this.generation;
+    const graph = this.createRemoteAudioGraph(stream);
     const el = document.createElement('audio');
     el.dataset['remoteAudio'] = id;
     el.setAttribute('playsinline', '');
     el.style.display = 'none';
     el.setAttribute('aria-hidden', 'true');
-    el.srcObject = stream;
+    el.srcObject = graph?.destination.stream ?? stream;
     this.applyVolumeState(el);
 
     const onEnded = () => this.removePublisher(id);
@@ -523,17 +586,20 @@ export class RemoteAudioService {
       track,
       trackName,
       el,
+      graph,
       blocked: true,
       playbackFailure: null,
       voiceStalled: false,
       sinkApplyResult: 'selected',
       sinkApplyTimedOut: false,
+      autoGain: 1,
       onEnded,
       onPlaying,
       onPaused,
       generation,
     };
     this.registry.set(id, entry);
+    this.applyVolumeState(el, entry);
     document.body.append(el);
     this.refreshBlockedState();
 
@@ -607,8 +673,15 @@ export class RemoteAudioService {
     this.effectiveSinkId = usedFallback ? '' : (deviceId ?? null);
   }
 
-  private applyVolumeState(el: HTMLAudioElement): void {
-    el.volume = this.mutedAll() ? 0 : Math.min(this.volume(), MAX_VOLUME);
+  private applyVolumeState(el: HTMLAudioElement, entry?: RemotePublisherEntry): void {
+    const level = this.mutedAll() ? 0 : this.volume() * (entry?.autoGain ?? 1);
+    if (entry?.graph) {
+      entry.graph.gain.gain.value = Math.max(0, Math.min(level, AUTO_LEVEL_MAX_GAIN));
+      el.volume = MAX_VOLUME;
+      el.muted = this.mutedAll();
+      return;
+    }
+    el.volume = Math.min(level, MAX_VOLUME);
     el.muted = this.mutedAll();
   }
 
@@ -616,7 +689,8 @@ export class RemoteAudioService {
     const entries = [...this.registry.entries()].filter(([id]) => !peerId || id === peerId);
     await Promise.all(
       entries.map(async ([id, entry]) => {
-        this.applyVolumeState(entry.el);
+        this.applyVolumeState(entry.el, entry);
+        await this.resumeAudioContext();
         const sinkApplied = await this.applySinkId(entry.el, deviceId);
         if (!this.isEntryCurrent(id, entry)) return;
         entry.sinkApplyResult = sinkApplied;
@@ -649,6 +723,62 @@ export class RemoteAudioService {
     return this.inCall && entry.generation === this.generation && this.registry.get(id) === entry;
   }
 
+  private createRemoteAudioGraph(stream: MediaStream): RemoteAudioGraph | null {
+    const context = this.ensureAudioContext();
+    if (!context) return null;
+    try {
+      const source = context.createMediaStreamSource(stream);
+      const gain = context.createGain();
+      const compressor = context.createDynamicsCompressor();
+      const destination = context.createMediaStreamDestination();
+      compressor.threshold.value = -18;
+      compressor.knee.value = 18;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.25;
+      source.connect(gain);
+      gain.connect(compressor);
+      compressor.connect(destination);
+      return { source, gain, compressor, destination };
+    } catch (err) {
+      console.debug('[media] remote audio WebAudio graph unavailable; using direct media element', err);
+      return null;
+    }
+  }
+
+  private ensureAudioContext(): AudioContext | null {
+    if (this.audioContext) return this.audioContext;
+    const audioWindow = window as Window & { webkitAudioContext?: typeof AudioContext };
+    const Ctor = window.AudioContext ?? audioWindow.webkitAudioContext;
+    if (!Ctor) return null;
+    try {
+      this.audioContext = new Ctor();
+      this.contextState.set(this.audioContext.state);
+      this.audioContext.onstatechange = () => this.contextState.set(this.audioContext?.state ?? 'none');
+      return this.audioContext;
+    } catch (err) {
+      console.debug('[media] remote audio AudioContext unavailable', err);
+      return null;
+    }
+  }
+
+  private async resumeAudioContext(): Promise<void> {
+    const context = this.audioContext;
+    if (!context || context.state !== 'suspended') return;
+    try {
+      await context.resume();
+    } finally {
+      this.contextState.set(context.state);
+    }
+  }
+
+  private destroyRemoteAudioGraph(graph: RemoteAudioGraph | null): void {
+    if (!graph) return;
+    try { graph.source.disconnect(); } catch {}
+    try { graph.gain.disconnect(); } catch {}
+    try { graph.compressor.disconnect(); } catch {}
+  }
+
   private destroyRegistryElement(entry: RemotePublisherEntry): void {
     entry.track.removeEventListener('ended', entry.onEnded);
     entry.el.removeEventListener('playing', entry.onPlaying);
@@ -662,6 +792,7 @@ export class RemoteAudioService {
       // best effort
     }
     entry.el.srcObject = null;
+    this.destroyRemoteAudioGraph(entry.graph);
     entry.el.remove();
   }
 

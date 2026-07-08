@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { seedUser } from '../scripts/seed.js';
 import { createSession } from '../src/modules/auth/sessions.js';
-import { createRoom } from '../src/modules/rooms/store.js';
+import { createRoom, setRoomPassword } from '../src/modules/rooms/store.js';
 import { getHostClientId, hasLiveRoom } from '../src/modules/signaling/index.js';
 import { createTestDb } from './helpers.js';
 import { closeServer, closeWs, connectWs, nextMessage, startWsServer } from './signaling-helpers.js';
@@ -106,6 +106,35 @@ describe('signaling closed-room auto-admit', () => {
     });
 
     closeWs(guest);
+    await closeServer(server);
+  });
+
+  it('auto-admits only guests with the correct room password when enabled', async () => {
+    const db = createTestDb();
+    seedUser(db);
+    const room = createRoom('Protected auto', 'jrom@silverjrom.app', db, { autoAdmit: true });
+    const passwordResult = setRoomPassword(room.id, 'secret', 'jrom@silverjrom.app', db);
+    expect(passwordResult.ok).toBe(true);
+    const ownerCookie = `session=${createSession('jrom@silverjrom.app', db)}`;
+    const { server, url } = await startWsServer(db);
+    const owner = await connectWs(url, ownerCookie);
+
+    owner.send(JSON.stringify({ type: 'join', room: room.id, name: 'Owner' }));
+    await nextMessage(owner);
+
+    const correct = await connectWs(url);
+    correct.send(JSON.stringify({ type: 'join', room: room.id, name: 'Correct', password: 'secret' }));
+    const admitted = await nextMessage(correct);
+    expect(admitted).toMatchObject({ type: 'admitted', roomTitle: 'Protected auto', isOwner: false });
+
+    const wrong = await connectWs(url);
+    wrong.send(JSON.stringify({ type: 'join', room: room.id, name: 'Wrong', password: 'wrong' }));
+    const knocking = await nextMessage(wrong);
+    expect(knocking).toMatchObject({ type: 'knocking', roomTitle: 'Protected auto' });
+
+    closeWs(wrong);
+    closeWs(correct);
+    closeWs(owner);
     await closeServer(server);
   });
 });

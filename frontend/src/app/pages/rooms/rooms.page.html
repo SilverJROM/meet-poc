@@ -21,6 +21,16 @@
         <ion-icon name="videocam-outline"></ion-icon>
         Create room
       </button>
+      <label class="create-policy">
+        <input
+          name="newAutoAdmit"
+          type="checkbox"
+          [ngModel]="newAutoAdmit()"
+          (ngModelChange)="newAutoAdmit.set($event)"
+          [disabled]="busy()"
+        >
+        Auto-admit with password
+      </label>
     </form>
   </header>
 
@@ -121,7 +131,7 @@
                 } @else {
                   <div class="room-name">
                     <strong>{{ room.title }}</strong>
-                    <span class="room-sub">{{ room.passwordRequired ? 'Password set' : 'No password' }}</span>
+                    <span class="room-sub">{{ room.passwordRequired ? (room.autoAdmit ? 'Password auto-admit' : 'Password + host admit') : 'No password' }}</span>
                   </div>
                 }
               </td>
@@ -183,6 +193,19 @@
                             <span>min</span>
                           </span>
                         </label>
+                        <div class="menu-row">
+                          <span>Correct password auto-admits</span>
+                          <button
+                            type="button"
+                            class="mini-toggle"
+                            [class.on]="room.autoAdmit"
+                            [disabled]="accessBusyId() === room.id"
+                            [attr.aria-pressed]="room.autoAdmit"
+                            (click)="toggleAutoAdmit(room, $event)"
+                          >
+                            <span class="knob"></span>
+                          </button>
+                        </div>
 
                         <div class="menu-divider"></div>
                         <span class="menu-section">Password</span>

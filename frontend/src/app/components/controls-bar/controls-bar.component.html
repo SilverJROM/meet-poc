@@ -63,8 +63,10 @@
     >
       @if (audioConnecting()) {
         <ion-icon name="chevron-up-outline" class="connecting-spinner"></ion-icon>
+      } @else if (micOn()) {
+        <ion-icon name="mic-outline"></ion-icon>
       } @else {
-        <ion-icon [name]="micOn() ? 'mic-outline' : 'mic-off-outline'"></ion-icon>
+        <ion-icon name="mic-off-outline"></ion-icon>
       }
     </button>
 
@@ -77,7 +79,11 @@
       (click)="camera.emit()"
       [title]="cameraOn() ? 'Turn camera off' : 'Turn camera on'"
     >
-      <ion-icon [name]="cameraOn() ? 'videocam-outline' : 'videocam-off-outline'"></ion-icon>
+      @if (cameraOn()) {
+        <ion-icon name="videocam-outline"></ion-icon>
+      } @else {
+        <ion-icon name="videocam-off-outline"></ion-icon>
+      }
     </button>
 
     <button
@@ -119,13 +125,21 @@
 
           @if (isHost()) {
             <button type="button" class="more-item" role="menuitem" [class.is-recording]="recording()" [disabled]="uploading()" (click)="chooseRecord()">
-              <ion-icon [name]="recording() ? 'ellipse' : 'ellipse-outline'"></ion-icon>
+              @if (recording()) {
+                <ion-icon name="ellipse"></ion-icon>
+              } @else {
+                <ion-icon name="ellipse-outline"></ion-icon>
+              }
               <span>{{ recording() ? 'Stop recording' : 'Record meeting' }}</span>
             </button>
           }
 
           <button type="button" class="more-item" role="menuitem" (click)="toggleSpeakerMuted()">
-            <ion-icon [name]="remoteAudio.mutedAll() ? 'volume-mute-outline' : 'volume-high-outline'"></ion-icon>
+            @if (remoteAudio.mutedAll()) {
+              <ion-icon name="volume-mute-outline"></ion-icon>
+            } @else {
+              <ion-icon name="volume-high-outline"></ion-icon>
+            }
             <span>{{ remoteAudio.mutedAll() ? 'Unmute speakers' : 'Mute speakers' }}</span>
           </button>
           <div class="more-volume">

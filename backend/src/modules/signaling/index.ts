@@ -939,14 +939,8 @@ export function attachSignaling(server: http.Server, database: Database.Database
         ensureLiveSession(roomId, room.ownerEmail, live, database);
         const owner = isOwnerOf(roomId, userEmail, database);
         currentRoomOwner = owner;
-        if (!owner && room.passwordRequired) {
-          const provided = typeof msg.password === 'string' ? msg.password as string : '';
-          if (!verifyRoomPassword(roomId, provided, database)) {
-            send(ws, { type: 'error', error: 'invalid password' });
-            ws.close();
-            return;
-          }
-        }
+        const providedPassword = typeof msg.password === 'string' ? msg.password as string : '';
+        const validRoomPassword = !room.passwordRequired || verifyRoomPassword(roomId, providedPassword, database);
 
         // (1) SERVER-SIDE IDEMPOTENCY (codex55): repeat 'join' from ALREADY-joined same socket/clientId
         // (e.g. frontend join-ack watchdog resends) must be NO-OP/refresh, NOT create new KNOCK or duplicate session.
@@ -1043,9 +1037,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
           },
         };
 
-        // auto_admit is a per-room DB flag (default 0). Only the AGENTROOM test room has it set to 1
-        // via migration 0014. No API allows it to be toggled at runtime. Real rooms always knock→host-admit.
-        const autoAdmitAllowed = room.autoAdmit && roomId === 'd98896162f09';
+        const autoAdmitAllowed = !owner && room.autoAdmit && validRoomPassword;
         if (!ownerResume && !canResume && !owner && !room.isOpen && !autoAdmitAllowed) {
           startClosedRoomWait(roomId, room.title, clientId, entry, room.waitTimeoutMinutes, live, database);
           console.log(`[room ${roomId}] WAIT ${myName} (${clientId}) timeout=${room.waitTimeoutMinutes}`);
@@ -1063,6 +1055,7 @@ export function attachSignaling(server: http.Server, database: Database.Database
           room.isOpen &&
           !hasOwnerPresentOrReconnecting(live, roomId, database) &&
           !getEffectiveHostClientId(live, roomId, database) &&
+          validRoomPassword &&
           live.admitted.size === 0;
         if (owner || canResume || shouldActAsFirstOpenRoomHost || autoAdmitAllowed) {
           if (resumeOldClientId) {

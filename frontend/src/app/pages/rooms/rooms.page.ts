@@ -36,6 +36,7 @@ export class RoomsPage implements OnDestroy {
   readonly error = signal<string | null>(null);
   readonly copyStatus = signal<string | null>(null);
   readonly newTitle = signal('');
+  readonly newAutoAdmit = signal(false);
   readonly searchQuery = signal('');
   readonly origin = window.location.origin;
   readonly hasRooms = computed(() => this.rooms().length > 0);
@@ -141,8 +142,9 @@ export class RoomsPage implements OnDestroy {
     this.busy.set(true);
     this.error.set(null);
     try {
-      await this.roomsService.create(this.newTitle());
+      await this.roomsService.create(this.newTitle(), this.newAutoAdmit());
       this.newTitle.set('');
+      this.newAutoAdmit.set(false);
       if (this.page() === 1) {
         await this.refreshRooms();
       } else {
@@ -279,14 +281,14 @@ export class RoomsPage implements OnDestroy {
 
   async toggleRoomOpen(room: Room, event?: Event): Promise<void> {
     event?.stopPropagation();
-    await this.updateRoomAccess(room, !room.isOpen, room.waitTimeoutMinutes);
+    await this.updateRoomAccess(room, !room.isOpen, room.waitTimeoutMinutes, room.autoAdmit);
   }
 
   async updateWaitTimeout(room: Room, rawValue: string, event?: Event): Promise<void> {
     event?.stopPropagation();
     const next = Number(rawValue);
     if (!Number.isFinite(next) || next <= 0 || next > 240 || next === room.waitTimeoutMinutes) return;
-    await this.updateRoomAccess(room, room.isOpen, next);
+    await this.updateRoomAccess(room, room.isOpen, next, room.autoAdmit);
   }
 
   isSelected(id: string): boolean {
@@ -336,14 +338,19 @@ export class RoomsPage implements OnDestroy {
     }
   }
 
-  private async updateRoomAccess(room: Room, isOpen: boolean, waitTimeoutMinutes: number): Promise<void> {
+  async toggleAutoAdmit(room: Room, event?: Event): Promise<void> {
+    event?.stopPropagation();
+    await this.updateRoomAccess(room, room.isOpen, room.waitTimeoutMinutes, !room.autoAdmit);
+  }
+
+  private async updateRoomAccess(room: Room, isOpen: boolean, waitTimeoutMinutes: number, autoAdmit: boolean): Promise<void> {
     if (this.accessBusyId()) return;
     this.accessBusyId.set(room.id);
     this.error.set(null);
     try {
-      const updated = await this.roomsService.setAccess(room.id, isOpen, waitTimeoutMinutes);
+      const updated = await this.roomsService.setAccess(room.id, isOpen, waitTimeoutMinutes, autoAdmit);
       this.rooms.update((rooms) => rooms.map((item) => (item.id === updated.id ? updated : item)));
-      this.copyStatus.set(updated.isOpen ? 'Room opened' : 'Room closed');
+      this.copyStatus.set(updated.autoAdmit ? 'Correct-password guests auto-admit' : (updated.isOpen ? 'Room opened' : 'Room closed'));
     } catch {
       this.error.set('Room access could not be updated');
     } finally {

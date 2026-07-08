@@ -14,7 +14,13 @@
             [routerLinkActiveOptions]="{ exact: false }"
             ariaCurrentWhenActive="page"
           >
-            <ion-icon [name]="group.icon" aria-hidden="true"></ion-icon>
+            @switch (group.icon) {
+              @case ('videocam-outline') { <ion-icon name="videocam-outline" aria-hidden="true"></ion-icon> }
+              @case ('radio-outline') { <ion-icon name="radio-outline" aria-hidden="true"></ion-icon> }
+              @case ('recording-outline') { <ion-icon name="recording-outline" aria-hidden="true"></ion-icon> }
+              @case ('settings-outline') { <ion-icon name="settings-outline" aria-hidden="true"></ion-icon> }
+              @case ('people-outline') { <ion-icon name="people-outline" aria-hidden="true"></ion-icon> }
+            }
             <span>{{ group.label }}</span>
           </a>
         } @else {
@@ -26,7 +32,13 @@
               [attr.aria-expanded]="openGroup() === group.label"
               (click)="toggleGroup(group.label, $event)"
             >
-              <ion-icon [name]="group.icon" aria-hidden="true"></ion-icon>
+              @switch (group.icon) {
+                @case ('videocam-outline') { <ion-icon name="videocam-outline" aria-hidden="true"></ion-icon> }
+                @case ('radio-outline') { <ion-icon name="radio-outline" aria-hidden="true"></ion-icon> }
+                @case ('recording-outline') { <ion-icon name="recording-outline" aria-hidden="true"></ion-icon> }
+                @case ('settings-outline') { <ion-icon name="settings-outline" aria-hidden="true"></ion-icon> }
+                @case ('people-outline') { <ion-icon name="people-outline" aria-hidden="true"></ion-icon> }
+              }
               <span>{{ group.label }}</span>
               <ion-icon class="caret" name="chevron-down-outline" aria-hidden="true"></ion-icon>
             </button>
@@ -40,7 +52,13 @@
                     routerLinkActive="is-active"
                     (click)="closeMenus()"
                   >
-                    <ion-icon [name]="child.icon" aria-hidden="true"></ion-icon>
+                    @switch (child.icon) {
+                      @case ('radio-outline') { <ion-icon name="radio-outline" aria-hidden="true"></ion-icon> }
+                      @case ('time-outline') { <ion-icon name="time-outline" aria-hidden="true"></ion-icon> }
+                      @case ('recording-outline') { <ion-icon name="recording-outline" aria-hidden="true"></ion-icon> }
+                      @case ('document-text-outline') { <ion-icon name="document-text-outline" aria-hidden="true"></ion-icon> }
+                      @case ('pulse-outline') { <ion-icon name="pulse-outline" aria-hidden="true"></ion-icon> }
+                    }
                     <span>{{ child.label }}</span>
                   </a>
                 }

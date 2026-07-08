@@ -27,8 +27,9 @@ import {
   nextMicWarningState,
   INITIAL_SWEEP_GATE_STATE,
   MIC_SWEEP_RETRY_INTERVAL_MS,
-  nextSweepGate,
+  micSilenceWatchdogBannerMessage,
   orderedMicCandidates,
+  planMicSweepAttempt,
   runMicSweep,
   type EnergySample,
   type SweepGateState,
@@ -690,6 +691,8 @@ export class RoomPage implements OnDestroy {
         // Always expose (including public DEV / remote joins) for diagnostics, E2E, and cross-machine ICE inspection (B1+)
         sfuGetStats: () => this.sfuClient.getStats(),
         sfuVideoEncodings: () => this.sfuClient.getVideoEncodings(),
+        sfuAudioEncodings: () => this.sfuClient.getAudioEncodings(),
+        senderSnapshot: () => this.sfuClient.senderSnapshotForDebug(),
         sfuUpdateCameraLayer: () => this.sfuClient.updateCameraLayer(),
         sfuSubscribedTracks: () => Object.fromEntries(this.sfuClient.subscribedTracks()),
         sfuLastRecoveryEvent: () => this.sfuClient.lastRecoveryEvent(),
@@ -3128,6 +3131,12 @@ export class RoomPage implements OnDestroy {
       for (const track of inboundAudio) {
         await this.observeRemoteVoiceTrack(track);
       }
+      this.remoteAudio.updateAutoLevels(
+        inboundAudio.map((track) => ({
+          publisherClientId: track.publisherClientId,
+          audioLevel: track.audioLevel ?? null,
+        })),
+      );
 
       if (this.isHost()) {
         this.updateRemoteAudioHealth(inboundAudio);
@@ -3497,14 +3506,14 @@ export class RoomPage implements OnDestroy {
     // confirmed 'silent' window is sweep-eligible.
     if (classification !== 'silent') return;
 
-    // Confirmed silent: run the bounded multi-device recovery sweep via the retry gate.
-    const gate = nextSweepGate(this.micSweepGateState, classification, true, Date.now());
-    this.micSweepGateState = {
-      attempts: gate.attempts,
-      episodeStartedAt: gate.episodeStartedAt,
-      nextAllowedAt: gate.nextAllowedAt,
-    };
-    if (gate.shouldSweep && !this.audioRecoveryInFlight) await this.runMicRecoverySweep();
+    // Confirmed silent: consume the retry gate only when a sweep can actually launch.
+    const micActive = this.captureGatePasses();
+    const plan = planMicSweepAttempt(this.micSweepGateState, classification, micActive, Date.now(), {
+      sweepInProgress: this.micSweepInProgress,
+      recoveryInFlight: this.audioRecoveryInFlight,
+    });
+    this.micSweepGateState = plan.nextState;
+    if (plan.shouldSweep) await this.runMicRecoverySweep();
   }
 
   // B2c — the thin ADAPTER over the pure runMicSweep orchestrator (R10). It owns
@@ -3556,6 +3565,7 @@ export class RoomPage implements OnDestroy {
 
       if (result.outcome === 'adopted') {
         this.syncSelectedAudioIdToTrack(this.captureAudioTrack());
+        this.micSilenceWindow = [];
         this.micSilentWarning.set(false);
         this.micSilentWarningMessage.set("We can't detect sound from your microphone");
         if (result.deviceId !== originalDeviceId) {
@@ -3575,10 +3585,8 @@ export class RoomPage implements OnDestroy {
 
       if (result.outcome === 'none-working') {
         // No candidate produced energy. The orchestrator restored the original
-        // device; surface the single terminal warn (kept a live track throughout).
+        // device; banner copy is watchdog-authoritative (exhausted vs retry).
         this.actionNotice.set(null);
-        this.micSilentWarningMessage.set('No working microphone detected — check your mic/permissions');
-        this.micSilentWarning.set(true);
         this.queueDiagnosticsLog('error', 'mic sweep found no working microphone; kept track, warned user');
         return;
       }
@@ -3819,12 +3827,11 @@ export class RoomPage implements OnDestroy {
     const classification = classifyMicCapture(this.micSilenceWindow);
 
     // Drive the bounded retry gate (re-arms on energy-return / mute / devicechange).
-    const gate = nextSweepGate(this.micSweepGateState, classification, true, Date.now());
-    this.micSweepGateState = {
-      attempts: gate.attempts,
-      episodeStartedAt: gate.episodeStartedAt,
-      nextAllowedAt: gate.nextAllowedAt,
-    };
+    const plan = planMicSweepAttempt(this.micSweepGateState, classification, true, Date.now(), {
+      sweepInProgress: this.micSweepInProgress,
+      recoveryInFlight: this.audioRecoveryInFlight,
+    });
+    this.micSweepGateState = plan.nextState;
 
     if (classification === 'working') {
       this.micSilentWarning.set(false);
@@ -3832,15 +3839,12 @@ export class RoomPage implements OnDestroy {
     } else if (classification === 'indeterminate') {
       this.micSilentWarning.set(nextMicWarningState(this.micSilentWarning(), 'indeterminate', true));
     } else if (classification === 'silent') {
-      this.micSilentWarningMessage.set(
-        gate.exhausted
-          ? 'No working microphone detected — check your mic/permissions'
-          : 'Still trying to restore your microphone…',
-      );
+      const bannerMsg = micSilenceWatchdogBannerMessage(classification, plan.exhausted);
+      if (bannerMsg) this.micSilentWarningMessage.set(bannerMsg);
       this.micSilentWarning.set(true);
     }
 
-    if (gate.shouldSweep && !this.audioRecoveryInFlight) await this.runMicRecoverySweep();
+    if (plan.shouldSweep) await this.runMicRecoverySweep();
   }
 
   // B5 — pre-call lobby self-test poller (R8). Mirrors the in-call watchdog shape
@@ -4660,6 +4664,8 @@ declare global {
       sfuRemoteScreenStreams?: Map<string, MediaStream>;
       sfuGetStats?: () => Promise<RTCStatsReport | null>;
       sfuVideoEncodings?: () => RTCRtpEncodingParameters[];
+      sfuAudioEncodings?: () => RTCRtpEncodingParameters[];
+      senderSnapshot?: () => Array<Record<string, unknown>>;
       sfuUpdateCameraLayer?: () => Promise<void>;
       sfuSubscribedTracks?: () => Record<string, import('../../services/sfu-client.service').SubscribedTrackEntry>;
       sfuLastRecoveryEvent?: () => import('../../services/sfu-client.service').SfuRecoveryDiagnosticsEvent | null;

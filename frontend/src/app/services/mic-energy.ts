@@ -380,6 +380,81 @@ export function nextSweepGate(
   };
 }
 
+/** Blockers that prevent committing a sweep-gate consumption attempt. */
+export type SweepCallerBlockers = {
+  sweepInProgress: boolean;
+  recoveryInFlight: boolean;
+};
+
+export type SweepAttemptPlan = {
+  nextState: SweepGateState;
+  shouldSweep: boolean;
+  exhausted: boolean;
+  /** True only when `attempts` incremented — never on re-arm, cooldown defer, or block. */
+  consumed: boolean;
+};
+
+/**
+ * PURE adapter planner (R1 CR1): wraps `nextSweepGate` so callers never persist a
+ * consumed attempt unless a recovery sweep is eligible to launch. Framework-free
+ * so blocked/in-flight no-consumption is tsx-testable without Angular harnesses.
+ */
+export function planMicSweepAttempt(
+  state: SweepGateState,
+  classification: MicCaptureClass,
+  micActive: boolean,
+  now: number,
+  blockers: SweepCallerBlockers,
+  opts?: { maxAttempts?: number; maxDurationMs?: number },
+): SweepAttemptPlan {
+  const blocked = blockers.sweepInProgress || blockers.recoveryInFlight;
+
+  const gate = nextSweepGate(state, classification, micActive, now, opts);
+  const nextState: SweepGateState = {
+    attempts: gate.attempts,
+    episodeStartedAt: gate.episodeStartedAt,
+    nextAllowedAt: gate.nextAllowedAt,
+  };
+
+  // Non-consuming re-arm paths always apply — even when blockers are present.
+  if (!micActive || classification === 'working') {
+    return {
+      nextState,
+      shouldSweep: false,
+      exhausted: gate.exhausted,
+      consumed: false,
+    };
+  }
+
+  // Blocked silent/indeterminate: never launch or consume; preserve state; report exhaustion.
+  if (blocked) {
+    return {
+      nextState: state,
+      shouldSweep: false,
+      exhausted: gate.exhausted,
+      consumed: false,
+    };
+  }
+
+  return {
+    nextState,
+    shouldSweep: gate.shouldSweep,
+    exhausted: gate.exhausted,
+    consumed: nextState.attempts > state.attempts,
+  };
+}
+
+/**
+ * Watchdog-owned retry/exhausted banner copy for a `'silent'` classification.
+ * Sweep side-effects must not set terminal copy — exhaustion is poll-authoritative.
+ */
+export function micSilenceWatchdogBannerMessage(classification: MicCaptureClass, exhausted: boolean): string | null {
+  if (classification !== 'silent') return null;
+  return exhausted
+    ? 'No working microphone detected — check your mic/permissions'
+    : 'Still trying to restore your microphone…';
+}
+
 /** Acquired-track shape the sweep orchestrator works with (framework-free). */
 export type SweepCandidate = { deviceId: string; label?: string };
 
