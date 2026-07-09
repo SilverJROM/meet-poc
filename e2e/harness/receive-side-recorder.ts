@@ -171,15 +171,20 @@ export async function installCaptureHook(page: Page): Promise<string> {
 
       const state = (window as any).__b08s2ReceiveCapture;
 
-      // Track navigations to detect page reloads
+      // Track navigations to detect page reloads. Gated on pcCount >= 1: Angular
+      // Router (and other SPA routers) fire their own replaceState/pushState
+      // during bootstrap/initial route resolution, BEFORE any RTCPeerConnection
+      // exists — that is not a reload and must not trip INVALID_RELOAD. Once a
+      // real RTCPeerConnection is up, any further history mutation is a genuine
+      // mid-call navigation and still counts.
       const origReplace = window.history.replaceState;
       const origPush = window.history.pushState;
       window.history.replaceState = function (...args) {
-        state.navCount++;
+        if (state.pcCount >= 1) state.navCount++;
         return origReplace.apply(window.history, args);
       };
       window.history.pushState = function (...args) {
-        state.navCount++;
+        if (state.pcCount >= 1) state.navCount++;
         return origPush.apply(window.history, args);
       };
 

@@ -162,4 +162,43 @@ describe('B08S-2 receive-capture-hook (real browser loopback, fake-device audio)
     },
     45_000,
   );
+
+  it(
+    'B08A-3: navCount gate — pre-PC history mutation (SPA router bootstrap) does not trip INVALID_RELOAD; post-PC mutation still does',
+    async () => {
+      server = await startServer();
+      browser = await chromium.launch({ args: FAKE_DEVICE_ARGS });
+      const context = await browser.newContext();
+      const page = await context.newPage();
+
+      await installCaptureHook(page);
+      await page.goto(server.url);
+
+      // Simulate an SPA router's bootstrap replaceState — BEFORE any RTCPeerConnection exists.
+      const preState = await page.evaluate(() => {
+        history.replaceState({}, '', location.href);
+        return { ...(window as any).__b08s2ReceiveCapture, audioSamplesBytes: [] };
+      });
+      expect(preState.pcCount).toBe(0);
+      expect(preState.navCount).toBe(1); // gated: no PC yet, bootstrap nav not counted
+      expect(classifyCapture(preState).kind).not.toBe('INVALID_RELOAD');
+
+      // Now construct a real RTCPeerConnection (pcCount becomes >= 1).
+      await page.evaluate(() => {
+        (window as any).__b08a3PostPc = new RTCPeerConnection();
+      });
+
+      // A genuine post-connection navigation must still trip the guard.
+      const postState = await page.evaluate(() => {
+        history.pushState({}, '', location.href);
+        return { ...(window as any).__b08s2ReceiveCapture, audioSamplesBytes: [] };
+      });
+      expect(postState.pcCount).toBeGreaterThanOrEqual(1);
+      expect(postState.navCount).toBeGreaterThan(1); // gated: PC existed, this nav counts
+      expect(classifyCapture(postState).kind).toBe('INVALID_RELOAD');
+
+      await context.close();
+    },
+    30_000,
+  );
 });

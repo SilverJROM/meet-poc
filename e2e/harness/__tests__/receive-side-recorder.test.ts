@@ -16,6 +16,14 @@ describe('receive-side-recorder taxonomy', () => {
       expect(result.kind).toBe('INVALID_HOOK_MISSING');
     });
 
+    // navCount > 1 still means INVALID_RELOAD here (classifyCapture's contract is
+    // unchanged) — but the REAL hook (installCaptureHook) now only increments
+    // navCount for pushState/replaceState calls that happen AFTER the first
+    // RTCPeerConnection is constructed (pcCount >= 1). A pre-PC value of 2 in
+    // this pure-function test represents a genuine post-connection navigation,
+    // not an SPA router's bootstrap replaceState (which the real hook no longer
+    // counts). See b08s2-receive-capture-hook.browser.test.ts for the live-hook
+    // gating proof.
     it('INVALID_RELOAD: navCount > 1', () => {
       const result = classifyCapture({
         installed: true,
