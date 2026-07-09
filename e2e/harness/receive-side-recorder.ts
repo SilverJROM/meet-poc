@@ -52,40 +52,56 @@ export async function captureReceiveSideAudio(
         const audioSamples: Float32Array[] = [];
         let hasReceivedAudio = false;
 
+        // Initialize audio context once for the entire session
+        const initializeAudioContext = () => {
+          if (audioContext) return;
+          const AudioContextCtor = (window as any).AudioContext ||
+            (window as any).webkitAudioContext;
+          if (!AudioContextCtor) return;
+          audioContext = new AudioContextCtor();
+        };
+
+        const processAudioTrack = (event: RTCTrackEvent) => {
+          if (event.track.kind !== 'audio') return;
+          hasReceivedAudio = true;
+
+          initializeAudioContext();
+          if (!audioContext) return;
+
+          // Create source from remote stream and capture raw samples
+          const mediaStreamAudioSource = audioContext.createMediaStreamSource(
+            event.streams[0],
+          );
+
+          // Use ScriptProcessorNode to capture raw PCM (4096 buffer)
+          if (!scriptProcessor) {
+            recordingStartTime = Date.now();
+            scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+
+            scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
+              const inputData = e.inputBuffer.getChannelData(0);
+              // Copy sample data to avoid mutation
+              audioSamples.push(new Float32Array(inputData));
+            };
+
+            mediaStreamAudioSource.connect(scriptProcessor);
+            scriptProcessor.connect(audioContext.destination);
+          }
+        };
+
         // Wrap RTCPeerConnection to intercept track events
         (window as any).RTCPeerConnection = function (...args: any[]) {
           const pc = new originalRtcPeerConnection(...args);
 
           pc.addEventListener('track', (event: RTCTrackEvent) => {
-            if (event.track.kind === 'audio') {
-              hasReceivedAudio = true;
+            processAudioTrack(event);
+          });
 
-              // Initialize audio context if needed
-              if (!audioContext) {
-                audioContext = new (window as any).AudioContext?.() ||
-                  new (window as any).webkitAudioContext?.();
-              }
-              if (!audioContext) return;
-
-              // Create source from remote stream and capture raw samples
-              const mediaStreamAudioSource = audioContext.createMediaStreamAudioSource(
-                event.streams[0],
-              );
-
-              // Use ScriptProcessorNode to capture raw PCM (4096 buffer)
-              if (!scriptProcessor) {
-                recordingStartTime = Date.now();
-                scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-
-                scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
-                  const inputData = e.inputBuffer.getChannelData(0);
-                  // Copy sample data to avoid mutation
-                  audioSamples.push(new Float32Array(inputData));
-                };
-
-                mediaStreamAudioSource.connect(scriptProcessor);
-                scriptProcessor.connect(audioContext.destination);
-              }
+          // Enumerate existing remote audio tracks that may have arrived before wrapper installed
+          pc.getReceivers().forEach((receiver: any) => {
+            if (receiver.track && receiver.track.kind === 'audio') {
+              const event = { track: receiver.track, streams: [new MediaStream([receiver.track])] };
+              processAudioTrack(event as unknown as RTCTrackEvent);
             }
           });
 
@@ -145,27 +161,6 @@ export async function captureReceiveSideAudio(
   fs.writeFileSync(wavPath, wavBuffer);
 
   return { wavPath, durationMs: captureResult.durationMs };
-}
-
-/**
- * Generate a stub audio buffer (tone + noise) for testing WAV capture pipeline.
- * Real implementation would use actual captured MediaStream data.
- */
-function generateStubAudio(durationMs: number): Float32Array {
-  const sampleRate = 48000;
-  const numSamples = Math.floor((durationMs / 1000) * sampleRate);
-  const samples = new Float32Array(numSamples);
-
-  // Generate simple tone + noise for verification
-  for (let i = 0; i < numSamples; i++) {
-    const t = i / sampleRate;
-    // Mix 440Hz sine wave (for test tone) + white noise
-    const sine = Math.sin(2 * Math.PI * 440 * t) * 0.3;
-    const noise = (Math.random() - 0.5) * 0.1;
-    samples[i] = sine + noise;
-  }
-
-  return samples;
 }
 
 /**
