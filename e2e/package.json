@@ -4,13 +4,15 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test"
+    "test": "vitest run harness/__tests__",
+    "test:e2e": "playwright test"
   },
   "devDependencies": {
     "@playwright/test": "^1.57.0",
     "@types/node": "^22.10.7",
     "@types/ws": "^8.5.13",
-    "typescript": "~5.9.2"
+    "typescript": "~5.9.2",
+    "vitest": "^2.1.8"
   },
   "dependencies": {
     "ws": "^8.18.0"
