@@ -1,0 +1,23 @@
+[
+  {
+    "name": "hello",
+    "text": "Hello, nice to meet you",
+    "path": "./bot-123/hello.wav",
+    "durationMs": 1400,
+    "rmsEstimate": 0.3
+  },
+  {
+    "name": "im-fine",
+    "text": "I am doing fine, thanks",
+    "path": "./bot-123/im-fine.wav",
+    "durationMs": 1600,
+    "rmsEstimate": 0.3
+  },
+  {
+    "name": "great",
+    "text": "That sounds great",
+    "path": "./bot-123/great.wav",
+    "durationMs": 1100,
+    "rmsEstimate": 0.3
+  }
+]
