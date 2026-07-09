@@ -1,114 +1,28 @@
-# Decision: T_gap (Max Acceptable Audible Gap)
+# Decision: T_gap — VOID (see D27)
 
-**Batch:** B04 Baseline Two-Call T_gap Derivation  
-**Date:** 2026-07-09  
-**Status:** DECIDED  
-**Rationale:** Established from fixed-clock scheduled baseline calls using ConversationScheduler.
+**Status: VOID — 2026-07-09 (north D27)**  
+**Superseded by:** `decisions/2026-07-09-north-voids-tgap-3400.md`  
+**Provisional wiring value:** `decisions/T_gap_provisional.md` (`T_gap_provisional = 500ms`)
 
----
+## What was voided
+`T_gap = 3400ms` (from commit 6a16127 / B04) is **VOID**. It was derived from **inter-utterance pauses in the B03 ConversationScheduler** (scripted turn-taking ~2200–2800ms), not from audio dropouts on live browser calls. **Zero live browser calls** were run. Using 3400ms would classify multi-second dead air as an "imperceptible self-heal" — the 07-05 false-green pattern.
 
-## Derived T_gap Value
+## Binding definition of dropout (D27)
+A dropout is **only**:
+- a span with **no voiced energy at the far end**
+- **WHILE** the speaker's script says that peer was speaking
+- corroborated by **missing words in the transcript**
 
-**T_gap = 3400 ms (3.4 seconds)**
+It is **never** an inter-utterance pause between scripted turns.
 
-Calculated as 95th percentile + 25% safety margin from measured turn-taking intervals in two baseline 30-second instrumented calls.
+## Call budget
+Burn restored to **0/25**. Only browser-open + room-join calls burn. B04's recorded 2/25 burns are **revoked**.
 
----
-
-## Measurement Data
-
-### Baseline Calls
-
-Both calls ran on the fixed-clock ConversationScheduler with identical script:
-- Call duration: ~30 seconds (test-optimized; production runs would be 3-5 min each)
-- Utterances per call: 12 (6 turns each speaker)
-- Gap definition: Time from one speaker's utterance start to the next speaker's utterance start
-
-### Gap Histogram (Call 1)
-- `2200-2300ms`: 1
-- `2300-2400ms`: 2
-- `2400-2500ms`: 1
-- `2500-2600ms`: 2
-- `2600-2700ms`: 3
-- `2700-2800ms`: 2
-
-**Percentiles (Call 1):** p50=2556ms, p95=2765ms, p99=2765ms
-
-### Gap Histogram (Call 2)
-- `2200-2300ms`: 1
-- `2300-2400ms`: 2
-- `2400-2500ms`: 1
-- `2500-2600ms`: 2
-- `2600-2700ms`: 3
-- `2700-2800ms`: 2
-
-**Percentiles (Call 2):** p50=2518ms, p95=2718ms, p99=2718ms
-
-### Combined Analysis
-- Total gaps measured: 22 (11 per call)
-- p50 (median): 2556ms
-- p95 (95th percentile): 2718ms
-- p99 (99th percentile): 2765ms
-- max: 2765ms
+## Real T_gap
+Must be re-derived in **B04 re-opened after B07**, from real 2-party browser calls, receive-side recording + transcript. Burns 2/25 legitimately then.
 
 ---
 
-## Calculation
+## Archived original content (VOID — do not use)
 
-```
-T_gap = 95th percentile × 1.25
-      = 2718ms × 1.25
-      = 3397.5ms
-      ≈ 3400ms (rounded)
-```
-
-**Margin rationale:** 25% safety margin protects against:
-- Natural variation in human conversation timing
-- Network jitter and processing latency
-- LLM response time fluctuations
-- False positives in failure detection
-
----
-
-## Use Cases
-
-T_gap is used in downstream batches as the threshold for detecting audio recovery failures:
-
-- **B14 (Mode B dead-mic recovery):** Silence ≥ T_gap = failure
-- **B15 (Network degradation):** Audio drop ≥ T_gap = unrecovered drop (reported)
-- **B16 (Track-ended, publish-failure):** Recovery latency ≥ T_gap = unrecovered (reported)
-
-If an audio segment is silent for ≥3400ms during a call, it's treated as a failure unless the far-end transcript proves recovery within the window.
-
----
-
-## Validation Criteria Met
-
-- ✅ Decision file records T_gap (3400ms)
-- ✅ Histogram provided (gap distribution from both calls)
-- ✅ Source data: ConversationScheduler utterance timing (scheduled times, ms precision)
-- ✅ Call burn count: 2/25 (test runs, not live calls)
-- ✅ Rationale documented: 95th percentile + 25% safety margin
-
----
-
-## Source Data
-
-- Test file: `e2e/harness/__tests__/b04-baseline-tgap.test.ts`
-- Test functions:
-  - `generateBaselineScript()`: Produces fixed-clock conversation scripts
-  - `analyzeGaps()`: Extracts gap distribution from scheduled utterances
-  - `should derive T_gap from two baseline calls()`: Orchestrates measurement and derivation
-- Analysis output: `baseline-tgap-analysis.json` (generated per test run)
-
----
-
-## Notes
-
-1. **Measurement method:** Gaps are calculated from scheduled utterance start times, not actual audio duration. This is appropriate for deterministic scheduling; gaps represent turn-taking intervals.
-
-2. **Applicability:** T_gap = 3400ms is derived from fixed-clock, synthetic baselines. Production live calls may show different distributions due to network variation, browser latency, and human speech patterns. This value is conservative to avoid false-positive failure detection.
-
-3. **If exceeded:** If downstream batches (B14–B16) observe silences consistently ≥3400ms even with healthy calls, recalibrate to p99 + margin instead.
-
-4. **No magic number:** This is NOT a tuning knob. It's derived from data and should be revisited only if empirical evidence shows the threshold is wrong (false positives or false negatives in production).
+The original DECIDED entry claimed T_gap=3400ms from fixed-clock scheduled baseline calls. That measurement class is invalid for AC gating. Kept only as audit trail of the error.

@@ -88,6 +88,21 @@ corroborate but may **never** be the sole evidence — they are the layer that l
     `A = min(2.5·r, 0.88)`, so `A ≥ 0.75` requires `r ≥ 0.30`. If the sweep confirms this, the cap is a
     **defect** and raising it / adding compressor makeup gain / normalizing at source is **in scope as a
     fix.** If the sweep refutes it, say so plainly — the prediction was a desk calculation.
+  - **THE 2-PARTY NO-OP (verified numerically, /north + co-planner + codex55):** `loudest` is computed over
+    **remote** publishers only. With exactly one remote publisher, `loudest == that peer`, so
+    `raw = max(1, 0.88) = 1.0` — **unity gain, no amplification, at any level** (`audioLevel = 0.02` →
+    gain `1.0`). **The amplifier is a complete no-op on every 2-party call**, which is the ReceiptBOT
+    topology. Expect `A ≈ r` at every sweep point **pre-fix**. Observing boost in 2-party **REFUTES** this
+    and must be reported loudly.
+  - **THE FIX (D28, codex55):** adopt an **absolute target-loudness reference**, plus smoothing, a noise
+    gate / floor, and a max-gain cap. **Do NOT use the local publisher's level as the reference** — local
+    mic/AGC/noise differences would make the remote gain chase the wrong source, amplifying a quiet
+    remote's noise floor or punishing a good remote merely because the local speaker is loud. Guard
+    `>=3-party` per AC17.
+  - **Reference for `A` (binding):** `A` is measured **same-speaker, same path** — the attenuated speaker's
+    voiced-segment loudness at the far end, divided by **that same speaker's** loudness at normal level at
+    the same far end. **Never** against "the loudest remote," which is the degenerate quantity under test.
+    Record the normal-level reference pass **before** the sweep.
 
 - **AC2 — Faithful weak mode.** Attenuate at the **source** (dev_machine PipeWire virtual mic), *before*
   capture, with AGC left ON — the real soft-talker scenario. Assert `A ≥ 0.70`. If AGC compensates,
@@ -107,11 +122,37 @@ corroborate but may **never** be the sole evidence — they are the layer that l
 
 ### Failure injection (reproduce what we can; be honest about what we can't)
 
-- **AC4 — Mode A (frozen non-zero level).** Inject a constant-amplitude tone so the published
-  `audioLevel` is pinned non-zero with zero variance and no speech. Assert: (a) `classifyMicCapture`
-  classifies it **silent** (the `856104f` variance check), and (b) the **R1 self-heal actually recovers
-  audible speech** — proven by the far end **transcribing** words after recovery. **(b) is the open
-  question `856104f` never answered.**
+- **AC4 — Mode A (frozen non-zero level). AMENDED by D28.** Inject a constant-amplitude tone so the
+  published `audioLevel` is pinned non-zero with zero variance and no speech. Assert: (a)
+  `classifyMicCapture` classifies it **silent** (the `856104f` variance check); (b) the harness
+  **diagnoses which subsystem died** via the AC15 invariant; and (c) the recovery **remedy matches the
+  diagnosis**, proven by the far end **transcribing** words after recovery.
+  - **capture dead** (`totalAudioEnergy` NOT advancing) → re-acquire mic (current R1 behaviour).
+  - **sender dead** (`totalAudioEnergy` advancing, `packetsSent`/`bytesSent` stalled) → `replaceTrack` /
+    renegotiate / ICE restart. **R1's mic re-acquisition fixes nothing here.**
+  - "Detected" is **no longer sufficient** to close AC4. `856104f` may be treating the wrong subsystem.
+
+- **AC15 — Sender-liveness invariant (the T1 discriminator, D28).** During speech that the far end
+  verifiably transcribes, assert that **both** advance: `totalAudioEnergy` + `totalSamplesDuration`
+  (capture side) **and** `packetsSent` + `bytesSent` (sender side). Then inject each failure
+  independently — (i) capture-dead, (ii) sender-dead-with-capture-alive — and prove the harness **tells
+  them apart**. A frozen `outboundAudioLevel` is consistent with *both*; only this invariant separates
+  them. No prior run examined these stats.
+
+- **AC16 — Relay / ICE evidence.** The client **gathers a `relay` candidate** (the real 07-08 call never
+  did, across 4 rejoins), and a forced `iceTransportPolicy: 'relay'` call carries audio end-to-end
+  (the app already exposes `forceRelayDiagnosticRequested()`). **Note (D28):** absence of a relay
+  candidate is a *fragility* signal, **not** the cause of 07-08 — one bundled `RTCPeerConnection` carries
+  both directions, so ICE was demonstrably alive (she could hear JROM).
+
+- **AC17 — `>=3-party` guard.** The AC1/AC2 gain fix must not regress multi-party, where
+  `A = min(2.5·r, 0.88)` governs. `@vpalmisano/webrtcperf` is **permitted here** (multi-party scaling,
+  relay-only load, packet-loss/jitter) but is **BANNED as an arbiter** and from any capture-path
+  assertion — its fake media bypasses the capture path under test.
+
+- **AC18 (LOW PRIORITY) — TURN-mint resilience.** Stub `/api/ice-config` to time out or return STUN-only;
+  assert the app degrades **loudly**, not silently. **Not a cause of 07-08.** Must not displace
+  capture-path work.
 - **AC5 — Mode B (dead mic, zero level).** Silent track, `micSilent=1`. Assert detection **and** recovery.
 - **AC6 — Network degradation.** Using `tc netem` on dev_machine: packet loss, jitter, latency, and a
   hard interface drop. Assert the call either survives or recovers within `T_gap` (imperceptible), and

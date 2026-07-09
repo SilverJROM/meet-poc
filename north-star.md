@@ -58,7 +58,17 @@ calls is the target — not scale.
   admit/lobby/identity/reconnect/chat/host-controls/diagnostics/iOS-audio, don't reintroduce mesh logic.
 - **Split deploy model bites:** the **FE is a static build — a committed FE fix is NOT live until
   `ng build`.** Has caused a real recording-loss incident. Always check `frontend/dist` mtime vs commit.
-- **STUN-only for now; TURN (coturn) deferred** by JROM. ICE minted via Cloudflare (`/api/ice-config`).
+- **Cloudflare TURN is LIVE; self-hosted TURN (coturn) is deferred** by JROM. ICE minted via Cloudflare
+  (`/api/ice-config`), which serves 3 STUN + **4 TURN URLs** (`turn.cloudflare.com` udp/tcp/tls:5349/
+  tls:443) with credentials, since `4085b43` (2026-06-04). The FE applies them to its single
+  `RTCPeerConnection` and has a `forceRelayDiagnosticRequested()` relay-only path + a TURN health check.
+  *(Corrected 2026-07-09 by /north — this line previously read "STUN-only for now," which was factually
+  false and had been reasoned from. The **coturn** deferral is the part that still stands. Flagged for
+  JROM's review.)*
+- **One bundled `RTCPeerConnection` carries BOTH directions** (`sfu-client.service.ts`, singleton
+  `SfuClientService`). Consequence, load-bearing for diagnosis: if a peer can *hear* the other side, ICE/
+  DTLS/SRTP to the SFU is alive — so a transport/NAT/TURN failure **cannot** explain one-way audio on that
+  connection. Established 2026-07-09 (D28, codex55 refutation of /north's TURN hypothesis).
 - **Recording `/upload` is gated** (owner-email 403 + open-session 409) and rejections are **silent** —
   closing the room ends the session and can lose the upload race on long calls.
 - **Pre-live ⇒ deferral is OFF.** No "follow-up PR / address later / TODO-sprinkle." Deferred work needs a
