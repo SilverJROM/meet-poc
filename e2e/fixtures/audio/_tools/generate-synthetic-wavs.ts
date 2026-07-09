@@ -1,6 +1,13 @@
+// TONES ONLY — never for hearability/transcript fixtures. See
+// e2e/fixtures/bot-speech/README.md and
+// plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/decisions/2026-07-09-north-structural-speech-device-plan.md
+// binding #3: tones are legitimate only for Mode-A constant-level injection /
+// stimulus verification. bot-140/bot-123 now use real piper speech (B00S-SPEECH);
+// this generator is quarantined here (moved out of e2e/fixtures/bot-speech/) and
+// is NOT wired into the bot-speech fixture path or its whisper-roundtrip gate.
+// Kept only as a reference tone generator for Mode-A stimulus needs.
+//
 // Generate synthetic WAV files for bot-140 and bot-123 utterances.
-// Used when piper is not available; replaces with real piper output when ready.
-
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -52,7 +59,10 @@ function generateSyntheticWav(params: WavParams): Buffer {
 }
 
 async function generateBotUtterances() {
-  const fixtureRoot = __dirname;
+  // Deliberately NOT __dirname anymore — this script moved to
+  // e2e/fixtures/audio/_tools/ (quarantined). Left pointing at bot-speech only
+  // for historical/reference accuracy; do not run this against real fixtures.
+  const fixtureRoot = path.resolve(__dirname, '../../bot-speech');
 
   // Bot-140 utterances: 440 Hz tone (from audio-rig.ts TONE_SET)
   const bot140Utterances = [

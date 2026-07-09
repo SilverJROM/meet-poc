@@ -1,0 +1,48 @@
+[
+  {
+    "path": "bot-140/hello.wav",
+    "text": "Hello, how are you?",
+    "voice": "en_US-amy-medium",
+    "class": "scripted"
+  },
+  {
+    "path": "bot-140/thanks.wav",
+    "text": "Thank you for that",
+    "voice": "en_US-amy-medium",
+    "class": "scripted"
+  },
+  {
+    "path": "bot-140/goodbye.wav",
+    "text": "Goodbye and thanks",
+    "voice": "en_US-amy-medium",
+    "class": "scripted"
+  },
+  {
+    "path": "bot-123/hello.wav",
+    "text": "Hello, nice to meet you",
+    "voice": "en_US-ryan-medium",
+    "class": "scripted"
+  },
+  {
+    "path": "bot-123/im-fine.wav",
+    "text": "I am doing fine, thanks",
+    "voice": "en_US-ryan-medium",
+    "class": "scripted"
+  },
+  {
+    "path": "bot-123/great.wav",
+    "text": "That sounds great",
+    "voice": "en_US-ryan-medium",
+    "class": "scripted"
+  },
+  {
+    "path": "../audio/speech/alice-host.wav",
+    "text": null,
+    "class": "already-valid"
+  },
+  {
+    "path": "../audio/speech/bob-local.wav",
+    "text": null,
+    "class": "already-valid"
+  }
+]

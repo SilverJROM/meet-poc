@@ -3,21 +3,18 @@
     "name": "hello",
     "text": "Hello, how are you?",
     "path": "./bot-140/hello.wav",
-    "durationMs": 1500,
-    "rmsEstimate": 0.3
+    "voice": "en_US-amy-medium"
   },
   {
     "name": "thanks",
     "text": "Thank you for that",
     "path": "./bot-140/thanks.wav",
-    "durationMs": 1200,
-    "rmsEstimate": 0.3
+    "voice": "en_US-amy-medium"
   },
   {
     "name": "goodbye",
     "text": "Goodbye and thanks",
     "path": "./bot-140/goodbye.wav",
-    "durationMs": 1300,
-    "rmsEstimate": 0.3
+    "voice": "en_US-amy-medium"
   }
 ]
