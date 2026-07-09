@@ -60,12 +60,13 @@ function hasExpectedWordsInSTT(utteranceText: string, sttData: STTData): boolean
  * A dropout is a silence that overlaps with a scripted speaker's turn (not the receiver),
  * corroborated by missing STT words — never an inter-utterance pause (D27).
  * Receiver-specific because only the far-end speaker's silence at the receiver counts.
+ * STT data is REQUIRED (fail-closed): silence-only without STT corroboration is NOT marked as dropout.
  */
 export function detectDropouts(
   script: ConversationScript,
   silenceSpans: SilenceSpan[],
   receiverSpeakerId: 'bot-140' | 'bot-123',
-  sttData?: STTData,
+  sttData: STTData,
 ): SilenceSpan[] {
   // The far-end speaker is the one NOT receiving
   const farEndSpeaker = receiverSpeakerId === 'bot-140' ? 'bot-123' : 'bot-140';
@@ -85,8 +86,8 @@ export function detectDropouts(
         // Guard: do not treat a silence that starts AFTER the utterance ended as a dropout
         // (that is an inter-utterance pause, not a dropout during speech)
         if (silence.startMs < utteranceEnd) {
-          // Corroborate with STT: if STT data exists, only mark as dropout if words are missing
-          const isDropout = !sttData || hasExpectedWordsInSTT(utterance.text, sttData);
+          // Corroborate with STT: only mark as dropout if words are missing (STT is required)
+          const isDropout = hasExpectedWordsInSTT(utterance.text, sttData);
 
           if (isDropout) {
             dropouts.push({
@@ -144,13 +145,14 @@ export function computeDistribution(
 /**
  * Analyze a single call's dropout pattern: given script, detected silences, STT data, and receiver,
  * compute dropouts and statistics. D27 binding: silence + missing words = dropout.
+ * STT data is REQUIRED for D27 corroboration (fail-closed).
  */
 export function analyzeCall(
   script: ConversationScript,
   silenceSpans: SilenceSpan[],
   receiverSpeakerId: 'bot-140' | 'bot-123',
   callDurationMs: number,
-  sttData?: STTData,
+  sttData: STTData,
 ): DropoutDetectionResult {
   const dropouts = detectDropouts(script, silenceSpans, receiverSpeakerId, sttData);
   const durations = dropouts.map((d) => d.durationMs);
