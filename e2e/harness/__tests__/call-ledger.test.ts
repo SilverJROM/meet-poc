@@ -12,6 +12,8 @@ import {
   isGateCheckExceeded,
   getState,
   resetLedger,
+  logCall,
+  type CallLogEntry,
 } from '../call-ledger';
 
 let tmpDir: string;
@@ -82,22 +84,43 @@ describe('call-ledger', () => {
   });
 
   describe('call budget tracking', () => {
-    it('should allow incrementing within cap (25 calls)', () => {
+    it('should allow acceptance burn within cap (25 calls)', () => {
       for (let i = 0; i < 25; i++) {
-        const result = incrementCallBurn();
+        const result = incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
         expect(result).toBe(true);
       }
       expect(isCallBurnExceeded()).toBe(false);
     });
 
-    it('should reject increment beyond cap', () => {
+    it('should reject acceptance burn beyond cap', () => {
       for (let i = 0; i < 25; i++) {
-        incrementCallBurn();
+        incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
       }
       expect(isCallBurnExceeded()).toBe(false);
-      const result = incrementCallBurn();
+      const result = incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
       expect(result).toBe(false);
       expect(isCallBurnExceeded()).toBe(true);
+    });
+
+    it('should not burn on acceptance < 180s (logs burned:false)', () => {
+      const startCount = getState().callBurnCount;
+      const result = incrementCallBurn({ acceptanceAttempt: true, durationMs: 100_000 });
+      expect(result).toBe(true); // returns true (did not exceed), but did not increment
+      expect(getState().callBurnCount).toBe(startCount); // no burn
+    });
+
+    it('should not burn on smoke tests (non-acceptance)', () => {
+      const startCount = getState().callBurnCount;
+      const result = incrementCallBurn({ acceptanceAttempt: false, durationMs: 300_000 });
+      expect(result).toBe(true);
+      expect(getState().callBurnCount).toBe(startCount); // no burn
+    });
+
+    it('should burn on acceptance with forceBurn even if < 180s', () => {
+      const startCount = getState().callBurnCount;
+      const result = incrementCallBurn({ acceptanceAttempt: true, durationMs: 100_000, forceBurn: true });
+      expect(result).toBe(true);
+      expect(getState().callBurnCount).toBe(startCount + 1); // did burn
     });
   });
 
@@ -133,8 +156,8 @@ describe('call-ledger', () => {
     });
 
     it('should persist call burn count', () => {
-      incrementCallBurn();
-      incrementCallBurn();
+      incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
+      incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
       const stateFile = path.join(tmpDir, 'ledger-state.json');
       const saved = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
       expect(saved.callBurnCount).toBe(2);
@@ -174,12 +197,108 @@ describe('call-ledger', () => {
     it('should return current state snapshot', () => {
       registerCreatedID('room', 'room-1');
       registerCreatedID('session', 'session-1');
-      incrementCallBurn();
+      incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
       incrementGateCheck();
       const state = getState();
       expect(state.createdIDs.length).toBe(2);
       expect(state.callBurnCount).toBe(1);
       expect(state.gateCheckCount).toBe(1);
+    });
+  });
+
+  describe('call logging (JSONL)', () => {
+    it('should append logCall entries to call-log.jsonl', () => {
+      const entry: CallLogEntry = {
+        timestamp: Date.now(),
+        purpose: 'acceptance',
+        durationMs: 5000,
+        deviceMode: 'fake-device',
+        stimulus: 'speech',
+        burned: false,
+        result: 'success',
+      };
+
+      logCall(entry);
+
+      const logFile = path.join(tmpDir, 'call-log.jsonl');
+      expect(fs.existsSync(logFile)).toBe(true);
+      const content = fs.readFileSync(logFile, 'utf-8');
+      const lines = content.trim().split('\n');
+      expect(lines.length).toBe(1);
+      const logged = JSON.parse(lines[0]);
+      expect(logged.purpose).toBe('acceptance');
+      expect(logged.durationMs).toBe(5000);
+      expect(logged.burned).toBe(false);
+    });
+
+    it('should append multiple logCall entries to same file', () => {
+      const entries: CallLogEntry[] = [
+        {
+          timestamp: Date.now(),
+          purpose: 'acceptance',
+          durationMs: 200_000,
+          deviceMode: 'fake-device',
+          burned: true,
+          result: 'success',
+        },
+        {
+          timestamp: Date.now() + 1000,
+          purpose: 'smoke',
+          durationMs: 50_000,
+          deviceMode: 'real-virtual-mic',
+          stimulus: 'tone',
+          burned: false,
+          result: 'success',
+        },
+      ];
+
+      entries.forEach((e) => logCall(e));
+
+      const logFile = path.join(tmpDir, 'call-log.jsonl');
+      const content = fs.readFileSync(logFile, 'utf-8');
+      const lines = content.trim().split('\n');
+      expect(lines.length).toBe(2);
+      expect(JSON.parse(lines[0]).purpose).toBe('acceptance');
+      expect(JSON.parse(lines[1]).purpose).toBe('smoke');
+    });
+
+    it('should record burned flag correctly based on acceptance + duration', () => {
+      const acceptanceLong: CallLogEntry = {
+        timestamp: Date.now(),
+        purpose: 'acceptance',
+        durationMs: 200_000,
+        deviceMode: 'fake-device',
+        burned: true, // acceptance + 200s should burn
+        result: 'success',
+      };
+
+      const acceptanceShort: CallLogEntry = {
+        timestamp: Date.now(),
+        purpose: 'acceptance',
+        durationMs: 100_000,
+        deviceMode: 'fake-device',
+        burned: false, // acceptance + 100s should NOT burn
+        result: 'success',
+      };
+
+      const smoke: CallLogEntry = {
+        timestamp: Date.now(),
+        purpose: 'smoke',
+        durationMs: 300_000,
+        deviceMode: 'fake-device',
+        burned: false, // smoke should never burn
+        result: 'success',
+      };
+
+      logCall(acceptanceLong);
+      logCall(acceptanceShort);
+      logCall(smoke);
+
+      const logFile = path.join(tmpDir, 'call-log.jsonl');
+      const lines = fs.readFileSync(logFile, 'utf-8').trim().split('\n');
+      expect(JSON.parse(lines[0]).burned).toBe(true);
+      expect(JSON.parse(lines[1]).burned).toBe(false);
+      expect(JSON.parse(lines[2]).burned).toBe(false);
     });
   });
 });

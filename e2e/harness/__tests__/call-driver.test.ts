@@ -77,7 +77,7 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
       expect(result.speaker1.publishedBytes).toBeGreaterThan(0);
       expect(result.speaker2.publishedBytes).toBeGreaterThan(0);
       expect(result.ledgerState.createdIDs.length).toBeGreaterThan(0);
-      expect(result.ledgerState.callBurnCount).toBe(1);
+      expect(result.ledgerState.callBurnCount).toBe(0); // smoke test, no burn
     },
     120_000, // 2 minute timeout
   );
@@ -108,7 +108,7 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
   );
 
   it(
-    'call burn tracking: incrementCallBurn respects budget cap and persists state',
+    'acceptance burn tracking: conditionally burns on acceptanceAttempt + durationMs >= 180s',
     () => {
       resetLedger();
 
@@ -117,15 +117,26 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
       let state = getState();
       expect(state.callBurnCount).toBe(0);
 
-      // First burn (should succeed)
-      const didNotExceed = incrementCallBurn();
-      expect(didNotExceed).toBe(true);
+      // Long acceptance (should succeed and burn)
+      const didBurn = incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
+      expect(didBurn).toBe(true);
       state = getState();
       expect(state.callBurnCount).toBe(1);
       expect(isCallBurnExceeded()).toBe(false);
 
-      // Simulate loading a different state file that has already burned some
-      // (This tests persistence across initLedger calls)
+      // Short smoke (should NOT burn)
+      const didSmoke = incrementCallBurn({ acceptanceAttempt: false, durationMs: 50_000 });
+      expect(didSmoke).toBe(true);
+      state = getState();
+      expect(state.callBurnCount).toBe(1); // still 1, no increment
+
+      // Short acceptance (should NOT burn)
+      const didNotBurn = incrementCallBurn({ acceptanceAttempt: true, durationMs: 100_000 });
+      expect(didNotBurn).toBe(true);
+      state = getState();
+      expect(state.callBurnCount).toBe(1); // still 1, no increment
+
+      // Verify state persists
       const stateFile = path.join(TEMP_DIR, 'ledger-state.json');
       if (fs.existsSync(stateFile)) {
         const partial = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
@@ -158,6 +169,61 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
             (err as Error).message.includes('Failed to parse URL'),
         ).toBe(true);
       }
+    },
+  );
+
+  it(
+    'fail-closed gate: acceptance attempt refuses if callBurnCount > 25 (before browser launch)',
+    async () => {
+      resetLedger();
+      initLedger(TEMP_DIR);
+
+      // Max out the burn count by directly manipulating state (simulating prior runs)
+      for (let i = 0; i < 26; i++) {
+        incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
+      }
+
+      expect(isCallBurnExceeded()).toBe(true);
+
+      // Now try to run an acceptance call — should throw BEFORE launching browsers
+      const config: CallDriverConfig = {
+        baseUrl: 'http://localhost:4700', // Won't be reached
+        speaker1Name: 'bot-140',
+        speaker2Name: 'bot-123',
+        deviceMode: 'fake-device',
+        acceptanceAttempt: true, // This should trigger the gate
+        ledgerBasePath: TEMP_DIR,
+      };
+
+      try {
+        await joinDualBrowserCall(config);
+        expect.fail('Expected B00S-BUDGET error on exceeded callBurnCount');
+      } catch (err) {
+        expect((err as Error).message).toContain('B00S-BUDGET');
+        expect((err as Error).message).toContain('acceptance attempt refused');
+        expect((err as Error).message).toContain('callBurnCount exceeds 25-cap');
+      }
+    },
+  );
+
+  it(
+    'smoke joins allowed even when callBurnCount > 25 (non-acceptance gate logic)',
+    async () => {
+      resetLedger();
+      initLedger(TEMP_DIR);
+
+      // Max out the burn count
+      for (let i = 0; i < 26; i++) {
+        incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
+      }
+
+      expect(isCallBurnExceeded()).toBe(true);
+
+      // Unit test: verify that smoke (acceptanceAttempt=false) would pass the gate logic
+      // without actually launching browsers
+      const acceptanceAttempt = false;
+      const willThrowGateError = acceptanceAttempt && isCallBurnExceeded();
+      expect(willThrowGateError).toBe(false); // Should NOT throw gate error for smoke
     },
   );
 
@@ -286,39 +352,40 @@ describe('B08S-1 call driver — integration with ConversationScheduler', () => 
         autoAdmitRoom: true,
         ledgerBasePath: TEMP_DIR_B08S2,
         deviceMode: 'fake-device',
+        acceptanceAttempt: true, // Mark as acceptance to burn
       };
 
       // Import scheduler
       const { ConversationScheduler } = require('../conversation-scheduler.js');
       const scheduler = new ConversationScheduler();
 
-      // Mock script: two utterances over 5 seconds
+      // Mock script: two utterances over 200+ seconds (meets 180s threshold)
       const script = {
         utterances: [
           {
             speaker: 'bot-140' as const,
             timeMs: 0,
-            durationMs: 1500,
+            durationMs: 100_000,
             audioPath: '/fixtures/bot-140-hello.wav',
             text: 'Hello, how are you?',
           },
           {
             speaker: 'bot-123' as const,
-            timeMs: 2000,
-            durationMs: 1500,
+            timeMs: 102_000,
+            durationMs: 100_000,
             audioPath: '/fixtures/bot-123-good.wav',
             text: 'Good, thanks!',
           },
         ],
-        totalDurationMs: 3500,
+        totalDurationMs: 202_000, // 202 seconds, exceeds 180s threshold
       };
 
       // This would run the actual call
       const result = await joinDualBrowserCall(config, script);
 
       expect(result.success).toBe(true);
-      expect(result.duration).toBeGreaterThanOrEqual(3500); // At minimum the script duration
-      expect(result.ledgerState.callBurnCount).toBe(1);
+      expect(result.duration).toBeGreaterThanOrEqual(202_000); // At minimum the script duration
+      expect(result.ledgerState.callBurnCount).toBe(1); // acceptance + 200s should burn
 
       const report = scheduler.getTimingReport();
       expect(report.played).toHaveLength(2);

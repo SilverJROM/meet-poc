@@ -6,7 +6,7 @@ import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { chromium } from '@playwright/test';
 import * as os from 'node:os';
 import { spawnSync } from 'node:child_process';
-import { initLedger, registerCreatedID, incrementCallBurn, getState } from './call-ledger.js';
+import { initLedger, registerCreatedID, incrementCallBurn, getState, isCallBurnExceeded, logCall, type CallLogEntry } from './call-ledger.js';
 import { ConversationScheduler, type ConversationScript } from './conversation-scheduler.js';
 import { startReceiveSideRecording, stopReceiveSideRecording, type CaptureHandle } from './receive-side-recorder.js';
 
@@ -43,6 +43,8 @@ export interface CallDriverConfig {
   ledgerBasePath?: string; // Path to store ledger state
   recordReceiveSide?: boolean; // B08S-2: capture receive-side audio
   receiverPageIndex?: 0 | 1; // Which browser receives (0=speaker1, 1=speaker2, default 1)
+  /** B00S-BUDGET: true if this call is an acceptance attempt (subject to 25-cap and 180s threshold). */
+  acceptanceAttempt?: boolean;
   /**
    * B08A-3: optional mid-call hook, invoked once both browsers have joined and
    * publish-bytes validation has passed, BEFORE receive-side recording stops and
@@ -343,6 +345,13 @@ export async function joinDualBrowserCall(
 
   initLedger(config.ledgerBasePath);
 
+  if (config.acceptanceAttempt && isCallBurnExceeded()) {
+    throw new Error(
+      `B00S-BUDGET: acceptance attempt refused — callBurnCount exceeds 25-cap. ` +
+        `No more acceptance calls allowed in this run. Smoke/short joins still permitted.`,
+    );
+  }
+
   const launchArgs = buildLaunchArgs(config);
   const startTime = Date.now();
 
@@ -452,10 +461,25 @@ export async function joinDualBrowserCall(
       );
     }
 
-    // Log the call burn
-    incrementCallBurn();
-
     const duration = Date.now() - startTime;
+
+    // Log the call (every join, success or fail)
+    logCall({
+      timestamp: Date.now(),
+      purpose: config.acceptanceAttempt ? 'acceptance' : 'smoke',
+      durationMs: duration,
+      deviceMode: config.deviceMode,
+      stimulus: config.stimulus,
+      burned: config.acceptanceAttempt && duration >= 180_000,
+      result: 'success',
+    });
+
+    // Conditional burn: only if acceptance + long enough
+    incrementCallBurn({
+      acceptanceAttempt: config.acceptanceAttempt ?? false,
+      durationMs: duration,
+    });
+
     const ledgerState = getState();
 
     return {
@@ -472,7 +496,25 @@ export async function joinDualBrowserCall(
       provenance: { deviceMode: config.deviceMode, stimulus: config.stimulus },
     };
   } catch (err) {
-    incrementCallBurn();
+    const duration = Date.now() - startTime;
+
+    // Log the failed call
+    logCall({
+      timestamp: Date.now(),
+      purpose: config.acceptanceAttempt ? 'acceptance' : 'smoke',
+      durationMs: duration,
+      deviceMode: config.deviceMode,
+      stimulus: config.stimulus,
+      burned: config.acceptanceAttempt && duration >= 180_000,
+      result: 'failed',
+    });
+
+    // Conditional burn on error path: only if acceptance + long enough
+    incrementCallBurn({
+      acceptanceAttempt: config.acceptanceAttempt ?? false,
+      durationMs: duration,
+    });
+
     throw err;
   } finally {
     await page1?.close().catch(() => {});

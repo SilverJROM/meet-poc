@@ -15,6 +15,16 @@ export interface LedgerState {
   gateCheckCount: number;
 }
 
+export interface CallLogEntry {
+  timestamp: number;
+  purpose?: string;
+  durationMs: number;
+  deviceMode: string;
+  stimulus?: string;
+  burned: boolean;
+  result?: 'success' | 'failed';
+}
+
 // Hard-blocked protected IDs — never deletable
 const PROTECTED_IDS = new Set<string>([
   '652c1475', // session
@@ -26,6 +36,7 @@ const DEFAULT_CALL_BURN_CAP = 25;
 const DEFAULT_GATE_CHECK_CAP = 5;
 
 let ledgerPath: string | null = null;
+let logPath: string | null = null;
 let currentState: LedgerState = {
   createdIDs: [],
   callBurnCount: 0,
@@ -35,6 +46,7 @@ let currentState: LedgerState = {
 export function initLedger(basePath?: string): void {
   const stateDir = basePath || process.env.LEDGER_STATE_DIR || process.cwd();
   ledgerPath = path.join(stateDir, 'ledger-state.json');
+  logPath = path.join(stateDir, 'call-log.jsonl');
   loadState();
 }
 
@@ -87,10 +99,26 @@ export function canDelete(id: string): boolean {
   return currentState.createdIDs.some((entry) => entry.id === id);
 }
 
-export function incrementCallBurn(): boolean {
+export interface IncrementCallBurnOptions {
+  acceptanceAttempt: boolean;
+  durationMs: number;
+  forceBurn?: boolean;
+}
+
+export function incrementCallBurn(options: IncrementCallBurnOptions): boolean {
+  const shouldBurn = options.acceptanceAttempt && (options.durationMs >= 180_000 || options.forceBurn);
+  if (!shouldBurn) {
+    return true;
+  }
   currentState.callBurnCount += 1;
   saveState();
   return currentState.callBurnCount <= DEFAULT_CALL_BURN_CAP;
+}
+
+export function logCall(entry: CallLogEntry): void {
+  if (!logPath) return;
+  const line = JSON.stringify(entry) + '\n';
+  fs.appendFileSync(logPath, line, 'utf-8');
 }
 
 export function isCallBurnExceeded(): boolean {
