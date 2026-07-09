@@ -38,3 +38,11 @@ export {
   type ModeBInjectionParams,
 } from './capture-injection';
 export { joinDualBrowserCall, dryRunDualBrowserCall, type CallDriverConfig, type CallResult } from './call-driver';
+export { WavEncoder, type WavEncoderOptions } from './wav-encoder';
+export {
+  captureReceiveSideAudio,
+  generateScriptTranscript,
+  writeTranscriptFile,
+  recordReceiveSideCall,
+  type ReceiveSideRecordingResult,
+} from './receive-side-recorder';

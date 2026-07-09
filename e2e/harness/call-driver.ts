@@ -6,6 +6,7 @@ import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { chromium } from '@playwright/test';
 import { initLedger, registerCreatedID, incrementCallBurn, getState } from './call-ledger.js';
 import { ConversationScheduler, type ConversationScript } from './conversation-scheduler.js';
+import { recordReceiveSideCall } from './receive-side-recorder.js';
 
 export interface CallDriverConfig {
   baseUrl: string; // e.g., http://localhost:4700
@@ -15,6 +16,8 @@ export interface CallDriverConfig {
   autoAdmitRoom?: boolean;
   launchArgs?: string[]; // Chrome flags (e.g., for fake audio)
   ledgerBasePath?: string; // Path to store ledger state
+  recordReceiveSide?: boolean; // B08S-2: capture receive-side audio
+  receiverPageIndex?: 0 | 1; // Which browser receives (0=speaker1, 1=speaker2, default 1)
 }
 
 export interface CallResult {
@@ -25,6 +28,9 @@ export interface CallResult {
   speaker2: { name: string; publishedBytes: number };
   ledgerState: ReturnType<typeof getState>;
   success: boolean;
+  receiveSideWavPath?: string; // B08S-2: receive-side audio WAV
+  transcriptPath?: string; // B08S-2: transcript text file
+  transcriptContent?: string; // B08S-2: full transcript (script-sourced)
 }
 
 const DEFAULT_LAUNCH_ARGS = [
@@ -229,6 +235,26 @@ export async function joinDualBrowserCall(
       );
     }
 
+    // B08S-2: Capture receive-side audio if requested
+    let receiveSideResult: Awaited<ReturnType<typeof recordReceiveSideCall>> | undefined;
+    if (config.recordReceiveSide) {
+      const receiverPageIndex = config.receiverPageIndex ?? 1;
+      const receiverPage = receiverPageIndex === 0 ? page1 : page2;
+      const farEndSpeaker = receiverPageIndex === 0 ? config.speaker2Name : config.speaker1Name;
+      const farEndSpeakerId = (farEndSpeaker === 'bot-140' ? 'bot-140' : 'bot-123') as
+        | 'bot-140'
+        | 'bot-123';
+
+      if (receiverPage) {
+        receiveSideResult = await recordReceiveSideCall(
+          receiverPage,
+          config.ledgerBasePath || process.cwd(),
+          script,
+          farEndSpeakerId,
+        );
+      }
+    }
+
     // Log the call burn
     incrementCallBurn();
 
@@ -243,6 +269,9 @@ export async function joinDualBrowserCall(
       speaker2: { name: config.speaker2Name, publishedBytes: result2.publishedBytes },
       ledgerState,
       success: true,
+      receiveSideWavPath: receiveSideResult?.wavPath,
+      transcriptPath: receiveSideResult?.transcriptPath,
+      transcriptContent: receiveSideResult?.transcriptContent,
     };
   } catch (err) {
     incrementCallBurn();

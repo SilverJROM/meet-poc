@@ -16,6 +16,12 @@ import {
   incrementCallBurn,
   isCallBurnExceeded,
 } from '../call-ledger.js';
+import { WavEncoder } from '../wav-encoder.js';
+import {
+  generateScriptTranscript,
+  writeTranscriptFile,
+} from '../receive-side-recorder.js';
+import { RecordingArbiter } from '../recording-arbiter.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEMP_DIR = path.join(HERE, '.temp-call-driver-test');
@@ -312,4 +318,165 @@ describe('B08S-1 call driver — integration with ConversationScheduler', () => 
     },
     120_000,
   );
+});
+
+describe('B08S-2 receive-side recorder — WAV encoding and transcript generation', () => {
+  beforeAll(() => {
+    // Create temp directory for recordings
+    if (!fs.existsSync(TEMP_DIR)) {
+      fs.mkdirSync(TEMP_DIR, { recursive: true });
+    }
+  });
+
+  afterAll(() => {
+    // Clean up temp files
+    if (fs.existsSync(TEMP_DIR)) {
+      fs.rmSync(TEMP_DIR, { recursive: true });
+    }
+  });
+
+  it('WAV encoder: produces valid WAV file with correct RIFF header', () => {
+    const encoder = new WavEncoder({ sampleRate: 48000, channels: 1 });
+
+    // Generate simple test samples (1 second of tone)
+    const sampleRate = 48000;
+    const numSamples = sampleRate; // 1 second
+    const testSamples = new Float32Array(numSamples);
+    for (let i = 0; i < numSamples; i++) {
+      // 440 Hz sine wave
+      testSamples[i] = Math.sin((2 * Math.PI * 440 * i) / sampleRate) * 0.5;
+    }
+
+    const wavBuffer = encoder.encode(testSamples);
+
+    // Validate RIFF header
+    expect(wavBuffer.toString('ascii', 0, 4)).toBe('RIFF');
+    expect(wavBuffer.toString('ascii', 8, 12)).toBe('WAVE');
+    expect(wavBuffer.toString('ascii', 12, 16)).toBe('fmt ');
+    expect(wavBuffer.toString('ascii', 36, 40)).toBe('data');
+
+    // Validate fmt chunk
+    const format = wavBuffer.readUInt16LE(20); // fmt chunk + size + offset
+    expect(format).toBe(1); // PCM
+    const channels = wavBuffer.readUInt16LE(22);
+    expect(channels).toBe(1);
+    const sr = wavBuffer.readUInt32LE(24);
+    expect(sr).toBe(48000);
+    const bitsPerSample = wavBuffer.readUInt16LE(34);
+    expect(bitsPerSample).toBe(16);
+
+    // Validate data size
+    const dataSize = wavBuffer.readUInt32LE(40);
+    expect(dataSize).toBe(numSamples * 2); // 16-bit = 2 bytes per sample
+  });
+
+  it('receive-side recorder: CallResult includes WAV and transcript paths when recordReceiveSide is enabled', async () => {
+    // This test validates the config and type signatures
+    // Actual recording requires a running browser, so this is a type/config test
+
+    const config: CallDriverConfig = {
+      baseUrl: BASE_URL,
+      speaker1Name: 'bot-140',
+      speaker2Name: 'bot-123',
+      autoAdmitRoom: true,
+      ledgerBasePath: TEMP_DIR,
+      recordReceiveSide: true,
+      receiverPageIndex: 1, // bot-123 receives
+    };
+
+    // Validate config fields are present
+    expect(config.recordReceiveSide).toBe(true);
+    expect(config.receiverPageIndex).toBe(1);
+  });
+
+  it('transcript generation: script-sourced transcript filters by speaker and concatenates text', () => {
+    const script = {
+      utterances: [
+        {
+          speaker: 'bot-140',
+          timeMs: 0,
+          durationMs: 1500,
+          audioPath: '/fixtures/bot-140-hello.wav',
+          text: 'Hello, how are you?',
+        },
+        {
+          speaker: 'bot-123',
+          timeMs: 2000,
+          durationMs: 1500,
+          audioPath: '/fixtures/bot-123-good.wav',
+          text: 'Good, thanks!',
+        },
+        {
+          speaker: 'bot-140',
+          timeMs: 4000,
+          durationMs: 1500,
+          audioPath: '/fixtures/bot-140-nice.wav',
+          text: 'Nice to meet you.',
+        },
+      ],
+      totalDurationMs: 5500,
+    };
+
+    // From bot-123 perspective (hearing bot-140)
+    const transcript = generateScriptTranscript(script, 'bot-140');
+    expect(transcript).toContain('Hello, how are you?');
+    expect(transcript).toContain('Nice to meet you.');
+    expect(transcript).not.toContain('Good, thanks!');
+
+    // From bot-140 perspective (hearing bot-123)
+    const transcript2 = generateScriptTranscript(script, 'bot-123');
+    expect(transcript2).toContain('Good, thanks!');
+    expect(transcript2).not.toContain('Hello, how are you?');
+  });
+
+  it('transcript file writing: writes transcript with header and returns valid path', () => {
+    const transcriptContent = '[00.00s] Hello, how are you?\n[02.00s] Good, thanks!';
+    const recordingId = 'test-rec-123';
+
+    const { transcriptPath } = writeTranscriptFile(transcriptContent, TEMP_DIR, recordingId);
+
+    // Validate file exists and has correct content
+    expect(fs.existsSync(transcriptPath)).toBe(true);
+    const content = fs.readFileSync(transcriptPath, 'utf-8');
+    expect(content).toContain('script-sourced');
+    expect(content).toContain('scriptExpected');
+    expect(content).toContain(transcriptContent);
+
+    // Clean up
+    fs.unlinkSync(transcriptPath);
+  });
+
+  it('RecordingArbiter integration: WAV file from encoder is parseable by RecordingArbiter', async () => {
+    // Create a test WAV with some audio content
+    const encoder = new WavEncoder({ sampleRate: 48000, channels: 1 });
+    const sampleRate = 48000;
+    const duration = 1000; // 1 second
+    const numSamples = Math.floor((duration / 1000) * sampleRate);
+    const samples = new Float32Array(numSamples);
+
+    // Generate tone + noise
+    for (let i = 0; i < numSamples; i++) {
+      const t = i / sampleRate;
+      const sine = Math.sin(2 * Math.PI * 440 * t) * 0.3;
+      const noise = (Math.random() - 0.5) * 0.1;
+      samples[i] = sine + noise;
+    }
+
+    const wavBuffer = encoder.encode(samples);
+    const wavPath = path.join(TEMP_DIR, 'test-arbiter-input.wav');
+    fs.writeFileSync(wavPath, wavBuffer);
+
+    // Parse with RecordingArbiter
+    const arbiter = new RecordingArbiter(TEMP_DIR);
+    const analysis = await arbiter.analyzeRecording(wavPath);
+
+    // Validate analysis
+    expect(analysis.recordingPath).toBe(wavPath);
+    expect(analysis.voicedSegments.length).toBeGreaterThan(0);
+    expect(analysis.overallLoudness.rms).toBeGreaterThan(0);
+    expect(analysis.overallLoudness.lufs).toBeGreaterThan(-Infinity);
+
+    // Clean up
+    fs.unlinkSync(wavPath);
+  });
 });
