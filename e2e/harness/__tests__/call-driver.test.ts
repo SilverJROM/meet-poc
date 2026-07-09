@@ -2,7 +2,7 @@
 // Validates join+publish on two Chromium instances, ledger registration, and dry-run smoke paths.
 // Target: 1/25 call burn for real-call, 0/25 for dry-run (if isolated from actual call infrastructure).
 
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -35,17 +35,21 @@ const TEMP_DIR = path.join(HERE, '.temp-call-driver-test');
 const BASE_URL = 'http://localhost:4700';
 
 describe('B08S-1 call driver — dual-browser room join + publish validation', () => {
-  beforeAll(() => {
-    // Create temp directory for ledger state
+  beforeEach(() => {
+    // Ensure temp directory exists before each test
     if (!fs.existsSync(TEMP_DIR)) {
       fs.mkdirSync(TEMP_DIR, { recursive: true });
     }
   });
 
-  afterAll(() => {
-    // Clean up temp files
+  afterEach(() => {
+    // Clean up only ledger and temp files, not the directory
     if (fs.existsSync(TEMP_DIR)) {
-      fs.rmSync(TEMP_DIR, { recursive: true });
+      fs.readdirSync(TEMP_DIR).forEach((file) => {
+        if (file.match(/^ledger-state\.json$|\.json$|\.wav$|\.txt$/)) {
+          fs.unlinkSync(path.join(TEMP_DIR, file));
+        }
+      });
     }
   });
 
@@ -326,17 +330,21 @@ describe('B08S-1 call driver — integration with ConversationScheduler', () => 
 });
 
 describe('B08S-2 receive-side recorder — WAV encoding and transcript generation', () => {
-  beforeAll(() => {
-    // Create temp directory for recordings
+  beforeEach(() => {
+    // Ensure temp directory exists before each test
     if (!fs.existsSync(TEMP_DIR)) {
       fs.mkdirSync(TEMP_DIR, { recursive: true });
     }
   });
 
-  afterAll(() => {
-    // Clean up temp files
+  afterEach(() => {
+    // Clean up only WAV and transcript files, not the directory
     if (fs.existsSync(TEMP_DIR)) {
-      fs.rmSync(TEMP_DIR, { recursive: true });
+      fs.readdirSync(TEMP_DIR).forEach((file) => {
+        if (file.match(/\.(wav|txt)$/)) {
+          fs.unlinkSync(path.join(TEMP_DIR, file));
+        }
+      });
     }
   });
 

@@ -57,8 +57,14 @@ export async function installCaptureHook(page: Page): Promise<string> {
         if (event.track.kind !== 'audio') return;
         hasReceivedAudio = true;
 
+        // Update state object so stopAndEncodeCapture sees live values
+        (window as any).__captureHookState.hasReceivedAudio = true;
+
         initializeAudioContext();
         if (!audioContext) return;
+
+        // Update state object with initialized context
+        (window as any).__captureHookState.audioContext = audioContext;
 
         // Create source from remote stream and capture raw samples
         const mediaStreamAudioSource = audioContext.createMediaStreamSource(
@@ -69,6 +75,10 @@ export async function installCaptureHook(page: Page): Promise<string> {
         if (!scriptProcessor) {
           recordingStartTime = Date.now();
           scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+
+          // Update state object with processor and start time
+          (window as any).__captureHookState.scriptProcessor = scriptProcessor;
+          (window as any).__captureHookState.recordingStartTime = recordingStartTime;
 
           scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
             const inputData = e.inputBuffer.getChannelData(0);
