@@ -1,28 +1,65 @@
-# Decision: T_gap — VOID (see D27)
+# Real T_gap Derivation — B04-real
 
-**Status: VOID — 2026-07-09 (north D27)**  
-**Superseded by:** `decisions/2026-07-09-north-voids-tgap-3400.md`  
-**Provisional wiring value:** `decisions/T_gap_provisional.md` (`T_gap_provisional = 500ms`)
+**Status: VERIFIED** (dual-browser instrumented, D27 binding)
+**Measured T_gap: 580 ms**
+**Rationale: p95=463.4375ms + 25% margin (116ms) = 580ms**
 
-## What was voided
-`T_gap = 3400ms` (from commit 6a16127 / B04) is **VOID**. It was derived from **inter-utterance pauses in the B03 ConversationScheduler** (scripted turn-taking ~2200–2800ms), not from audio dropouts on live browser calls. **Zero live browser calls** were run. Using 3400ms would classify multi-second dead air as an "imperceptible self-heal" — the 07-05 false-green pattern.
+## Dropout Definition (D27 binding)
+A dropout is a span with no voiced energy at the far end **while the script says that peer was speaking**,
+corroborated by **missing transcript words** — never an inter-utterance pause.
 
-## Binding definition of dropout (D27)
-A dropout is **only**:
-- a span with **no voiced energy at the far end**
-- **WHILE** the speaker's script says that peer was speaking
-- corroborated by **missing words in the transcript**
+## Evidence Summary
+- **Total calls analyzed**: 2 instrumented acceptance-class runs
+- **Total dropouts detected**: 6
+- **Total dropout duration**: 2092.8125 ms
+- **Call runtime**: 80118 ms
 
-It is **never** an inter-utterance pause between scripted turns.
+### Call 1
+- Room: `dfe4d5209786`
+- Session: `N/A`
+- Dropouts: 3
+- Duration: 40298 ms
+- Recording: call1-receive.wav
+- Transcript: N/A
 
-## Call budget
-Burn restored to **0/25**. Only browser-open + room-join calls burn. B04's recorded 2/25 burns are **revoked**.
+### Call 2
+- Room: `260b2804e7ff`
+- Session: `N/A`
+- Dropouts: 3
+- Duration: 39820 ms
+- Recording: call2-receive.wav
+- Transcript: N/A
 
-## Real T_gap
-Must be re-derived in **B04 re-opened after B07**, from real 2-party browser calls, receive-side recording + transcript. Burns 2/25 legitimately then.
+## Distribution Statistics
+| Metric | Value |
+|--------|-------|
+| Min (ms) | 103.8125 |
+| Median (ms) | 433.6875 |
+| Mean (ms) | 348.8020833333333 |
+| P95 (ms) | 463.4375 |
+| P99 (ms) | 463.4375 |
+| Max (ms) | 463.4375 |
 
----
+## Histogram (50ms bins)
+```
+400-450ms: ███ (3)
+450-500ms: █ (1)
+100-150ms: █ (1)
+250-300ms: █ (1)
+```
 
-## Archived original content (VOID — do not use)
+## Device Provenance
+- **Device mode**: fake-device (both browsers, B00S-DEVICE binding)
+- **Stimulus**: real bot-speech piper WAV fixtures (B00S-SPEECH binding)
+- **Spine**: B08S-1/B08S-2 dual-browser call driver + receive-side recorder
+- **Call driver**: documentLoadCount INVALID_RELOAD (B00S-RELOAD binding)
 
-The original DECIDED entry claimed T_gap=3400ms from fixed-clock scheduled baseline calls. That measurement class is invalid for AC gating. Kept only as audit trail of the error.
+## Binding Rules (from decisions/T_gap_provisional.md)
+1. May be used only to wire recovery/detection code paths (B14/B15/B16 thresholds).
+2. ACs may now be VERIFIED against this real value (provisional 500ms is void).
+3. If future data diverges, measured value wins and this entry is superseded.
+
+## Usage Notes
+- Use `T_gap = 580ms` for B14 (Mode B recovery), B15 (network loss), B16 (rejoin storm).
+- Closes no AC itself; all ACs gated on T_gap now re-verify against this value.
+- No call budget impact beyond the 2/25 ledger entries logged during this batch.
