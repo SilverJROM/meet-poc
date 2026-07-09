@@ -1,13 +1,17 @@
-# B01 Validation — Call-Budget Ledger and Cleanup Guardrails
+# B01 Re-Validation — Fail-Open Fixes
 
 **Validator:** L2 codex55  
 **Branch:** `batch-01-diagnosis-2026-07-08`  
-**Commit checked:** `eada423`  
+**Commit checked:** `b0f2bcee41723bd68dee3cb1b464693341299f44`  
+**Scope:** Re-check only B01 fail-open fixes from prior validator FAIL:
+
+1. Empty ID `registerCreatedID()` / `canDelete()`
+2. Whitespace-only ID `registerCreatedID()` / `canDelete()`
+3. `getState()` mutable `createdIDs` bypass
+
 **Verdict:** FAIL
 
-## Evidence
-
-### Required unit reproduction
+## Required Suite Reproduction
 
 Command:
 
@@ -17,50 +21,63 @@ npx tsx e2e/harness/__tests__/call-ledger.test.ts
 
 Result:
 
-- PASS: 15
+- PASS: 18
 - FAIL: 0
-- Required suite confirms protected IDs are blocked, uncaptured IDs are rejected, registered non-protected IDs are allowed, budget cap is 25, gate cap is 5, and state persistence exists.
+- Exit code: 0
 
-### Adversarial dry-run checks
+The required suite now includes the three fix-regression cases and passes:
+
+- Empty ID registration does not authorize deletion.
+- Whitespace-only ID registration does not authorize deletion.
+- `getState().createdIDs.push(...)` does not authorize deletion.
+
+## Adversarial Checks
 
 Command:
 
 ```bash
-npx tsx -e "<independent call-ledger adversarial checks>"
+npx tsx -e "<independent fail-open adversarial checks>"
 ```
+
+Result:
+
+- PASS: 6
+- FAIL: 1
+- Exit code: 1
 
 Passing checks:
 
-- Protected session `652c1475` remains blocked even after registration.
-- Protected rooms `TEST_ROOM01` and `testroom01001` remain blocked even after registration.
-- Unregistered empty string, whitespace, and partial protected IDs are rejected.
-- Registered non-protected room ID is allowed.
-- Call budget reaches 25 and the 26th call returns false.
-- Gate budget reaches 5 and the 6th gate returns false.
-- `ledger-state.json` is written under the provided state path.
+- Empty ID remains unauthorized after `registerCreatedID('room', '')`.
+- Whitespace-only ID remains unauthorized after `registerCreatedID('room', '   ')`.
+- Tab/newline whitespace remains unauthorized after `registerCreatedID('session', '\t\n  ')`.
+- Protected IDs remain unauthorized even after registration.
+- `getState().createdIDs.push({ ... })` no longer authorizes an uncaptured ID.
+- Registered non-protected ID remains authorized.
 
-Fail-open checks:
+Failing check:
 
 | Check | Expected | Actual | Impact |
 |---|---:|---:|---|
-| `registerCreatedID('room', '')`; `canDelete('')` | `false` | `true` | Empty IDs can become cleanup-authorized. |
-| `registerCreatedID('room', '   ')`; `canDelete('   ')` | `false` | `true` | Whitespace-only IDs can become cleanup-authorized. |
-| `getState().createdIDs.push({ type: 'room', id: 'mutated-not-registered', timestamp: 0 })`; `canDelete('mutated-not-registered')` | `false` | `true` | The exported state "snapshot" shares the live `createdIDs` array, allowing delete authorization without `registerCreatedID()`. |
+| Register `legit-room`; call `const state = getState()`; mutate `state.createdIDs[0].id = 'object-mutated-uncaptured'`; then call `canDelete('object-mutated-uncaptured')` | `false` | `true` | `getState()` returns a copied array but still exposes live `LedgerEntry` object references, so caller-side mutation can authorize an uncaptured ID without `registerCreatedID()`. |
+
+## Mechanism Review
+
+The empty and whitespace fail-open fixes are closed at [e2e/harness/call-ledger.ts](/home/agjrom/websites/meet-poc/e2e/harness/call-ledger.ts:62) and [e2e/harness/call-ledger.ts](/home/agjrom/websites/meet-poc/e2e/harness/call-ledger.ts:75): both `registerCreatedID()` and `canDelete()` reject empty or trim-empty strings.
+
+The prior array-push bypass is only partially closed at [e2e/harness/call-ledger.ts](/home/agjrom/websites/meet-poc/e2e/harness/call-ledger.ts:110). `getState()` returns `createdIDs: [...currentState.createdIDs]`, which copies the array shell but not the entry objects. Because `canDelete()` trusts `currentState.createdIDs.some((entry) => entry.id === id)` at [e2e/harness/call-ledger.ts](/home/agjrom/websites/meet-poc/e2e/harness/call-ledger.ts:87), mutating a returned entry object mutates the live authorization source.
 
 ## Acceptance Mapping
 
-| B01 acceptance | Evidence | Result |
+| B01 fail-open recheck | Evidence | Result |
 |---|---|---|
-| Dry-run proves protected IDs cannot be deleted: `652c1475`, `TEST_ROOM01`, `testroom01001` | Required suite + adversarial registered-protected checks | PASS |
-| Uncaptured IDs rejected for delete | Required suite passes, but `getState()` mutable array allows an uncaptured ID to be inserted into live state and then deleted | FAIL |
-| Registered non-protected IDs allowed | Required suite + adversarial registered room check | PASS |
-| Call budget 25 + gate 5 tracking exists | Required suite + adversarial cap checks | PASS |
-| No AC closes yet — safety prerequisite only | No AC closure attempted | PASS |
+| Empty ID registration/delete fail closed | Required suite + adversarial check | PASS |
+| Whitespace-only ID registration/delete fail closed | Required suite + adversarial check, including tab/newline whitespace | PASS |
+| `getState()` mutable `createdIDs` bypass fail closed | Required suite covers array push only; adversarial object-property mutation still authorizes uncaptured ID | FAIL |
 
 ## Q0
 
-A fresh user of the harness would agree the happy-path delete guard exists, but not that it is fail-closed. The guard trusts any registered string, including empty/whitespace IDs, and `getState()` exposes a mutable reference that can authorize an uncaptured ID without going through the registry API. Since B01 is the cleanup safety prerequisite and the validator brief says to fail closed, this does not pass.
+A fresh user of the harness would agree the original empty/whitespace issues are fixed and the exact `createdIDs.push()` bypass is blocked. They would not agree the `getState()` mutable-state bypass is fully fixed, because returned ledger entries are still live mutable objects that can change the internal authorization list.
 
 ## Callback
 
-[projcore callback] validator B01 STATUS: DONE — FAIL — required tests pass, but adversarial guard checks found empty/whitespace ID authorization and mutable state bypass.
+[projcore callback] validator B01 STATUS: DONE — FAIL

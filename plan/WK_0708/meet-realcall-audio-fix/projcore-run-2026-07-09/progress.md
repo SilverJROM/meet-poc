@@ -55,3 +55,10 @@ tagged HIGH — approve to convene the planning deliberation panel? (proceeding 
 [overmind] 2026-07-09T01:42:54+00:00 child sync OK (child-rm x-01_validator_codex55_meet) children=[]
 [overmind] 2026-07-09T01:42:57+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b01-fix1) children=["x-01_impl_haiku_meet"]
 [overmind] 2026-07-09T01:43:00+00:00 sync OK current='Forced weak-signal sweep — verified r points with A>=0.70' tasks=14
+[overmind] 2026-07-09T01:44:05+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=[]
+[2026-07-09T01:44:05+00:00] [B01 FIX] b0f2bce — empty/ws reject + getState deep copy. Tests 18/18. (Note: impl used git add -A; commit includes run artifacts — acceptable for now.) Re-validating.
+[overmind] 2026-07-09T01:44:10+00:00 child sync OK (child-add x-01_validator_codex55_meet:validator-codex55-b01-r2) children=["x-01_validator_codex55_meet"]
+[overmind] 2026-07-09T01:44:10+00:00 sync OK current='Forced weak-signal sweep — verified r points with A>=0.70' tasks=14
+[2026-07-09T01:45:52+00:00] [B01 VALIDATOR FAIL iter2] empty/ws fixed; getState still exposes live LedgerEntry objects (mutate .id authorizes uncaptured). Send-back iter 2.
+[overmind] 2026-07-09T01:45:52+00:00 child sync OK (child-rm x-01_validator_codex55_meet) children=[]
+[overmind] 2026-07-09T01:45:55+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b01-fix2) children=["x-01_impl_haiku_meet"]

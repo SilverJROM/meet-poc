@@ -109,7 +109,7 @@ export function isGateCheckExceeded(): boolean {
 
 export function getState(): LedgerState {
   return {
-    createdIDs: [...currentState.createdIDs],
+    createdIDs: currentState.createdIDs.map((e) => ({ ...e })),
     callBurnCount: currentState.callBurnCount,
     gateCheckCount: currentState.gateCheckCount,
   };

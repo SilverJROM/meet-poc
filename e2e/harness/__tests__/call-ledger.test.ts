@@ -281,6 +281,26 @@ test('immutability: getState() mutation must not authorize uncaptured ID deletio
   }
 });
 
+test('immutability: getState() entry mutation must not affect canDelete checks', () => {
+  beforeEach();
+  try {
+    const legit = 'legit-room-1';
+    registerCreatedID('room', legit);
+    const state = getState();
+    state.createdIDs[0].id = 'object-mutated-uncaptured';
+    assert(
+      canDelete('object-mutated-uncaptured') === false,
+      'mutated ID via returned entry must not be deletable'
+    );
+    assert(
+      canDelete(legit) === true,
+      'original registered ID must still be deletable'
+    );
+  } finally {
+    afterEach();
+  }
+});
+
 // Tests: state retrieval
 test('state: should return current state snapshot', () => {
   beforeEach();

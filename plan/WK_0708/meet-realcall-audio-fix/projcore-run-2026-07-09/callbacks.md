@@ -5,3 +5,4 @@
 [2026-07-09T01:38:04+00:00] [projcore callback] impl B01 STATUS: DONE — eada423 call-ledger 15/15 tests
 [2026-07-09T01:41:15+00:00] [projcore callback] redteam B01 STATUS: DONE — CLEAN
 [2026-07-09T01:42:54+00:00] [projcore callback] validator B01 STATUS: DONE — FAIL — empty/ws IDs + mutable getState
+[2026-07-09T01:45:52+00:00] [projcore callback] validator B01 STATUS: DONE — FAIL — getState shallow object refs
