@@ -1,0 +1,216 @@
+// B08S-1: Dual-browser call driver tests
+// Validates join+publish on two Chromium instances, ledger registration, and dry-run smoke paths.
+// Target: 1/25 call burn for real-call, 0/25 for dry-run (if isolated from actual call infrastructure).
+
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import * as path from 'node:path';
+import * as fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { joinDualBrowserCall, dryRunDualBrowserCall, type CallDriverConfig } from '../call-driver.js';
+import { resetLedger, getState } from '../call-ledger.js';
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const TEMP_DIR = path.join(HERE, '.temp-call-driver-test');
+
+// Mock app URL — in real scenario this would be a running dev server
+const BASE_URL = 'http://localhost:4700';
+
+describe('B08S-1 call driver — dual-browser room join + publish validation', () => {
+  beforeAll(() => {
+    // Create temp directory for ledger state
+    if (!fs.existsSync(TEMP_DIR)) {
+      fs.mkdirSync(TEMP_DIR, { recursive: true });
+    }
+  });
+
+  afterAll(() => {
+    // Clean up temp files
+    if (fs.existsSync(TEMP_DIR)) {
+      fs.rmSync(TEMP_DIR, { recursive: true });
+    }
+  });
+
+  it.skip(
+    'dry-run: validates join + publish on two browsers without full conversation',
+    async () => {
+      // SKIP NOTE: This requires a running dev server (yarn dev) and actual app infrastructure.
+      // Uncomment and run with: yarn dev & npm run vitest -- call-driver.test.ts --run
+
+      resetLedger();
+
+      const config: CallDriverConfig = {
+        baseUrl: BASE_URL,
+        speaker1Name: 'bot-140',
+        speaker2Name: 'bot-123',
+        autoAdmitRoom: true,
+        ledgerBasePath: TEMP_DIR,
+        launchArgs: [
+          '--use-file-for-fake-audio-capture=/path/to/speech.wav', // Would need actual fixture
+        ],
+      };
+
+      const result = await dryRunDualBrowserCall(config);
+
+      // Assertions
+      expect(result.success).toBe(true);
+      expect(result.roomId).toBeTruthy();
+      expect(result.speaker1.publishedBytes).toBeGreaterThan(0);
+      expect(result.speaker2.publishedBytes).toBeGreaterThan(0);
+      expect(result.ledgerState.createdIDs.length).toBeGreaterThan(0);
+      expect(result.ledgerState.callBurnCount).toBe(1);
+    },
+    120_000, // 2 minute timeout
+  );
+
+  it(
+    'ledger integration: registerCreatedID tracks room and prevents deletion of protected IDs',
+    () => {
+      resetLedger();
+
+      // Import fresh modules to get isolated ledger state
+      const { registerCreatedID, canDelete, getState } = require('../call-ledger.js');
+
+      // Register a new room
+      registerCreatedID('room', 'test-room-abc-123');
+      let state = getState();
+      expect(state.createdIDs).toHaveLength(1);
+      expect(state.createdIDs[0].id).toBe('test-room-abc-123');
+      expect(state.createdIDs[0].type).toBe('room');
+
+      // Verify it can be deleted
+      expect(canDelete('test-room-abc-123')).toBe(true);
+
+      // Protected IDs cannot be deleted
+      expect(canDelete('652c1475')).toBe(false); // protected session
+      expect(canDelete('TEST_ROOM01')).toBe(false); // protected room
+      expect(canDelete('testroom01001')).toBe(false); // protected room
+
+      // Unregistered IDs cannot be deleted
+      expect(canDelete('unknown-id')).toBe(false);
+    },
+  );
+
+  it(
+    'call burn tracking: incrementCallBurn respects budget cap and persists state',
+    () => {
+      resetLedger();
+
+      const { initLedger, incrementCallBurn, isCallBurnExceeded, getState } = require('../call-ledger.js');
+
+      initLedger(TEMP_DIR);
+
+      let state = getState();
+      expect(state.callBurnCount).toBe(0);
+
+      // First burn (should succeed)
+      const didNotExceed = incrementCallBurn();
+      expect(didNotExceed).toBe(true);
+      state = getState();
+      expect(state.callBurnCount).toBe(1);
+      expect(isCallBurnExceeded()).toBe(false);
+
+      // Simulate loading a different state file that has already burned some
+      // (This tests persistence across initLedger calls)
+      const stateFile = path.join(TEMP_DIR, 'ledger-state.json');
+      if (fs.existsSync(stateFile)) {
+        const partial = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+        expect(partial.callBurnCount).toBe(1);
+      }
+    },
+  );
+
+  it(
+    'config validation: missing baseUrl or room details are caught',
+    async () => {
+      resetLedger();
+
+      const badConfig: CallDriverConfig = {
+        baseUrl: '', // Missing!
+        speaker1Name: 'bot-140',
+        speaker2Name: 'bot-123',
+      };
+
+      // Should fail during room creation
+      try {
+        await dryRunDualBrowserCall(badConfig);
+        expect.fail('Expected error on empty baseUrl');
+      } catch (err) {
+        expect((err as Error).message).toContain('Failed to create room');
+      }
+    },
+  );
+
+  it(
+    'dry-run exports its function and accepts optional ConversationScript',
+    async () => {
+      // This test just validates function signature and exports
+      expect(typeof dryRunDualBrowserCall).toBe('function');
+      expect(typeof joinDualBrowserCall).toBe('function');
+
+      // dryRunDualBrowserCall should be the same shape as joinDualBrowserCall
+      // (and just calls it without a script)
+      const dryRun = dryRunDualBrowserCall.toString();
+      expect(dryRun).toContain('CallDriverConfig');
+    },
+  );
+});
+
+describe('B08S-1 call driver — integration with ConversationScheduler', () => {
+  it.skip(
+    'real-call: runs ConversationScheduler with two browsers on fixed-clock schedule',
+    async () => {
+      // SKIP NOTE: This requires:
+      // 1. A running dev server
+      // 2. Pre-generated speech WAVs from B03 fixtures
+      // 3. Proper gUM shim configuration
+      // Uncomment when B08S-2 (receive-side recorder) is ready to validate end-to-end.
+
+      resetLedger();
+
+      const config: CallDriverConfig = {
+        baseUrl: BASE_URL,
+        speaker1Name: 'bot-140',
+        speaker2Name: 'bot-123',
+        autoAdmitRoom: true,
+        ledgerBasePath: TEMP_DIR,
+      };
+
+      // Import scheduler
+      const { ConversationScheduler } = require('../conversation-scheduler.js');
+      const scheduler = new ConversationScheduler();
+
+      // Mock script: two utterances over 5 seconds
+      const script = {
+        utterances: [
+          {
+            speaker: 'bot-140' as const,
+            timeMs: 0,
+            durationMs: 1500,
+            audioPath: '/fixtures/bot-140-hello.wav',
+            text: 'Hello, how are you?',
+          },
+          {
+            speaker: 'bot-123' as const,
+            timeMs: 2000,
+            durationMs: 1500,
+            audioPath: '/fixtures/bot-123-good.wav',
+            text: 'Good, thanks!',
+          },
+        ],
+        totalDurationMs: 3500,
+      };
+
+      // This would run the actual call
+      const result = await joinDualBrowserCall(config, script);
+
+      expect(result.success).toBe(true);
+      expect(result.duration).toBeGreaterThanOrEqual(3500); // At minimum the script duration
+      expect(result.ledgerState.callBurnCount).toBe(1);
+
+      const report = scheduler.getTimingReport();
+      expect(report.played).toHaveLength(2);
+      expect(report.allOnTime).toBe(true); // All utterances within 50ms skew
+    },
+    120_000,
+  );
+});

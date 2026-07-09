@@ -1,5 +1,18 @@
-// Harness module exports: ledger, arbiter, scheduler, and async brain
-export { CallLedger, type CallBudgetState } from './call-ledger';
+// Harness module exports: ledger, arbiter, scheduler, async brain, and call driver
+export {
+  initLedger,
+  registerCreatedID,
+  incrementCallBurn,
+  isCallBurnExceeded,
+  incrementGateCheck,
+  isGateCheckExceeded,
+  getState,
+  resetLedger,
+  canDelete,
+  type CreatedIDType,
+  type LedgerEntry,
+  type LedgerState,
+} from './call-ledger';
 export { RecordingArbiter, LoudnessAnalyzer, type RecordingAnalysis, type StimulusVerification } from './recording-arbiter';
 export { ConversationScheduler, type ConversationScript, type UtteranceSlot, type PlayedUtterance, type TimingReport } from './conversation-scheduler';
 export { AsyncBrain, type AsyncBrainState, type LLMInvoker } from './async-brain';
@@ -24,3 +37,4 @@ export {
   type ModeAInjectionParams,
   type ModeBInjectionParams,
 } from './capture-injection';
+export { joinDualBrowserCall, dryRunDualBrowserCall, type CallDriverConfig, type CallResult } from './call-driver';
