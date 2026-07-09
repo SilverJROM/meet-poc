@@ -107,8 +107,8 @@ export function extractOutboundAudioSource(stats: {
  * B08A-1 — outbound sender-liveness stats (D28/D29 T1 discriminator input).
  *
  * Capture side (`media-source`/audio) and sender side (`outbound-rtp`/audio)
- * over ONE getStats() pass. Reader/emit only — no classification here (that is
- * B08A-2's classifySenderLiveness, which does not exist yet).
+ * over ONE getStats() pass. Reader/emit only — classification lives in
+ * `classifySenderLiveness` (B08A-2, below).
  */
 export type OutboundLivenessStats = {
   totalAudioEnergy: number | null;
@@ -245,6 +245,68 @@ export function classifyMicCapture(
   if (maxLevel < levelThreshold) return 'silent';
 
   return 'working';
+}
+
+/**
+ * B08A-2 — capture-vs-sender discriminator (D29/AC15b).
+ *
+ * Four-way classification of an `OutboundLivenessStats` window, mapped off TWO
+ * independent booleans — `captureAdvancing` (`totalAudioEnergy` delta) and
+ * `senderAdvancing` (`packetsSent` delta) — grounded in a real-Chromium
+ * loopback-RTCPeerConnection measurement (see
+ * `decisions/2026-07-09-b08a2-empirical-findings.md`): this stack runs no
+ * DTX on outbound mic audio, so RTP keeps flowing at a steady cadence even
+ * when the captured signal is literal digital silence. Consequently
+ * `'capture-dead'` reads as energy-frozen-while-packets-still-climb, NOT
+ * "both frozen" — the inverse pairing (capture climbing, packets frozen) is
+ * `'sender-dead'`. Only when BOTH are flat (or the window has insufficient
+ * usable samples for either metric) is the fault genuinely ambiguous — total
+ * link death, a closed PC, or too thin a window — so that quadrant is
+ * `'indeterminate'`, never a specific single-sided claim.
+ */
+export type SenderLivenessClass = 'both-advancing' | 'capture-dead' | 'sender-dead' | 'indeterminate';
+
+/**
+ * `packetsSent` is a whole-packet integer counter (unlike the continuous
+ * `totalAudioEnergy` accumulator) — any real increase across the window counts
+ * as advancing, so the default epsilon is 1.
+ */
+export const SENDER_PACKET_DELTA_EPSILON = 1;
+
+/**
+ * SUSTAINED sender-liveness discriminator (AC15b, B08A-2). Pure, no caller
+ * wiring — exported and uncalled here; B13W is the intended future watchdog
+ * caller. Mirrors `classifyMicCapture`'s window-delta idiom exactly: needs at
+ * least two usable (non-null) readings of EACH metric to judge advancing vs.
+ * flat, else `'indeterminate'` (never a false single-cause claim on a thin
+ * window). `bytesSent`/`totalSamplesDuration` are captured by the reader
+ * (B08A-1) but are not part of this decision — `packetsSent`/`totalAudioEnergy`
+ * are each this classifier's one deciding metric per side, matching
+ * `classifyMicCapture`'s own single-primary-metric precedent.
+ */
+export function classifySenderLiveness(
+  window: OutboundLivenessStats[],
+  opts?: { energyDeltaEpsilon?: number; packetDeltaEpsilon?: number },
+): SenderLivenessClass {
+  const energyEpsilon = opts?.energyDeltaEpsilon ?? ENERGY_DELTA_EPSILON;
+  const packetEpsilon = opts?.packetDeltaEpsilon ?? SENDER_PACKET_DELTA_EPSILON;
+
+  const energies = window
+    .map((s) => s.totalAudioEnergy)
+    .filter((e): e is number => typeof e === 'number');
+  const packets = window
+    .map((s) => s.packetsSent)
+    .filter((p): p is number => typeof p === 'number');
+
+  if (energies.length < 2 || packets.length < 2) return 'indeterminate';
+
+  const captureAdvancing = energies[energies.length - 1] - energies[0] >= energyEpsilon;
+  const senderAdvancing = packets[packets.length - 1] - packets[0] >= packetEpsilon;
+
+  if (captureAdvancing && senderAdvancing) return 'both-advancing';
+  if (captureAdvancing && !senderAdvancing) return 'sender-dead';
+  if (!captureAdvancing && senderAdvancing) return 'capture-dead';
+  return 'indeterminate';
 }
 
 /**
