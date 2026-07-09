@@ -592,12 +592,16 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
     }
   });
 
-  it('installCaptureHook: installs wrapper before RTCPeerConnection is created', async () => {
-    // Unit test: verify that installCaptureHook returns a valid hookId
+  it('installCaptureHook: installs wrapper via addInitScript (persists across navigation)', async () => {
+    // Unit test: verify that installCaptureHook uses addInitScript for navigation persistence
     const mockPage = {
-      evaluate: async (fn: (hId: string) => Promise<any>, hId: string) => {
-        // Mock successful hook installation (this would run in browser context in real scenario)
-        return undefined; // Hook installation success
+      addInitScript: async (fn: (hId: string) => void, hId: string) => {
+        // Mock addInitScript (injected on every document, including post-navigation)
+        return undefined; // Script injection success
+      },
+      evaluate: async (fn: (hId: string) => any, hId: string) => {
+        // Mock evaluate for later state retrieval in stopAndEncodeCapture
+        return undefined;
       },
     } as any;
 
@@ -609,10 +613,63 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
     expect(hookId.length).toBeGreaterThan(5);
   });
 
+  it('installCaptureHook: hook persists across page.goto() navigation', async () => {
+    // Integration test: verify hook survives page navigation (Playwright addInitScript pattern)
+    // This test documents the B08S-2 R5 fix: addInitScript injects on every document
+    const { chromium } = await import('@playwright/test');
+    const browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext();
+    const page = await context.newPage();
+
+    try {
+      // Install hook via addInitScript BEFORE any navigation
+      // addInitScript will run on the first page.goto and all subsequent navigations
+      const hookId = await installCaptureHook(page);
+      expect(hookId).toBeTruthy();
+
+      // Navigate to first page (hook script runs here for the first time)
+      await page.goto('about:blank').catch(() => {});
+      await page.waitForTimeout(50);
+
+      // Probe on first page (hook should be present)
+      const firstPage = await page.evaluate(() => {
+        return {
+          hasState: !!(window as any).__captureHookState,
+          wrapped: typeof (window as any).RTCPeerConnection === 'function',
+        };
+      });
+      expect(firstPage.hasState).toBe(true);
+      expect(firstPage.wrapped).toBe(true);
+
+      // Navigate to second page (simulates joinBrowser's page.goto(roomUrl))
+      await page.goto('about:blank?test=2').catch(() => {});
+      await page.waitForTimeout(50);
+
+      // Probe AFTER navigation (hook MUST persist because addInitScript injects on every load)
+      const secondPage = await page.evaluate(() => {
+        return {
+          hasState: !!(window as any).__captureHookState,
+          wrapped: typeof (window as any).RTCPeerConnection === 'function',
+        };
+      });
+
+      // With addInitScript, hook state MUST persist across navigation
+      expect(secondPage.hasState).toBe(true);
+      expect(secondPage.wrapped).toBe(true);
+    } finally {
+      await context.close();
+      await browser.close();
+    }
+  });
+
   it('stopAndEncodeCapture: retrieves state from hook and encodes captured audio', async () => {
     // Mock a page that has hook state with real audio samples
     const hookId = `hook-${Date.now()}-test`;
     const mockPage = {
+      addInitScript: async (fn: (hId: string) => void, hId: string) => {
+        // Mock addInitScript for hook installation
+        return undefined;
+      },
       evaluate: async (fn: (hId: string) => Promise<any>, hId: string) => {
         // Simulate: hook was installed, real audio was captured
         const sampleRate = 48000;
@@ -643,6 +700,10 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
   it('startReceiveSideRecording + stopReceiveSideRecording: two-phase recording flow', async () => {
     // Unit test: verify the two-phase API exists and is callable
     const mockPage = {
+      addInitScript: async (fn: (hId: string) => void, hId: string) => {
+        // Mock addInitScript for hook installation
+        return undefined;
+      },
       evaluate: async (fn: (hId: string) => Promise<any>, hId: string) => {
         // Mock returning real audio samples
         const sampleRate = 48000;

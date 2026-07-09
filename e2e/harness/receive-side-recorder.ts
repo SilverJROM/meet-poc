@@ -18,6 +18,7 @@ export interface ReceiveSideRecordingResult {
 /**
  * Install receive-side audio capture hook on page BEFORE RTCPeerConnection is created.
  * Must be called before joinBrowser() to capture existing tracks created during join.
+ * Uses addInitScript() so hook persists across page.goto() navigation.
  *
  * @param page Receiving browser page
  * @returns Handle for later stopAndEncodeCapture() call
@@ -25,9 +26,9 @@ export interface ReceiveSideRecordingResult {
 export async function installCaptureHook(page: Page): Promise<string> {
   const hookId = `hook-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-  // Install wrapper on page before any PC is created
-  await page.evaluate(
-    async (hId: string) => {
+  // Install wrapper via addInitScript so it persists across page.goto() navigation
+  await page.addInitScript(
+    (hId: string) => {
       const originalRtcPeerConnection = (window as any).RTCPeerConnection ||
         (window as any).webkitRTCPeerConnection;
 
