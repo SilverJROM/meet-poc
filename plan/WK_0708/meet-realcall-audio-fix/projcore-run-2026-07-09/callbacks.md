@@ -182,3 +182,37 @@
   Fixes: typo createMediaStreamSource (was createMediaStreamAudioSource).
   Proof: tsc --noEmit clean on receive-side-recorder.ts; vitest run call-driver.test.ts green (13 passed, 2 skipped).
   Commit: 5d16e08
+[2026-07-09T05:27:50+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 5d16e08 AudioContext + getReceivers
+[2026-07-09T05:31:08+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL R3 — 5d16e08/f2559e4
+  Prior fail items rechecked by independent L2 codex55. PASS: no synthetic success WAV remains; null/empty capture throws before writing WAV; TS1209 optional-chain constructor is fixed by AudioContextCtor selection; focused receive-side-recorder tsc parse is clean; call-driver Vitest target green (13 passed, 2 skipped); full harness green (103 passed, 2 skipped); no req-matrix/og-requirements AC closure. Blocking FAIL: `getReceivers()` enumeration is only inside the replacement RTCPeerConnection constructor installed by `captureReceiveSideAudio()`, while `joinDualBrowserCall()` calls recording after both joined/publish validation. Existing call PCs created before wrapper install remain invisible, so B08S-2 still cannot capture existing remote tracks on the real B08S-1 path. Report: validation/b08s2-validation-r3.md.
+[2026-07-09T05:31:44+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL R3 — late PC wrap (codex55)
+[2026-07-09T05:35:56+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 32a1951 install-before-join
+[2026-07-09T05:39:25+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL R4 — 32a1951
+  R4 puts `startReceiveSideRecording()` before `joinBrowser()` and leaves `stopReceiveSideRecording()` after both joins/publish validation; focused call-driver Vitest, full e2e harness Vitest, and focused tsc are green. Blocking FAIL: `installCaptureHook()` uses `page.evaluate()` on a new blank receiver page, then `joinBrowser()` immediately navigates with `page.goto(roomUrl)`, discarding `window.RTCPeerConnection` wrapper and `__captureHookState`. Playwright probe confirmed evaluate-installed hook state/wrapper are present before navigation and gone after navigation. No synthetic fallback remains; no req-matrix/og-requirements AC closure. Report: validation/b08s2-validation-r4.md.
+[2026-07-09T05:40:00+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL R4 — evaluate lost on navigation (codex55)
+[2026-07-09T05:44:27+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 14b2f96 addInitScript
+[2026-07-09T05:48:50+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL R5 — 14b2f96
+  R5 confirms the specific R4 fix: `installCaptureHook()` now uses `page.addInitScript()`, the focused navigation-persistence Vitest passes (`1 passed | 18 skipped`), capture is still installed before receiver join and stopped after both joins/publish validation, no synthetic WAV fallback is active, tsc is clean, and no AC files changed. Blocking FAIL: required Vitest gates are red from clean checkout (`npx vitest run e2e/harness/__tests__/call-driver.test.ts` -> 2 failed/12 passed/5 skipped due ENOENT writing `.temp-call-driver-test`; `npm test -w e2e -- harness/__tests__/call-driver.test.ts` -> 1 failed/103 passed/5 skipped due ENOENT unlinking same temp path). Additional live-capture blocker by code inspection: injected hook stores `hasReceivedAudio`, `audioContext`, `scriptProcessor`, and `recordingStartTime` as install-time snapshots on `__captureHookState`; track arrival mutates closure vars only, so `stopAndEncodeCapture()` can still fail closed after real audio. Report: validation/b08s2-validation-r5.md.
+[2026-07-09T05:49:01+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL R5 — temp dir + state snapshot (codex55)
+[2026-07-09T05:52:28+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 735aad7 temp dir + hook state
+[2026-07-09T05:56:13+00:00] [projcore callback] coord B08S-2 STATUS: BLOCKED — escalate to co-planners (design); haiku stopped
+[2026-07-09T05:56:13+00:00] [projcore callback] coord planning STATUS: WORKING — B08S-2 design co-planners
+[2026-07-09T05:57:33+00:00] [projcore callback] coplanner B B08S-2 STATUS: WORKING — reading validation history and harness/app capture surfaces
+[2026-07-09T05:58:53+00:00] [projcore callback] coplanner B B08S-2 STATUS: DONE — decision file written; recommends D hybrid addInitScript-before-join + app/SFU registry, with no-capture vs captured-silence fail-closed contract
+[2026-07-09T06:01:47+00:00] [projcore callback] coplanner A B08S-2 STATUS: WORKING — dissent filed vs coplanner B (registry-as-authority = circular evidence); deliberating
+[2026-07-09T06:07:06+00:00] [projcore callback] coplanner A B08S-2 STATUS: DONE — converged decision written; D-hybrid with addInitScript shim as SOLE capture+discovery path, app registry demoted to read-only corroboration (registry-as-authority rejected: circular evidence), zero product changes; B agreed all 6 amendments
+[2026-07-09T06:07:33+00:00] [projcore callback] coord B08S-2 STATUS: DESIGN-LOCKED — see decisions/2026-07-09-b08s2-receive-capture-hook-design.md; awaiting next boundary (not implementing yet per north)
+[2026-07-09T06:14:38+00:00] [projcore callback] coord STATUS: WORKING — resume B08S-2 post-design
+[2026-07-09T06:15:09+00:00] [projcore callback] impl B08S-2 STATUS: WORKING — design-locked impl awaiting PROPOSED
+[2026-07-09T06:18:42+00:00] [projcore callback] impl B08S-2 STATUS: PROPOSED — receive-side recorder rewrite + THREE GUARDS mapping
+  Design truth: decisions/2026-07-09-b08s2-receive-capture-hook-design.md (north-approved, A-primary addInitScript).
+  Mapping doc: validation/B08S2_PROPOSED_MAPPING.md (files/tests/guards, awaiting APPROVED-PLAN before impl).
+  State object: __b08s2ReceiveCapture (live, not snapshots) — installed/pcCount/trackCount/callbackCount/sampleCount/navCount/firstTrackAtMs/audioContextState/audioSamplesBase64/sourceNodes/scriptProcessor.
+  Shim: RTCPeerConnection wrapper installed via addInitScript before page.goto, config passthrough UNMODIFIED (GUARD 1), addEventListener('track') in constructor (not pc.ontrack=), delete getReceivers() dead code.
+  Track handler: lazy audio graph on first remote audio track; mixer bus tee (GUARD 2); resume + assert running (GUARD 3); Int16 PCM base64 samples.
+  Taxonomy: pure classifyCapture(state, stats) — VALID/SILENCE/INVALID_*/PRODUCT_NO_MEDIA (unit-testable, fail-closed no synthetic WAV).
+  Files to change: receive-side-recorder.ts (rewrite ~250L), call-driver.ts (flag + ordering guard), receive-side-recorder.test.ts (new ~150L unit), call-driver.test.ts (temp-dir per describe).
+  Gates: npx vitest run e2e/harness/__tests__/{receive-side-recorder,call-driver}.test.ts; tsc --noEmit e2e/harness/{receive-side-recorder,call-driver}.ts.
+  PROPOSED ACTIONS: confirm design → APPROVED-PLAN → implement → commit → DONE callback.
+  Awaiting APPROVED-PLAN handshake.
+[2026-07-09T06:17:32+00:00] [projcore callback] coord B08S-2 STATUS: APPROVED-PLAN — design-locked + 3 guards

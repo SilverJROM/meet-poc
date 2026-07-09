@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
+import * as os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { joinDualBrowserCall, dryRunDualBrowserCall, type CallDriverConfig } from '../call-driver.js';
 import {
@@ -29,27 +30,22 @@ import {
 import { RecordingArbiter } from '../recording-arbiter.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const TEMP_DIR = path.join(HERE, '.temp-call-driver-test');
 
 // Mock app URL — in real scenario this would be a running dev server
 const BASE_URL = 'http://localhost:4700';
 
 describe('B08S-1 call driver — dual-browser room join + publish validation', () => {
-  beforeEach(() => {
-    // Ensure temp directory exists before each test
-    if (!fs.existsSync(TEMP_DIR)) {
-      fs.mkdirSync(TEMP_DIR, { recursive: true });
-    }
+  let TEMP_DIR: string;
+
+  beforeAll(() => {
+    // Allocate isolated temp dir per describe block (fixes R5 ENOENT)
+    TEMP_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'b08s1-test-'));
   });
 
-  afterEach(() => {
-    // Clean up only ledger and temp files, not the directory
+  afterAll(() => {
+    // Clean up entire temp directory tree
     if (fs.existsSync(TEMP_DIR)) {
-      fs.readdirSync(TEMP_DIR).forEach((file) => {
-        if (file.match(/^ledger-state\.json$|\.json$|\.wav$|\.txt$/)) {
-          fs.unlinkSync(path.join(TEMP_DIR, file));
-        }
-      });
+      fs.rmSync(TEMP_DIR, { recursive: true, force: true });
     }
   });
 
@@ -286,7 +282,7 @@ describe('B08S-1 call driver — integration with ConversationScheduler', () => 
         speaker1Name: 'bot-140',
         speaker2Name: 'bot-123',
         autoAdmitRoom: true,
-        ledgerBasePath: TEMP_DIR,
+        ledgerBasePath: TEMP_DIR_B08S2,
       };
 
       // Import scheduler
@@ -330,21 +326,17 @@ describe('B08S-1 call driver — integration with ConversationScheduler', () => 
 });
 
 describe('B08S-2 receive-side recorder — WAV encoding and transcript generation', () => {
-  beforeEach(() => {
-    // Ensure temp directory exists before each test
-    if (!fs.existsSync(TEMP_DIR)) {
-      fs.mkdirSync(TEMP_DIR, { recursive: true });
-    }
+  let TEMP_DIR_B08S2: string;
+
+  beforeAll(() => {
+    // Allocate isolated temp dir per describe block
+    TEMP_DIR_B08S2 = fs.mkdtempSync(path.join(os.tmpdir(), 'b08s2-recorder-test-'));
   });
 
-  afterEach(() => {
-    // Clean up only WAV and transcript files, not the directory
-    if (fs.existsSync(TEMP_DIR)) {
-      fs.readdirSync(TEMP_DIR).forEach((file) => {
-        if (file.match(/\.(wav|txt)$/)) {
-          fs.unlinkSync(path.join(TEMP_DIR, file));
-        }
-      });
+  afterAll(() => {
+    // Clean up entire temp directory tree
+    if (fs.existsSync(TEMP_DIR_B08S2)) {
+      fs.rmSync(TEMP_DIR_B08S2, { recursive: true, force: true });
     }
   });
 
@@ -392,7 +384,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
       speaker1Name: 'bot-140',
       speaker2Name: 'bot-123',
       autoAdmitRoom: true,
-      ledgerBasePath: TEMP_DIR,
+      ledgerBasePath: TEMP_DIR_B08S2,
       recordReceiveSide: true,
       receiverPageIndex: 1, // bot-123 receives
     };
@@ -446,7 +438,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
     const transcriptContent = '[00.00s] Hello, how are you?\n[02.00s] Good, thanks!';
     const recordingId = 'test-rec-123';
 
-    const { transcriptPath } = writeTranscriptFile(transcriptContent, TEMP_DIR, recordingId);
+    const { transcriptPath } = writeTranscriptFile(transcriptContent, TEMP_DIR_B08S2, recordingId);
 
     // Validate file exists and has correct content
     expect(fs.existsSync(transcriptPath)).toBe(true);
@@ -476,11 +468,11 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
     }
 
     const wavBuffer = encoder.encode(samples);
-    const wavPath = path.join(TEMP_DIR, 'test-arbiter-input.wav');
+    const wavPath = path.join(TEMP_DIR_B08S2, 'test-arbiter-input.wav');
     fs.writeFileSync(wavPath, wavBuffer);
 
     // Parse with RecordingArbiter
-    const arbiter = new RecordingArbiter(TEMP_DIR);
+    const arbiter = new RecordingArbiter(TEMP_DIR_B08S2);
     const analysis = await arbiter.analyzeRecording(wavPath);
 
     // Validate analysis
@@ -511,13 +503,13 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
 
     // Should throw instead of writing synthetic WAV
     try {
-      await captureReceiveSideAudio(mockPage, TEMP_DIR);
+      await captureReceiveSideAudio(mockPage, TEMP_DIR_B08S2);
       expect.fail('Expected captureReceiveSideAudio to throw on no captured audio');
     } catch (err) {
       expect((err as Error).message).toContain('No real remote audio captured');
       expect((err as Error).message).toContain('Failing closed');
       // Verify no WAV file was written
-      const wavFiles = fs.readdirSync(TEMP_DIR).filter((f) => f.endsWith('.wav'));
+      const wavFiles = fs.readdirSync(TEMP_DIR_B08S2).filter((f) => f.endsWith('.wav'));
       expect(wavFiles).toHaveLength(0);
     }
   });
@@ -551,7 +543,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
     } as any;
 
     // Should succeed and write the real captured audio
-    const result = await captureReceiveSideAudio(mockPage, TEMP_DIR);
+    const result = await captureReceiveSideAudio(mockPage, TEMP_DIR_B08S2);
     expect(result.wavPath).toBeTruthy();
     expect(fs.existsSync(result.wavPath)).toBe(true);
 
@@ -564,7 +556,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
     expect(riffHeader).toBe('RIFF');
 
     // Parse and analyze with RecordingArbiter to verify it contains the real captured audio
-    const arbiter = new RecordingArbiter(TEMP_DIR);
+    const arbiter = new RecordingArbiter(TEMP_DIR_B08S2);
     const analysis = await arbiter.analyzeRecording(result.wavPath);
 
     // The 220Hz sine wave should produce measurable audio analysis
@@ -593,7 +585,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
 
     // Should throw since empty array means no real audio
     try {
-      await captureReceiveSideAudio(mockPage, TEMP_DIR);
+      await captureReceiveSideAudio(mockPage, TEMP_DIR_B08S2);
       expect.fail('Expected captureReceiveSideAudio to throw on empty samples');
     } catch (err) {
       expect((err as Error).message).toContain('No real remote audio captured');
@@ -697,7 +689,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
     } as any;
 
     // Should succeed and write the real captured audio
-    const result = await stopAndEncodeCapture(mockPage, TEMP_DIR, hookId);
+    const result = await stopAndEncodeCapture(mockPage, TEMP_DIR_B08S2, hookId);
     expect(result.wavPath).toBeTruthy();
     expect(fs.existsSync(result.wavPath)).toBe(true);
 
@@ -726,11 +718,11 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
     } as any;
 
     // Phase 1: Start recording (install hook)
-    const handle = await startReceiveSideRecording(mockPage, TEMP_DIR);
+    const handle = await startReceiveSideRecording(mockPage, TEMP_DIR_B08S2);
     expect(handle).toBeTruthy();
     expect(handle.hookId).toBeTruthy();
     expect(handle.page).toBe(mockPage);
-    expect(handle.outputDir).toBe(TEMP_DIR);
+    expect(handle.outputDir).toBe(TEMP_DIR_B08S2);
 
     // Phase 2: Stop and encode (with optional script)
     const script = {

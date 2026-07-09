@@ -1,6 +1,7 @@
-// B08S-2: Receive-side audio capture and transcript adapter
-// Captures far-end audio from receiving browser via MediaRecorder or WebAudio,
-// encodes to WAV, and generates transcript from ConversationScript.
+// B08S-2: Receive-side audio capture hook and transcript adapter (design-locked)
+// Captures far-end audio via addInitScript RTCPeerConnection shim before join.
+// Encodes to WAV and generates transcript from ConversationScript.
+// Fail-closed: no-capture → INVALID, no WAV. No synthetic success.
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -9,117 +10,251 @@ import { WavEncoder } from './wav-encoder.js';
 import type { ConversationScript } from './conversation-scheduler.js';
 
 export interface ReceiveSideRecordingResult {
-  wavPath: string; // Path to receive-side WAV file
-  transcriptPath: string; // Path to transcript text file
-  transcriptContent: string; // Full transcript text
-  durationMs: number; // Recording duration
+  wavPath: string;
+  transcriptPath: string;
+  transcriptContent: string;
+  durationMs: number;
+}
+
+// State object stored on window; must be live (mutable), not install-time snapshots
+interface B08S2CaptureState {
+  installed: boolean;
+  pcCount: number;
+  trackCount: number;
+  callbackCount: number;
+  sampleCount: number;
+  navCount: number;
+  firstTrackAtMs: number;
+  audioContextState: string;
+  audioSamplesBase64: string;
+  sourceNodes: any[];
+  scriptProcessor: any;
+}
+
+type CaptureClassification =
+  | { kind: 'VALID'; durationMs: number; rms: number }
+  | { kind: 'SILENCE'; durationMs: number; rms: number }
+  | { kind: 'INVALID_HOOK_MISSING' }
+  | { kind: 'INVALID_NO_PC' }
+  | { kind: 'INVALID_AUDIO_GRAPH' }
+  | { kind: 'INVALID_RELOAD' }
+  | { kind: 'INVALID_HOOK_BLIND' }
+  | { kind: 'PRODUCT_NO_MEDIA' };
+
+/**
+ * Pure taxonomy classifier: no browser, no I/O, deterministic.
+ * Returns tagged union; caller decides WAV write, INVALID throw, etc.
+ */
+export function classifyCapture(
+  state: Partial<B08S2CaptureState>,
+  stats?: { inboundAudioRtp?: number },
+): CaptureClassification {
+  if (!state || !state.installed) {
+    return { kind: 'INVALID_HOOK_MISSING' };
+  }
+  if (state.navCount && state.navCount > 1) {
+    return { kind: 'INVALID_RELOAD' };
+  }
+  if (!state.pcCount || state.pcCount === 0) {
+    return { kind: 'INVALID_NO_PC' };
+  }
+  if (!state.trackCount || state.trackCount === 0) {
+    if (stats && stats.inboundAudioRtp && stats.inboundAudioRtp > 0) {
+      return { kind: 'INVALID_HOOK_BLIND' };
+    }
+    if (stats && stats.inboundAudioRtp === 0) {
+      return { kind: 'PRODUCT_NO_MEDIA' };
+    }
+    return { kind: 'INVALID_NO_PC' };
+  }
+  if (!state.callbackCount || state.callbackCount === 0 || state.audioContextState !== 'running') {
+    return { kind: 'INVALID_AUDIO_GRAPH' };
+  }
+
+  // trackCount >= 1, callbackCount >= 1, context running
+  const durationMs = state.sampleCount && state.audioContextState === 'running' ? state.sampleCount / 48 : 0;
+  const rms = calculateRms(state.audioSamplesBase64 || '');
+
+  const SILENCE_FLOOR = 0.01;
+  if (rms < SILENCE_FLOOR) {
+    return { kind: 'SILENCE', durationMs, rms };
+  }
+  return { kind: 'VALID', durationMs, rms };
+}
+
+function calculateRms(base64Samples: string): number {
+  if (!base64Samples) return 0;
+  try {
+    const binaryStr = Buffer.from(base64Samples, 'base64').toString('binary');
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < binaryStr.length; i += 2) {
+      const val = (binaryStr.charCodeAt(i + 1) << 8) | binaryStr.charCodeAt(i);
+      const int16 = val > 32767 ? val - 65536 : val;
+      const normalized = int16 / 32768;
+      sum += normalized * normalized;
+      count++;
+    }
+    return count > 0 ? Math.sqrt(sum / count) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**
- * Install receive-side audio capture hook on page BEFORE RTCPeerConnection is created.
- * Must be called before joinBrowser() to capture existing tracks created during join.
- * Uses addInitScript() so hook persists across page.goto() navigation.
- *
- * @param page Receiving browser page
- * @returns Handle for later stopAndEncodeCapture() call
+ * Install receive-side audio capture hook on page BEFORE any navigation.
+ * Must call BEFORE page.goto() so hook persists and intercepts PC construction at join.
+ * GUARD: throws if page.url() !== 'about:blank' (ordering guard, prevents late install).
  */
 export async function installCaptureHook(page: Page): Promise<string> {
+  const currentUrl = page.url();
+  if (currentUrl !== 'about:blank') {
+    throw new Error(
+      `Cannot install capture hook: page already navigated (url="${currentUrl}"). ` +
+      `Call installCaptureHook() BEFORE joinBrowser() / page.goto().`,
+    );
+  }
+
   const hookId = `hook-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-  // Install wrapper via addInitScript so it persists across page.goto() navigation
   await page.addInitScript(
     (hId: string) => {
-      const originalRtcPeerConnection = (window as any).RTCPeerConnection ||
-        (window as any).webkitRTCPeerConnection;
+      const originalRtcPeerConnection =
+        (window as any).RTCPeerConnection || (window as any).webkitRTCPeerConnection;
 
       if (!originalRtcPeerConnection) {
-        // No RTCPeerConnection support; fail closed
-        (window as any).__captureHookState = { hookId: hId, active: false };
+        (window as any).__b08s2ReceiveCapture = {
+          installed: false,
+          pcCount: 0,
+          trackCount: 0,
+          callbackCount: 0,
+          sampleCount: 0,
+          navCount: 1,
+          firstTrackAtMs: 0,
+          audioContextState: 'closed',
+          audioSamplesBase64: '',
+          sourceNodes: [],
+          scriptProcessor: null,
+        };
         return;
       }
 
-      let audioContext: AudioContext | null = null;
-      let scriptProcessor: ScriptProcessorNode | null = null;
-      let recordingStartTime = 0;
-      const audioSamples: Float32Array[] = [];
-      let hasReceivedAudio = false;
+      // Guard re-entry: if already installed, return original PC (prevent double-wrap)
+      if ((window as any).__b08s2ReceiveCapture) {
+        return;
+      }
 
-      // Initialize audio context once for the entire session
-      const initializeAudioContext = () => {
-        if (audioContext) return;
-        const AudioContextCtor = (window as any).AudioContext ||
-          (window as any).webkitAudioContext;
-        if (!AudioContextCtor) return;
-        audioContext = new AudioContextCtor();
+      // Initialize live state object
+      (window as any).__b08s2ReceiveCapture = {
+        installed: true,
+        pcCount: 0,
+        trackCount: 0,
+        callbackCount: 0,
+        sampleCount: 0,
+        navCount: 1,
+        firstTrackAtMs: 0,
+        audioContextState: 'closed',
+        audioSamplesBase64: '',
+        sourceNodes: [] as any[],
+        scriptProcessor: null,
+      } as B08S2CaptureState;
+
+      const state = (window as any).__b08s2ReceiveCapture;
+
+      // Track navigations to detect page reloads
+      const origReplace = window.history.replaceState;
+      const origPush = window.history.pushState;
+      window.history.replaceState = function (...args) {
+        state.navCount++;
+        return origReplace.apply(window.history, args);
+      };
+      window.history.pushState = function (...args) {
+        state.navCount++;
+        return origPush.apply(window.history, args);
       };
 
       const processAudioTrack = (event: RTCTrackEvent) => {
         if (event.track.kind !== 'audio') return;
-        hasReceivedAudio = true;
 
-        // Update state object so stopAndEncodeCapture sees live values
-        (window as any).__captureHookState.hasReceivedAudio = true;
+        state.trackCount++;
 
-        initializeAudioContext();
-        if (!audioContext) return;
+        // Lazy graph initialization on first audio track
+        if (state.trackCount === 1) {
+          const AudioContextCtor =
+            (window as any).AudioContext || (window as any).webkitAudioContext;
+          if (!AudioContextCtor) {
+            state.audioContextState = 'unavailable';
+            return;
+          }
 
-        // Update state object with initialized context
-        (window as any).__captureHookState.audioContext = audioContext;
+          const audioContext = new AudioContextCtor();
+          audioContext.resume().catch(() => {});
 
-        // Create source from remote stream and capture raw samples
-        const mediaStreamAudioSource = audioContext.createMediaStreamSource(
-          event.streams[0],
-        );
+          if (audioContext.state !== 'running') {
+            state.audioContextState = audioContext.state;
+            return;
+          }
+          state.audioContextState = 'running';
 
-        // Use ScriptProcessorNode to capture raw PCM (4096 buffer)
-        if (!scriptProcessor) {
-          recordingStartTime = Date.now();
-          scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+          // Create graph: ScriptProcessorNode once, reused for all tracks
+          const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+          const mixerGain = audioContext.createGain();
+          const zeroGain = audioContext.createGain();
+          zeroGain.gain.value = 0;
 
-          // Update state object with processor and start time
-          (window as any).__captureHookState.scriptProcessor = scriptProcessor;
-          (window as any).__captureHookState.recordingStartTime = recordingStartTime;
+          zeroGain.connect(audioContext.destination);
 
+          // onaudioprocess: collect samples once (called on first track setup)
           scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
+            state.callbackCount++;
             const inputData = e.inputBuffer.getChannelData(0);
-            // Copy sample data to avoid mutation
-            audioSamples.push(new Float32Array(inputData));
+            state.sampleCount += inputData.length;
+
+            // Convert Float32 to Int16 and encode as base64
+            const int16 = new Int16Array(inputData.length);
+            for (let i = 0; i < inputData.length; i++) {
+              int16[i] = Math.max(-1, Math.min(1, inputData[i])) < 0 ? inputData[i] * 0x8000 : inputData[i] * 0x7fff;
+            }
+            const base64Chunk = Buffer.from(int16).toString('base64');
+            state.audioSamplesBase64 += base64Chunk;
           };
 
-          mediaStreamAudioSource.connect(scriptProcessor);
-          scriptProcessor.connect(audioContext.destination);
+          scriptProcessor.connect(mixerGain);
+          mixerGain.connect(zeroGain);
+
+          state.scriptProcessor = scriptProcessor;
         }
+
+        // GUARD 2 (tee): connect new source to mixer, playback untouched
+        const audioContext = (window as any).__b08s2ReceiveCapture.scriptProcessor?.context;
+        if (!audioContext || !state.scriptProcessor) return;
+
+        const source = audioContext.createMediaStreamSource(event.streams[0]);
+        const mixerGain = state.scriptProcessor.destination || state.scriptProcessor.context.createGain();
+        source.connect(mixerGain);
+        state.sourceNodes.push(source);
       };
 
-      // Wrap RTCPeerConnection to intercept track events on both future and existing PCs
+      // Wrap global RTCPeerConnection: constructor is the sole capture entry point
       (window as any).RTCPeerConnection = function (...args: any[]) {
         const pc = new originalRtcPeerConnection(...args);
 
+        state.pcCount++;
+
+        // GUARD 1 (passthrough): copy RTCConfiguration exactly as-is
+        // (no filtering, no mutations; the caller's config reaches the real PC)
+
+        // GUARD key: attach listener synchronously in constructor
         pc.addEventListener('track', (event: RTCTrackEvent) => {
           processAudioTrack(event);
-        });
-
-        // Enumerate existing remote audio tracks that may have arrived before event listener attached
-        pc.getReceivers().forEach((receiver: any) => {
-          if (receiver.track && receiver.track.kind === 'audio') {
-            const event = { track: receiver.track, streams: [new MediaStream([receiver.track])] };
-            processAudioTrack(event as unknown as RTCTrackEvent);
-          }
         });
 
         return pc;
       };
 
-      // Store state for later retrieval
-      (window as any).__captureHookState = {
-        hookId: hId,
-        active: true,
-        audioSamples,
-        audioContext,
-        scriptProcessor,
-        recordingStartTime,
-        hasReceivedAudio,
-      };
+      // Preserve prototype and statics
+      (window as any).RTCPeerConnection.prototype = originalRtcPeerConnection.prototype;
+      Object.setPrototypeOf((window as any).RTCPeerConnection, originalRtcPeerConnection);
     },
     hookId,
   );
@@ -128,109 +263,111 @@ export async function installCaptureHook(page: Page): Promise<string> {
 }
 
 /**
- * Stop recording and encode to WAV. Must be called after call ends.
- *
- * @param page Receiving browser page
- * @param outputDir Directory to write WAV file
- * @param hookId Handle returned from installCaptureHook()
- * @returns WAV path and duration
+ * Stop recording and encode to WAV. Must call after both browsers published.
+ * Reads live state, classifies, and either writes WAV or throws INVALID.
  */
 export async function stopAndEncodeCapture(
   page: Page,
   outputDir: string,
   hookId: string,
-): Promise<{ wavPath: string; durationMs: number }> {
+): Promise<{ wavPath: string; durationMs: number; metaPath?: string }> {
   const recordingId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-  const captureResult = await page.evaluate(
-    async (hId: string) => {
-      // Retrieve state from hook installation
-      const state = (window as any).__captureHookState;
-      if (!state || !state.active) {
-        return { samples: null, sampleRate: 0, durationMs: 0 };
-      }
-
-      const { audioSamples, audioContext, scriptProcessor, recordingStartTime, hasReceivedAudio } =
-        state;
-
-      // Stop recording
-      if (scriptProcessor) {
-        scriptProcessor.disconnect();
-      }
-
-      if (!hasReceivedAudio || audioSamples.length === 0) {
-        // No real audio was captured; fail closed
-        return { samples: null, sampleRate: 0, durationMs: 0 };
-      }
-
-      // Combine all captured samples into one buffer
-      const totalSamples = audioSamples.reduce((sum: number, arr: Float32Array) => sum + arr.length, 0);
-      const combinedSamples = new Float32Array(totalSamples);
-      let offset = 0;
-      for (const samples of audioSamples) {
-        combinedSamples.set(samples, offset);
-        offset += samples.length;
-      }
-
-      const durationMs = Date.now() - recordingStartTime;
-      const sampleRate = audioContext?.sampleRate || 48000;
-
-      // Convert to array for serialization
+  // Read live state from hook
+  const captureResult = await page.evaluate(() => {
+    const state = (window as any).__b08s2ReceiveCapture;
+    if (!state) {
       return {
-        samples: Array.from(combinedSamples),
-        sampleRate,
-        durationMs,
+        state: null,
+        stats: null,
       };
-    },
-    hookId,
-  );
+    }
 
-  // Fail closed: if no real audio captured, throw instead of writing synthetic WAV
-  if (captureResult.samples === null || captureResult.samples.length === 0) {
-    throw new Error(
-      `stopAndEncodeCapture: No real remote audio captured (durationMs=${captureResult.durationMs}). ` +
-        'Failing closed instead of writing synthetic WAV.',
-    );
+    // Disconnect graph to stop recording
+    if (state.scriptProcessor) {
+      state.scriptProcessor.disconnect();
+    }
+
+    // Read stats for corroboration (optional)
+    const stats = (window as any).__meetDebug?.sfuGetStats?.() || null;
+    const inboundAudioRtp = stats?.inboundRtp?.find((s: any) => s.kind === 'audio')?.packetsReceived || 0;
+
+    return {
+      state,
+      stats: { inboundAudioRtp },
+    };
+  });
+
+  const { state, stats } = captureResult;
+
+  // Classify
+  const classification = classifyCapture(state, stats);
+
+  if (classification.kind === 'INVALID_HOOK_MISSING') {
+    throw new Error('INVALID_HOOK_MISSING');
+  }
+  if (classification.kind === 'INVALID_NO_PC') {
+    throw new Error('INVALID_NO_PC');
+  }
+  if (classification.kind === 'INVALID_AUDIO_GRAPH') {
+    throw new Error('INVALID_AUDIO_GRAPH');
+  }
+  if (classification.kind === 'INVALID_RELOAD') {
+    throw new Error('INVALID_RELOAD');
+  }
+  if (classification.kind === 'INVALID_HOOK_BLIND') {
+    throw new Error('INVALID_HOOK_BLIND');
+  }
+  if (classification.kind === 'PRODUCT_NO_MEDIA') {
+    // Media never arrived; don't write WAV
+    const metaPath = path.join(outputDir, `b08s2-receive-${recordingId}.meta.json`);
+    fs.writeFileSync(metaPath, JSON.stringify({ reason: 'PRODUCT_NO_MEDIA', stats }, null, 2));
+    throw new Error('PRODUCT_NO_MEDIA: no inbound audio detected');
   }
 
-  // Convert captured samples to WAV
-  const samples = new Float32Array(captureResult.samples);
-  const encoder = new WavEncoder({ sampleRate: captureResult.sampleRate, channels: 1 });
-  const wavBuffer = encoder.encode(samples);
+  // VALID or SILENCE: write WAV
+  if (classification.kind === 'VALID' || classification.kind === 'SILENCE') {
+    const base64Samples = state!.audioSamplesBase64;
+    const int16Buffer = Buffer.from(base64Samples, 'base64');
+    const float32 = new Float32Array(int16Buffer.buffer, int16Buffer.byteOffset, int16Buffer.length / 2);
 
-  const wavPath = path.join(outputDir, `b08s2-receive-${recordingId}.wav`);
-  fs.writeFileSync(wavPath, wavBuffer);
+    const encoder = new WavEncoder({ sampleRate: 48000, channels: 1 });
+    const wavBuffer = encoder.encode(float32);
 
-  return { wavPath, durationMs: captureResult.durationMs };
-}
+    const wavPath = path.join(outputDir, `b08s2-receive-${recordingId}.wav`);
+    fs.writeFileSync(wavPath, wavBuffer);
 
-/**
- * Capture receive-side audio from a Playwright page via MediaRecorder API.
- * DEPRECATED: Use installCaptureHook() + stopAndEncodeCapture() for proper timing.
- * Kept for backward compatibility with unit tests.
- *
- * @param page Receiving browser page
- * @param outputDir Directory to write WAV and transcript
- * @returns RecordingResult with paths and transcript content
- */
-export async function captureReceiveSideAudio(
-  page: Page,
-  outputDir: string,
-): Promise<{ wavPath: string; durationMs: number }> {
-  // For backward compatibility: install, wait, and stop immediately
-  const hookId = await installCaptureHook(page);
-  // Use native setTimeout for wait instead of Playwright's waitForTimeout
-  await new Promise((resolve) => setTimeout(resolve, 5000));
-  return stopAndEncodeCapture(page, outputDir, hookId);
+    const metaPath = path.join(outputDir, `b08s2-receive-${recordingId}.meta.json`);
+    fs.writeFileSync(
+      metaPath,
+      JSON.stringify(
+        {
+          reason: classification.kind,
+          pcCount: state!.pcCount,
+          trackCount: state!.trackCount,
+          callbackCount: state!.callbackCount,
+          sampleCount: state!.sampleCount,
+          audioContextState: state!.audioContextState,
+          rms: classification.rms,
+        },
+        null,
+        2,
+      ),
+    );
+
+    return {
+      wavPath,
+      metaPath,
+      durationMs: classification.durationMs,
+    };
+  }
+
+  throw new Error('Unknown classification result');
 }
 
 /**
  * Generate transcript from ConversationScript (script-sourced, labeled scriptExpected).
  * Represents the far-end speech as heard by the receiving browser.
- *
- * @param script ConversationScript with utterance text
- * @param receiverSpeakerId Speaker ID of the far end (from receiver's perspective)
- * @returns Concatenated transcript text
  */
 export function generateScriptTranscript(
   script: ConversationScript,
@@ -244,13 +381,6 @@ export function generateScriptTranscript(
   return lines.join('\n');
 }
 
-/**
- * Generate transcript text file and return paths.
- *
- * @param transcriptContent Full transcript text
- * @param outputDir Directory to write transcript
- * @returns transcriptPath, transcriptContent
- */
 export function writeTranscriptFile(
   transcriptContent: string,
   outputDir: string,
@@ -270,16 +400,9 @@ export interface CaptureHandle {
 
 /**
  * Phase 1: Install capture hook on receiver page BEFORE join.
- * Must be called before joinBrowser() on the receiver page.
- *
- * @param page Receiving browser page
- * @param outputDir Ledger base directory for output files
- * @returns Handle for stopReceiveSideRecording() call
+ * Must call BEFORE joinBrowser() on the receiver page.
  */
-export async function startReceiveSideRecording(
-  page: Page,
-  outputDir: string,
-): Promise<CaptureHandle> {
+export async function startReceiveSideRecording(page: Page, outputDir: string): Promise<CaptureHandle> {
   const hookId = await installCaptureHook(page);
   return { hookId, page, outputDir };
 }
@@ -287,11 +410,6 @@ export async function startReceiveSideRecording(
 /**
  * Phase 2: Stop recording and generate transcript.
  * Called after call ends and both browsers have published.
- *
- * @param handle Handle returned from startReceiveSideRecording()
- * @param script Optional ConversationScript for transcript generation
- * @param receiverSpeakerId Speaker ID of the far end
- * @returns ReceiveSideRecordingResult with WAV path, transcript, and content
  */
 export async function stopReceiveSideRecording(
   handle: CaptureHandle,
@@ -300,14 +418,8 @@ export async function stopReceiveSideRecording(
 ): Promise<ReceiveSideRecordingResult> {
   const recordingId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-  // Capture audio
-  const { wavPath, durationMs } = await stopAndEncodeCapture(
-    handle.page,
-    handle.outputDir,
-    handle.hookId,
-  );
+  const { wavPath, durationMs } = await stopAndEncodeCapture(handle.page, handle.outputDir, handle.hookId);
 
-  // Generate transcript
   let transcriptContent = '[No script provided]';
   let transcriptPath = path.join(handle.outputDir, `b08s2-transcript-${recordingId}.txt`);
 
@@ -315,50 +427,6 @@ export async function stopReceiveSideRecording(
     transcriptContent = generateScriptTranscript(script, receiverSpeakerId);
     ({ transcriptPath } = writeTranscriptFile(transcriptContent, handle.outputDir, recordingId));
   } else {
-    // Still write a stub transcript file
-    const header = '# Receive-side transcript (no script provided)\n\n';
-    fs.writeFileSync(transcriptPath, header + transcriptContent);
-  }
-
-  return {
-    wavPath,
-    transcriptPath,
-    transcriptContent,
-    durationMs,
-  };
-}
-
-/**
- * Orchestrate full receive-side recording: audio capture + transcript generation.
- * Returns paths and content for integration with RecordingArbiter.
- * DEPRECATED: Use startReceiveSideRecording() + stopReceiveSideRecording() for proper timing.
- *
- * @param page Receiving browser page
- * @param outputDir Ledger base directory for output files
- * @param script Optional ConversationScript for transcript generation
- * @param receiverSpeakerId Speaker ID of the far end
- * @returns ReceiveSideRecordingResult with WAV path, transcript, and content
- */
-export async function recordReceiveSideCall(
-  page: Page,
-  outputDir: string,
-  script?: ConversationScript,
-  receiverSpeakerId: 'bot-140' | 'bot-123' = 'bot-140',
-): Promise<ReceiveSideRecordingResult> {
-  const recordingId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-
-  // Capture audio (deprecated single-phase path)
-  const { wavPath, durationMs } = await captureReceiveSideAudio(page, outputDir);
-
-  // Generate transcript
-  let transcriptContent = '[No script provided]';
-  let transcriptPath = path.join(outputDir, `b08s2-transcript-${recordingId}.txt`);
-
-  if (script) {
-    transcriptContent = generateScriptTranscript(script, receiverSpeakerId);
-    ({ transcriptPath } = writeTranscriptFile(transcriptContent, outputDir, recordingId));
-  } else {
-    // Still write a stub transcript file
     const header = '# Receive-side transcript (no script provided)\n\n';
     fs.writeFileSync(transcriptPath, header + transcriptContent);
   }

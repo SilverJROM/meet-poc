@@ -6,7 +6,7 @@ import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { chromium } from '@playwright/test';
 import { initLedger, registerCreatedID, incrementCallBurn, getState } from './call-ledger.js';
 import { ConversationScheduler, type ConversationScript } from './conversation-scheduler.js';
-import { recordReceiveSideCall, startReceiveSideRecording, stopReceiveSideRecording, type CaptureHandle } from './receive-side-recorder.js';
+import { startReceiveSideRecording, stopReceiveSideRecording, type CaptureHandle } from './receive-side-recorder.js';
 
 export interface CallDriverConfig {
   baseUrl: string; // e.g., http://localhost:4700
@@ -39,6 +39,7 @@ const DEFAULT_LAUNCH_ARGS = [
   '--disable-background-timer-throttling',
   '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',
+  '--autoplay-policy=no-user-gesture-required', // GUARD 3 (B08S-2): AudioContext cannot start suspended
 ];
 
 /**

@@ -256,3 +256,43 @@ tagged HIGH — approve to convene the planning deliberation panel? (proceeding 
 [overmind] 2026-07-09T05:26:26+00:00 child sync OK (child-rm x-01_validator_codex55_meet) children=[]
 [2026-07-09T05:26:26+00:00] [B08S-2 FAIL R2] codex55: fail-closed fixed; TS1209 invalid optional chain on new AudioContext; live branch not type-safe
 [overmind] 2026-07-09T05:26:29+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-fix3) children=["x-01_impl_haiku_meet"]
+[overmind] 2026-07-09T05:27:51+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=[]
+[overmind] 2026-07-09T05:27:56+00:00 child sync OK (child-add x-01_validator_codex55_meet:validator-codex55-b08s2-r3) children=["x-01_validator_codex55_meet"]
+[2026-07-09T05:27:50+00:00] [B08S-2 RE-GATE R3] codex55 on 5d16e08 headroom=3%
+[overmind] 2026-07-09T05:31:44+00:00 child sync OK (child-rm x-01_validator_codex55_meet) children=[]
+[2026-07-09T05:31:44+00:00] [B08S-2 FAIL R3] codex55: install capture AFTER join → wrapper never sees existing PCs. Need install-before-join or enumerate app PC via __meetDebug.
+[2026-07-09T05:31:44+00:00] [B08S-2 SENDBACK R4] install receive capture before room join; or use sfu client PC registry.
+[overmind] 2026-07-09T05:31:47+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-fix4) children=["x-01_impl_haiku_meet"]
+[overmind] 2026-07-09T05:35:57+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=[]
+[overmind] 2026-07-09T05:36:02+00:00 child sync OK (child-add x-01_validator_codex55_meet:validator-codex55-b08s2-r4) children=["x-01_validator_codex55_meet"]
+[2026-07-09T05:35:56+00:00] [B08S-2 RE-GATE R4] codex55 on 32a1951 headroom=3%
+[overmind] 2026-07-09T05:40:00+00:00 child sync OK (child-rm x-01_validator_codex55_meet) children=[]
+[2026-07-09T05:40:00+00:00] [B08S-2 FAIL R4] page.evaluate hook discarded on page.goto — need addInitScript
+[overmind] 2026-07-09T05:40:03+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-fix5) children=["x-01_impl_haiku_meet"]
+[overmind] 2026-07-09T05:44:27+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=[]
+[overmind] 2026-07-09T05:44:32+00:00 child sync OK (child-add x-01_validator_codex55_meet:validator-codex55-b08s2-r5) children=["x-01_validator_codex55_meet"]
+[2026-07-09T05:44:27+00:00] [B08S-2 RE-GATE R5] codex55 on 14b2f96 headroom=3%
+[overmind] 2026-07-09T05:49:01+00:00 child sync OK (child-rm x-01_validator_codex55_meet) children=[]
+[2026-07-09T05:49:01+00:00] [B08S-2 FAIL R5] codex55: addInitScript OK; vitest ENOENT temp dir lifecycle; live state may be stale snapshot
+[overmind] 2026-07-09T05:49:04+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-fix6) children=["x-01_impl_haiku_meet"]
+[overmind] 2026-07-09T05:52:28+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=[]
+[overmind] 2026-07-09T05:52:33+00:00 child sync OK (child-add x-01_validator_codex55_meet:validator-codex55-b08s2-r6) children=["x-01_validator_codex55_meet"]
+[2026-07-09T05:52:28+00:00] [B08S-2 RE-GATE R6] codex55 on 735aad7 headroom=3%
+[overmind] 2026-07-09T05:56:13+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=["x-01_validator_codex55_meet"]
+[overmind] 2026-07-09T05:56:13+00:00 child sync OK (child-rm x-01_validator_codex55_meet) children=[]
+[overmind] 2026-07-09T05:56:13+00:00 child sync OK (child-rm x-01_panel_haiku_meet) children=[]
+[2026-07-09T05:56:13+00:00] [ESCALATION RUNG-2] B08S-2 after validator r6 — stop haiku trial-and-error. Design defect: receive-side hook placement vs join/renegotiation. Co-planners reconvene JIT.
+[2026-07-09T05:56:13+00:00] [ROUTING] codex55 CONSERVE: interim gates sonnet-on-haiku (verifier≠fixer); codex55 FINAL gate only. Spent ~5 codex55 sessions on B08S-2 alone — stop.
+[2026-07-09T05:56:13+00:00] [RULE STANDS] synthetic capture as success evidence = automatic FAIL (INVALID ≠ PASS).
+[overmind] 2026-07-09T05:56:18+00:00 child sync OK (child-add x-01_coplanner_opus_meet:coplanner-opus-b08s2) children=["x-01_coplanner_opus_meet"]
+[overmind] 2026-07-09T05:56:18+00:00 child sync OK (child-add x-01_coplanner_codex55_meet:coplanner-codex55-b08s2) children=["x-01_coplanner_opus_meet", "x-01_coplanner_codex55_meet"]
+[2026-07-09T05:56:13+00:00] [PLANNING] co-planners opus+codex55 launched for B08S-2 design
+[overmind] 2026-07-09T06:07:33+00:00 child sync OK (child-rm x-01_coplanner_opus_meet) children=["x-01_coplanner_codex55_meet"]
+[overmind] 2026-07-09T06:07:33+00:00 child sync OK (child-rm x-01_coplanner_codex55_meet) children=[]
+[2026-07-09T06:07:33+00:00] [B08S-2 DESIGN CONVERGED] Co-planners A+B locked D-hybrid A-primary: addInitScript RTCPeerConnection shim sole capture+discovery; app registry demoted to corroboration only; zero product changes; no-capture vs captured-silence provenance contract. NO haiku dispatch until report absorbed — design file is truth for next impl.
+[2026-07-09T06:07:33+00:00] [ROUTING LOCK] Interim haiku gates: sonnet L2 (verifier≠fixer). codex55 reserved for FINAL batch gate only while weekly headroom tight.
+[overmind] 2026-07-09T06:07:33+00:00 sync OK current='Forced weak-signal sweep — A>=0.70 same-speaker ref; absolute target-loudness fix' tasks=18
+[2026-07-09T06:14:38+00:00] [NORTH NUDGE] idle resume — B08S-2 design-locked; dispatch impl against design
+[overmind] 2026-07-09T06:15:12+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-design) children=["x-01_impl_haiku_meet"]
+[2026-07-09T06:15:09+00:00] [B08S-2] DESIGN APPROVED by north; haiku dispatched; guards recorded; codex55 FINAL only
+[2026-07-09T06:17:32+00:00] [B08S-2] APPROVED-PLAN design-locked + THREE GUARDS

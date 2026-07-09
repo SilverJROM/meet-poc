@@ -20,3 +20,6 @@ x-01_impl_sonnet_meet # impl # B08A-2
 x-01_impl_haiku_meet # impl # B00F
 x-01_impl_haiku_meet # impl # B08S-1
 x-01_impl_haiku_meet # impl # B08S-1-fix2
+x-01_coplanner_opus_meet # coplanner # B08S-2 design
+x-01_coplanner_codex55_meet # coplanner # B08S-2 design
+x-01_impl_haiku_meet # impl # B08S-2 design-locked
