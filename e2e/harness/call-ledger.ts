@@ -60,6 +60,10 @@ function saveState(): void {
 }
 
 export function registerCreatedID(type: CreatedIDType, id: string): void {
+  // Reject empty or whitespace-only IDs
+  if (!id || !id.trim()) {
+    return;
+  }
   currentState.createdIDs.push({
     type,
     id,
@@ -69,6 +73,11 @@ export function registerCreatedID(type: CreatedIDType, id: string): void {
 }
 
 export function canDelete(id: string): boolean {
+  // Reject empty or whitespace-only IDs
+  if (!id || !id.trim()) {
+    return false;
+  }
+
   // Hard-block protected IDs
   if (PROTECTED_IDS.has(id)) {
     return false;
@@ -99,7 +108,11 @@ export function isGateCheckExceeded(): boolean {
 }
 
 export function getState(): LedgerState {
-  return { ...currentState };
+  return {
+    createdIDs: [...currentState.createdIDs],
+    callBurnCount: currentState.callBurnCount,
+    gateCheckCount: currentState.gateCheckCount,
+  };
 }
 
 export function resetLedger(): void {

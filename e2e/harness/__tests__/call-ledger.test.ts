@@ -245,6 +245,42 @@ test('persistence: should persist call burn count', () => {
   }
 });
 
+// Tests: empty and whitespace ID rejection
+test('empty/whitespace: should reject empty ID registration', () => {
+  beforeEach();
+  try {
+    registerCreatedID('room', '');
+    assert(canDelete('') === false, 'empty ID must not be deletable');
+  } finally {
+    afterEach();
+  }
+});
+
+test('empty/whitespace: should reject whitespace-only ID registration', () => {
+  beforeEach();
+  try {
+    registerCreatedID('room', '   ');
+    assert(canDelete('   ') === false, 'whitespace-only ID must not be deletable');
+  } finally {
+    afterEach();
+  }
+});
+
+// Tests: getState() immutability
+test('immutability: getState() mutation must not authorize uncaptured ID deletion', () => {
+  beforeEach();
+  try {
+    const state = getState();
+    state.createdIDs.push({ type: 'room', id: 'mutated-id', timestamp: 0 });
+    assert(
+      canDelete('mutated-id') === false,
+      'mutated ID inserted via getState() must not be deletable'
+    );
+  } finally {
+    afterEach();
+  }
+});
+
 // Tests: state retrieval
 test('state: should return current state snapshot', () => {
   beforeEach();

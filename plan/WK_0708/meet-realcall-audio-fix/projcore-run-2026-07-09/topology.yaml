@@ -1,0 +1,95 @@
+contract_version: 1
+run_id: projcore-run-2026-07-09-meet-realcall-audio-fix
+project: meet-poc
+north_star_ref: ./north-star.md
+og_requirements_ref: ./og-requirements.md
+stamped_by: north-session-2026-07-09          # this /north conversation = the consult-handshake contact
+stamped_at: 2026-07-09T01:19:50+00:00
+
+# JROM set this roster explicitly (2026-07-09). Supersedes the 2026-07-08 stamp, whose grokbuild seats
+# are DEAD: `grok models` on CLI 0.2.93 offers only grok-4.5, grok-composer-2.5-fast, glm5.2.
+planning_criticality: high
+# `high` (not `critical`) — deliberate resource-conservation call by /north per JROM "we need to conserve
+# resources when we can". The plan is already tightly specified by JROM in the frontload interview; the
+# 4-model planning panel is not the best spend. Co-planners deliberate; the panel is engaged PER-BATCH on
+# the high-risk capture-path batches only (deliberation: yes). LOGGED in decisions/ — JROM may overrule.
+
+co_planners:                                   # EXACTLY 2 (JROM: codex55/opus)
+  - { id: A, model: opus,    launch: "claude --dangerously-skip-permissions --model opus" }
+  - { id: B, model: codex55, launch: "codex --dangerously-bypass-approvals-and-sandbox" }
+
+implementer:                                   # JROM-routed 2026-07-09
+  # L1 is an A/B ALTERNATION by JROM's explicit request ("have spark/composer alternate i want to check
+  # who is better with them"). Alternate strictly per L1 task, starting with spark. Record which model
+  # implemented each L1 task + its outcome (pass/send-back count) in progress.md for JROM's comparison.
+  L1:
+    alternate: true
+    a: { model: spark,       launch: "codex --dangerously-bypass-approvals-and-sandbox -m gpt-5.3-codex-spark" }
+    b: { model: grokcompose, launch: "grok --always-approve -m grok-composer-2.5-fast" }
+  L2: { model: haiku,  launch: "claude --dangerously-skip-permissions --model haiku" }   # default
+  L3: { model: sonnet, launch: "claude --dangerously-skip-permissions --model sonnet" }  # complex / capture-path
+
+validator:                                     # verifier ≠ fixer at EVERY tier
+  L1: { model: codex55, launch: "codex --dangerously-bypass-approvals-and-sandbox" }     # routine gate
+  L2: { model: codex55, launch: "codex --dangerously-bypass-approvals-and-sandbox" }     # default gate
+  L3: { model: opus,    launch: "claude --dangerously-skip-permissions --model opus" }   # hard / final gate
+
+deliberation_panel:                            # per-batch (capture-path batches), cross-provider
+  convergence: strict-unanimous
+  max_rounds: 3
+  settle: [opus, codex55]
+  panelists:
+    - { model: opus,      profile: agj-panelist }
+    - { model: sonnet,    profile: agj-panelist }
+    - { model: grok45,    profile: agj-panelist }
+    - { model: spark,     profile: agj-panelist }
+
+redteam_panel:                                 # impl-stage, DIFF-level back-gate (verifier ≠ fixer)
+  convergence: N-consecutive-clean
+  N: 2
+  tiers:
+    budget:   { count: 3, models: [haiku, grok45, grokcompose] }
+    standard: { count: 3, models: [opus, sonnet, grok45] }
+    elite:    { count: 6, models: [opus, codex55, sonnet, grok45, spark, grokcompose] }
+
+routing_notes:
+  default_impl_tier: L2                         # haiku
+  default_validator_tier: L2                    # codex55
+  default_redteam_tier: budget                  # CONSERVE (JROM). standard for capture-path diffs.
+  redteam_elite_gate: "elite ONLY after a fix has failed twice. Never by default — conserve."
+
+  # ---- Usage hygiene, measured 2026-07-09T01:1x via ~/.claude/agents/lib/agent-usage.sh ----
+  usage_hygiene: |
+    claude: shared_5h 23%, shared_weekly 11%, extra-credits $5000/mo at 4% → HEALTHY (opus/sonnet/haiku).
+    codex:  shared_weekly 96% → codex55 has ~4% headroom → DEPLETED-ADJACENT. Ration hard.
+    spark:  spark_5h 0%, spark_weekly 8% → ~92% headroom. SPARK DRAWS ITS OWN BUCKET (JROM, 2026-07-09).
+    grok:   quota reset 2026-07-09 (JROM) → healthy; not measurable by the gateway.
+  gateway_bug: |
+    agent-usage.sh reports `spark: {headroom: 4, depleted: true}` because it derives spark's headroom from
+    codex `shared_weekly` (96%). The raw payload shows spark's OWN buckets (spark_5h 0, spark_weekly 8).
+    The rung calc is WRONG for spark. Do NOT trust `rungs.spark`; read `raw.codex.spark_*`. Fix later.
+
+  # ---- Fail-open fallbacks (the run must degrade, never stall — JROM: "dont hold out on completion") ----
+  validator_backup: |
+    codex55 is at ~4% weekly. When the codex bucket is exhausted (or codex55 errors on quota), validator
+    L1/L2 fall open to SONNET (JROM-authorized backup) and the run CONTINUES. Log every fallback to
+    progress.md + decisions/. Validator L3 (opus) is unaffected. Cross-provider independence is lost on
+    fallback — say so explicitly in the validation report; never claim it silently.
+  impl_L1_alternation: |
+    Strict A/B per L1 task, starting with spark(A) → grokcompose(B) → spark(A) … If spark's bucket is
+    exhausted, fall to grokcompose for the remainder and NOTE that the A/B comparison is truncated
+    (do not silently present a partial comparison as a verdict).
+  verifier_not_fixer: |
+    Enforced by rule, not luck. opus is validator L3 only — it never implements in this run. sonnet is
+    implementer L3 AND the validator fallback: when sonnet implemented a task, its validator MUST be
+    codex55 (or opus L3), never sonnet. A sonnet-validates-sonnet routing is a FAIL-CLOSED error.
+
+  coordinator_session: "lkvcgrok"               # JROM: OVM recognizes this name.
+  session_naming_override: |
+    `lkvcgrok` intentionally breaks the reserved `x-` agent-session prefix
+    (~/.config/agent-protocols/tmux-session-naming.md). JROM overrode it: OVM's registered run is keyed to
+    this session name. CHILD sessions still follow the standard: x-01_<function>_<model>_meet.
+  jrom_routing_override: |
+    2026-07-09 — JROM: coordinator grok-4.5; impl L1 = spark/composer ALTERNATING (A/B evaluation),
+    L2 = haiku, L3 = sonnet; validator L1/L2 = codex55 (backup sonnet), L3 = opus; co-planners codex55/opus.
+    Supersedes the 2026-07-08 stamp (grokbuild seats no longer exist).
