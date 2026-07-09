@@ -243,3 +243,9 @@
   Commit: 7294687
 [2026-07-09T06:38:25+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 7294687 F1 Buffer F2 tee F3 browser
 [2026-07-09T06:43:10+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL interim sonnet r2 — F3 silence unlock
+[2026-07-09T14:45:34+08:00] [projcore callback] impl B08S-2 STATUS: DONE — 0f0c568 F3 audio decode unlock
+  F3 fix: attach remote stream to hidden muted <audio autoplay> element + call play() to force real decode in headless Chromium (mirrors app's remote-audio.service.ts behavior). Root cause (Sonnet probe): RTC loopback alone stays silent; same loopback+audio.play() yields rms~0.065.
+  Browser test assertions: require kind==='VALID' (not VALID||SILENCE) + assert rms>0 (was accepting manufactured silence).
+  Result: browser test now captures real loopback audio with rms~0.15-0.19 (variability normal), VALID classification confirmed.
+  Tests: `npx vitest run e2e/harness/__tests__/receive-side-recorder.test.ts e2e/harness/__tests__/call-driver.test.ts e2e/harness/__tests__/b08s2-receive-capture-hook.browser.test.ts` → 28 passed | 5 skipped.
+  Commit: 0f0c568. F3 gate complete.
