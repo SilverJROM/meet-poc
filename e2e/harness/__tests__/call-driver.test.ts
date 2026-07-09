@@ -678,14 +678,22 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
         const duration = 1000;
         const numSamples = Math.floor((duration / 1000) * sampleRate);
 
-        // Create base64 encoded int16 samples
+        // Create int16 samples split into chunks
         const int16 = new Int16Array(numSamples);
         for (let i = 0; i < numSamples; i++) {
           const t = i / sampleRate;
           const sine = Math.sin(2 * Math.PI * 220 * t) * 0.5;
           int16[i] = sine < 0 ? sine * 0x8000 : sine * 0x7fff;
         }
-        const audioSamplesBase64 = Buffer.from(int16).toString('base64');
+
+        // Split into chunks (mimicking multiple onaudioprocess callbacks)
+        const audioSamplesBytes: Uint8Array[] = [];
+        const chunkSize = 4096; // samples per chunk
+        for (let i = 0; i < numSamples; i += chunkSize) {
+          const end = Math.min(i + chunkSize, numSamples);
+          const chunk = int16.slice(i, end);
+          audioSamplesBytes.push(new Uint8Array(chunk.buffer));
+        }
 
         return {
           state: {
@@ -697,7 +705,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
             navCount: 1,
             firstTrackAtMs: 0,
             audioContextState: 'running',
-            audioSamplesBase64,
+            audioSamplesBytes,
             sourceNodes: [],
             scriptProcessor: null,
           },
@@ -734,7 +742,15 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
           const sine = Math.sin(2 * Math.PI * 220 * t) * 0.5;
           int16[i] = sine < 0 ? sine * 0x8000 : sine * 0x7fff;
         }
-        const audioSamplesBase64 = Buffer.from(int16).toString('base64');
+
+        // Split into chunks (mimicking multiple onaudioprocess callbacks)
+        const audioSamplesBytes: Uint8Array[] = [];
+        const chunkSize = 4096; // samples per chunk
+        for (let i = 0; i < numSamples; i += chunkSize) {
+          const end = Math.min(i + chunkSize, numSamples);
+          const chunk = int16.slice(i, end);
+          audioSamplesBytes.push(new Uint8Array(chunk.buffer));
+        }
 
         return {
           state: {
@@ -746,7 +762,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
             navCount: 1,
             firstTrackAtMs: 0,
             audioContextState: 'running',
-            audioSamplesBase64,
+            audioSamplesBytes,
             sourceNodes: [],
             scriptProcessor: null,
           },

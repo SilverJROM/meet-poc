@@ -26,7 +26,7 @@ interface B08S2CaptureState {
   navCount: number;
   firstTrackAtMs: number;
   audioContextState: string;
-  audioSamplesBase64: string;
+  audioSamplesBytes: Uint8Array[];
   sourceNodes: any[];
   scriptProcessor: any;
   mixerGain?: any;
@@ -74,7 +74,7 @@ export function classifyCapture(
 
   // trackCount >= 1, callbackCount >= 1, context running
   const durationMs = state.sampleCount && state.audioContextState === 'running' ? state.sampleCount / 48 : 0;
-  const rms = calculateRms(state.audioSamplesBase64 || '');
+  const rms = calculateRms(state.audioSamplesBytes || []);
 
   const SILENCE_FLOOR = 0.01;
   if (rms < SILENCE_FLOOR) {
@@ -83,11 +83,22 @@ export function classifyCapture(
   return { kind: 'VALID', durationMs, rms };
 }
 
-function calculateRms(base64Samples: string): number {
-  if (!base64Samples) return 0;
+function concatenateByteChunks(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const result = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    result.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return result;
+}
+
+function calculateRms(byteChunks: Uint8Array[]): number {
+  if (!byteChunks || byteChunks.length === 0) return 0;
   try {
-    const int16Buffer = Buffer.from(base64Samples, 'base64');
-    const int16Array = new Int16Array(int16Buffer.buffer, int16Buffer.byteOffset, int16Buffer.length / 2);
+    const allBytes = concatenateByteChunks(byteChunks);
+    const int16Array = new Int16Array(allBytes.buffer, allBytes.byteOffset, allBytes.length / 2);
     let sum = 0;
     for (let i = 0; i < int16Array.length; i++) {
       const normalized = int16Array[i] / 32768;
@@ -131,7 +142,7 @@ export async function installCaptureHook(page: Page): Promise<string> {
           navCount: 1,
           firstTrackAtMs: 0,
           audioContextState: 'closed',
-          audioSamplesBase64: '',
+          audioSamplesBytes: [],
           sourceNodes: [],
           scriptProcessor: null,
         };
@@ -153,7 +164,7 @@ export async function installCaptureHook(page: Page): Promise<string> {
         navCount: 1,
         firstTrackAtMs: 0,
         audioContextState: 'closed',
-        audioSamplesBase64: '',
+        audioSamplesBytes: [] as Uint8Array[],
         sourceNodes: [] as any[],
         scriptProcessor: null,
       } as B08S2CaptureState;
@@ -209,19 +220,14 @@ export async function installCaptureHook(page: Page): Promise<string> {
             const inputData = e.inputBuffer.getChannelData(0);
             state.sampleCount += inputData.length;
 
-            // Convert Float32 to Int16 and encode as base64 (browser-safe)
+            // Convert Float32 to Int16, store raw bytes (no base64 encoding per-chunk)
             const int16 = new Int16Array(inputData.length);
             for (let i = 0; i < inputData.length; i++) {
               int16[i] = Math.max(-1, Math.min(1, inputData[i])) < 0 ? inputData[i] * 0x8000 : inputData[i] * 0x7fff;
             }
-            // Browser-safe base64: convert Uint8Array to binary string, then btoa
-            const uint8 = new Uint8Array(int16.buffer);
-            let binaryStr = '';
-            for (let i = 0; i < uint8.length; i++) {
-              binaryStr += String.fromCharCode(uint8[i]);
-            }
-            const base64Chunk = (window as any).btoa(binaryStr);
-            state.audioSamplesBase64 += base64Chunk;
+            // Store the raw byte chunk; concatenate only when decoding
+            const uint8Chunk = new Uint8Array(int16.buffer);
+            state.audioSamplesBytes.push(uint8Chunk);
           };
 
           // Correct connection order: mixerGain (source aggregator) → scriptProcessor (capture) → zeroGain (mute) → destination
@@ -345,11 +351,26 @@ export async function stopAndEncodeCapture(
 
   // VALID or SILENCE: write WAV
   if (classification.kind === 'VALID' || classification.kind === 'SILENCE') {
-    const base64Samples = state!.audioSamplesBase64;
-    const int16Buffer = Buffer.from(base64Samples, 'base64');
+    // Concatenate all byte chunks
+    const allBytes = new Uint8Array(state!.audioSamplesBytes?.reduce((sum, chunk) => sum + chunk.length, 0) || 0);
+    let offset = 0;
+    for (const chunk of state!.audioSamplesBytes || []) {
+      allBytes.set(chunk, offset);
+      offset += chunk.length;
+    }
 
-    // Convert int16 to float32 properly
-    const int16Array = new Int16Array(int16Buffer.buffer, int16Buffer.byteOffset, int16Buffer.length / 2);
+    const int16Array = new Int16Array(allBytes.buffer, allBytes.byteOffset, allBytes.length / 2);
+    const decodedSampleCount = int16Array.length;
+
+    // Guard 3: decoded sample count must match sampleCount
+    if (decodedSampleCount !== state!.sampleCount) {
+      throw new Error(
+        `B08S-2: sample count mismatch — expected ${state!.sampleCount}, got ${decodedSampleCount} ` +
+        `(${state!.callbackCount} callbacks, ${state!.audioSamplesBytes?.length || 0} byte chunks)`,
+      );
+    }
+
+    // Convert int16 to float32
     const float32 = new Float32Array(int16Array.length);
     for (let i = 0; i < int16Array.length; i++) {
       float32[i] = int16Array[i] / 32768;
@@ -372,6 +393,8 @@ export async function stopAndEncodeCapture(
           callbackCount: state!.callbackCount,
           sampleCount: state!.sampleCount,
           audioContextState: state!.audioContextState,
+          byteChunksCount: state!.audioSamplesBytes?.length || 0,
+          decodedSampleCount,
           rms: classification.rms,
         },
         null,

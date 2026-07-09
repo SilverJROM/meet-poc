@@ -97,13 +97,11 @@ describe('B08S-2 receive-capture-hook (real browser loopback, fake-device audio)
         // Read capture state from hook
         const state = (window as any).__b08s2ReceiveCapture;
 
-        // Extract first 16 bytes of base64 to check if data is all zeros
-        const base64Sample = (state?.audioSamplesBase64 || '').substring(0, 100);
-        let decodedSample: string | null = null;
-        try {
-          decodedSample = atob(base64Sample).substring(0, 16);
-        } catch {
-          decodedSample = 'failed-to-decode';
+        // Check first byte chunk
+        let firstChunkBytes: number[] = [];
+        if (state?.audioSamplesBytes && state.audioSamplesBytes.length > 0) {
+          const chunk = state.audioSamplesBytes[0];
+          firstChunkBytes = Array.from(chunk.slice(0, 16));
         }
 
         return {
@@ -112,10 +110,10 @@ describe('B08S-2 receive-capture-hook (real browser loopback, fake-device audio)
           callbackCount: state?.callbackCount || 0,
           sampleCount: state?.sampleCount || 0,
           audioContextState: state?.audioContextState || 'unknown',
-          audioSamplesBase64Length: (state?.audioSamplesBase64 || '').length,
+          audioSamplesBytesLength: (state?.audioSamplesBytes || []).reduce((sum: number, chunk: Uint8Array) => sum + chunk.length, 0),
+          audioSamplesChunkCount: (state?.audioSamplesBytes || []).length,
           installed: state?.installed || false,
-          firstBase64Chunk: base64Sample,
-          decodedFirstChunk: decodedSample,
+          firstChunkBytes,
         };
       });
 
@@ -126,7 +124,8 @@ describe('B08S-2 receive-capture-hook (real browser loopback, fake-device audio)
       expect(captureResult.callbackCount).toBeGreaterThan(0);
       expect(captureResult.sampleCount).toBeGreaterThan(0);
       expect(captureResult.audioContextState).toBe('running');
-      expect(captureResult.audioSamplesBase64Length).toBeGreaterThan(0);
+      expect(captureResult.audioSamplesBytesLength).toBeGreaterThan(0);
+      expect(captureResult.audioSamplesChunkCount).toBeGreaterThan(0);
 
       // Read full state and classify
       const fullState = await page.evaluate(() => {
@@ -140,14 +139,13 @@ describe('B08S-2 receive-capture-hook (real browser loopback, fake-device audio)
         kind: classification.kind,
         rms: (classification as any).rms,
         durationMs: (classification as any).durationMs,
-        audioSamplesBase64Length: fullState.audioSamplesBase64.length,
+        audioSamplesBytesLength: fullState.audioSamplesBytes.reduce((sum: number, chunk: Uint8Array) => sum + chunk.length, 0),
+        audioSamplesChunkCount: fullState.audioSamplesBytes.length,
         sampleCount: fullState.sampleCount,
         callbackCount: fullState.callbackCount,
       });
       console.log('Capture result from loop:', captureResult);
-      console.log('First bytes (decoded):', captureResult.decodedFirstChunk?.charCodeAt ?
-        `[${Array.from(captureResult.decodedFirstChunk as any).map((c: any) => c.charCodeAt ? c.charCodeAt(0) : c).join(', ')}]`
-        : captureResult.decodedFirstChunk);
+      console.log('First bytes:', captureResult.firstChunkBytes);
 
       // Validation: F1 (no Buffer errors) + F2 (graph connected, callbacks firing) + F3 (loopback audio decoded and captured)
       expect(classification.kind).toBe('VALID'); // F3 gate: must capture real audio, not silence
@@ -158,7 +156,7 @@ describe('B08S-2 receive-capture-hook (real browser loopback, fake-device audio)
       expect(fullState.trackCount).toBeGreaterThanOrEqual(1);
       expect(fullState.callbackCount).toBeGreaterThan(0); // Callbacks firing = graph connected (F2)
       expect(fullState.audioContextState).toBe('running');
-      expect(fullState.audioSamplesBase64.length).toBeGreaterThan(0); // Data encoded without errors (F1)
+      expect(fullState.audioSamplesBytes.length).toBeGreaterThan(0); // Data captured without errors (F1)
 
       await context.close();
     },

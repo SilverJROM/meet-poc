@@ -118,7 +118,7 @@ describe('receive-side-recorder taxonomy', () => {
         callbackCount: 100,
         audioContextState: 'running',
         sampleCount: 4096,
-        audioSamplesBase64: '', // Empty or near-zero samples
+        audioSamplesBytes: [], // Empty samples
       });
       expect(result.kind).toBe('SILENCE');
       expect((result as any).durationMs).toBeGreaterThanOrEqual(0);
@@ -126,6 +126,15 @@ describe('receive-side-recorder taxonomy', () => {
     });
 
     it('VALID: trackCount >= 1, callbacks fired, context running, RMS above floor', () => {
+      // Create a Uint8Array with non-zero samples (4096 samples = 8192 bytes of Int16)
+      const int16Array = new Int16Array(2048);
+      // Fill with values large enough to produce RMS > 0.01
+      // normalized = sample / 32768, RMS needs sum(normalized^2)/N > 0.0001
+      // sample = 5000 → normalized = 0.1526, RMS ≈ 0.1526
+      for (let i = 0; i < int16Array.length; i++) {
+        int16Array[i] = 5000;
+      }
+      const bytes = new Uint8Array(int16Array.buffer);
       const result = classifyCapture({
         installed: true,
         navCount: 1,
@@ -134,10 +143,10 @@ describe('receive-side-recorder taxonomy', () => {
         callbackCount: 100,
         audioContextState: 'running',
         sampleCount: 4096,
-        audioSamplesBase64: 'AQID', // Minimal non-zero samples
+        audioSamplesBytes: [bytes],
       });
       expect(result.kind).toBe('VALID');
-      expect((result as any).rms).toBeGreaterThanOrEqual(0);
+      expect((result as any).rms).toBeGreaterThan(0.01);
     });
 
     it('table-driven: no INVALID row yields VALID', () => {
@@ -167,7 +176,7 @@ describe('receive-side-recorder taxonomy', () => {
         callbackCount: 50,
         audioContextState: 'running',
         sampleCount: 2048,
-        audioSamplesBase64: '',
+        audioSamplesBytes: [],
       });
       expect(result.kind).toBe('SILENCE');
       expect(result.kind).not.toBe('INVALID_AUDIO_GRAPH');
