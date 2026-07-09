@@ -26,77 +26,65 @@ export interface ReceiveSideRecordingResult {
 export async function captureReceiveSideAudio(
   page: Page,
   outputDir: string,
-): Promise<{ wavPath: string; durationMs: number; audioBuffer?: ArrayBuffer }> {
-  // Install recording hook via page.evaluate
-  // The hook will capture incoming audio tracks and buffer them for export
+): Promise<{ wavPath: string; durationMs: number }> {
+  // Capture real remote audio or fail (fail-closed, no synthetic fallback)
   const recordingId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-  const audioBuffer = await page.evaluate(
+  const captureResult = await page.evaluate(
     async (recId: string) => {
-      // This runs in the browser context
-      const audioContextWindow = window as any;
-
-      // Collect all incoming audio data
-      let audioChunks: Blob[] = [];
-      let mediaRecorder: MediaRecorder | null = null;
-      let recordingStartTime = 0;
-
-      return new Promise<{ buffer: string; durationMs: number }>((resolve) => {
-        // Listen for RTCPeerConnection track events (incoming audio)
+      // This runs in browser context; captures raw PCM samples from incoming audio
+      return new Promise<{
+        samples: number[] | null;
+        sampleRate: number;
+        durationMs: number;
+      }>((resolve) => {
         const originalRtcPeerConnection = (window as any).RTCPeerConnection ||
           (window as any).webkitRTCPeerConnection;
 
         if (!originalRtcPeerConnection) {
-          resolve({ buffer: '', durationMs: 0 });
+          // No RTCPeerConnection support; fail closed
+          resolve({ samples: null, sampleRate: 0, durationMs: 0 });
           return;
         }
 
-        const peerConnections: RTCPeerConnection[] = [];
+        let audioContext: AudioContext | null = null;
+        let scriptProcessor: ScriptProcessorNode | null = null;
+        let recordingStartTime = 0;
+        const audioSamples: Float32Array[] = [];
+        let hasReceivedAudio = false;
 
         // Wrap RTCPeerConnection to intercept track events
         (window as any).RTCPeerConnection = function (...args: any[]) {
           const pc = new originalRtcPeerConnection(...args);
-          peerConnections.push(pc);
 
           pc.addEventListener('track', (event: RTCTrackEvent) => {
             if (event.track.kind === 'audio') {
-              // Create audio context and capture this remote track
-              const audioContext = new (window as any).AudioContext?.() ||
-                new (window as any).webkitAudioContext?.();
+              hasReceivedAudio = true;
+
+              // Initialize audio context if needed
+              if (!audioContext) {
+                audioContext = new (window as any).AudioContext?.() ||
+                  new (window as any).webkitAudioContext?.();
+              }
               if (!audioContext) return;
 
+              // Create source from remote stream and capture raw samples
               const mediaStreamAudioSource = audioContext.createMediaStreamAudioSource(
                 event.streams[0],
               );
-              const destination = audioContext.createMediaStreamAudioDestination();
-              mediaStreamAudioSource.connect(destination);
 
-              // Start recording from the destination stream
-              if (!mediaRecorder) {
+              // Use ScriptProcessorNode to capture raw PCM (4096 buffer)
+              if (!scriptProcessor) {
                 recordingStartTime = Date.now();
-                mediaRecorder = new (window as any).MediaRecorder(destination.stream, {
-                  mimeType: 'audio/webm',
-                });
+                scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
 
-                mediaRecorder.addEventListener('dataavailable', (dataEvent) => {
-                  audioChunks.push(dataEvent.data);
-                });
+                scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
+                  const inputData = e.inputBuffer.getChannelData(0);
+                  // Copy sample data to avoid mutation
+                  audioSamples.push(new Float32Array(inputData));
+                };
 
-                mediaRecorder.addEventListener('stop', () => {
-                  const blob = new Blob(audioChunks, { type: 'audio/webm' });
-                  const reader = new FileReader();
-                  reader.onload = () => {
-                    const durationMs = Date.now() - recordingStartTime;
-                    resolve({
-                      buffer: btoa(
-                        String.fromCharCode(...new Uint8Array(reader.result as ArrayBuffer)),
-                      ),
-                      durationMs,
-                    });
-                  };
-                  reader.readAsArrayBuffer(blob);
-                });
-
-                mediaRecorder.start();
+                mediaStreamAudioSource.connect(scriptProcessor);
+                scriptProcessor.connect(audioContext.destination);
               }
             }
           });
@@ -104,32 +92,59 @@ export async function captureReceiveSideAudio(
           return pc;
         };
 
-        // Also try to start recording on any existing PeerConnections
-        // Wait a bit for tracks to arrive
+        // Wait for recording window; stop if no audio arrived or if time expires
         setTimeout(() => {
-          if (mediaRecorder && mediaRecorder.state === 'recording') {
-            mediaRecorder.stop();
-          } else if (!mediaRecorder) {
-            resolve({ buffer: '', durationMs: 0 });
+          if (scriptProcessor) {
+            scriptProcessor.disconnect();
           }
-        }, 5000); // Record for max 5 seconds per page interaction
+
+          if (!hasReceivedAudio || audioSamples.length === 0) {
+            // No real audio was captured; fail closed
+            resolve({ samples: null, sampleRate: 0, durationMs: 0 });
+            return;
+          }
+
+          // Combine all captured samples into one buffer
+          const totalSamples = audioSamples.reduce((sum, arr) => sum + arr.length, 0);
+          const combinedSamples = new Float32Array(totalSamples);
+          let offset = 0;
+          for (const samples of audioSamples) {
+            combinedSamples.set(samples, offset);
+            offset += samples.length;
+          }
+
+          const durationMs = Date.now() - recordingStartTime;
+          const sampleRate = audioContext?.sampleRate || 48000;
+
+          // Convert to array for serialization
+          resolve({
+            samples: Array.from(combinedSamples),
+            sampleRate,
+            durationMs,
+          });
+        }, 5000); // Record for max 5 seconds
       });
     },
     recordingId,
   );
 
-  // For now, stub with synthesized audio (TODO: decode webm to PCM)
-  // Real implementation would transcode webm to WAV
-  // For acceptance, we create a minimal valid WAV with some audio content
-  const duration = audioBuffer.durationMs || 1000;
-  const stubSamples = generateStubAudio(duration);
-  const encoder = new WavEncoder({ sampleRate: 48000, channels: 1 });
-  const wavBuffer = encoder.encode(stubSamples);
+  // Fail closed: if no real audio captured, throw instead of writing synthetic WAV
+  if (captureResult.samples === null || captureResult.samples.length === 0) {
+    throw new Error(
+      `captureReceiveSideAudio: No real remote audio captured (durationMs=${captureResult.durationMs}). ` +
+        'Failing closed instead of writing synthetic WAV.',
+    );
+  }
+
+  // Convert captured samples to WAV
+  const samples = new Float32Array(captureResult.samples);
+  const encoder = new WavEncoder({ sampleRate: captureResult.sampleRate, channels: 1 });
+  const wavBuffer = encoder.encode(samples);
 
   const wavPath = path.join(outputDir, `b08s2-receive-${recordingId}.wav`);
   fs.writeFileSync(wavPath, wavBuffer);
 
-  return { wavPath, durationMs: duration };
+  return { wavPath, durationMs: captureResult.durationMs };
 }
 
 /**

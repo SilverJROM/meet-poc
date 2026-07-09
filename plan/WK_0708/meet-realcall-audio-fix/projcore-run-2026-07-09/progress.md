@@ -229,3 +229,24 @@ tagged HIGH — approve to convene the planning deliberation panel? (proceeding 
 [2026-07-09T05:03:31+00:00] [B08S-1 FAIL R2] codex55 again: F2 fixed; F1 partial — stats filter uses mediaType not kind (RTCStatsReport). Live publish bytes still 0.
 [2026-07-09T05:03:31+00:00] [B08S-1 SENDBACK R3] fix (stat.kind ?? stat.mediaType)==='audio' + unit stub with kind:'audio' Map shape.
 [overmind] 2026-07-09T05:03:34+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s1-fix3) children=["x-01_impl_haiku_meet"]
+[overmind] 2026-07-09T05:04:32+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=[]
+[overmind] 2026-07-09T05:04:37+00:00 child sync OK (child-add x-01_validator_codex55_meet:validator-codex55-b08s1-r3) children=["x-01_validator_codex55_meet"]
+[2026-07-09T05:04:32+00:00] [B08S-1 RE-GATE R3] codex55 on 1a00ed0 headroom=3%
+[overmind] 2026-07-09T05:05:51+00:00 child sync OK (child-rm x-01_validator_codex55_meet) children=[]
+[2026-07-09T05:05:51+00:00] [B08S-1 VERIFIED] codex55 L2 PASS r3 on 1a00ed0 (+54ee377,6d0e65a,2d9c740). Cross-provider gate. Note: live dual-browser still .skip (needs server) — unit path + correct stats wiring accepted for batch scope.
+[2026-07-09T05:05:51+00:00] [ROUTING] codex55 headroom still 3%>=1% — continue L2 with codex55. B00F remains VERIFIED with logged independence loss (sonnet-on-haiku).
+[2026-07-09T05:05:51+00:00] [B08S-2 DISPATCH] receive-side WAV+transcript adapter L2 haiku; val codex55.
+[overmind] 2026-07-09T05:05:54+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2) children=["x-01_impl_haiku_meet"]
+[overmind] 2026-07-09T05:05:54+00:00 sync OK current='Forced weak-signal sweep — A>=0.70 same-speaker ref; absolute target-loudness fix' tasks=18
+[2026-07-09T05:06:20+00:00] [NORTH NUDGE] idle resume — poll child, gate, advance
+[2026-07-09T05:07:20+00:00] [B08S-2] APPROVED-PLAN — real receive-side WAV preferred; ledger room/session only; script transcript interim OK labeled
+[overmind] 2026-07-09T05:15:21+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=[]
+[2026-07-09T05:15:21+00:00] [B08S-2 IMPL DONE] 5d7f652. Gate: redteam budget → codex55 L2 (headroom 3%>=1%).
+[overmind] 2026-07-09T05:15:24+00:00 child sync OK (child-add x-01_panel_haiku_meet:redteam-haiku-b08s2) children=["x-01_panel_haiku_meet"]
+[overmind] 2026-07-09T05:16:44+00:00 child sync OK (child-rm x-01_panel_haiku_meet) children=[]
+[overmind] 2026-07-09T05:16:49+00:00 child sync OK (child-add x-01_validator_codex55_meet:validator-codex55-b08s2) children=["x-01_validator_codex55_meet"]
+[2026-07-09T05:15:21+00:00] [B08S-2 GATE] codex55 L2 launched
+[overmind] 2026-07-09T05:20:24+00:00 child sync OK (child-rm x-01_validator_codex55_meet) children=[]
+[2026-07-09T05:20:24+00:00] [B08S-2 FAIL] codex55 L2: captureReceiveSideAudio writes generateStubAudio() always — false-greens live ACs. Redteam HIGH concurred.
+[2026-07-09T05:20:24+00:00] [B08S-2 SENDBACK] fail-closed real remote capture OR invalid/no-capture; never synthetic as success evidence.
+[overmind] 2026-07-09T05:20:27+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-fix) children=["x-01_impl_haiku_meet"]

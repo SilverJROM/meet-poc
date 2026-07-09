@@ -166,3 +166,7 @@
   Closes no AC (evidence pipe only); unblocks B08A-3, B04-real, B08, B08R (live ACs need receive-side recording/transcript proof)
   Ledger: no registerCreatedID for wav/transcript (ledger type remains room|session); paths only on CallResult
   Validation: validation/b08s2-changes.md (scope, acceptance, binding corrections applied, test results)
+[2026-07-09T05:20:00+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL — 5d7f652
+  Independent validation by L2 codex55. `npx vitest run e2e/harness/__tests__/` is green (11 files, 100 passed, 2 skipped). WAV encoder output is mechanically parseable by RecordingArbiter. Transcript files are labeled scriptExpected and paths are returned on CallResult. CallLedger remains only room|session; no fake registerCreatedID artifact types. Closes no AC.
+  Blocking failure: `captureReceiveSideAudio()` is synthetic/fail-open, not trustworthy live receive-side evidence. It installs a future RTCPeerConnection wrapper after join, does not enumerate existing PCs, discards any captured WebM buffer, and always writes generated tone/noise via `generateStubAudio()`. Validator probe with a fake page returning no captured audio still produced a 96 KB parseable voiced WAV (`durationMs=1000`, `voicedSegments=12`, RMS ~0.214). This can false-green live ACs with no remote audio. Report: validation/b08s2-validation.md.
+[2026-07-09T05:20:24+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL — synthetic stub false-green (codex55)

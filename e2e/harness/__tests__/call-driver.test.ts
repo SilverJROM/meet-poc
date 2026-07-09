@@ -20,6 +20,7 @@ import { WavEncoder } from '../wav-encoder.js';
 import {
   generateScriptTranscript,
   writeTranscriptFile,
+  captureReceiveSideAudio,
 } from '../receive-side-recorder.js';
 import { RecordingArbiter } from '../recording-arbiter.js';
 
@@ -478,5 +479,90 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
 
     // Clean up
     fs.unlinkSync(wavPath);
+  });
+
+  it('captureReceiveSideAudio: fails closed when no real audio captured (rejects synthetic)', async () => {
+    // Mock a page that returns no captured audio (the old behavior would have written synthetic WAV)
+    const mockPage = {
+      evaluate: async (fn: (recId: string) => Promise<any>, recId: string) => {
+        // Simulate: no remote track arrived, no samples captured
+        return { samples: null, sampleRate: 0, durationMs: 0 };
+      },
+    } as any;
+
+    // Should throw instead of writing synthetic WAV
+    try {
+      await captureReceiveSideAudio(mockPage, TEMP_DIR);
+      expect.fail('Expected captureReceiveSideAudio to throw on no captured audio');
+    } catch (err) {
+      expect((err as Error).message).toContain('No real remote audio captured');
+      expect((err as Error).message).toContain('Failing closed');
+      // Verify no WAV file was written
+      const wavFiles = fs.readdirSync(TEMP_DIR).filter((f) => f.endsWith('.wav'));
+      expect(wavFiles).toHaveLength(0);
+    }
+  });
+
+  it('captureReceiveSideAudio: encodes real captured samples to WAV (not synthetic)', async () => {
+    // Mock a page that returns real audio samples from captured remote track
+    const mockPage = {
+      evaluate: async (fn: (recId: string) => Promise<any>, recId: string) => {
+        // Simulate: real remote audio was captured
+        const sampleRate = 48000;
+        const duration = 1000; // 1 second
+        const numSamples = Math.floor((duration / 1000) * sampleRate);
+        const samples: number[] = [];
+
+        // Generate a unique pattern: 220Hz sine wave (distinct from the old 440Hz stub)
+        for (let i = 0; i < numSamples; i++) {
+          const t = i / sampleRate;
+          const sine = Math.sin(2 * Math.PI * 220 * t) * 0.5; // 220Hz, 0.5 amplitude
+          samples.push(sine);
+        }
+
+        return { samples, sampleRate, durationMs: duration };
+      },
+    } as any;
+
+    // Should succeed and write the real captured audio
+    const result = await captureReceiveSideAudio(mockPage, TEMP_DIR);
+    expect(result.wavPath).toBeTruthy();
+    expect(fs.existsSync(result.wavPath)).toBe(true);
+
+    // Verify WAV content by parsing it
+    const encoder = new WavEncoder({ sampleRate: 48000, channels: 1 });
+    const wavBuffer = fs.readFileSync(result.wavPath);
+
+    // Verify it's a valid WAV (has RIFF header)
+    const riffHeader = String.fromCharCode(...Array.from(wavBuffer.slice(0, 4)));
+    expect(riffHeader).toBe('RIFF');
+
+    // Parse and analyze with RecordingArbiter to verify it contains the real captured audio
+    const arbiter = new RecordingArbiter(TEMP_DIR);
+    const analysis = await arbiter.analyzeRecording(result.wavPath);
+
+    // The 220Hz sine wave should produce measurable audio analysis
+    expect(analysis.overallLoudness.rms).toBeGreaterThan(0.1); // 220Hz sine at 0.5 amplitude
+    expect(analysis.voicedSegments.length).toBeGreaterThan(0);
+
+    // Clean up
+    fs.unlinkSync(result.wavPath);
+  });
+
+  it('captureReceiveSideAudio: empty sample array also fails closed', async () => {
+    // Mock a page that returns an empty array (array exists but no samples)
+    const mockPage = {
+      evaluate: async (fn: (recId: string) => Promise<any>, recId: string) => {
+        return { samples: [], sampleRate: 48000, durationMs: 0 };
+      },
+    } as any;
+
+    // Should throw since empty array means no real audio
+    try {
+      await captureReceiveSideAudio(mockPage, TEMP_DIR);
+      expect.fail('Expected captureReceiveSideAudio to throw on empty samples');
+    } catch (err) {
+      expect((err as Error).message).toContain('No real remote audio captured');
+    }
   });
 });
