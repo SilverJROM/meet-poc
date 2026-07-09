@@ -16,138 +16,168 @@ export interface ReceiveSideRecordingResult {
 }
 
 /**
- * Capture receive-side audio from a Playwright page via MediaRecorder API.
- * Requires that the page has an active RTCPeerConnection with remote audio tracks.
+ * Install receive-side audio capture hook on page BEFORE RTCPeerConnection is created.
+ * Must be called before joinBrowser() to capture existing tracks created during join.
  *
  * @param page Receiving browser page
- * @param outputDir Directory to write WAV and transcript
- * @returns RecordingResult with paths and transcript content
+ * @returns Handle for later stopAndEncodeCapture() call
  */
-export async function captureReceiveSideAudio(
+export async function installCaptureHook(page: Page): Promise<string> {
+  const hookId = `hook-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  // Install wrapper on page before any PC is created
+  await page.evaluate(
+    async (hId: string) => {
+      const originalRtcPeerConnection = (window as any).RTCPeerConnection ||
+        (window as any).webkitRTCPeerConnection;
+
+      if (!originalRtcPeerConnection) {
+        // No RTCPeerConnection support; fail closed
+        (window as any).__captureHookState = { hookId: hId, active: false };
+        return;
+      }
+
+      let audioContext: AudioContext | null = null;
+      let scriptProcessor: ScriptProcessorNode | null = null;
+      let recordingStartTime = 0;
+      const audioSamples: Float32Array[] = [];
+      let hasReceivedAudio = false;
+
+      // Initialize audio context once for the entire session
+      const initializeAudioContext = () => {
+        if (audioContext) return;
+        const AudioContextCtor = (window as any).AudioContext ||
+          (window as any).webkitAudioContext;
+        if (!AudioContextCtor) return;
+        audioContext = new AudioContextCtor();
+      };
+
+      const processAudioTrack = (event: RTCTrackEvent) => {
+        if (event.track.kind !== 'audio') return;
+        hasReceivedAudio = true;
+
+        initializeAudioContext();
+        if (!audioContext) return;
+
+        // Create source from remote stream and capture raw samples
+        const mediaStreamAudioSource = audioContext.createMediaStreamSource(
+          event.streams[0],
+        );
+
+        // Use ScriptProcessorNode to capture raw PCM (4096 buffer)
+        if (!scriptProcessor) {
+          recordingStartTime = Date.now();
+          scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+
+          scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
+            const inputData = e.inputBuffer.getChannelData(0);
+            // Copy sample data to avoid mutation
+            audioSamples.push(new Float32Array(inputData));
+          };
+
+          mediaStreamAudioSource.connect(scriptProcessor);
+          scriptProcessor.connect(audioContext.destination);
+        }
+      };
+
+      // Wrap RTCPeerConnection to intercept track events on both future and existing PCs
+      (window as any).RTCPeerConnection = function (...args: any[]) {
+        const pc = new originalRtcPeerConnection(...args);
+
+        pc.addEventListener('track', (event: RTCTrackEvent) => {
+          processAudioTrack(event);
+        });
+
+        // Enumerate existing remote audio tracks that may have arrived before event listener attached
+        pc.getReceivers().forEach((receiver: any) => {
+          if (receiver.track && receiver.track.kind === 'audio') {
+            const event = { track: receiver.track, streams: [new MediaStream([receiver.track])] };
+            processAudioTrack(event as unknown as RTCTrackEvent);
+          }
+        });
+
+        return pc;
+      };
+
+      // Store state for later retrieval
+      (window as any).__captureHookState = {
+        hookId: hId,
+        active: true,
+        audioSamples,
+        audioContext,
+        scriptProcessor,
+        recordingStartTime,
+        hasReceivedAudio,
+      };
+    },
+    hookId,
+  );
+
+  return hookId;
+}
+
+/**
+ * Stop recording and encode to WAV. Must be called after call ends.
+ *
+ * @param page Receiving browser page
+ * @param outputDir Directory to write WAV file
+ * @param hookId Handle returned from installCaptureHook()
+ * @returns WAV path and duration
+ */
+export async function stopAndEncodeCapture(
   page: Page,
   outputDir: string,
+  hookId: string,
 ): Promise<{ wavPath: string; durationMs: number }> {
-  // Capture real remote audio or fail (fail-closed, no synthetic fallback)
   const recordingId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
   const captureResult = await page.evaluate(
-    async (recId: string) => {
-      // This runs in browser context; captures raw PCM samples from incoming audio
-      return new Promise<{
-        samples: number[] | null;
-        sampleRate: number;
-        durationMs: number;
-      }>((resolve) => {
-        const originalRtcPeerConnection = (window as any).RTCPeerConnection ||
-          (window as any).webkitRTCPeerConnection;
+    async (hId: string) => {
+      // Retrieve state from hook installation
+      const state = (window as any).__captureHookState;
+      if (!state || !state.active) {
+        return { samples: null, sampleRate: 0, durationMs: 0 };
+      }
 
-        if (!originalRtcPeerConnection) {
-          // No RTCPeerConnection support; fail closed
-          resolve({ samples: null, sampleRate: 0, durationMs: 0 });
-          return;
-        }
+      const { audioSamples, audioContext, scriptProcessor, recordingStartTime, hasReceivedAudio } =
+        state;
 
-        let audioContext: AudioContext | null = null;
-        let scriptProcessor: ScriptProcessorNode | null = null;
-        let recordingStartTime = 0;
-        const audioSamples: Float32Array[] = [];
-        let hasReceivedAudio = false;
+      // Stop recording
+      if (scriptProcessor) {
+        scriptProcessor.disconnect();
+      }
 
-        // Initialize audio context once for the entire session
-        const initializeAudioContext = () => {
-          if (audioContext) return;
-          const AudioContextCtor = (window as any).AudioContext ||
-            (window as any).webkitAudioContext;
-          if (!AudioContextCtor) return;
-          audioContext = new AudioContextCtor();
-        };
+      if (!hasReceivedAudio || audioSamples.length === 0) {
+        // No real audio was captured; fail closed
+        return { samples: null, sampleRate: 0, durationMs: 0 };
+      }
 
-        const processAudioTrack = (event: RTCTrackEvent) => {
-          if (event.track.kind !== 'audio') return;
-          hasReceivedAudio = true;
+      // Combine all captured samples into one buffer
+      const totalSamples = audioSamples.reduce((sum: number, arr: Float32Array) => sum + arr.length, 0);
+      const combinedSamples = new Float32Array(totalSamples);
+      let offset = 0;
+      for (const samples of audioSamples) {
+        combinedSamples.set(samples, offset);
+        offset += samples.length;
+      }
 
-          initializeAudioContext();
-          if (!audioContext) return;
+      const durationMs = Date.now() - recordingStartTime;
+      const sampleRate = audioContext?.sampleRate || 48000;
 
-          // Create source from remote stream and capture raw samples
-          const mediaStreamAudioSource = audioContext.createMediaStreamSource(
-            event.streams[0],
-          );
-
-          // Use ScriptProcessorNode to capture raw PCM (4096 buffer)
-          if (!scriptProcessor) {
-            recordingStartTime = Date.now();
-            scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
-
-            scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
-              const inputData = e.inputBuffer.getChannelData(0);
-              // Copy sample data to avoid mutation
-              audioSamples.push(new Float32Array(inputData));
-            };
-
-            mediaStreamAudioSource.connect(scriptProcessor);
-            scriptProcessor.connect(audioContext.destination);
-          }
-        };
-
-        // Wrap RTCPeerConnection to intercept track events
-        (window as any).RTCPeerConnection = function (...args: any[]) {
-          const pc = new originalRtcPeerConnection(...args);
-
-          pc.addEventListener('track', (event: RTCTrackEvent) => {
-            processAudioTrack(event);
-          });
-
-          // Enumerate existing remote audio tracks that may have arrived before wrapper installed
-          pc.getReceivers().forEach((receiver: any) => {
-            if (receiver.track && receiver.track.kind === 'audio') {
-              const event = { track: receiver.track, streams: [new MediaStream([receiver.track])] };
-              processAudioTrack(event as unknown as RTCTrackEvent);
-            }
-          });
-
-          return pc;
-        };
-
-        // Wait for recording window; stop if no audio arrived or if time expires
-        setTimeout(() => {
-          if (scriptProcessor) {
-            scriptProcessor.disconnect();
-          }
-
-          if (!hasReceivedAudio || audioSamples.length === 0) {
-            // No real audio was captured; fail closed
-            resolve({ samples: null, sampleRate: 0, durationMs: 0 });
-            return;
-          }
-
-          // Combine all captured samples into one buffer
-          const totalSamples = audioSamples.reduce((sum, arr) => sum + arr.length, 0);
-          const combinedSamples = new Float32Array(totalSamples);
-          let offset = 0;
-          for (const samples of audioSamples) {
-            combinedSamples.set(samples, offset);
-            offset += samples.length;
-          }
-
-          const durationMs = Date.now() - recordingStartTime;
-          const sampleRate = audioContext?.sampleRate || 48000;
-
-          // Convert to array for serialization
-          resolve({
-            samples: Array.from(combinedSamples),
-            sampleRate,
-            durationMs,
-          });
-        }, 5000); // Record for max 5 seconds
-      });
+      // Convert to array for serialization
+      return {
+        samples: Array.from(combinedSamples),
+        sampleRate,
+        durationMs,
+      };
     },
-    recordingId,
+    hookId,
   );
 
   // Fail closed: if no real audio captured, throw instead of writing synthetic WAV
   if (captureResult.samples === null || captureResult.samples.length === 0) {
     throw new Error(
-      `captureReceiveSideAudio: No real remote audio captured (durationMs=${captureResult.durationMs}). ` +
+      `stopAndEncodeCapture: No real remote audio captured (durationMs=${captureResult.durationMs}). ` +
         'Failing closed instead of writing synthetic WAV.',
     );
   }
@@ -161,6 +191,26 @@ export async function captureReceiveSideAudio(
   fs.writeFileSync(wavPath, wavBuffer);
 
   return { wavPath, durationMs: captureResult.durationMs };
+}
+
+/**
+ * Capture receive-side audio from a Playwright page via MediaRecorder API.
+ * DEPRECATED: Use installCaptureHook() + stopAndEncodeCapture() for proper timing.
+ * Kept for backward compatibility with unit tests.
+ *
+ * @param page Receiving browser page
+ * @param outputDir Directory to write WAV and transcript
+ * @returns RecordingResult with paths and transcript content
+ */
+export async function captureReceiveSideAudio(
+  page: Page,
+  outputDir: string,
+): Promise<{ wavPath: string; durationMs: number }> {
+  // For backward compatibility: install, wait, and stop immediately
+  const hookId = await installCaptureHook(page);
+  // Use native setTimeout for wait instead of Playwright's waitForTimeout
+  await new Promise((resolve) => setTimeout(resolve, 5000));
+  return stopAndEncodeCapture(page, outputDir, hookId);
 }
 
 /**
@@ -201,9 +251,76 @@ export function writeTranscriptFile(
   return { transcriptPath };
 }
 
+export interface CaptureHandle {
+  hookId: string;
+  page: Page;
+  outputDir: string;
+}
+
+/**
+ * Phase 1: Install capture hook on receiver page BEFORE join.
+ * Must be called before joinBrowser() on the receiver page.
+ *
+ * @param page Receiving browser page
+ * @param outputDir Ledger base directory for output files
+ * @returns Handle for stopReceiveSideRecording() call
+ */
+export async function startReceiveSideRecording(
+  page: Page,
+  outputDir: string,
+): Promise<CaptureHandle> {
+  const hookId = await installCaptureHook(page);
+  return { hookId, page, outputDir };
+}
+
+/**
+ * Phase 2: Stop recording and generate transcript.
+ * Called after call ends and both browsers have published.
+ *
+ * @param handle Handle returned from startReceiveSideRecording()
+ * @param script Optional ConversationScript for transcript generation
+ * @param receiverSpeakerId Speaker ID of the far end
+ * @returns ReceiveSideRecordingResult with WAV path, transcript, and content
+ */
+export async function stopReceiveSideRecording(
+  handle: CaptureHandle,
+  script?: ConversationScript,
+  receiverSpeakerId: 'bot-140' | 'bot-123' = 'bot-140',
+): Promise<ReceiveSideRecordingResult> {
+  const recordingId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  // Capture audio
+  const { wavPath, durationMs } = await stopAndEncodeCapture(
+    handle.page,
+    handle.outputDir,
+    handle.hookId,
+  );
+
+  // Generate transcript
+  let transcriptContent = '[No script provided]';
+  let transcriptPath = path.join(handle.outputDir, `b08s2-transcript-${recordingId}.txt`);
+
+  if (script) {
+    transcriptContent = generateScriptTranscript(script, receiverSpeakerId);
+    ({ transcriptPath } = writeTranscriptFile(transcriptContent, handle.outputDir, recordingId));
+  } else {
+    // Still write a stub transcript file
+    const header = '# Receive-side transcript (no script provided)\n\n';
+    fs.writeFileSync(transcriptPath, header + transcriptContent);
+  }
+
+  return {
+    wavPath,
+    transcriptPath,
+    transcriptContent,
+    durationMs,
+  };
+}
+
 /**
  * Orchestrate full receive-side recording: audio capture + transcript generation.
  * Returns paths and content for integration with RecordingArbiter.
+ * DEPRECATED: Use startReceiveSideRecording() + stopReceiveSideRecording() for proper timing.
  *
  * @param page Receiving browser page
  * @param outputDir Ledger base directory for output files
@@ -219,7 +336,7 @@ export async function recordReceiveSideCall(
 ): Promise<ReceiveSideRecordingResult> {
   const recordingId = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-  // Capture audio
+  // Capture audio (deprecated single-phase path)
   const { wavPath, durationMs } = await captureReceiveSideAudio(page, outputDir);
 
   // Generate transcript

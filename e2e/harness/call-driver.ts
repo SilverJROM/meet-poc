@@ -6,7 +6,7 @@ import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { chromium } from '@playwright/test';
 import { initLedger, registerCreatedID, incrementCallBurn, getState } from './call-ledger.js';
 import { ConversationScheduler, type ConversationScript } from './conversation-scheduler.js';
-import { recordReceiveSideCall } from './receive-side-recorder.js';
+import { recordReceiveSideCall, startReceiveSideRecording, stopReceiveSideRecording, type CaptureHandle } from './receive-side-recorder.js';
 
 export interface CallDriverConfig {
   baseUrl: string; // e.g., http://localhost:4700
@@ -196,17 +196,41 @@ export async function joinDualBrowserCall(
     // Launch browser
     browser = await chromium.launch({ headless: true, args: launchArgs });
 
+    // B08S-2: Prepare capture handle if needed (install hook BEFORE join)
+    let captureHandle: CaptureHandle | undefined;
+    if (config.recordReceiveSide) {
+      const receiverPageIndex = config.recordReceiveSide ? (config.receiverPageIndex ?? 1) : 1;
+      // Pre-allocate receiver context and page so we can install hook before join
+      if (receiverPageIndex === 0) {
+        context1 = await browser.newContext({ permissions: ['microphone', 'camera'] });
+        page1 = await context1.newPage();
+        captureHandle = await startReceiveSideRecording(page1, config.ledgerBasePath || process.cwd());
+      } else {
+        context2 = await browser.newContext({ permissions: ['microphone', 'camera'] });
+        page2 = await context2.newPage();
+        captureHandle = await startReceiveSideRecording(page2, config.ledgerBasePath || process.cwd());
+      }
+    }
+
     // Browser 1
-    context1 = await browser.newContext({ permissions: ['microphone', 'camera'] });
-    page1 = await context1.newPage();
+    if (!context1) {
+      context1 = await browser.newContext({ permissions: ['microphone', 'camera'] });
+    }
+    if (!page1) {
+      page1 = await context1.newPage();
+    }
     const result1 = await joinBrowser(page1, roomUrl, config.speaker1Name);
     if (result1.sessionId) {
       registerCreatedID('session', result1.sessionId);
     }
 
     // Browser 2
-    context2 = await browser.newContext({ permissions: ['microphone', 'camera'] });
-    page2 = await context2.newPage();
+    if (!context2) {
+      context2 = await browser.newContext({ permissions: ['microphone', 'camera'] });
+    }
+    if (!page2) {
+      page2 = await context2.newPage();
+    }
     const result2 = await joinBrowser(page2, roomUrl, config.speaker2Name);
     if (result2.sessionId) {
       registerCreatedID('session', result2.sessionId);
@@ -235,24 +259,20 @@ export async function joinDualBrowserCall(
       );
     }
 
-    // B08S-2: Capture receive-side audio if requested
-    let receiveSideResult: Awaited<ReturnType<typeof recordReceiveSideCall>> | undefined;
-    if (config.recordReceiveSide) {
+    // B08S-2: Stop recording after publish validation (AFTER both browsers have joined and published)
+    let receiveSideResult: Awaited<ReturnType<typeof stopReceiveSideRecording>> | undefined;
+    if (captureHandle) {
       const receiverPageIndex = config.receiverPageIndex ?? 1;
-      const receiverPage = receiverPageIndex === 0 ? page1 : page2;
       const farEndSpeaker = receiverPageIndex === 0 ? config.speaker2Name : config.speaker1Name;
       const farEndSpeakerId = (farEndSpeaker === 'bot-140' ? 'bot-140' : 'bot-123') as
         | 'bot-140'
         | 'bot-123';
 
-      if (receiverPage) {
-        receiveSideResult = await recordReceiveSideCall(
-          receiverPage,
-          config.ledgerBasePath || process.cwd(),
-          script,
-          farEndSpeakerId,
-        );
-      }
+      receiveSideResult = await stopReceiveSideRecording(
+        captureHandle,
+        script,
+        farEndSpeakerId,
+      );
     }
 
     // Log the call burn
