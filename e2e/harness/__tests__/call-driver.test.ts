@@ -173,13 +173,13 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
   );
 
   it(
-    'fail-closed gate: acceptance attempt refuses if callBurnCount > 50 (before browser launch)',
+    'fail-closed gate: acceptance attempt refuses if callBurnCount > 25 (before browser launch)',
     async () => {
       resetLedger();
       initLedger(TEMP_DIR);
 
       // Max out the burn count by directly manipulating state (simulating prior runs)
-      for (let i = 0; i < 51; i++) {
+      for (let i = 0; i < 26; i++) {
         incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
       }
 
@@ -201,19 +201,19 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
       } catch (err) {
         expect((err as Error).message).toContain('B00S-BUDGET');
         expect((err as Error).message).toContain('acceptance attempt refused');
-        expect((err as Error).message).toContain('callBurnCount exceeds 50-cap');
+        expect((err as Error).message).toContain('callBurnCount exceeds 25-cap');
       }
     },
   );
 
   it(
-    'smoke joins allowed even when callBurnCount > 50 (non-acceptance gate logic)',
+    'smoke joins allowed even when callBurnCount > 25 (non-acceptance gate logic)',
     async () => {
       resetLedger();
       initLedger(TEMP_DIR);
 
       // Max out the burn count
-      for (let i = 0; i < 51; i++) {
+      for (let i = 0; i < 26; i++) {
         incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
       }
 

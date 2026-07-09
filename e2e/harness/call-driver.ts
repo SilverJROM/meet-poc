@@ -9,6 +9,7 @@ import { spawnSync } from 'node:child_process';
 import { initLedger, registerCreatedID, incrementCallBurn, getState, isCallBurnExceeded, logCall, type CallLogEntry } from './call-ledger.js';
 import { ConversationScheduler, type ConversationScript } from './conversation-scheduler.js';
 import { startReceiveSideRecording, stopReceiveSideRecording, type CaptureHandle } from './receive-side-recorder.js';
+import { gumShimInitScript } from './gum-shim.js';
 
 // B00S-DEVICE: explicit device provenance — no implicit fake-device default.
 export type DeviceMode = 'fake-device' | 'real-virtual-mic';
@@ -53,6 +54,10 @@ export interface CallDriverConfig {
    * omitting it changes nothing about existing behavior.
    */
   onLive?: (ctx: { page1: Page; page2: Page; roomId: string }) => Promise<void>;
+  /** B08: weak-signal ratio for gumShimInitScript (0.0–1.0, undefined = no shim). */
+  weakSignalRatio?: number;
+  /** B08: which page receives the weak-signal shim (0=speaker1, 1=speaker2, default 0). */
+  weakSignalPageIndex?: 0 | 1;
 }
 
 export interface CallResult {
@@ -282,6 +287,18 @@ async function waitForPublishedAudioBytes(page: Page, timeoutMs: number): Promis
   return latest;
 }
 
+/** Inject weak-signal shim if configured for this page index. */
+async function injectWeakSignalShimIfConfigured(
+  page: Page,
+  pageIndex: 0 | 1,
+  config: CallDriverConfig,
+): Promise<void> {
+  const weakSignalPageIndex = config.weakSignalPageIndex ?? 0;
+  if (config.weakSignalRatio !== undefined && pageIndex === weakSignalPageIndex) {
+    await page.addInitScript(gumShimInitScript, config.weakSignalRatio);
+  }
+}
+
 /**
  * B08A-3: authenticates against the real app using the project's own sanctioned
  * e2e credentials (same source as e2e/fixtures/auth.ts's loginAsJrom — the
@@ -347,7 +364,7 @@ export async function joinDualBrowserCall(
 
   if (config.acceptanceAttempt && isCallBurnExceeded()) {
     throw new Error(
-      `B00S-BUDGET: acceptance attempt refused — callBurnCount exceeds 50-cap. ` +
+      `B00S-BUDGET: acceptance attempt refused — callBurnCount exceeds 25-cap. ` +
         `No more acceptance calls allowed in this run. Smoke/short joins still permitted.`,
     );
   }
@@ -400,6 +417,7 @@ export async function joinDualBrowserCall(
     if (!page1) {
       page1 = await context1.newPage();
     }
+    await injectWeakSignalShimIfConfigured(page1, 0, config);
     const result1 = await joinBrowser(page1, roomUrl, config.speaker1Name);
     if (result1.sessionId) {
       registerCreatedID('session', result1.sessionId);
@@ -412,6 +430,7 @@ export async function joinDualBrowserCall(
     if (!page2) {
       page2 = await context2.newPage();
     }
+    await injectWeakSignalShimIfConfigured(page2, 1, config);
     const result2 = await joinBrowser(page2, roomUrl, config.speaker2Name);
     if (result2.sessionId) {
       registerCreatedID('session', result2.sessionId);
