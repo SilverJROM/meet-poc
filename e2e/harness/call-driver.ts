@@ -136,6 +136,16 @@ export function buildLaunchArgs(config: CallDriverConfig): string[] {
       );
     }
   } else if (config.deviceMode === 'real-virtual-mic') {
+    const sneakedFakeFlags = args.filter(
+      (a) => a === '--use-fake-device-for-media-stream' || a.startsWith('--use-file-for-fake-audio-capture'),
+    );
+    if (sneakedFakeFlags.length > 0) {
+      throw new Error(
+        `[B00S-DEVICE] deviceMode 'real-virtual-mic' forbids fake-device flags in launchArgs, ` +
+          `found: ${sneakedFakeFlags.join(', ')} — real-virtual-mic must use the OS default input, ` +
+          `never Chrome's fake device. Remove these from launchArgs.`,
+      );
+    }
     assertRealVirtualMicHost();
     if (config.virtualMicSourceName) {
       setVirtualMicDefaultSource(config.virtualMicSourceName);

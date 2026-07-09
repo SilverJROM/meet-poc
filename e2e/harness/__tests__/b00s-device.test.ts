@@ -73,22 +73,17 @@ describe('B00S-DEVICE — buildLaunchArgs', () => {
     warnSpy.mockRestore();
   });
 
-  it('real-virtual-mic: never includes fake-device flags, even if launchArgs tries to sneak them in', () => {
+  it('real-virtual-mic: throws if launchArgs tries to sneak in fake-device flags (fail closed, no silent strip)', () => {
     const prevEnv = process.env.MEET_REAL_MIC_HOST;
     process.env.MEET_REAL_MIC_HOST = '123';
     try {
-      const args = buildLaunchArgs({
-        ...baseConfig,
-        deviceMode: 'real-virtual-mic',
-        launchArgs: ['--use-fake-device-for-media-stream', '--use-file-for-fake-audio-capture=/tone.wav'],
-      });
-      // buildLaunchArgs only ever ADDS fake-device flags conditionally; it doesn't strip
-      // caller-supplied ones — assert the branch itself never contributes them (binding #4).
-      const addedByBranch = args.filter(
-        (a) => a === '--use-fake-device-for-media-stream' || a.startsWith('--use-file-for-fake-audio-capture'),
-      );
-      // Both present entries came from the caller's own launchArgs (spread first), not the branch.
-      expect(addedByBranch).toHaveLength(2);
+      expect(() =>
+        buildLaunchArgs({
+          ...baseConfig,
+          deviceMode: 'real-virtual-mic',
+          launchArgs: ['--use-fake-device-for-media-stream', '--use-file-for-fake-audio-capture=/tone.wav'],
+        }),
+      ).toThrow(/forbids fake-device flags/);
     } finally {
       process.env.MEET_REAL_MIC_HOST = prevEnv;
     }

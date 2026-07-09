@@ -140,3 +140,33 @@ device mode or stimulus at all.
   `dryRunDualBrowserCall` against a live server (the new smoke's live case
   correctly skips off `.123`); no `call-ledger` interaction beyond what the
   pre-existing test suite already exercised.
+
+## SENDBACK fix (2026-07-09, L2 codex55 FAIL on 36c3aff)
+
+**Verdict on original:** FAIL, gate 3 — `real-virtual-mic` result was NOT
+guaranteed free of fake-device flags. `buildLaunchArgs()` seeded `args` from
+`[...DEFAULT_LAUNCH_ARGS, ...(config.launchArgs || [])]` *before* branching on
+`deviceMode`, so a caller could sneak `--use-fake-device-for-media-stream` /
+`--use-file-for-fake-audio-capture=...` into `config.launchArgs` under
+`real-virtual-mic` and the `real-virtual-mic` branch never stripped or
+rejected them — it only skipped *adding* its own. The unit test at
+`b00s-device.test.ts:76`-`91` had codified this gap as correct behavior
+(asserted the 2 sneaked flags stayed present).
+
+**Fix:** `call-driver.ts`'s `real-virtual-mic` branch now scans `args` for
+either fake-device flag and **throws** (fail closed) if either is present,
+before calling `assertRealVirtualMicHost()`. No silent strip — a caller
+passing fake-device flags under `real-virtual-mic` almost certainly has the
+wrong `deviceMode`/`launchArgs` combination, and stripping would mask that
+misconfiguration.
+
+**Test fix:** replaced the wrong-expectation test with
+`'real-virtual-mic: throws if launchArgs tries to sneak in fake-device flags
+(fail closed, no silent strip)'` — asserts `buildLaunchArgs` throws
+`/forbids fake-device flags/` for that input.
+
+**Evidence:** `npx vitest run e2e/harness/__tests__/b00s-device.test.ts` →
+12 tests, 11 passed + 1 skipped (gated live smoke, same as before — untouched
+by this fix).
+
+**Commit:** `fix(B00S-DEVICE): reject fake-device flags under real-virtual-mic`
