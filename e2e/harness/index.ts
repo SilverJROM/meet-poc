@@ -37,7 +37,18 @@ export {
   type ModeAInjectionParams,
   type ModeBInjectionParams,
 } from './capture-injection';
-export { joinDualBrowserCall, dryRunDualBrowserCall, type CallDriverConfig, type CallResult } from './call-driver';
+export {
+  joinDualBrowserCall,
+  dryRunDualBrowserCall,
+  buildLaunchArgs,
+  isOnRealMicHost,
+  assertRealVirtualMicHost,
+  type CallDriverConfig,
+  type CallResult,
+  type DeviceMode,
+  type Stimulus,
+  type CallProvenance,
+} from './call-driver';
 export { WavEncoder, type WavEncoderOptions } from './wav-encoder';
 export {
   captureReceiveSideAudio,

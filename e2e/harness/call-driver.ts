@@ -4,9 +4,20 @@
 
 import type { Browser, BrowserContext, Page } from '@playwright/test';
 import { chromium } from '@playwright/test';
+import * as os from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { initLedger, registerCreatedID, incrementCallBurn, getState } from './call-ledger.js';
 import { ConversationScheduler, type ConversationScript } from './conversation-scheduler.js';
 import { startReceiveSideRecording, stopReceiveSideRecording, type CaptureHandle } from './receive-side-recorder.js';
+
+// B00S-DEVICE: explicit device provenance — no implicit fake-device default.
+export type DeviceMode = 'fake-device' | 'real-virtual-mic';
+export type Stimulus = 'speech' | 'tone' | 'DC';
+
+export interface CallProvenance {
+  deviceMode: DeviceMode;
+  stimulus?: Stimulus;
+}
 
 export interface CallDriverConfig {
   baseUrl: string; // e.g., http://localhost:4700
@@ -14,6 +25,20 @@ export interface CallDriverConfig {
   speaker1Name: string; // e.g., 'bot-140'
   speaker2Name: string; // e.g., 'bot-123'
   autoAdmitRoom?: boolean;
+  /**
+   * B00S-DEVICE: REQUIRED, no default. `.140` has no audio stack (no pactl) —
+   * 'real-virtual-mic' is only valid when running on `.123`
+   * (see assertRealVirtualMicHost). 'fake-device' uses Chrome's synthetic
+   * capture device, fed a real speech WAV via fakeAudioPath when hearability
+   * matters (never a bare beep for hearability/transcript ACs).
+   */
+  deviceMode: DeviceMode;
+  /** Provenance-only label for validation reports; not enforced against actual audio content. */
+  stimulus?: Stimulus;
+  /** fake-device only: WAV fed via --use-file-for-fake-audio-capture. */
+  fakeAudioPath?: string;
+  /** real-virtual-mic only: pactl source name to set as default-source before launch. */
+  virtualMicSourceName?: string;
   launchArgs?: string[]; // Chrome flags (e.g., for fake audio)
   ledgerBasePath?: string; // Path to store ledger state
   recordReceiveSide?: boolean; // B08S-2: capture receive-side audio
@@ -39,16 +64,89 @@ export interface CallResult {
   receiveSideWavPath?: string; // B08S-2: receive-side audio WAV
   transcriptPath?: string; // B08S-2: transcript text file
   transcriptContent?: string; // B08S-2: full transcript (script-sourced)
+  provenance: CallProvenance; // B00S-DEVICE: device_mode + stimulus for validation reports
 }
 
+// B00S-DEVICE: '--use-fake-device-for-media-stream' is NOT here anymore —
+// it's added conditionally by buildLaunchArgs() only for deviceMode: 'fake-device'.
+// A call without an explicit deviceMode must fail before ever reaching this list.
 const DEFAULT_LAUNCH_ARGS = [
   '--use-fake-ui-for-media-stream',
-  '--use-fake-device-for-media-stream',
   '--disable-background-timer-throttling',
   '--disable-backgrounding-occluded-windows',
   '--disable-renderer-backgrounding',
   '--autoplay-policy=no-user-gesture-required', // GUARD 3 (B08S-2): AudioContext cannot start suspended
 ];
+
+/** `.123` is the only host with a PipeWire virtual mic (B00S-DEVICE binding #3). */
+const REAL_VIRTUAL_MIC_HOST_IP = '192.168.254.123';
+
+/**
+ * True when this process is running on the `.123` real-mic host: either an
+ * explicit `MEET_REAL_MIC_HOST=123` env override (for a test runner that
+ * knows it's on `.123`), or a local network interface carrying
+ * 192.168.254.123.
+ */
+export function isOnRealMicHost(): boolean {
+  if (process.env.MEET_REAL_MIC_HOST === '123') return true;
+  const interfaces = os.networkInterfaces();
+  return Object.values(interfaces).some((addrs) =>
+    (addrs || []).some((addr) => addr.address === REAL_VIRTUAL_MIC_HOST_IP),
+  );
+}
+
+/** Throws unless running on `.123` — real-virtual-mic is never valid elsewhere (`.140` has no audio stack). */
+export function assertRealVirtualMicHost(): void {
+  if (!isOnRealMicHost()) {
+    throw new Error(
+      `deviceMode 'real-virtual-mic' requires running on .123 (${REAL_VIRTUAL_MIC_HOST_IP}) — ` +
+        `this host has no PipeWire virtual mic / pactl. Set MEET_REAL_MIC_HOST=123 only if you ` +
+        `are actually running on that host.`,
+    );
+  }
+}
+
+/** Sets the PipeWire default source via pactl so Chrome's OS-default-input gUM picks up the virtual mic. */
+function setVirtualMicDefaultSource(sourceName: string): void {
+  const result = spawnSync('pactl', ['set-default-source', sourceName], { encoding: 'utf-8' });
+  if (result.status !== 0) {
+    throw new Error(
+      `pactl set-default-source ${sourceName} failed (exit ${result.status}): ${result.stderr || result.stdout}`,
+    );
+  }
+}
+
+/**
+ * Builds the Chrome launch args for a call, branching on the required
+ * deviceMode. Exported for unit testing (pure function, no I/O besides the
+ * real-virtual-mic host assertion / pactl call).
+ */
+export function buildLaunchArgs(config: CallDriverConfig): string[] {
+  const args = [...DEFAULT_LAUNCH_ARGS, ...(config.launchArgs || [])];
+
+  if (config.deviceMode === 'fake-device') {
+    args.push('--use-fake-device-for-media-stream');
+    if (config.fakeAudioPath) {
+      args.push(`--use-file-for-fake-audio-capture=${config.fakeAudioPath}`);
+    } else if (!args.some((a) => a.startsWith('--use-file-for-fake-audio-capture'))) {
+      console.warn(
+        '[B00S-DEVICE] fake-device with no fakeAudioPath/--use-file-for-fake-audio-capture — ' +
+          "Chrome's default synthetic beep will be used, not real speech. Fine for join/publish " +
+          'smoke; never claim hearability/transcript ACs from this call.',
+      );
+    }
+  } else if (config.deviceMode === 'real-virtual-mic') {
+    assertRealVirtualMicHost();
+    if (config.virtualMicSourceName) {
+      setVirtualMicDefaultSource(config.virtualMicSourceName);
+    }
+    // Deliberately NOT pushing --use-fake-device-for-media-stream or
+    // --use-file-for-fake-audio-capture — Chrome uses the OS default input,
+    // which pactl (above) just pointed at the virtual mic.
+  }
+
+  return args;
+}
 
 /**
  * Handles preflight device check dialog
@@ -225,9 +323,17 @@ export async function joinDualBrowserCall(
   config: CallDriverConfig,
   script?: ConversationScript,
 ): Promise<CallResult> {
+  // B00S-DEVICE: belt-and-suspenders runtime guard alongside the TS-required
+  // field — catches dynamic/JS callers that bypass the type system.
+  if (!config.deviceMode) {
+    throw new Error(
+      "CallDriverConfig.deviceMode is required ('fake-device' | 'real-virtual-mic') — no default.",
+    );
+  }
+
   initLedger(config.ledgerBasePath);
 
-  const launchArgs = [...DEFAULT_LAUNCH_ARGS, ...(config.launchArgs || [])];
+  const launchArgs = buildLaunchArgs(config);
   const startTime = Date.now();
 
   let browser: Browser | undefined;
@@ -353,6 +459,7 @@ export async function joinDualBrowserCall(
       receiveSideWavPath: receiveSideResult?.wavPath,
       transcriptPath: receiveSideResult?.transcriptPath,
       transcriptContent: receiveSideResult?.transcriptContent,
+      provenance: { deviceMode: config.deviceMode, stimulus: config.stimulus },
     };
   } catch (err) {
     incrementCallBurn();

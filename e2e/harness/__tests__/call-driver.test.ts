@@ -63,6 +63,7 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
         speaker2Name: 'bot-123',
         autoAdmitRoom: true,
         ledgerBasePath: TEMP_DIR,
+        deviceMode: 'fake-device',
         launchArgs: [
           '--use-file-for-fake-audio-capture=/path/to/speech.wav', // Would need actual fixture
         ],
@@ -142,6 +143,7 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
         baseUrl: '', // Missing!
         speaker1Name: 'bot-140',
         speaker2Name: 'bot-123',
+        deviceMode: 'fake-device',
       };
 
       // Should fail during room creation (URL constructor or fetch)
@@ -283,6 +285,7 @@ describe('B08S-1 call driver — integration with ConversationScheduler', () => 
         speaker2Name: 'bot-123',
         autoAdmitRoom: true,
         ledgerBasePath: TEMP_DIR_B08S2,
+        deviceMode: 'fake-device',
       };
 
       // Import scheduler
@@ -387,6 +390,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
       ledgerBasePath: TEMP_DIR_B08S2,
       recordReceiveSide: true,
       receiverPageIndex: 1, // bot-123 receives
+      deviceMode: 'fake-device',
     };
 
     // Validate config fields are present

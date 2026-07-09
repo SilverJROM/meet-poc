@@ -154,6 +154,10 @@ describe('B08A-3 AC15 live clause — real dual-browser call, sender-liveness in
           recordReceiveSide: true,
           receiverPageIndex: 1, // page2 (bot-123) receives; page1 (bot-140) is the far end we sample.
           ledgerBasePath: process.cwd(),
+          // B00S-DEVICE: fake-device is explicit now (no implicit default);
+          // stimulus is declared for provenance (binding #7).
+          deviceMode: 'fake-device',
+          stimulus: 'speech',
           // F1: page1 (bot-140, the sender we sample) plays real speech instead
           // of Chrome's fake-device tone — see header comment.
           launchArgs: [`--use-file-for-fake-audio-capture=${REAL_SPEECH_SOURCE}`],
