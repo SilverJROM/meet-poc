@@ -175,3 +175,10 @@
   Prior synthetic-WAV false-green is fixed: active `captureReceiveSideAudio()` now throws on null/empty samples before writing any WAV, the old unconditional generated-stub success path is gone, no-capture unit tests exist, and `npx vitest run e2e/harness/__tests__/call-driver.test.ts` is green (13 passed, 2 skipped). CallResult path propagation remains present by inspection. Closes no AC; no req-matrix/og-requirements change.
   Blocking R2 finding: new live capture branch contains invalid TypeScript at `new (window as any).AudioContext?.()` / `new (window as any).webkitAudioContext?.()`. Independent `npx tsc --noEmit --pretty false --allowJs false e2e/harness/receive-side-recorder.ts e2e/harness/__tests__/call-driver.test.ts e2e/harness/call-driver.ts` fails with TS1209 on both lines. Required Vitest target misses this because mocks bypass the browser capture body. Report: validation/b08s2-validation-r2.md.
 [2026-07-09T05:26:26+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL R2 — TS1209 AudioContext optional chain (codex55)
+[2026-07-09T13:27:05+08:00] [projcore callback] impl B08S-2 STATUS: DONE — 5d16e08 fix TS1209 + capture existing tracks
+  TS1209 fix: extracted AudioContext constructor before `new` (eliminate optional chain on new expression). Introduced initializeAudioContext() helper for one-time per-session init.
+  Existing track capture: added pc.getReceivers() enumeration to processAudioTrack() for tracks arriving before wrapper installation (timing safety).
+  Dead code removal: deleted unused generateStubAudio() function.
+  Fixes: typo createMediaStreamSource (was createMediaStreamAudioSource).
+  Proof: tsc --noEmit clean on receive-side-recorder.ts; vitest run call-driver.test.ts green (13 passed, 2 skipped).
+  Commit: 5d16e08
