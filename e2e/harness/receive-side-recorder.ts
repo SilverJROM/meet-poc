@@ -29,6 +29,7 @@ interface B08S2CaptureState {
   audioSamplesBase64: string;
   sourceNodes: any[];
   scriptProcessor: any;
+  mixerGain?: any;
 }
 
 type CaptureClassification =
@@ -85,17 +86,14 @@ export function classifyCapture(
 function calculateRms(base64Samples: string): number {
   if (!base64Samples) return 0;
   try {
-    const binaryStr = Buffer.from(base64Samples, 'base64').toString('binary');
+    const int16Buffer = Buffer.from(base64Samples, 'base64');
+    const int16Array = new Int16Array(int16Buffer.buffer, int16Buffer.byteOffset, int16Buffer.length / 2);
     let sum = 0;
-    let count = 0;
-    for (let i = 0; i < binaryStr.length; i += 2) {
-      const val = (binaryStr.charCodeAt(i + 1) << 8) | binaryStr.charCodeAt(i);
-      const int16 = val > 32767 ? val - 65536 : val;
-      const normalized = int16 / 32768;
+    for (let i = 0; i < int16Array.length; i++) {
+      const normalized = int16Array[i] / 32768;
       sum += normalized * normalized;
-      count++;
     }
-    return count > 0 ? Math.sqrt(sum / count) : 0;
+    return int16Array.length > 0 ? Math.sqrt(sum / int16Array.length) : 0;
   } catch {
     return 0;
   }
@@ -211,28 +209,37 @@ export async function installCaptureHook(page: Page): Promise<string> {
             const inputData = e.inputBuffer.getChannelData(0);
             state.sampleCount += inputData.length;
 
-            // Convert Float32 to Int16 and encode as base64
+            // Convert Float32 to Int16 and encode as base64 (browser-safe)
             const int16 = new Int16Array(inputData.length);
             for (let i = 0; i < inputData.length; i++) {
               int16[i] = Math.max(-1, Math.min(1, inputData[i])) < 0 ? inputData[i] * 0x8000 : inputData[i] * 0x7fff;
             }
-            const base64Chunk = Buffer.from(int16).toString('base64');
+            // Browser-safe base64: convert Uint8Array to binary string, then btoa
+            const uint8 = new Uint8Array(int16.buffer);
+            let binaryStr = '';
+            for (let i = 0; i < uint8.length; i++) {
+              binaryStr += String.fromCharCode(uint8[i]);
+            }
+            const base64Chunk = (window as any).btoa(binaryStr);
             state.audioSamplesBase64 += base64Chunk;
           };
 
-          scriptProcessor.connect(mixerGain);
-          mixerGain.connect(zeroGain);
+          // Correct connection order: mixerGain (source aggregator) → scriptProcessor (capture) → zeroGain (mute) → destination
+          mixerGain.connect(scriptProcessor);
+          scriptProcessor.connect(zeroGain);
+          zeroGain.connect(audioContext.destination);
 
           state.scriptProcessor = scriptProcessor;
+          state.mixerGain = mixerGain;
         }
 
-        // GUARD 2 (tee): connect new source to mixer, playback untouched
-        const audioContext = (window as any).__b08s2ReceiveCapture.scriptProcessor?.context;
-        if (!audioContext || !state.scriptProcessor) return;
+        // GUARD 2 (tee): connect new source to scriptProcessor for capture
+        if (!state.scriptProcessor) return;
 
+        const audioContext = state.scriptProcessor.context;
         const source = audioContext.createMediaStreamSource(event.streams[0]);
-        const mixerGain = state.scriptProcessor.destination || state.scriptProcessor.context.createGain();
-        source.connect(mixerGain);
+        // Direct connection for capture: source → scriptProcessor input
+        source.connect(state.scriptProcessor);
         state.sourceNodes.push(source);
       };
 

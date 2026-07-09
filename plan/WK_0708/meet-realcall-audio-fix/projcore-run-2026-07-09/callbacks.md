@@ -215,7 +215,7 @@
   Gates: npx vitest run e2e/harness/__tests__/{receive-side-recorder,call-driver}.test.ts; tsc --noEmit e2e/harness/{receive-side-recorder,call-driver}.ts.
   PROPOSED ACTIONS: confirm design → APPROVED-PLAN → implement → commit → DONE callback.
   Awaiting APPROVED-PLAN handshake.
-[2026-07-09T06:22:45+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 0b589a4 design-locked rewrite
+[2026-07-09T06:22:45+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 0b589a4 design-locked rewrite (vitest RED sendback)
   receive-side-recorder.ts REWRITE: __b08s2ReceiveCapture live state object, addInitScript shim at document-start, addEventListener('track') in constructor (not pc.ontrack=), lazy audio graph on first audio track, GUARD 3 resume+assert running, GUARD 2 tee wiring, Int16 base64 samples, pure classifyCapture() taxonomy (VALID/SILENCE/INVALID_*/PRODUCT_NO_MEDIA), stopAndEncodeCapture classifies and writes WAV only on VALID/SILENCE (throws INVALID, no WAV on disk).
   call-driver.ts EDITS: (1) add --autoplay-policy=no-user-gesture-required to DEFAULT_LAUNCH_ARGS (GUARD 3), (2) ordering guard in startReceiveSideRecording throw if page.url() !== 'about:blank'.
   receive-side-recorder.test.ts NEW: 11 unit tests (Node, no browser) for pure classifyCapture() taxonomy — INVALID_HOOK_MISSING, INVALID_NO_PC, INVALID_AUDIO_GRAPH, INVALID_RELOAD, INVALID_HOOK_BLIND, PRODUCT_NO_MEDIA, SILENCE, VALID rows; table-driven asserts no INVALID→VALID, silence→SILENCE.
@@ -227,3 +227,10 @@
   changes.md: validation/b08s2-changes.md. Commit: 0b589a4.
 [2026-07-09T06:17:32+00:00] [projcore callback] coord B08S-2 STATUS: APPROVED-PLAN — design-locked + 3 guards
 [2026-07-09T06:22:53+00:00] [projcore callback] coord B08S-2 STATUS: SENDBACK — tests red on 0b589a4 (pre-gate)
+[2026-07-09T06:31:11+00:00] [projcore callback] validator B08S-2 INTERIM STATUS: DONE — FAIL — 0b589a4+dae01fc (sonnet L2)
+  vitest green (27/27) and all THREE GUARDS' *structure* correct (config passthrough, running-guard, no-synthetic-WAV/fail-closed taxonomy, no late-install regression) — but every green test mocks page.evaluate(), so none of them exercise the actual injected hook against a real MediaStreamTrack.
+  Built a throwaway real-Chromium probe (loopback RTCPeerConnection + real fake-device audio, same class as b08a2-sender-liveness.browser.test.ts) that does. Found the in-page capture pipeline is broken: (1) `Buffer` (Node-only) is called inside onaudioprocess and throws "Buffer is not defined" on every callback (27/27 in probe) — audioSamplesBase64 never gets written, stays '' forever; (2) independently, the tee never connects the per-track source into the real scriptProcessor input — `state.scriptProcessor.destination` is not a real API (ScriptProcessorNode has no .destination), so source audio routes into a disposable dead-end GainNode instead.
+  Net effect: every real call, real speech or not, is misclassified SILENCE not VALID — the design's own "trap this contract closes" (all-zero ScriptProcessor buffers manufacturing fake captured-silence), just reached via a wiring/runtime-error bug instead of an eager-graph bug. classifyCapture()'s fail-closed taxonomy never gets tested against real audio, so this shipped green.
+  Report: validation/b08s2-validation-interim-sonnet.md. Probe file deleted after use; e2e/ tree clean; 0/25 burn (loopback-only, no room/SFU).
+  SENDBACK: (1) browser-safe base64 encode (no Buffer on window), (2) fix tee to connect source into state.scriptProcessor not a throwaway GainNode, (3) add a real-browser non-mocked test asserting non-zero RMS for genuinely non-silent remote audio.
+[2026-07-09T06:32:28+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL interim sonnet — Buffer+tee wiring

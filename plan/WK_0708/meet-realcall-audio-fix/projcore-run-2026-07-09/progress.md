@@ -297,3 +297,13 @@ tagged HIGH — approve to convene the planning deliberation panel? (proceeding 
 [2026-07-09T06:15:09+00:00] [B08S-2] DESIGN APPROVED by north; haiku dispatched; guards recorded; codex55 FINAL only
 [2026-07-09T06:17:32+00:00] [B08S-2] APPROVED-PLAN design-locked + THREE GUARDS
 [2026-07-09T06:22:53+00:00] [B08S-2] 0b589a4 landed but vitest red (page.url mock). SENDBACK fix before any validator.
+[overmind] 2026-07-09T06:24:55+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=[]
+[2026-07-09T06:24:55+00:00] [B08S-2] 0b589a4+dae01fc design-locked rewrite green (27 pass). Interim gate: redteam + sonnet L2 (codex55 reserved for FINAL).
+[overmind] 2026-07-09T06:24:58+00:00 child sync OK (child-add x-01_panel_haiku_meet:redteam-haiku-b08s2) children=["x-01_panel_haiku_meet"]
+[overmind] 2026-07-09T06:26:43+00:00 child sync OK (child-rm x-01_panel_haiku_meet) children=[]
+[overmind] 2026-07-09T06:26:47+00:00 child sync OK (child-add x-01_validator_sonnet_meet:validator-sonnet-b08s2-interim) children=["x-01_validator_sonnet_meet"]
+[2026-07-09T06:24:55+00:00] [B08S-2 INTERIM GATE] sonnet L2 launched (codex55 conserved)
+[overmind] 2026-07-09T06:32:28+00:00 child sync OK (child-rm x-01_validator_sonnet_meet) children=[]
+[2026-07-09T06:32:28+00:00] [B08S-2 INTERIM FAIL] sonnet L2: Buffer in page context + tee disconnect (scriptProcessor.destination). Manufactures SILENCE. codex55 NOT burned.
+[2026-07-09T06:32:28+00:00] [B08S-2 SENDBACK] fix Buffer→btoa; source.connect(state.scriptProcessor); browser probe non-zero RMS
+[overmind] 2026-07-09T06:32:31+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-fix-tee) children=["x-01_impl_haiku_meet"]
