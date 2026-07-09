@@ -150,10 +150,10 @@ export class WeakSourceControl {
  * Documentation for manual setup (when .123 is reachable but SSH not configured)
  *
  * Steps to manually attenuate on dev_machine before B06 call:
- * 1. SSH into .123: `ssh peer2@192.168.1.123`
+ * 1. SSH into .123: `ssh silverjrom@192.168.254.123`
  * 2. List PipeWire sources: `pactl list sources | grep -E "Source #|Name:|Volume"`
  * 3. Set volume to 60%: `pactl set-source-volume <SOURCE_ID> 60%`
- *    e.g., `pactl set-source-volume alsa_input.usb.0-1.analog.stereo 60%`
+ *    e.g., `pactl set-source-volume alsa_input.pci-0000_2d_00.4.analog-stereo 60%`
  * 4. Verify: `pactl get-source-volume <SOURCE_ID>` should show 60%
  * 5. Leave this attenuation active during the B06 call
  * 6. After the call, restore: `pactl set-source-volume <SOURCE_ID> 100%`

@@ -50,26 +50,33 @@
 
 ---
 
-## Finding 4: PipeWire Attenuation Contract (Production Ready)
+## Finding 4: PipeWire Attenuation Contract (Live Proof Validated)
 
 **Command:** `pactl set-source-volume <source_id> <percent>%`
 
-**Example for dev_machine .123:**
+**Live proof on dev_machine `.123` (2026-07-09):**
 ```bash
-ssh peer2@192.168.1.123 pactl set-source-volume alsa_input.usb.0-1.analog.stereo 60%
+ssh silverjrom@192.168.254.123 pactl set-source-volume alsa_input.pci-0000_2d_00.4.analog-stereo 60%
 ```
 
-**Verification:**
-```bash
-ssh peer2@192.168.1.123 pactl get-source-volume alsa_input.usb.0-1.analog.stereo
+**Discovered sources on `.123`:**
 ```
+46	alsa_output.pci-0000_2d_00.4.iec958-stereo.monitor
+47	alsa_input.pci-0000_2d_00.4.analog-stereo
+```
+
+**Live attenuation proof (read → set → verify → restore → verify):**
+- Pre-attenuation: 100% (0.00 dB)
+- After set to 60%: 60% (-13.31 dB per channel) ✓
+- After restore to 100%: 100% (0.00 dB) ✓
 
 **Notes:**
-- Source ID varies by audio hardware; must query `.123`'s PipeWire configuration first
+- `.123` is reachable at `silverjrom@192.168.254.123` (not stale `peer2@192.168.1.123`)
+- Target source: `alsa_input.pci-0000_2d_00.4.analog-stereo` (analog-stereo microphone)
 - Attenuation applies *before* Chrome's getUserMedia capture — AGC operates on the already-attenuated signal
-- Restore to 100% after the test call to avoid affecting future calls
+- Restore pattern is safe and verified (no side effects)
 
-**Implication:** B06 scaffold documents this contract. Live integration in a future session will SSH to .123, set volume, run the call, then measure loudness and log AGC compensation.
+**Implication:** Live PipeWire control is validated. Ready for full dual-call integration with AGC measurement.
 
 ---
 
@@ -93,25 +100,34 @@ ssh peer2@192.168.1.123 pactl get-source-volume alsa_input.usb.0-1.analog.stereo
 
 ## Finding 6: Scaffold Status and Next Steps
 
-**Current state (B06):**
+**Current state (B06 — this batch):**
 - ✅ Measurement infrastructure in place (RMS, LUFS, voiced segment detection)
 - ✅ AGC compensation logging API defined (`WeakSourceSession.agcCompensationFactor`)
-- ✅ PipeWire contract documented (pactl commands)
-- ⏳ Live .123 integration awaiting dev_machine availability
+- ✅ PipeWire contract documented and live-verified (pactl commands)
+- ✅ Stale host/source references fixed (`silverjrom@192.168.254.123`, `alsa_input.pci-0000_2d_00.4.analog-stereo`)
+- ✅ SSH read/set/restore proof of concept validated (live .123 PipeWire control works)
+- ⏳ Full dual-call AGC measurement (explicit OPEN for next batch)
 
-**Production integration (next session when .123 reachable):**
-1. SSH to .123 and run `pactl set-source-volume ... 60%` (soft-talker scenario)
-2. Run a 2–3 minute call with AGC ON
-3. Measure receive-side loudness using `LoudnessAnalyzer`
-4. Compute `agcCompensationFactor = measuredLoudness / referenceLoudness`
-5. Log findings to `decisions/b06-findings.md` (update this file)
+**What this batch delivered:**
+1. Live discovery of PipeWire sources on `.123`
+2. Proof of attenuation control (set to 60%, verify, restore to 100%)
+3. Restore verification (no side effects, clean state)
+4. Updated docs with correct host and source ID
+
+**OPEN — Full dual-call integration (defer to next batch):**
+1. Run attenuated call (60% source volume): capture receive-side audio
+2. Run baseline call (100% source volume): capture receive-side audio for reference
+3. Measure receive-side loudness on both using `LoudnessAnalyzer`
+4. Compute `agcCompensationFactor = measuredLoudness_attenuated / measuredLoudness_baseline`
+5. Log empirical AGC compensation factor to this file
 6. Pass observations to B08 (forced sweep) and B18+ (clean call acceptance gates)
 
 **Acceptance path:**
-- B06 unit tests: 7/7 PASS (this session)
-- B06 live integration: pending .123 availability
-- B07 (Mode-A/B capture contracts): depends on B06 findings only structurally, not on live .123 call
-- B08 (forced sweep baseline): uses B06 insights about AGC compensation range
+- B06 unit tests: 7/7 PASS ✓
+- B06 live PipeWire discovery & control: PASS ✓ (this batch)
+- B06 full dual-call AGC measurement: OPEN (next batch, ~25 min)
+- B07 (Mode-A/B capture contracts): structurally independent of B06
+- B08 (forced sweep baseline): will use empirical B06 AGC compensation range
 
 ---
 

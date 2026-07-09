@@ -122,8 +122,8 @@ describe('B06 — Weak-source measurement and logging', () => {
     const config = {
       volumePercent: 60,
       description: 'soft-talker simulation',
-      host: '192.168.1.123',
-      sourceId: 'alsa_input.usb.0-1.analog.stereo',
+      host: '192.168.254.123',
+      sourceId: 'alsa_input.pci-0000_2d_00.4.analog-stereo',
     };
 
     // When .123 is not reachable (typical in this session)
