@@ -10,3 +10,17 @@ export {
   withinTolerance,
   DEFAULT_TOLERANCE_FRACTION,
 } from './gum-shim';
+export {
+  modeAInitScript,
+  modeBInitScript,
+  buildInjectionTimeline,
+  classifyHoldPhaseSignature,
+  T_GAP_PROVISIONAL_MS,
+  MIRRORED_MIC_SILENCE_LEVEL_THRESHOLD,
+  MIRRORED_LEVEL_VARIANCE_THRESHOLD,
+  type CaptureMode,
+  type CaptureInjectionTimeline,
+  type HoldPhaseSignature,
+  type ModeAInjectionParams,
+  type ModeBInjectionParams,
+} from './capture-injection';
