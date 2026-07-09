@@ -307,3 +307,10 @@ tagged HIGH — approve to convene the planning deliberation panel? (proceeding 
 [2026-07-09T06:32:28+00:00] [B08S-2 INTERIM FAIL] sonnet L2: Buffer in page context + tee disconnect (scriptProcessor.destination). Manufactures SILENCE. codex55 NOT burned.
 [2026-07-09T06:32:28+00:00] [B08S-2 SENDBACK] fix Buffer→btoa; source.connect(state.scriptProcessor); browser probe non-zero RMS
 [overmind] 2026-07-09T06:32:31+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-fix-tee) children=["x-01_impl_haiku_meet"]
+[overmind] 2026-07-09T06:38:25+00:00 child sync OK (child-rm x-01_impl_haiku_meet) children=[]
+[2026-07-09T06:38:25+00:00] [B08S-2] 7294687 Buffer+tee+browser test. Re-run interim sonnet then FINAL codex55 if PASS.
+[overmind] 2026-07-09T06:38:32+00:00 child sync OK (child-add x-01_validator_sonnet_meet:validator-sonnet-b08s2-i2) children=["x-01_validator_sonnet_meet"]
+[overmind] 2026-07-09T06:43:10+00:00 child sync OK (child-rm x-01_validator_sonnet_meet) children=[]
+[2026-07-09T06:43:10+00:00] [B08S-2 INTERIM FAIL R2] sonnet: F1/F2 fixed; F3 test accepts SILENCE; headless WebRTC needs HTMLMediaElement.play() to unlock decode (probe rms 0.065 with audio.play)
+[2026-07-09T06:43:10+00:00] [B08S-2 SENDBACK] attach+play remote stream before capture; assert VALID non-zero RMS in browser test
+[overmind] 2026-07-09T06:43:13+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-fix-play) children=["x-01_impl_haiku_meet"]

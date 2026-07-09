@@ -241,6 +241,16 @@ export async function installCaptureHook(page: Page): Promise<string> {
         // Direct connection for capture: source → scriptProcessor input
         source.connect(state.scriptProcessor);
         state.sourceNodes.push(source);
+
+        // Force real decode by attaching stream to a playing audio element (Chromium requirement).
+        // This mirrors what the real app does at remote-audio.service.ts:560,628.
+        const audioEl = document.createElement('audio');
+        audioEl.srcObject = event.streams[0];
+        audioEl.style.display = 'none';
+        audioEl.autoplay = true;
+        audioEl.muted = true;
+        document.body.appendChild(audioEl);
+        audioEl.play().catch(() => {});
       };
 
       // Wrap global RTCPeerConnection: constructor is the sole capture entry point

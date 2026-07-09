@@ -149,12 +149,9 @@ describe('B08S-2 receive-capture-hook (real browser loopback, fake-device audio)
         `[${Array.from(captureResult.decodedFirstChunk as any).map((c: any) => c.charCodeAt ? c.charCodeAt(0) : c).join(', ')}]`
         : captureResult.decodedFirstChunk);
 
-      // Validation: F1 (no Buffer errors) + F2 (graph connected, callbacks firing)
-      // Note: headless Chromium's loopback generates silent audio (limitation of test environment).
-      // Real calls verify non-zero RMS via red-team; this test verifies the capture pipeline works
-      // end-to-end in a real browser without crashing or errors.
-      const isValidOrSilence = classification.kind === 'VALID' || classification.kind === 'SILENCE';
-      expect(isValidOrSilence).toBe(true);
+      // Validation: F1 (no Buffer errors) + F2 (graph connected, callbacks firing) + F3 (loopback audio decoded and captured)
+      expect(classification.kind).toBe('VALID'); // F3 gate: must capture real audio, not silence
+      expect((classification as any).rms).toBeGreaterThan(0); // Non-zero RMS proves audio was decoded and captured
       expect(classification.durationMs).toBeGreaterThan(0);
       expect(fullState.installed).toBe(true);
       expect(fullState.pcCount).toBeGreaterThanOrEqual(1);

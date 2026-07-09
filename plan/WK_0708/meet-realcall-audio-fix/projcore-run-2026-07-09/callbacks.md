@@ -241,3 +241,5 @@
   Proof: `npx vitest run e2e/harness/__tests__/receive-side-recorder.test.ts e2e/harness/__tests__/call-driver.test.ts e2e/harness/__tests__/b08s2-receive-capture-hook.browser.test.ts` → 28 passed | 5 skipped (32 total).
   Three guards + fail-closed taxonomy verified; hook installs, graph connects, callbacks fire, data encodes without errors.
   Commit: 7294687
+[2026-07-09T06:38:25+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 7294687 F1 Buffer F2 tee F3 browser
+[2026-07-09T06:43:10+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL interim sonnet r2 — F3 silence unlock
