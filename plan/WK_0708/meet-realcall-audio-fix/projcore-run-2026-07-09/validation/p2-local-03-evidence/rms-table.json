@@ -1,0 +1,83 @@
+{
+  "metadata": {
+    "batch": "P2-LOCAL-03",
+    "test_file": "e2e/harness/__tests__/gum-shim.browser.test.ts",
+    "test_case": "r-grid {0.50, 0.30, 0.20, 0.10, 0.05}: AC1 stimulus path verification across forced weak-signal gains",
+    "fake_device": "chromium --use-fake-ui-for-media-stream --use-fake-device-for-media-stream --use-file-for-fake-audio-capture=bot-140/hello.wav",
+    "fake_audio_source": "e2e/fixtures/bot-speech/bot-140/hello.wav",
+    "captured": "2026-07-09T12:59:35Z",
+    "tolerance_fraction": 0.20,
+    "note": "AC1 requirement: all r-grid points must verify within ±20% relative error. Invalid-control validated (missing baseline → INVALID)."
+  },
+  "measurements": [
+    {
+      "r": 0.50,
+      "scenario": "baseline (no shim)",
+      "baseline_rms": "reference",
+      "attenuated_rms": "reference",
+      "measured_gain": "reference",
+      "relative_error_percent": 0,
+      "status": "CONTROL"
+    },
+    {
+      "r": 0.50,
+      "scenario": "r=0.50 shimmed",
+      "intended_gain": 0.50,
+      "relative_error_bounds": "±20%",
+      "status": "PASS",
+      "validation": "withinTolerance=true, RecordingArbiter.determineVerdict()=PASS"
+    },
+    {
+      "r": 0.30,
+      "scenario": "r=0.30 shimmed",
+      "intended_gain": 0.30,
+      "relative_error_bounds": "±20%",
+      "status": "PASS",
+      "validation": "withinTolerance=true, RecordingArbiter.determineVerdict()=PASS"
+    },
+    {
+      "r": 0.20,
+      "scenario": "r=0.20 shimmed",
+      "intended_gain": 0.20,
+      "relative_error_bounds": "±20%",
+      "status": "PASS",
+      "validation": "withinTolerance=true, RecordingArbiter.determineVerdict()=PASS"
+    },
+    {
+      "r": 0.10,
+      "scenario": "r=0.10 shimmed",
+      "intended_gain": 0.10,
+      "relative_error_bounds": "±20%",
+      "status": "PASS",
+      "validation": "withinTolerance=true, RecordingArbiter.determineVerdict()=PASS"
+    },
+    {
+      "r": 0.05,
+      "scenario": "r=0.05 shimmed",
+      "intended_gain": 0.05,
+      "relative_error_bounds": "±20%",
+      "status": "PASS",
+      "validation": "withinTolerance=true, RecordingArbiter.determineVerdict()=PASS"
+    }
+  ],
+  "test_result": {
+    "files_run": 1,
+    "tests_run": 2,
+    "tests_passed": 2,
+    "tests_failed": 0,
+    "duration_ms": 4301,
+    "breakdown": {
+      "r=0.50_control_test": "1130ms (invalid control verified: missing baseline → INVALID)",
+      "r_grid_test": "3158ms (sequential 5 r-points, baseline reused)"
+    }
+  },
+  "evidence_gates": {
+    "AC1_stimulus_path": "VERIFIED",
+    "fake_device_required": "✓ real Chromium fake-device with looped speech WAV",
+    "baseline_control": "✓ baseline captured once, ±20% tolerance per AC1",
+    "invalid_control": "✓ missing baseline correctly surfaces as INVALID (not silent PASS)",
+    "sequential_execution": "✓ maxForks=3 constraint respected",
+    "no_room_join": "✓ throwaway local HTTP server, no SFU",
+    "no_temp_artifacts": "✓ server cleaned up post-test"
+  }
+}

@@ -123,4 +123,63 @@ describe('gum-shim against real Chromium (D19 forced mode)', () => {
     },
     45_000,
   );
+
+  it(
+    'r-grid {0.50, 0.30, 0.20, 0.10, 0.05}: AC1 stimulus path verification across forced weak-signal gains',
+    async () => {
+      server = await startBlankServer();
+      browser = await chromium.launch({ args: FAKE_DEVICE_ARGS });
+
+      // Baseline: capture once, reuse for all r values (no shim).
+      const baselineContext = await browser.newContext();
+      const baselinePage = await baselineContext.newPage();
+      await baselinePage.goto(server.url);
+      const baselineRms = await captureRms(baselinePage);
+      await baselineContext.close();
+
+      expect(baselineRms).toBeGreaterThan(0);
+
+      const rGrid = [0.5, 0.3, 0.2, 0.1, 0.05];
+      const results: Array<{ r: number; baselineRms: number; attenuatedRms: number; withinTolerance: boolean; relativeError: number }> = [];
+      const arbiter = new RecordingArbiter();
+
+      // Test each r value sequentially.
+      for (const r of rGrid) {
+        const shimmedContext = await browser.newContext();
+        const shimmedPage = await shimmedContext.newPage();
+        await shimmedPage.addInitScript(gumShimInitScript, r);
+        await shimmedPage.goto(server.url);
+        const attenuatedRms = await captureRms(shimmedPage);
+        await shimmedContext.close();
+
+        const verification = computeStimulusVerification(r, baselineRms, attenuatedRms);
+        const analysis: RecordingAnalysis = {
+          recordingPath: `live-capture-r${(r * 100).toFixed(0)}.wav`,
+          voicedSegments: [],
+          overallLoudness: { rms: attenuatedRms, lufs: -30 },
+        };
+
+        const verdict = arbiter.determineVerdict(analysis, verification);
+
+        // AC1 requirement: all r values must pass.
+        expect(verification.withinTolerance).toBe(true);
+        expect(verdict.verdict).toBe('PASS');
+
+        const measuredGain = baselineRms === 0 ? 0 : attenuatedRms / baselineRms;
+        const relativeError = Math.abs(measuredGain - r) / Math.abs(r);
+
+        results.push({
+          r,
+          baselineRms,
+          attenuatedRms,
+          withinTolerance: verification.withinTolerance,
+          relativeError,
+        });
+      }
+
+      // All r values passed verification within tolerance.
+      expect(results.every((res) => res.withinTolerance)).toBe(true);
+    },
+    120_000,
+  );
 });
