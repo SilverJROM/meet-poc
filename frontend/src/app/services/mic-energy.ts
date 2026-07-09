@@ -103,6 +103,57 @@ export function extractOutboundAudioSource(stats: {
   return null;
 }
 
+/**
+ * B08A-1 — outbound sender-liveness stats (D28/D29 T1 discriminator input).
+ *
+ * Capture side (`media-source`/audio) and sender side (`outbound-rtp`/audio)
+ * over ONE getStats() pass. Reader/emit only — no classification here (that is
+ * B08A-2's classifySenderLiveness, which does not exist yet).
+ */
+export type OutboundLivenessStats = {
+  totalAudioEnergy: number | null;
+  totalSamplesDuration: number | null;
+  packetsSent: number | null;
+  bytesSent: number | null;
+};
+
+/**
+ * Pure extractor for the sender-liveness stat pair (AC15a, B08A-1).
+ *
+ * ONE pass over an already-fetched RTCStatsReport-shaped object: capture side
+ * comes from the first `media-source`/`kind==='audio'` entry (`totalAudioEnergy`
+ * + `totalSamplesDuration` — the latter is NOT read by `extractOutboundAudioSource`
+ * today), sender side from the first `outbound-rtp`/`kind==='audio'` entry
+ * (`packetsSent` + `bytesSent` — `hasOutboundAudioTrack` only checks existence).
+ * Non-number fields -> null, missing stat types -> null fields, never throws.
+ */
+export function extractOutboundLiveness(stats: {
+  values(): IterableIterator<any>;
+}): OutboundLivenessStats {
+  let totalAudioEnergy: number | null = null;
+  let totalSamplesDuration: number | null = null;
+  let packetsSent: number | null = null;
+  let bytesSent: number | null = null;
+  let sawCaptureSource = false;
+  let sawSenderSource = false;
+
+  for (const stat of stats.values()) {
+    if (!stat) continue;
+    if (!sawCaptureSource && stat.type === 'media-source' && stat.kind === 'audio') {
+      totalAudioEnergy = typeof stat.totalAudioEnergy === 'number' ? stat.totalAudioEnergy : null;
+      totalSamplesDuration = typeof stat.totalSamplesDuration === 'number' ? stat.totalSamplesDuration : null;
+      sawCaptureSource = true;
+    } else if (!sawSenderSource && stat.type === 'outbound-rtp' && stat.kind === 'audio') {
+      packetsSent = typeof stat.packetsSent === 'number' ? stat.packetsSent : null;
+      bytesSent = typeof stat.bytesSent === 'number' ? stat.bytesSent : null;
+      sawSenderSource = true;
+    }
+    if (sawCaptureSource && sawSenderSource) break;
+  }
+
+  return { totalAudioEnergy, totalSamplesDuration, packetsSent, bytesSent };
+}
+
 /** A single window sample for the sustained-capture discriminator. */
 export type EnergySample = {
   totalAudioEnergy: number | null;

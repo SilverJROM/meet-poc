@@ -1083,6 +1083,14 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
       { id: 'local-cand', type: 'local-candidate', candidateType: 'srflx', protocol: 'udp', address: '203.0.113.10', port: 49000 },
       { id: 'remote-cand', type: 'remote-candidate', candidateType: 'host', protocol: 'udp', address: '198.51.100.20', port: 3478 },
       {
+        id: 'capture-audio',
+        type: 'media-source',
+        kind: 'audio',
+        audioLevel: 0.4,
+        totalAudioEnergy: 91.2,
+        totalSamplesDuration: 12.75,
+      },
+      {
         id: 'out-audio',
         type: 'outbound-rtp',
         kind: 'audio',
@@ -1180,6 +1188,14 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
   assert.equal(videoOut?.remoteFractionLost, 0.05);
   assert.equal(videoOut?.remoteJitterMs, 12);
 
+  // B08A-1/D29 — sender-liveness capture pair merged onto the AUDIO outbound track only
+  assert.equal(audioOut?.totalAudioEnergy, 91.2, 'capture-side energy merged onto the audio outbound track');
+  assert.equal(audioOut?.totalSamplesDuration, 12.75, 'capture-side samples-duration merged onto the audio outbound track');
+  assert.equal(audioOut?.bytesSent, 12_000, 'sender-side bytesSent stays per-track (unchanged path)');
+  assert.equal(audioOut?.packetsSent, 120, 'sender-side packetsSent stays per-track (unchanged path)');
+  assert.equal(videoOut?.totalAudioEnergy, undefined, 'capture-side pair is never merged onto the video track');
+  assert.equal(videoOut?.totalSamplesDuration, undefined, 'capture-side pair is never merged onto the video track');
+
   const audioIn = diagnostics?.inboundTracks.find((track) => track.kind === 'audio');
   const videoIn = diagnostics?.inboundTracks.find((track) => track.kind === 'video');
   assert.equal(audioIn?.audioLevel, 0.31, 'inbound audio liveness is captured');
@@ -1206,7 +1222,35 @@ async function collectDiagnosticsFromStats(stats: RTCStatsReport): Promise<{ dia
   assert.equal(missing.diagnostics?.inboundTracks[0]?.audioLevel, null);
   assert.equal(missing.diagnostics?.inboundTracks[0]?.totalAudioEnergy, null);
   assert.equal(missing.diagnostics?.inboundTracks[0]?.jitter, null);
+  assert.equal(missing.diagnostics?.outboundTracks[0]?.totalAudioEnergy, null, 'no media-source stat -> null, not undefined, on the audio track');
+  assert.equal(missing.diagnostics?.outboundTracks[0]?.totalSamplesDuration, null, 'no media-source stat -> null, not undefined, on the audio track');
   assert.equal(missing.diagnostics?.mediaPlayout, undefined);
+}
+
+// getOutboundLiveness (B08A-1) — standalone harness reader, ONE getStats() call, null-safe
+{
+  const sfu = createSfuClient();
+  let getStatsCalls = 0;
+  const pc = {
+    connectionState: 'connected',
+    iceConnectionState: 'connected',
+    async getStats(): Promise<RTCStatsReport> {
+      getStatsCalls += 1;
+      return statsReportOf(
+        { id: 'capture-audio', type: 'media-source', kind: 'audio', audioLevel: 0.5, totalAudioEnergy: 61.4, totalSamplesDuration: 8.5 },
+        { id: 'out-audio', type: 'outbound-rtp', kind: 'audio', bytesSent: 5_000, packetsSent: 260 },
+      );
+    },
+  } as unknown as RTCPeerConnection;
+  const privateSfu = sfu as unknown as { pc: RTCPeerConnection };
+  privateSfu.pc = pc;
+
+  const liveness = await sfu.getOutboundLiveness();
+  assert.equal(getStatsCalls, 1, 'getOutboundLiveness must use exactly one getStats call');
+  assert.deepEqual(liveness, { totalAudioEnergy: 61.4, totalSamplesDuration: 8.5, packetsSent: 260, bytesSent: 5_000 });
+
+  const sfuNoPc = createSfuClient();
+  assert.equal(await sfuNoPc.getOutboundLiveness(), null, 'no peer-connection -> null, never throws');
 }
 
 // selectNewRemoteTracks — partial subscribe covers added audio/video/screen and skips existing names

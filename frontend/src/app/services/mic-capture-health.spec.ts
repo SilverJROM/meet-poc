@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   audioCaptureConstraints,
   extractOutboundAudioSource,
+  extractOutboundLiveness,
   classifyMicCapture,
   decideMicRecovery,
   nextMicWarningState,
@@ -296,6 +297,56 @@ const CLASSES: MicCaptureClass[] = ['silent', 'working', 'indeterminate'];
   assert.strictEqual(shown, true, 'silent poll -> shown');
   shown = nextMicWarningState(shown, classifyMicCapture(silentWindow), false); // muted
   assert.strictEqual(shown, false, 'muting while silent -> cleared');
+}
+
+// ===========================================================================
+// AC15a (B08A-1) — extractOutboundLiveness: ONE-pass sender-liveness reader
+// ===========================================================================
+
+// U-33 — all four counters extracted from their respective stat types
+{
+  const stats = statsOf(
+    { type: 'candidate-pair', nominated: true },
+    { type: 'media-source', kind: 'video' },
+    { type: 'media-source', kind: 'audio', audioLevel: 0.4, totalAudioEnergy: 91.2, totalSamplesDuration: 12.75 },
+    { type: 'outbound-rtp', kind: 'video', bytesSent: 999, packetsSent: 50 },
+    { type: 'outbound-rtp', kind: 'audio', bytesSent: 4200, packetsSent: 310 },
+  );
+  assert.deepStrictEqual(extractOutboundLiveness(stats), {
+    totalAudioEnergy: 91.2,
+    totalSamplesDuration: 12.75,
+    packetsSent: 310,
+    bytesSent: 4200,
+  });
+}
+
+// U-34 — non-number fields -> null per field, never throw on garbage values
+{
+  const partial = statsOf(
+    { type: 'media-source', kind: 'audio', totalAudioEnergy: 'not-a-number', totalSamplesDuration: null },
+    { type: 'outbound-rtp', kind: 'audio', bytesSent: undefined, packetsSent: 'not-a-number' },
+  );
+  assert.deepStrictEqual(extractOutboundLiveness(partial), {
+    totalAudioEnergy: null,
+    totalSamplesDuration: null,
+    packetsSent: null,
+    bytesSent: null,
+  });
+}
+
+// U-35 — missing stat types entirely -> all-null, never throw (no media-source/outbound-rtp at all)
+{
+  const noSenderStats = statsOf({ type: 'candidate-pair', nominated: true }, { type: 'inbound-rtp', kind: 'audio' });
+  assert.deepStrictEqual(extractOutboundLiveness(noSenderStats), {
+    totalAudioEnergy: null,
+    totalSamplesDuration: null,
+    packetsSent: null,
+    bytesSent: null,
+  });
+
+  // Malformed entries (null/undefined in the report) must not throw.
+  const withNulls = statsOf({ type: 'media-source', kind: 'audio', totalAudioEnergy: 5 } as Record<string, unknown>);
+  assert.doesNotThrow(() => extractOutboundLiveness(withNulls));
 }
 
 console.log('mic-capture-health: all assertions passed');

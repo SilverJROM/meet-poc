@@ -13,7 +13,7 @@ import {
   shouldRegisterFirstAddedLocalTrack,
 } from './sfu-roster-utils.js';
 import { reconcileSubscribedMids } from './sfu-mid-reconcile.js';
-import { extractOutboundAudioSource, type OutboundAudioSourceStat } from './mic-energy';
+import { extractOutboundAudioSource, extractOutboundLiveness, type OutboundAudioSourceStat, type OutboundLivenessStats } from './mic-energy';
 import { extractSubscribeFailureEvidence, type SubscribeFailureEvidence } from './sfu-subscribe-failure-evidence.js';
 import { shouldBindSubscribeResponse } from './sfu-recovery-epoch.js';
 import type { SfuDiagnosticsSnapshot, SfuPublishPhase, SfuOutboundTrackStats, SfuInboundTrackStats, SfuSubscribeLatency, DiagnosticsCandidatePair, SfuConnectionQuality } from './meeting-sessions.service';
@@ -816,6 +816,26 @@ export class SfuClientService {
   }
 
   /**
+   * Public reader for the sender-liveness discriminator (B08A-1, AC15a).
+   * ONE getStats() pass returning BOTH capture-side (media-source: totalAudioEnergy
+   * + totalSamplesDuration) and sender-side (outbound-rtp audio: packetsSent +
+   * bytesSent) via the shared extractOutboundLiveness() extractor. Reader only —
+   * no classification (B08A-2), no remedy. Returns null when there is no
+   * peer-connection or getStats() throws.
+   */
+  async getOutboundLiveness(): Promise<OutboundLivenessStats | null> {
+    const pc = this.pc;
+    if (!pc) return null;
+    let stats: RTCStatsReport;
+    try {
+      stats = await pc.getStats();
+    } catch {
+      return null;
+    }
+    return extractOutboundLiveness(stats);
+  }
+
+  /**
    * Returns true when an outbound-rtp audio stat exists — i.e., the WebRTC
    * sending pipeline is established and the SFU has accepted the audio sender.
    * Deliberately does NOT require bytesSent > 0: a muted joiner is correctly
@@ -1182,6 +1202,13 @@ export class SfuClientService {
     // report — no second getStats(), no duplicate media-source loop.
     const outboundAudioSource: OutboundAudioSourceStat | null = extractOutboundAudioSource(stats);
 
+    // --- Sender-liveness pair (B08A-1/D29) ---
+    // SAME already-fetched stats report, SAME shared extractor the harness reader
+    // (getOutboundLiveness) uses — no second getStats(), no duplicate stat loop.
+    // Merged onto each outbound-rtp AUDIO track below so real-call diagnostics can
+    // discriminate capture-dead vs sender-dead, not just the harness.
+    const outboundLiveness: OutboundLivenessStats = extractOutboundLiveness(stats);
+
     for (const stat of stats.values()) {
       if (stat.type === 'candidate-pair' && (stat.nominated === true || stat.state === 'succeeded')) {
         rttMs = typeof stat.currentRoundTripTime === 'number' ? Math.round(stat.currentRoundTripTime * 1000) : null;
@@ -1232,6 +1259,9 @@ export class SfuClientService {
         remoteRoundTripTimeMs: null,
         remoteFractionLost: null,
         remoteJitterMs: null,
+        ...(stat.kind === 'audio'
+          ? { totalAudioEnergy: outboundLiveness.totalAudioEnergy, totalSamplesDuration: outboundLiveness.totalSamplesDuration }
+          : {}),
       };
       const index = outboundTracks.push(track) - 1;
       if (typeof stat.id === 'string') outboundTrackIndexById.set(stat.id, index);

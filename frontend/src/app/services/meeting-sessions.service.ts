@@ -274,6 +274,9 @@ export type SfuOutboundTrackStats = {
   remoteRoundTripTimeMs?: number | null;
   remoteFractionLost?: number | null;
   remoteJitterMs?: number | null;
+  /** B08A-1/D29 — capture-side pair (media-source), audio tracks only. Sender-liveness T1 discriminator input. */
+  totalAudioEnergy?: number | null;
+  totalSamplesDuration?: number | null;
 };
 
 export type SfuInboundTrackStats = {
