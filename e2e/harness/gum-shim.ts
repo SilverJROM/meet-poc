@@ -16,6 +16,7 @@
 import type { StimulusVerification } from './recording-arbiter.js';
 
 export const DEFAULT_TOLERANCE_FRACTION = 0.2;
+export const MIN_BASELINE = 0.01; // Reject baselines below this floor (dead/noise-only mics)
 
 /**
  * Page-context function. Pass to `page.addInitScript(gumShimInitScript, intendedRatio)`
@@ -85,7 +86,8 @@ export function computeStimulusVerification(
  * measurement is missing (baseline never captured, attenuated capture failed, no
  * usable reference level), verification cannot be computed — that must surface as
  * INVALID (via RecordingArbiter.determineVerdict receiving `undefined`), never a
- * silent PASS.
+ * silent PASS. Dead/too-quiet baselines (below MIN_BASELINE) also surface as INVALID
+ * to prevent noise-floor coincidences from falsely passing.
  */
 export function verifyStimulus(
   intendedGain: number,
@@ -93,7 +95,12 @@ export function verifyStimulus(
   attenuatedLevel: number | null,
   toleranceFraction = DEFAULT_TOLERANCE_FRACTION,
 ): StimulusVerification | undefined {
-  if (baselineLevel === null || attenuatedLevel === null || baselineLevel <= 0) {
+  if (
+    baselineLevel === null ||
+    attenuatedLevel === null ||
+    baselineLevel <= 0 ||
+    baselineLevel < MIN_BASELINE
+  ) {
     return undefined;
   }
   return computeStimulusVerification(intendedGain, baselineLevel, attenuatedLevel, toleranceFraction);

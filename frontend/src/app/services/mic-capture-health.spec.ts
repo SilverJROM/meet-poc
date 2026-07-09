@@ -115,10 +115,10 @@ function statsOf(...entries: Record<string, unknown>[]): { values(): IterableIte
   assert.strictEqual(classifyMicCapture(window), 'working', 'loud rising energy -> working');
 }
 
-// U-10 — Flat energy but level ABOVE threshold ⇒ NOT silent (do not over-trigger)
+// U-10 — Frozen level + flat energy → SILENT (even with high audioLevel; closes frozen-frozen-detector gap)
 {
   const window: EnergySample[] = Array.from({ length: 6 }, () => ({ totalAudioEnergy: 5.0, audioLevel: 0.4 }));
-  assert.notStrictEqual(classifyMicCapture(window), 'silent', 'flat energy + high level -> not silent');
+  assert.strictEqual(classifyMicCapture(window), 'silent', 'frozen level + flat energy -> silent (not fooled by high absolute level)');
 }
 
 // U-11 — Insufficient / null-field window ⇒ indeterminate (never a false silent claim)

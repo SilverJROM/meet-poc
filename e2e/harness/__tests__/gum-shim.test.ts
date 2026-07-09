@@ -80,4 +80,13 @@ describe('verifyStimulus + RecordingArbiter.determineVerdict — D19 INVALID != 
     const verdict = arbiter.determineVerdict(analysis, verification);
     expect(verdict.verdict).toBe('FAIL');
   });
+
+  it('dead mic: noise-floor baseline below MIN_BASELINE returns INVALID not false PASS', () => {
+    // Dead mic case: noise floor only (0.005) attenuated to (0.0025)
+    // measuredGain would be 0.5 (within tolerance), but baseline is too quiet
+    const verification = verifyStimulus(0.5, 0.005, 0.0025);
+    expect(verification).toBeUndefined();
+    const verdict = arbiter.determineVerdict(analysis, verification);
+    expect(verdict.verdict).toBe('INVALID');
+  });
 });
