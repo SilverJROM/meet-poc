@@ -84,8 +84,8 @@ describe('call-ledger', () => {
   });
 
   describe('call budget tracking', () => {
-    it('should allow acceptance burn within cap (25 calls)', () => {
-      for (let i = 0; i < 25; i++) {
+    it('should allow acceptance burn within cap (50 calls)', () => {
+      for (let i = 0; i < 50; i++) {
         const result = incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
         expect(result).toBe(true);
       }
@@ -93,7 +93,7 @@ describe('call-ledger', () => {
     });
 
     it('should reject acceptance burn beyond cap', () => {
-      for (let i = 0; i < 25; i++) {
+      for (let i = 0; i < 50; i++) {
         incrementCallBurn({ acceptanceAttempt: true, durationMs: 200_000 });
       }
       expect(isCallBurnExceeded()).toBe(false);

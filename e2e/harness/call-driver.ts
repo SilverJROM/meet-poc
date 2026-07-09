@@ -347,7 +347,7 @@ export async function joinDualBrowserCall(
 
   if (config.acceptanceAttempt && isCallBurnExceeded()) {
     throw new Error(
-      `B00S-BUDGET: acceptance attempt refused — callBurnCount exceeds 25-cap. ` +
+      `B00S-BUDGET: acceptance attempt refused — callBurnCount exceeds 50-cap. ` +
         `No more acceptance calls allowed in this run. Smoke/short joins still permitted.`,
     );
   }

@@ -32,7 +32,7 @@ const PROTECTED_IDS = new Set<string>([
   'testroom01001', // room
 ]);
 
-const DEFAULT_CALL_BURN_CAP = 25;
+const DEFAULT_CALL_BURN_CAP = 50;
 const DEFAULT_GATE_CHECK_CAP = 5;
 
 let ledgerPath: string | null = null;
