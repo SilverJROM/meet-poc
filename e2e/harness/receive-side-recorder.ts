@@ -23,13 +23,25 @@ interface B08S2CaptureState {
   trackCount: number;
   callbackCount: number;
   sampleCount: number;
-  navCount: number;
   firstTrackAtMs: number;
   audioContextState: string;
   audioSamplesBytes: Uint8Array[];
   sourceNodes: any[];
   scriptProcessor: any;
   mixerGain?: any;
+}
+
+// B00S-RELOAD: authoritative, out-of-page document-load counter per page.
+// A real page.reload() (or any main-frame document navigation) ticks this;
+// SPA route changes (history.replaceState/pushState) never do, because they
+// don't destroy the document. This replaces the removed navCount/history
+// monkeypatch, which fired on the wrong signal in both directions (see
+// decisions/2026-07-09-north-invalid-reload-document-load.md).
+const documentLoadCounts = new WeakMap<Page, { count: number }>();
+
+/** Read the out-of-page document-load count tracked for a page (test/inspection use). */
+export function getDocumentLoadCount(page: Page): number | undefined {
+  return documentLoadCounts.get(page)?.count;
 }
 
 type CaptureClassification =
@@ -48,12 +60,12 @@ type CaptureClassification =
  */
 export function classifyCapture(
   state: Partial<B08S2CaptureState>,
-  stats?: { inboundAudioRtp?: number },
+  stats?: { inboundAudioRtp?: number; documentLoadCount?: number },
 ): CaptureClassification {
   if (!state || !state.installed) {
     return { kind: 'INVALID_HOOK_MISSING' };
   }
-  if (state.navCount && state.navCount > 1) {
+  if (stats?.documentLoadCount !== undefined && stats.documentLoadCount > 1) {
     return { kind: 'INVALID_RELOAD' };
   }
   if (!state.pcCount || state.pcCount === 0) {
@@ -127,8 +139,37 @@ export async function installCaptureHook(page: Page): Promise<string> {
 
   const hookId = `hook-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
+  // B00S-RELOAD: authoritative, out-of-page document-load counter. page.on('load')
+  // is main-frame-scoped (unlike framenavigated, which also fires for subframes),
+  // so no extra filtering is needed. Guarded: mocks without .on() (call-driver.test.ts)
+  // stay unaffected — documentLoadCount simply stays undefined for them.
+  if (typeof (page as any).on === 'function') {
+    const counter = { count: 0 };
+    documentLoadCounts.set(page, counter);
+    page.on('load', () => {
+      counter.count += 1;
+    });
+  }
+
   await page.addInitScript(
     (hId: string) => {
+      // B00S-RELOAD: in-page corroboration epoch. Runs on every real document
+      // creation (including a real reload) because addInitScript re-runs then;
+      // survives the reload via sessionStorage (unlike window state, which is
+      // wiped). SPA route changes never re-run addInitScript at all, so this
+      // can't move on a route change. The out-of-page page.on('load') counter
+      // (see documentLoadCounts in the module scope) is the authoritative
+      // signal; this is corroboration only. Wrapped in try/catch: opaque-origin
+      // documents (about:blank, sandboxed frames) throw on sessionStorage access
+      // — that must never break hook installation itself.
+      try {
+        const __b08s2DocEpoch = Number(sessionStorage.getItem('__b08s2Doc') || '0') + 1;
+        sessionStorage.setItem('__b08s2Doc', String(__b08s2DocEpoch));
+        (window as any).__b08s2Doc = __b08s2DocEpoch;
+      } catch {
+        // opaque origin / storage disabled — corroboration unavailable, not fatal
+      }
+
       const originalRtcPeerConnection =
         (window as any).RTCPeerConnection || (window as any).webkitRTCPeerConnection;
 
@@ -139,7 +180,6 @@ export async function installCaptureHook(page: Page): Promise<string> {
           trackCount: 0,
           callbackCount: 0,
           sampleCount: 0,
-          navCount: 1,
           firstTrackAtMs: 0,
           audioContextState: 'closed',
           audioSamplesBytes: [],
@@ -161,7 +201,6 @@ export async function installCaptureHook(page: Page): Promise<string> {
         trackCount: 0,
         callbackCount: 0,
         sampleCount: 0,
-        navCount: 1,
         firstTrackAtMs: 0,
         audioContextState: 'closed',
         audioSamplesBytes: [] as Uint8Array[],
@@ -170,23 +209,6 @@ export async function installCaptureHook(page: Page): Promise<string> {
       } as B08S2CaptureState;
 
       const state = (window as any).__b08s2ReceiveCapture;
-
-      // Track navigations to detect page reloads. Gated on pcCount >= 1: Angular
-      // Router (and other SPA routers) fire their own replaceState/pushState
-      // during bootstrap/initial route resolution, BEFORE any RTCPeerConnection
-      // exists — that is not a reload and must not trip INVALID_RELOAD. Once a
-      // real RTCPeerConnection is up, any further history mutation is a genuine
-      // mid-call navigation and still counts.
-      const origReplace = window.history.replaceState;
-      const origPush = window.history.pushState;
-      window.history.replaceState = function (...args) {
-        if (state.pcCount >= 1) state.navCount++;
-        return origReplace.apply(window.history, args);
-      };
-      window.history.pushState = function (...args) {
-        if (state.pcCount >= 1) state.navCount++;
-        return origPush.apply(window.history, args);
-      };
 
       const processAudioTrack = (event: RTCTrackEvent) => {
         if (event.track.kind !== 'audio') return;
@@ -329,8 +351,13 @@ export async function stopAndEncodeCapture(
 
   const { state, stats } = captureResult;
 
+  // B00S-RELOAD: merge the out-of-page, authoritative document-load count
+  // (tracked since installCaptureHook) into stats before classifying.
+  const documentLoadCount = documentLoadCounts.get(page)?.count;
+  const statsWithLoadCount = { ...(stats || {}), documentLoadCount };
+
   // Classify
-  const classification = classifyCapture(state, stats);
+  const classification = classifyCapture(state, statsWithLoadCount);
 
   if (classification.kind === 'INVALID_HOOK_MISSING') {
     throw new Error('INVALID_HOOK_MISSING');

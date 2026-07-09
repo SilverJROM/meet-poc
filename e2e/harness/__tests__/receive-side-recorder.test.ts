@@ -16,30 +16,58 @@ describe('receive-side-recorder taxonomy', () => {
       expect(result.kind).toBe('INVALID_HOOK_MISSING');
     });
 
-    // navCount > 1 still means INVALID_RELOAD here (classifyCapture's contract is
-    // unchanged) — but the REAL hook (installCaptureHook) now only increments
-    // navCount for pushState/replaceState calls that happen AFTER the first
-    // RTCPeerConnection is constructed (pcCount >= 1). A pre-PC value of 2 in
-    // this pure-function test represents a genuine post-connection navigation,
-    // not an SPA router's bootstrap replaceState (which the real hook no longer
-    // counts). See b08s2-receive-capture-hook.browser.test.ts for the live-hook
-    // gating proof.
-    it('INVALID_RELOAD: navCount > 1', () => {
+    // B00S-RELOAD: INVALID_RELOAD is now driven by the out-of-page, authoritative
+    // documentLoadCount (page.on('load') between install and stop), passed in via
+    // the `stats` param — not by an in-page navCount/history monkeypatch (that was
+    // a FALSE invariant: a real reload always resets in-page state, so it never
+    // fired on an actual reload and always fired on SPA router history calls).
+    // See b08s2-receive-capture-hook.browser.test.ts for the live out-of-page proof.
+    it('INVALID_RELOAD: documentLoadCount > 1', () => {
+      const result = classifyCapture(
+        {
+          installed: true,
+          pcCount: 1,
+          trackCount: 1,
+          callbackCount: 1,
+          audioContextState: 'running',
+        },
+        { documentLoadCount: 2 },
+      );
+      expect(result.kind).toBe('INVALID_RELOAD');
+    });
+
+    it('not INVALID_RELOAD: documentLoadCount === 1 (initial join navigation only)', () => {
+      const result = classifyCapture(
+        {
+          installed: true,
+          pcCount: 1,
+          trackCount: 1,
+          callbackCount: 1,
+          audioContextState: 'running',
+          sampleCount: 4096,
+          audioSamplesBytes: [],
+        },
+        { documentLoadCount: 1 },
+      );
+      expect(result.kind).not.toBe('INVALID_RELOAD');
+    });
+
+    it('not INVALID_RELOAD: documentLoadCount undefined (unknown/untracked)', () => {
       const result = classifyCapture({
         installed: true,
-        navCount: 2,
         pcCount: 1,
         trackCount: 1,
         callbackCount: 1,
         audioContextState: 'running',
+        sampleCount: 4096,
+        audioSamplesBytes: [],
       });
-      expect(result.kind).toBe('INVALID_RELOAD');
+      expect(result.kind).not.toBe('INVALID_RELOAD');
     });
 
     it('INVALID_NO_PC: pcCount === 0', () => {
       const result = classifyCapture({
         installed: true,
-        navCount: 1,
         pcCount: 0,
         trackCount: 0,
         callbackCount: 0,
@@ -52,7 +80,6 @@ describe('receive-side-recorder taxonomy', () => {
       const result = classifyCapture(
         {
           installed: true,
-          navCount: 1,
           pcCount: 0,
           trackCount: 0,
         },
@@ -65,7 +92,6 @@ describe('receive-side-recorder taxonomy', () => {
       const result = classifyCapture(
         {
           installed: true,
-          navCount: 1,
           pcCount: 1,
           trackCount: 0,
           callbackCount: 0,
@@ -80,7 +106,6 @@ describe('receive-side-recorder taxonomy', () => {
       const result = classifyCapture(
         {
           installed: true,
-          navCount: 1,
           pcCount: 1,
           trackCount: 0,
           callbackCount: 0,
@@ -94,7 +119,6 @@ describe('receive-side-recorder taxonomy', () => {
     it('INVALID_AUDIO_GRAPH: trackCount >= 1 but callbackCount === 0', () => {
       const result = classifyCapture({
         installed: true,
-        navCount: 1,
         pcCount: 1,
         trackCount: 1,
         callbackCount: 0,
@@ -107,7 +131,6 @@ describe('receive-side-recorder taxonomy', () => {
     it('INVALID_AUDIO_GRAPH: trackCount >= 1, callbackCount >= 1 but context not running', () => {
       const result = classifyCapture({
         installed: true,
-        navCount: 1,
         pcCount: 1,
         trackCount: 1,
         callbackCount: 100,
@@ -120,7 +143,6 @@ describe('receive-side-recorder taxonomy', () => {
     it('SILENCE: trackCount >= 1, callbacks fired, context running, but RMS near-zero', () => {
       const result = classifyCapture({
         installed: true,
-        navCount: 1,
         pcCount: 1,
         trackCount: 1,
         callbackCount: 100,
@@ -145,7 +167,6 @@ describe('receive-side-recorder taxonomy', () => {
       const bytes = new Uint8Array(int16Array.buffer);
       const result = classifyCapture({
         installed: true,
-        navCount: 1,
         pcCount: 1,
         trackCount: 1,
         callbackCount: 100,
@@ -159,16 +180,16 @@ describe('receive-side-recorder taxonomy', () => {
 
     it('table-driven: no INVALID row yields VALID', () => {
       // All invalid states should never yield VALID
-      const invalidStates = [
-        { installed: false },
-        { installed: true, navCount: 2 },
-        { installed: true, navCount: 1, pcCount: 0 },
-        { installed: true, navCount: 1, pcCount: 1, trackCount: 0 },
-        { installed: true, navCount: 1, pcCount: 1, trackCount: 1, callbackCount: 0, audioContextState: 'suspended' },
+      const invalidStates: Array<[Record<string, unknown>, { documentLoadCount?: number } | undefined]> = [
+        [{ installed: false }, undefined],
+        [{ installed: true, pcCount: 1 }, { documentLoadCount: 2 }],
+        [{ installed: true, pcCount: 0 }, undefined],
+        [{ installed: true, pcCount: 1, trackCount: 0 }, undefined],
+        [{ installed: true, pcCount: 1, trackCount: 1, callbackCount: 0, audioContextState: 'suspended' }, undefined],
       ];
 
-      invalidStates.forEach((state) => {
-        const result = classifyCapture(state as any);
+      invalidStates.forEach(([state, stats]) => {
+        const result = classifyCapture(state as any, stats);
         expect(result.kind).not.toBe('VALID');
         expect(result.kind).not.toBe('SILENCE');
       });
@@ -178,7 +199,6 @@ describe('receive-side-recorder taxonomy', () => {
       // Real track, real callbacks, context running, but RMS near-zero
       const result = classifyCapture({
         installed: true,
-        navCount: 1,
         pcCount: 1,
         trackCount: 1,
         callbackCount: 50,

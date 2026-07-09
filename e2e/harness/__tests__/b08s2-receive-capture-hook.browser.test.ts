@@ -14,7 +14,7 @@ import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import { chromium, type Browser, type Page } from '@playwright/test';
-import { installCaptureHook, classifyCapture } from '../receive-side-recorder.js';
+import { installCaptureHook, classifyCapture, getDocumentLoadCount } from '../receive-side-recorder.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -164,7 +164,7 @@ describe('B08S-2 receive-capture-hook (real browser loopback, fake-device audio)
   );
 
   it(
-    'B08A-3: navCount gate — pre-PC history mutation (SPA router bootstrap) does not trip INVALID_RELOAD; post-PC mutation still does',
+    'B00S-RELOAD: SPA-style same-document navigation (history.pushState) does NOT trip INVALID_RELOAD',
     async () => {
       server = await startServer();
       browser = await chromium.launch({ args: FAKE_DEVICE_ARGS });
@@ -174,28 +174,58 @@ describe('B08S-2 receive-capture-hook (real browser loopback, fake-device audio)
       await installCaptureHook(page);
       await page.goto(server.url);
 
-      // Simulate an SPA router's bootstrap replaceState — BEFORE any RTCPeerConnection exists.
-      const preState = await page.evaluate(() => {
-        history.replaceState({}, '', location.href);
-        return { ...(window as any).__b08s2ReceiveCapture, audioSamplesBytes: [] };
-      });
-      expect(preState.pcCount).toBe(0);
-      expect(preState.navCount).toBe(1); // gated: no PC yet, bootstrap nav not counted
-      expect(classifyCapture(preState).kind).not.toBe('INVALID_RELOAD');
-
-      // Now construct a real RTCPeerConnection (pcCount becomes >= 1).
+      // Stand-in for an SPA router (e.g. Angular Router) navigating within the
+      // same document — this synthetic test harness has no real client-side
+      // router to drive, so we call the same API a router would use directly.
+      // This must NOT tick the out-of-page document-load counter, because no
+      // document is destroyed/recreated.
+      const docEpochBefore = await page.evaluate(() => sessionStorage.getItem('__b08s2Doc'));
       await page.evaluate(() => {
-        (window as any).__b08a3PostPc = new RTCPeerConnection();
-      });
-
-      // A genuine post-connection navigation must still trip the guard.
-      const postState = await page.evaluate(() => {
         history.pushState({}, '', location.href);
+      });
+      const docEpochAfter = await page.evaluate(() => sessionStorage.getItem('__b08s2Doc'));
+
+      expect(getDocumentLoadCount(page)).toBe(1);
+      expect(docEpochAfter).toBe(docEpochBefore); // unchanged: no document creation occurred
+
+      const state = await page.evaluate(() => {
         return { ...(window as any).__b08s2ReceiveCapture, audioSamplesBytes: [] };
       });
-      expect(postState.pcCount).toBeGreaterThanOrEqual(1);
-      expect(postState.navCount).toBeGreaterThan(1); // gated: PC existed, this nav counts
-      expect(classifyCapture(postState).kind).toBe('INVALID_RELOAD');
+      const classification = classifyCapture(state, { documentLoadCount: getDocumentLoadCount(page) });
+      expect(classification.kind).not.toBe('INVALID_RELOAD');
+
+      await context.close();
+    },
+    30_000,
+  );
+
+  it(
+    'B00S-RELOAD: an actual page.reload() DOES trip INVALID_RELOAD',
+    async () => {
+      server = await startServer();
+      browser = await chromium.launch({ args: FAKE_DEVICE_ARGS });
+      const context = await browser.newContext();
+      const page = await context.newPage();
+
+      await installCaptureHook(page);
+      await page.goto(server.url);
+      expect(getDocumentLoadCount(page)).toBe(1);
+
+      await page.reload();
+
+      // Real reload destroys the document: addInitScript re-runs, in-page state
+      // (__b08s2ReceiveCapture) resets — but the out-of-page counter and the
+      // sessionStorage epoch (which survives reload) both corroborate a second
+      // document load.
+      expect(getDocumentLoadCount(page)).toBe(2);
+      const docEpoch = await page.evaluate(() => sessionStorage.getItem('__b08s2Doc'));
+      expect(docEpoch).toBe('2');
+
+      const state = await page.evaluate(() => {
+        return { ...(window as any).__b08s2ReceiveCapture, audioSamplesBytes: [] };
+      });
+      const classification = classifyCapture(state, { documentLoadCount: getDocumentLoadCount(page) });
+      expect(classification.kind).toBe('INVALID_RELOAD');
 
       await context.close();
     },
