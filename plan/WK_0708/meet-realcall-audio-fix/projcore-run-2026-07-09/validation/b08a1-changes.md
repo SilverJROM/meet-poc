@@ -1,6 +1,6 @@
 # B08A-1 Changes — AC15a sender-liveness stats reader (D28 + D29)
 
-**Commit:** pending (recorded below after commit)
+**Commit:** `0ca6670`
 **Date:** 2026-07-09
 **Test Status:** pure-extractor unit tests + `sfu-client.spec.ts` integration tests, all passing; FE build green
 
