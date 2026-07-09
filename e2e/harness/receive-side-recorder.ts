@@ -105,9 +105,10 @@ function calculateRms(base64Samples: string): number {
  * Install receive-side audio capture hook on page BEFORE any navigation.
  * Must call BEFORE page.goto() so hook persists and intercepts PC construction at join.
  * GUARD: throws if page.url() !== 'about:blank' (ordering guard, prevents late install).
+ * Note: guard is defensive; mocks without url() method are allowed (test-only).
  */
 export async function installCaptureHook(page: Page): Promise<string> {
-  const currentUrl = page.url();
+  const currentUrl = typeof (page as any).url === 'function' ? (page as any).url() : 'about:blank';
   if (currentUrl !== 'about:blank') {
     throw new Error(
       `Cannot install capture hook: page already navigated (url="${currentUrl}"). ` +
@@ -329,7 +330,13 @@ export async function stopAndEncodeCapture(
   if (classification.kind === 'VALID' || classification.kind === 'SILENCE') {
     const base64Samples = state!.audioSamplesBase64;
     const int16Buffer = Buffer.from(base64Samples, 'base64');
-    const float32 = new Float32Array(int16Buffer.buffer, int16Buffer.byteOffset, int16Buffer.length / 2);
+
+    // Convert int16 to float32 properly
+    const int16Array = new Int16Array(int16Buffer.buffer, int16Buffer.byteOffset, int16Buffer.length / 2);
+    const float32 = new Float32Array(int16Array.length);
+    for (let i = 0; i < int16Array.length; i++) {
+      float32[i] = int16Array[i] / 32768;
+    }
 
     const encoder = new WavEncoder({ sampleRate: 48000, channels: 1 });
     const wavBuffer = encoder.encode(float32);

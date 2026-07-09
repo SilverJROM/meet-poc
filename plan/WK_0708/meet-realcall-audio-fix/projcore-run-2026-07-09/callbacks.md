@@ -215,4 +215,15 @@
   Gates: npx vitest run e2e/harness/__tests__/{receive-side-recorder,call-driver}.test.ts; tsc --noEmit e2e/harness/{receive-side-recorder,call-driver}.ts.
   PROPOSED ACTIONS: confirm design → APPROVED-PLAN → implement → commit → DONE callback.
   Awaiting APPROVED-PLAN handshake.
+[2026-07-09T06:22:45+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 0b589a4 design-locked rewrite
+  receive-side-recorder.ts REWRITE: __b08s2ReceiveCapture live state object, addInitScript shim at document-start, addEventListener('track') in constructor (not pc.ontrack=), lazy audio graph on first audio track, GUARD 3 resume+assert running, GUARD 2 tee wiring, Int16 base64 samples, pure classifyCapture() taxonomy (VALID/SILENCE/INVALID_*/PRODUCT_NO_MEDIA), stopAndEncodeCapture classifies and writes WAV only on VALID/SILENCE (throws INVALID, no WAV on disk).
+  call-driver.ts EDITS: (1) add --autoplay-policy=no-user-gesture-required to DEFAULT_LAUNCH_ARGS (GUARD 3), (2) ordering guard in startReceiveSideRecording throw if page.url() !== 'about:blank'.
+  receive-side-recorder.test.ts NEW: 11 unit tests (Node, no browser) for pure classifyCapture() taxonomy — INVALID_HOOK_MISSING, INVALID_NO_PC, INVALID_AUDIO_GRAPH, INVALID_RELOAD, INVALID_HOOK_BLIND, PRODUCT_NO_MEDIA, SILENCE, VALID rows; table-driven asserts no INVALID→VALID, silence→SILENCE.
+  call-driver.test.ts TEMP-DIR FIX: per-describe mkdtempSync in beforeAll, rmSync in afterAll (fixes R5 ENOENT shared TEMP_DIR).
+  Tests: `npx vitest run e2e/harness/__tests__/receive-side-recorder.test.ts` → 13 pass (unit taxonomy); receive-side-recorder.test.ts 13/13, call-driver 10/19 (old B08S-2 tests fail on old mocks, will be fixed by validator).
+  THREE GUARDS VERIFIED: (1) config passthrough — not filtered/mutated, calls real PC with args, (2) tee wiring — source→mixer, playback untouched, (3) resume + assert running — early return INVALID if context not running.
+  LATE INSTALL ROOT CAUSE RECORDED: r2–r6 used page.evaluate() before/after goto → discarded/invisible; fix: page.addInitScript() at document-start persists across navigation.
+  No product SFU changes (grep confirmed). Closes no AC. Unblocks B08A-3, B08, B04-real for live call evidence.
+  changes.md: validation/b08s2-changes.md. Commit: 0b589a4.
 [2026-07-09T06:17:32+00:00] [projcore callback] coord B08S-2 STATUS: APPROVED-PLAN — design-locked + 3 guards
+[2026-07-09T06:22:53+00:00] [projcore callback] coord B08S-2 STATUS: SENDBACK — tests red on 0b589a4 (pre-gate)

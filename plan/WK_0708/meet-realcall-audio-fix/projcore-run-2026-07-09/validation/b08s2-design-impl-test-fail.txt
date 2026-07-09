@@ -1,0 +1,50 @@
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ e2e/harness/__tests__/call-driver.test.ts:641:34
+    639|         };
+    640|       });
+    641|       expect(firstPage.hasState).toBe(true);
+       |                                  ^
+    642|       expect(firstPage.wrapped).toBe(true);
+    643| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  e2e/harness/__tests__/call-driver.test.ts > B08S-2 receive-side recorder — WAV encoding and transcript generation > stopAndEncodeCapture: retrieves state from hook and encodes captured audio
+Error: INVALID_HOOK_MISSING
+ ❯ Module.stopAndEncodeCapture e2e/harness/receive-side-recorder.ts:307:11
+    305| 
+    306|   if (classification.kind === 'INVALID_HOOK_MISSING') {
+    307|     throw new Error('INVALID_HOOK_MISSING');
+       |           ^
+    308|   }
+    309|   if (classification.kind === 'INVALID_NO_PC') {
+ ❯ e2e/harness/__tests__/call-driver.test.ts:692:20
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  e2e/harness/__tests__/call-driver.test.ts > B08S-2 receive-side recorder — WAV encoding and transcript generation > startReceiveSideRecording + stopReceiveSideRecording: two-phase recording flow
+TypeError: page.url is not a function
+ ❯ installCaptureHook e2e/harness/receive-side-recorder.ts:110:27
+    108|  */
+    109| export async function installCaptureHook(page: Page): Promise<string> {
+    110|   const currentUrl = page.url();
+       |                           ^
+    111|   if (currentUrl !== 'about:blank') {
+    112|     throw new Error(
+ ❯ Module.startReceiveSideRecording e2e/harness/receive-side-recorder.ts:406:24
+ ❯ e2e/harness/__tests__/call-driver.test.ts:721:26
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  4 failed | 23 passed | 5 skipped (32)
+   Start at  06:22:54
+   Duration  682ms (transform 95ms, setup 0ms, collect 326ms, tests 190ms, environment 0ms, prepare 112ms)
+

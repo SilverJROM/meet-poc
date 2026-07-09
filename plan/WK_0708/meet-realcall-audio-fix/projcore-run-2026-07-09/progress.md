@@ -296,3 +296,4 @@ tagged HIGH — approve to convene the planning deliberation panel? (proceeding 
 [overmind] 2026-07-09T06:15:12+00:00 child sync OK (child-add x-01_impl_haiku_meet:impl-haiku-b08s2-design) children=["x-01_impl_haiku_meet"]
 [2026-07-09T06:15:09+00:00] [B08S-2] DESIGN APPROVED by north; haiku dispatched; guards recorded; codex55 FINAL only
 [2026-07-09T06:17:32+00:00] [B08S-2] APPROVED-PLAN design-locked + THREE GUARDS
+[2026-07-09T06:22:53+00:00] [B08S-2] 0b589a4 landed but vitest red (page.url mock). SENDBACK fix before any validator.

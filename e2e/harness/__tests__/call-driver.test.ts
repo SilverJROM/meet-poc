@@ -634,7 +634,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
       // Probe on first page (hook should be present)
       const firstPage = await page.evaluate(() => {
         return {
-          hasState: !!(window as any).__captureHookState,
+          hasState: !!(window as any).__b08s2ReceiveCapture,
           wrapped: typeof (window as any).RTCPeerConnection === 'function',
         };
       });
@@ -648,7 +648,7 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
       // Probe AFTER navigation (hook MUST persist because addInitScript injects on every load)
       const secondPage = await page.evaluate(() => {
         return {
-          hasState: !!(window as any).__captureHookState,
+          hasState: !!(window as any).__b08s2ReceiveCapture,
           wrapped: typeof (window as any).RTCPeerConnection === 'function',
         };
       });
@@ -670,21 +670,39 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
         // Mock addInitScript for hook installation
         return undefined;
       },
+      url: () => 'about:blank',
       evaluate: async (fn: (hId: string) => Promise<any>, hId: string) => {
         // Simulate: hook was installed, real audio was captured
+        // Return state object + stats (new format)
         const sampleRate = 48000;
-        const duration = 1000; // 1 second
+        const duration = 1000;
         const numSamples = Math.floor((duration / 1000) * sampleRate);
-        const samples: number[] = [];
 
-        // Generate a 220Hz sine wave (real captured audio simulation)
+        // Create base64 encoded int16 samples
+        const int16 = new Int16Array(numSamples);
         for (let i = 0; i < numSamples; i++) {
           const t = i / sampleRate;
           const sine = Math.sin(2 * Math.PI * 220 * t) * 0.5;
-          samples.push(sine);
+          int16[i] = sine < 0 ? sine * 0x8000 : sine * 0x7fff;
         }
+        const audioSamplesBase64 = Buffer.from(int16).toString('base64');
 
-        return { samples, sampleRate, durationMs: duration };
+        return {
+          state: {
+            installed: true,
+            pcCount: 1,
+            trackCount: 1,
+            callbackCount: 100,
+            sampleCount: numSamples,
+            navCount: 1,
+            firstTrackAtMs: 0,
+            audioContextState: 'running',
+            audioSamplesBase64,
+            sourceNodes: [],
+            scriptProcessor: null,
+          },
+          stats: { inboundAudioRtp: 1000 },
+        };
       },
     } as any;
 
@@ -704,16 +722,36 @@ describe('B08S-2 receive-side recorder — WAV encoding and transcript generatio
         // Mock addInitScript for hook installation
         return undefined;
       },
+      url: () => 'about:blank',
       evaluate: async (fn: (hId: string) => Promise<any>, hId: string) => {
-        // Mock returning real audio samples
+        // Mock returning state + stats (new format)
         const sampleRate = 48000;
-        const numSamples = 48000; // 1 second
-        const samples: number[] = [];
+        const numSamples = 48000;
+
+        const int16 = new Int16Array(numSamples);
         for (let i = 0; i < numSamples; i++) {
           const t = i / sampleRate;
-          samples.push(Math.sin(2 * Math.PI * 220 * t) * 0.5);
+          const sine = Math.sin(2 * Math.PI * 220 * t) * 0.5;
+          int16[i] = sine < 0 ? sine * 0x8000 : sine * 0x7fff;
         }
-        return { samples, sampleRate, durationMs: 1000 };
+        const audioSamplesBase64 = Buffer.from(int16).toString('base64');
+
+        return {
+          state: {
+            installed: true,
+            pcCount: 1,
+            trackCount: 1,
+            callbackCount: 100,
+            sampleCount: numSamples,
+            navCount: 1,
+            firstTrackAtMs: 0,
+            audioContextState: 'running',
+            audioSamplesBase64,
+            sourceNodes: [],
+            scriptProcessor: null,
+          },
+          stats: { inboundAudioRtp: 1000 },
+        };
       },
     } as any;
 
