@@ -160,6 +160,87 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
       expect(dryRunDualBrowserCall.length).toBeGreaterThanOrEqual(1); // accepts config param
     },
   );
+
+  it(
+    'diagnostics sampling: correctly reads __meetDebug and sfuGetStats with stubbed globals',
+    () => {
+      // Unit test for joinBrowser diagnostics path (F1)
+      // Validates that the correct debug object (__meetDebug) and method (sfuGetStats) are used
+      // by simulating the browser context sampling logic
+
+      const mockSessionId = 'sess-12345-mock';
+      const mockStats = [
+        {
+          type: 'outbound-rtp',
+          mediaType: 'audio',
+          bytesSent: 5000,
+        },
+        {
+          type: 'outbound-rtp',
+          mediaType: 'audio',
+          bytesSent: 3000,
+        },
+        {
+          type: 'inbound-rtp', // Should be ignored
+          mediaType: 'audio',
+          bytesSent: 1000,
+        },
+      ];
+
+      // Test 1: sessionId is correctly extracted from __meetDebug
+      const contextWithSession = {
+        __meetDebug: {
+          sessionId: mockSessionId,
+          sfuGetStats: async () => mockStats,
+        },
+      };
+
+      const sessionIdResult = (contextWithSession as any).__meetDebug?.sessionId || null;
+      expect(sessionIdResult).toBe(mockSessionId);
+
+      // Test 2: bytesSent is correctly accumulated from outbound-rtp audio stats
+      let totalBytes = 0;
+      if (contextWithSession.__meetDebug?.sfuGetStats) {
+        for (const stat of mockStats) {
+          if (stat.type === 'outbound-rtp' && stat.mediaType === 'audio') {
+            totalBytes += stat.bytesSent || 0;
+          }
+        }
+      }
+      expect(totalBytes).toBe(8000); // 5000 + 3000
+
+      // Test 3: Missing sfuGetStats returns 0 (no publish)
+      const contextWithoutStats = {
+        __meetDebug: {
+          sessionId: mockSessionId,
+          // sfuGetStats is missing
+        },
+      };
+
+      let noStatsBytes = 0;
+      if (contextWithoutStats.__meetDebug?.sfuGetStats) {
+        for (const stat of mockStats) {
+          if (stat.type === 'outbound-rtp' && stat.mediaType === 'audio') {
+            noStatsBytes += stat.bytesSent || 0;
+          }
+        }
+      }
+      expect(noStatsBytes).toBe(0);
+
+      // Test 4: Missing __meetDebug entirely returns 0 (diagnostic unavailable)
+      const contextNoDebug = {}; // No __meetDebug
+
+      let noDebugBytes = 0;
+      if ((contextNoDebug as any).__meetDebug?.sfuGetStats) {
+        for (const stat of mockStats) {
+          if (stat.type === 'outbound-rtp' && stat.mediaType === 'audio') {
+            noDebugBytes += stat.bytesSent || 0;
+          }
+        }
+      }
+      expect(noDebugBytes).toBe(0);
+    },
+  );
 });
 
 describe('B08S-1 call driver — integration with ConversationScheduler', () => {

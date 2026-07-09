@@ -98,7 +98,7 @@ async function joinBrowser(
   const sessionId = await page
     .evaluate(() => {
       try {
-        return (window as any).__MEET_DIAGNOSTICS?.sessionId || null;
+        return (window as any).__meetDebug?.sessionId || null;
       } catch {
         return null;
       }
@@ -109,7 +109,7 @@ async function joinBrowser(
   const publishedBytes = await page
     .evaluate(async () => {
       try {
-        const stats = await (window as any).__MEET_DIAGNOSTICS?.getStats?.();
+        const stats = await (window as any).__meetDebug?.sfuGetStats?.();
         if (!stats) return 0;
         let totalBytes = 0;
         for (const stat of stats) {
@@ -184,11 +184,17 @@ export async function joinDualBrowserCall(
     context1 = await browser.newContext({ permissions: ['microphone', 'camera'] });
     page1 = await context1.newPage();
     const result1 = await joinBrowser(page1, roomUrl, config.speaker1Name);
+    if (result1.sessionId) {
+      registerCreatedID('session', result1.sessionId);
+    }
 
     // Browser 2
     context2 = await browser.newContext({ permissions: ['microphone', 'camera'] });
     page2 = await context2.newPage();
     const result2 = await joinBrowser(page2, roomUrl, config.speaker2Name);
+    if (result2.sessionId) {
+      registerCreatedID('session', result2.sessionId);
+    }
 
     // If a script is provided, run it (optional conversation)
     if (script && page1 && page2) {
