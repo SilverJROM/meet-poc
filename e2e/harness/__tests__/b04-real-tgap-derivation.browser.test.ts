@@ -159,6 +159,7 @@ function runLocalWhisper(wavPath: string, clientId: string, displayName: string)
  * Detect silence spans in receive-side WAV using voiced segment analysis.
  * D27: dropout = silence overlapping with far-end speaker turn.
  * Convert voiced segments to silence spans between them.
+ * F2: Extract actual sample rate from WAV header (48kHz for real captures).
  */
 async function detectSilenceSpans(wavPath: string): Promise<SilenceSpan[]> {
   const arbiter = new RecordingArbiter(path.dirname(wavPath));
@@ -170,12 +171,15 @@ async function detectSilenceSpans(wavPath: string): Promise<SilenceSpan[]> {
     // Entire recording is silence
     return [{
       startMs: 0,
-      endMs: 1000, // Approximation; exact duration would need header parse
+      endMs: 1000,
       durationMs: 1000,
     }];
   }
 
-  const sampleRate = 16000; // Standard sample rate; could be parsed from WAV header
+  // F2: Extract actual sample rate from WAV header (not 16kHz)
+  const buffer = fs.readFileSync(wavPath);
+  const fmtPos = buffer.indexOf(Buffer.from('fmt '));
+  const sampleRate = fmtPos !== -1 ? buffer.readUInt32LE(fmtPos + 12) : 48000;
 
   // Build silence spans from gaps between voiced segments
   for (let i = 0; i < analysis.voicedSegments.length - 1; i++) {
@@ -201,6 +205,8 @@ async function detectSilenceSpans(wavPath: string): Promise<SilenceSpan[]> {
 
 /**
  * Format T_gap decision document with evidence from two call analyses.
+ * F1 D27: Wire STT data into the document for missing-word corroboration.
+ * F3: Status = MEASURED (not VERIFIED; leave for validator).
  */
 function formatDecisionDocument(
   call1Analysis: DropoutDetectionResult,
@@ -211,13 +217,15 @@ function formatDecisionDocument(
   call2Room: string,
   call2Session: string,
   evidencePaths: { call1Wav?: string; call1Tx?: string; call2Wav?: string; call2Tx?: string },
+  call1STT?: { text: string; wordCount: number; words: string[] },
+  call2STT?: { text: string; wordCount: number; words: string[] },
 ): string {
   const combined = mergedResult.combined;
   const { derivedTGap, rationale } = mergedResult;
 
   return `# Real T_gap Derivation — B04-real
 
-**Status: VERIFIED** (dual-browser instrumented, D27 binding)
+**Status: MEASURED** (dual-browser instrumented, D27 binding, validator to confirm)
 **Measured T_gap: ${derivedTGap} ms**
 **Rationale: ${rationale}**
 
@@ -238,6 +246,7 @@ corroborated by **missing transcript words** — never an inter-utterance pause.
 - Duration: ${call1Analysis.statistics.callDurationMs} ms
 - Recording: ${evidencePaths.call1Wav ? path.basename(evidencePaths.call1Wav) : 'N/A'}
 - Transcript: ${evidencePaths.call1Tx ? path.basename(evidencePaths.call1Tx) : 'N/A'}
+- STT words recognized: ${call1STT?.wordCount ?? 0} (D27 corroboration)
 
 ### Call 2
 - Room: \`${call2Room}\`
@@ -246,6 +255,7 @@ corroborated by **missing transcript words** — never an inter-utterance pause.
 - Duration: ${call2Analysis.statistics.callDurationMs} ms
 - Recording: ${evidencePaths.call2Wav ? path.basename(evidencePaths.call2Wav) : 'N/A'}
 - Transcript: ${evidencePaths.call2Tx ? path.basename(evidencePaths.call2Tx) : 'N/A'}
+- STT words recognized: ${call2STT?.wordCount ?? 0} (D27 corroboration)
 
 ## Distribution Statistics
 | Metric | Value |
@@ -426,14 +436,27 @@ describe('B04-real: Real dual-browser T_gap derivation', () => {
     expect(call1Data).toBeTruthy();
     expect(call2Data).toBeTruthy();
 
-    const { analysis: analysis1, result: result1 } = call1Data;
-    const { analysis: analysis2, result: result2 } = call2Data;
+    const { analysis: analysis1, result: result1, stt: stt1 } = call1Data;
+    const { analysis: analysis2, result: result2, stt: stt2 } = call2Data;
+
+    // F1: Persist transcripts to EVIDENCE_DIR
+    fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+    if (stt1?.text) {
+      const txPath1 = path.join(EVIDENCE_DIR, 'call1-transcript.json');
+      fs.writeFileSync(txPath1, JSON.stringify({ words: stt1.words, text: stt1.text, wordCount: stt1.wordCount }, null, 2));
+      console.log(`Call 1 transcript persisted: ${txPath1}`);
+    }
+    if (stt2?.text) {
+      const txPath2 = path.join(EVIDENCE_DIR, 'call2-transcript.json');
+      fs.writeFileSync(txPath2, JSON.stringify({ words: stt2.words, text: stt2.text, wordCount: stt2.wordCount }, null, 2));
+      console.log(`Call 2 transcript persisted: ${txPath2}`);
+    }
 
     // Merge analyses to derive T_gap
     const mergedResult = mergeTwoCallAnalyses(analysis1, analysis2);
     console.log(`Merged T_gap derivation:`, mergedResult);
 
-    // Format decision document
+    // F1 D27: Format decision document with STT data for missing-word corroboration
     const decisionDoc = formatDecisionDocument(
       analysis1,
       analysis2,
@@ -444,8 +467,12 @@ describe('B04-real: Real dual-browser T_gap derivation', () => {
       result2.sessionId || 'N/A',
       {
         call1Wav: path.join(EVIDENCE_DIR, 'call1-receive.wav'),
+        call1Tx: stt1?.text ? path.join(EVIDENCE_DIR, 'call1-transcript.json') : undefined,
         call2Wav: path.join(EVIDENCE_DIR, 'call2-receive.wav'),
+        call2Tx: stt2?.text ? path.join(EVIDENCE_DIR, 'call2-transcript.json') : undefined,
       },
+      stt1,
+      stt2,
     );
 
     // Write decisions/T_gap.md
@@ -464,5 +491,6 @@ describe('B04-real: Real dual-browser T_gap derivation', () => {
     expect(fs.existsSync(decisionPath)).toBe(true);
     const written = fs.readFileSync(decisionPath, 'utf-8');
     expect(written).toContain(`${mergedResult.derivedTGap} ms`);
+    expect(written).toContain('MEASURED');
   });
 });
