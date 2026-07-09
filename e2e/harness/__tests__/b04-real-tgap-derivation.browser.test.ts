@@ -20,6 +20,7 @@ import {
   mergeTwoCallAnalyses,
   type SilenceSpan,
   type DropoutDetectionResult,
+  type STTData,
 } from '../dropout-analyzer.js';
 
 const BASE_URL = 'http://localhost:4700';
@@ -333,12 +334,18 @@ describe('B04-real: Real dual-browser T_gap derivation', () => {
       const stt = runLocalWhisper(result.receiveSideWavPath!, 'bot-140', 'bot-140');
       console.log(`Call 1: whisper produced ${stt.wordCount} words`);
 
-      // Detect dropouts using analyzer
-      const dropouts = detectDropouts(script, silenceSpans, 'bot-123');
+      // Prepare STT data for corroboration
+      const sttData: STTData = {
+        words: stt.words,
+        text: stt.text,
+      };
+
+      // Detect dropouts using analyzer with STT corroboration
+      const dropouts = detectDropouts(script, silenceSpans, 'bot-123', sttData);
       console.log(`Call 1: ${dropouts.length} dropouts detected`);
 
-      // Analyze this call
-      const analysis1 = analyzeCall(script, silenceSpans, 'bot-123', result.duration);
+      // Analyze this call with STT corroboration
+      const analysis1 = analyzeCall(script, silenceSpans, 'bot-123', result.duration, sttData);
       console.log(`Call 1 analysis:`, {
         dropouts: analysis1.statistics.totalObserved,
         distribution: analysis1.distribution,
@@ -401,12 +408,18 @@ describe('B04-real: Real dual-browser T_gap derivation', () => {
       const stt = runLocalWhisper(result.receiveSideWavPath!, 'bot-140', 'bot-140');
       console.log(`Call 2: whisper produced ${stt.wordCount} words`);
 
-      // Detect dropouts
-      const dropouts = detectDropouts(script, silenceSpans, 'bot-123');
+      // Prepare STT data for corroboration
+      const sttData: STTData = {
+        words: stt.words,
+        text: stt.text,
+      };
+
+      // Detect dropouts with STT corroboration
+      const dropouts = detectDropouts(script, silenceSpans, 'bot-123', sttData);
       console.log(`Call 2: ${dropouts.length} dropouts detected`);
 
-      // Analyze this call
-      const analysis2 = analyzeCall(script, silenceSpans, 'bot-123', result.duration);
+      // Analyze this call with STT corroboration
+      const analysis2 = analyzeCall(script, silenceSpans, 'bot-123', result.duration, sttData);
       console.log(`Call 2 analysis:`, {
         dropouts: analysis2.statistics.totalObserved,
         distribution: analysis2.distribution,

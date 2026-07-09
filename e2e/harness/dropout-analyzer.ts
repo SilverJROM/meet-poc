@@ -11,6 +11,11 @@ export interface SilenceSpan {
   description?: string;
 }
 
+export interface STTData {
+  words: string[];
+  text: string;
+}
+
 export interface DropoutDetectionResult {
   dropouts: SilenceSpan[];
   distribution: {
@@ -30,14 +35,37 @@ export interface DropoutDetectionResult {
 }
 
 /**
+ * Check if expected words from an utterance are present in STT data.
+ * Returns true if the utterance shows missing words (dropout), false if words are present.
+ */
+function hasExpectedWordsInSTT(utteranceText: string, sttData: STTData): boolean {
+  // Extract expected words from utterance text (case-insensitive, alphanumeric only)
+  const expectedWords = utteranceText
+    .toLowerCase()
+    .split(/\W+/)
+    .filter((w) => w.length > 0);
+
+  if (expectedWords.length === 0) return true; // Empty utterance is not a dropout
+
+  // Count how many expected words appear in the STT data
+  const recognizedSet = new Set(sttData.words);
+  const matchedWords = expectedWords.filter((w) => recognizedSet.has(w)).length;
+
+  // Dropout indicator: less than 50% of expected words were recognized
+  return matchedWords < expectedWords.length * 0.5;
+}
+
+/**
  * Pure detector: given a script and detected silence spans, find dropouts.
- * A dropout is a silence that overlaps with a scripted speaker's turn (not the receiver).
+ * A dropout is a silence that overlaps with a scripted speaker's turn (not the receiver),
+ * corroborated by missing STT words — never an inter-utterance pause (D27).
  * Receiver-specific because only the far-end speaker's silence at the receiver counts.
  */
 export function detectDropouts(
   script: ConversationScript,
   silenceSpans: SilenceSpan[],
   receiverSpeakerId: 'bot-140' | 'bot-123',
+  sttData?: STTData,
 ): SilenceSpan[] {
   // The far-end speaker is the one NOT receiving
   const farEndSpeaker = receiverSpeakerId === 'bot-140' ? 'bot-123' : 'bot-140';
@@ -57,12 +85,17 @@ export function detectDropouts(
         // Guard: do not treat a silence that starts AFTER the utterance ended as a dropout
         // (that is an inter-utterance pause, not a dropout during speech)
         if (silence.startMs < utteranceEnd) {
-          dropouts.push({
-            startMs: Math.max(silence.startMs, utteranceStart),
-            endMs: Math.min(silence.endMs, utteranceEnd),
-            durationMs: Math.min(silence.endMs, utteranceEnd) - Math.max(silence.startMs, utteranceStart),
-            description: `Dropout during "${utterance.text}" at ${utteranceStart}ms`,
-          });
+          // Corroborate with STT: if STT data exists, only mark as dropout if words are missing
+          const isDropout = !sttData || hasExpectedWordsInSTT(utterance.text, sttData);
+
+          if (isDropout) {
+            dropouts.push({
+              startMs: Math.max(silence.startMs, utteranceStart),
+              endMs: Math.min(silence.endMs, utteranceEnd),
+              durationMs: Math.min(silence.endMs, utteranceEnd) - Math.max(silence.startMs, utteranceStart),
+              description: `Dropout during "${utterance.text}" at ${utteranceStart}ms`,
+            });
+          }
         }
       }
     }
@@ -109,16 +142,17 @@ export function computeDistribution(
 }
 
 /**
- * Analyze a single call's dropout pattern: given script, detected silences, and receiver,
- * compute dropouts and statistics.
+ * Analyze a single call's dropout pattern: given script, detected silences, STT data, and receiver,
+ * compute dropouts and statistics. D27 binding: silence + missing words = dropout.
  */
 export function analyzeCall(
   script: ConversationScript,
   silenceSpans: SilenceSpan[],
   receiverSpeakerId: 'bot-140' | 'bot-123',
   callDurationMs: number,
+  sttData?: STTData,
 ): DropoutDetectionResult {
-  const dropouts = detectDropouts(script, silenceSpans, receiverSpeakerId);
+  const dropouts = detectDropouts(script, silenceSpans, receiverSpeakerId, sttData);
   const durations = dropouts.map((d) => d.durationMs);
   const dist = computeDistribution(durations);
 

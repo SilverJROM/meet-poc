@@ -1,8 +1,8 @@
 # Real T_gap Derivation — B04-real
 
 **Status: MEASURED** (dual-browser instrumented, D27 binding, validator to confirm)
-**Measured T_gap: 350 ms**
-**Rationale: p95=279.52083333333576ms + 25% margin (70ms) = 350ms**
+**Measured T_gap: 358 ms**
+**Rationale: p95=285.02083333333576ms + 25% margin (72ms) = 358ms**
 
 ## Dropout Definition (D27 binding)
 A dropout is a span with no voiced energy at the far end **while the script says that peer was speaking**,
@@ -10,24 +10,24 @@ corroborated by **missing transcript words** — never an inter-utterance pause.
 
 ## Evidence Summary
 - **Total calls analyzed**: 2 instrumented acceptance-class runs
-- **Total dropouts detected**: 20
-- **Total dropout duration**: 4203.375000000009 ms
-- **Call runtime**: 81538 ms
+- **Total dropouts detected**: 17
+- **Total dropout duration**: 3456.770833333344 ms
+- **Call runtime**: 84051 ms
 
 ### Call 1
-- Room: `d1541a0dad5a`
+- Room: `4d88b085d514`
 - Session: `N/A`
-- Dropouts: 9
-- Duration: 41318 ms
+- Dropouts: 6
+- Duration: 40703 ms
 - Recording: call1-receive.wav
 - Transcript: call1-transcript.json
-- STT words recognized: 8 (D27 corroboration)
+- STT words recognized: 3 (D27 corroboration)
 
 ### Call 2
-- Room: `5c5c830248ef`
+- Room: `efae5715d3ce`
 - Session: `N/A`
 - Dropouts: 11
-- Duration: 40220 ms
+- Duration: 43348 ms
 - Recording: call2-receive.wav
 - Transcript: call2-transcript.json
 - STT words recognized: 4 (D27 corroboration)
@@ -35,19 +35,20 @@ corroborated by **missing transcript words** — never an inter-utterance pause.
 ## Distribution Statistics
 | Metric | Value |
 |--------|-------|
-| Min (ms) | 26.04166666666424 |
-| Median (ms) | 219.6249999999991 |
-| Mean (ms) | 210.16875000000044 |
-| P95 (ms) | 279.52083333333576 |
-| P99 (ms) | 279.52083333333576 |
-| Max (ms) | 279.52083333333576 |
+| Min (ms) | 6.9375 |
+| Median (ms) | 217.06250000000364 |
+| Mean (ms) | 203.33946078431435 |
+| P95 (ms) | 285.02083333333576 |
+| P99 (ms) | 285.02083333333576 |
+| Max (ms) | 285.02083333333576 |
 
 ## Histogram (50ms bins)
 ```
-150-200ms: ██ (2)
-200-250ms: ███████████ (11)
-250-300ms: █████ (5)
+200-250ms: █████████ (9)
+250-300ms: ████ (4)
+150-200ms: █ (1)
 0-50ms: █ (1)
+100-150ms: █ (1)
 50-100ms: █ (1)
 ```
 
@@ -63,6 +64,6 @@ corroborated by **missing transcript words** — never an inter-utterance pause.
 3. If future data diverges, measured value wins and this entry is superseded.
 
 ## Usage Notes
-- Use `T_gap = 350ms` for B14 (Mode B recovery), B15 (network loss), B16 (rejoin storm).
+- Use `T_gap = 358ms` for B14 (Mode B recovery), B15 (network loss), B16 (rejoin storm).
 - Closes no AC itself; all ACs gated on T_gap now re-verify against this value.
 - No call budget impact beyond the 2/25 ledger entries logged during this batch.
