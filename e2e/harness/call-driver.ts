@@ -18,6 +18,14 @@ export interface CallDriverConfig {
   ledgerBasePath?: string; // Path to store ledger state
   recordReceiveSide?: boolean; // B08S-2: capture receive-side audio
   receiverPageIndex?: 0 | 1; // Which browser receives (0=speaker1, 1=speaker2, default 1)
+  /**
+   * B08A-3: optional mid-call hook, invoked once both browsers have joined and
+   * publish-bytes validation has passed, BEFORE receive-side recording stops and
+   * BEFORE the call burn increments. Lets a caller sample live stats (e.g.
+   * sender-liveness) while the call is still up. Additive/backward-compatible:
+   * omitting it changes nothing about existing behavior.
+   */
+  onLive?: (ctx: { page1: Page; page2: Page; roomId: string }) => Promise<void>;
 }
 
 export interface CallResult {
@@ -112,8 +120,18 @@ async function joinBrowser(
     })
     .catch(() => null);
 
-  // Sample outbound RTP bytes to verify publishing
-  const publishedBytes = await page
+  // B08A-3: ICE/DTLS/SFU negotiation is not instantaneous on a real server —
+  // a single sample right after clicking join reads 0 (confirmed live: prior
+  // single-shot sample got speaker1=0, speaker2=3 bytes). Poll instead of
+  // sampling once.
+  const publishedBytes = await waitForPublishedAudioBytes(page, 8000);
+
+  return { sessionId: sessionId as string | undefined, publishedBytes };
+}
+
+/** Sample outbound RTP audio bytes over the current SFU connection. */
+async function sampleOutboundAudioBytes(page: Page): Promise<number> {
+  return page
     .evaluate(async () => {
       try {
         const stats = await (window as any).__meetDebug?.sfuGetStats?.();
@@ -140,19 +158,56 @@ async function joinBrowser(
       }
     })
     .catch(() => 0);
+}
 
-  return { sessionId: sessionId as string | undefined, publishedBytes };
+/** Polls sampleOutboundAudioBytes until nonzero or timeoutMs elapses. */
+async function waitForPublishedAudioBytes(page: Page, timeoutMs: number): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  let latest = 0;
+  while (Date.now() < deadline) {
+    latest = await sampleOutboundAudioBytes(page);
+    if (latest > 0) return latest;
+    await new Promise((r) => setTimeout(r, 400));
+  }
+  return latest;
 }
 
 /**
- * Creates a room via API
+ * B08A-3: authenticates against the real app using the project's own sanctioned
+ * e2e credentials (same source as e2e/fixtures/auth.ts's loginAsJrom — the
+ * single seeded dev user, jrom@silverjrom.app, password read from
+ * INITIAL_PASSWORD.txt) and returns the `session` cookie value. POST /api/rooms
+ * is auth-gated (requireAuth) — createRoom() below was previously unauthenticated
+ * and 401s against a real server; this closes that gap with the same credential
+ * the rest of the e2e suite already uses, not a new/invented bypass.
+ */
+async function authenticateHarness(baseUrl: string): Promise<string> {
+  const { email, initialPassword } = await import('../fixtures/auth.js');
+  const response = await fetch(`${baseUrl}/api/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password: initialPassword() }),
+  });
+  if (!response.ok) {
+    throw new Error(`Harness login failed: ${response.status} ${response.statusText}`);
+  }
+  const setCookie = response.headers.get('set-cookie');
+  const match = setCookie?.match(/session=([^;]+)/);
+  if (!match) {
+    throw new Error('Harness login succeeded but no session cookie was returned');
+  }
+  return `session=${match[1]}`;
+}
+
+/**
+ * Creates a room via API (authenticated — see authenticateHarness above).
  */
 async function createRoom(baseUrl: string, title: string, autoAdmit = true): Promise<string> {
   const apiUrl = `${baseUrl}/api/rooms`;
-  // In a real harness context, we'd use proper auth; for now assume dev/test auth or unauthenticated
+  const cookie = await authenticateHarness(baseUrl);
   const response = await fetch(apiUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', Cookie: cookie },
     body: JSON.stringify({ title, autoAdmit }),
   });
   if (!response.ok) {
@@ -258,6 +313,11 @@ export async function joinDualBrowserCall(
       throw new Error(
         `Publishing validation failed: speaker1=${result1.publishedBytes} bytes, speaker2=${result2.publishedBytes} bytes`,
       );
+    }
+
+    // B08A-3: mid-call hook — call is live, both sides published, recording (if any) still running.
+    if (config.onLive && page1 && page2) {
+      await config.onLive({ page1, page2, roomId });
     }
 
     // B08S-2: Stop recording after publish validation (AFTER both browsers have joined and published)
