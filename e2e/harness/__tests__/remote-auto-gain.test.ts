@@ -6,21 +6,47 @@ const AUTO_LEVEL_TARGET_RATIO = 0.88;
 const AUTO_LEVEL_NOISE_FLOOR = 0.003;
 const AUTO_LEVEL_MAX_GAIN = 2.5;
 const AUTO_LEVEL_SMOOTHING = 0.35;
+const AUTO_LEVEL_ABS_TARGET = 0.5;
 
 describe('computeRemoteAutoGains', () => {
-  describe('2-party single remote (no-op)', () => {
-    it.each([0.5, 0.3, 0.2, 0.1, 0.05, 0.02])(
-      'single remote at level %.3f should gain ≈ 1.0 (2-party unity)',
+  describe('2-party single remote — absolute target reference (D28 fix)', () => {
+    it('remote at the absolute target (0.5) stays at unity', () => {
+      const samples: RemoteAudioLevelSample[] = [{ publisherClientId: 'remote-1', audioLevel: 0.5 }];
+      const gains = computeRemoteAutoGains(samples);
+
+      // reference = max(loudest=0.5, ABS_TARGET=0.5) = 0.5
+      // raw = max(1, min(2.5, (0.5 * 0.88) / 0.5)) = max(1, 0.88) = 1.0
+      expect(gains['remote-1']).toBeCloseTo(1.0, 3);
+    });
+
+    it.each([0.3, 0.2, 0.1, 0.05, 0.02])(
+      'quiet remote at level %.3f is boosted toward the absolute target (NOT unity — pre-fix defect)',
       (remoteLevel: number) => {
         const samples: RemoteAudioLevelSample[] = [
           { publisherClientId: 'remote-1', audioLevel: remoteLevel },
         ];
         const gains = computeRemoteAutoGains(samples);
 
-        // 2-party: loudest = remoteLevel
-        // raw = max(1, min(2.5, (remoteLevel * 0.88) / remoteLevel)) = max(1, 0.88) = 1.0
-        // After smoothing with initial prev=1: 1 + (1 - 1) * 0.35 = 1.0
-        expect(gains['remote-1']).toBeCloseTo(1.0, 3);
+        // Pre-fix: loudest == remoteLevel (only remote present) -> raw always max(1, 0.88) = 1.0 (no-op).
+        // Post-fix: reference = max(loudest, ABS_TARGET=0.5) = 0.5 since remoteLevel < 0.5,
+        // so the quiet peer is measured against the absolute target, not itself.
+        expect(gains['remote-1']).toBeGreaterThan(1.0);
+      }
+    );
+
+    it.each([
+      { level: 0.5, smoothed: 1.0 },
+      { level: 0.3, smoothed: 1.163 },
+      { level: 0.2, smoothed: 1.42 },
+      { level: 0.1, smoothed: 1.525 }, // clamped at AUTO_LEVEL_MAX_GAIN
+      { level: 0.05, smoothed: 1.525 }, // clamped
+      { level: 0.02, smoothed: 1.525 }, // clamped
+    ])(
+      'formula: reference=max(loudest,0.5), level=$level → smoothed≈$smoothed',
+      ({ level, smoothed }: { level: number; smoothed: number }) => {
+        const samples: RemoteAudioLevelSample[] = [{ publisherClientId: 'remote-1', audioLevel: level }];
+        const gains = computeRemoteAutoGains(samples);
+        expect(gains['remote-1']).toBeCloseTo(smoothed, 2);
       }
     );
   });
@@ -158,7 +184,9 @@ describe('computeRemoteAutoGains', () => {
       ];
       const gains = computeRemoteAutoGains(samples);
       expect(gains).toHaveProperty('my-peer-id-123');
-      expect(gains['my-peer-id-123']).toBeCloseTo(1.0, 3);
+      // reference = max(loudest=0.3, ABS_TARGET=0.5) = 0.5 (D28: absolute target reference)
+      // raw = max(1, min(2.5, (0.5 * 0.88) / 0.3)) ≈ 1.467, smoothed ≈ 1.163
+      expect(gains['my-peer-id-123']).toBeCloseTo(1.163, 2);
     });
 
     it('missing publisherClientId is handled safely', () => {
@@ -168,10 +196,10 @@ describe('computeRemoteAutoGains', () => {
       ];
       const gains = computeRemoteAutoGains(samples);
       // Empty string is falsy, filtered out in usable, but still processed in loop
-      // loudest = 0.3 (only r1 is usable)
+      // loudest = 0.3 (only r1 is usable); reference = max(0.3, ABS_TARGET=0.5) = 0.5
       // empty: not usable, raw = 1.0
-      // r1: raw = 1.0
-      expect(gains['r1']).toBeCloseTo(1.0, 3);
+      // r1: raw = max(1, min(2.5, (0.5 * 0.88) / 0.3)) ≈ 1.467, smoothed ≈ 1.163
+      expect(gains['r1']).toBeCloseTo(1.163, 2);
     });
   });
 

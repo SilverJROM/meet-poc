@@ -84,6 +84,10 @@ const AUTO_LEVEL_TARGET_RATIO = 0.88;
 const AUTO_LEVEL_NOISE_FLOOR = 0.003;
 const AUTO_LEVEL_MAX_GAIN = 2.5;
 const AUTO_LEVEL_SMOOTHING = 0.35;
+// Absolute reference for "normal" published loudness (D28). Without this floor, a 2-party call's
+// `loudest` degenerates to the lone remote's own level, making the gain formula a permanent no-op
+// (P2-LOCAL-02). Multi-party calls with a genuinely loud peer (loudest >= this) are unaffected.
+const AUTO_LEVEL_ABS_TARGET = 0.5;
 
 export type RemoteAudioLevelSample = {
   publisherClientId: string;
@@ -102,17 +106,17 @@ export function computeRemoteAutoGains(
       sample.audioLevel >= AUTO_LEVEL_NOISE_FLOOR,
   );
   const loudest = usable.reduce((max, sample) => Math.max(max, sample.audioLevel), 0);
+  const reference = Math.max(loudest, AUTO_LEVEL_ABS_TARGET);
   const next: Record<string, number> = {};
   for (const sample of samples) {
     const prev = previous[sample.publisherClientId] ?? 1;
     let raw = 1;
     if (
-      loudest > 0 &&
       typeof sample.audioLevel === 'number' &&
       Number.isFinite(sample.audioLevel) &&
       sample.audioLevel >= AUTO_LEVEL_NOISE_FLOOR
     ) {
-      raw = Math.max(1, Math.min(AUTO_LEVEL_MAX_GAIN, (loudest * AUTO_LEVEL_TARGET_RATIO) / sample.audioLevel));
+      raw = Math.max(1, Math.min(AUTO_LEVEL_MAX_GAIN, (reference * AUTO_LEVEL_TARGET_RATIO) / sample.audioLevel));
     }
     next[sample.publisherClientId] = Number((prev + (raw - prev) * AUTO_LEVEL_SMOOTHING).toFixed(3));
   }

@@ -694,11 +694,13 @@ function peer(id: string, mediaStream: MediaStream): Parameters<RemoteAudioServi
   assert.strictEqual(localStorage.get('meet-poc:volume:value'), '1');
 }
 
-// RA-LEVEL-1 — quiet speakers are raised toward the loudest active speaker without clipping.
+// RA-LEVEL-1 — quiet speakers are raised toward a genuinely loud (>=absolute target) active
+// speaker without clipping. D28: reference = max(loudest, ABS_TARGET=0.5), so a loud peer at
+// or above the absolute target still anchors the reference exactly as before the fix.
 {
   const gains = computeRemoteAutoGains([
-    { publisherClientId: 'quiet', audioLevel: 0.01 },
-    { publisherClientId: 'loud', audioLevel: 0.1 },
+    { publisherClientId: 'quiet', audioLevel: 0.05 },
+    { publisherClientId: 'loud', audioLevel: 0.5 },
     { publisherClientId: 'noise', audioLevel: 0.0001 },
   ]);
   assert.ok(gains.quiet > 1, 'quiet speaker receives gain');
