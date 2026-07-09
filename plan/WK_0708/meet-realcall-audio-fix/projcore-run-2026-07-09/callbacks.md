@@ -145,3 +145,24 @@
 [2026-07-09T05:01:59+00:00] [projcore callback] impl B08S-1 STATUS: DONE — 54ee377 fix F1+F2 diagnostics+session ledger
 [2026-07-09T05:02:58+00:00] [projcore callback] validator B08S-1 STATUS: DONE — FAIL — R2 after 54ee377: test target green and session registration fixed, but live publish sampling still filters mediaType instead of RTCStatsReport kind, so __meetDebug.sfuGetStats audio bytes remain 0 against the app's actual stats shape
 [2026-07-09T05:03:31+00:00] [projcore callback] validator B08S-1 STATUS: DONE — FAIL R2 — mediaType vs kind filter (codex55)
+[2026-07-09T05:04:32+00:00] [projcore callback] impl B08S-1 STATUS: DONE — 1a00ed0 kind+mediaType audio filter
+[2026-07-09T05:05:12+00:00] [projcore callback] validator B08S-1 STATUS: DONE — PASS R3 — 1a00ed0 re-gated: __meetDebug.sfuGetStats used, session IDs registered, publish bytes filter accepts RTCStatsReport kind:'audio' with mediaType fallback, unit stub covers kind:'audio', and `npx vitest run e2e/harness/__tests__/call-driver.test.ts` is green (5 passed, 2 skipped).
+[2026-07-09T05:05:51+00:00] [projcore callback] validator B08S-1 STATUS: DONE — PASS R3 — 1a00ed0 codex55
+[2026-07-09T05:05:51+00:00] [projcore callback] impl B08S-2 STATUS: WORKING — awaiting PROPOSED
+[2026-07-09T05:06:20+00:00] [projcore callback] coord STATUS: WORKING — north idle-nudge; resume B08S-2 loop
+[2026-07-09T05:07:20+00:00] [projcore callback] coord B08S-2 STATUS: APPROVED-PLAN
+[2026-07-09T05:07:20+00:00] [projcore callback] impl B08S-2 STATUS: PROPOSED — receive-side recorder+transcript (coord captured)
+[2026-07-09T05:08:15+00:00] [projcore callback] impl B08S-2 STATUS: PROPOSED — binding-corrected: real MediaStream capture preferred, script-sourced transcript labeled scriptExpected, no registerCreatedID for wav/transcript paths
+[2026-07-09T05:08:32+00:00] [projcore callback] coord B08S-2 STATUS: APPROVED-PLAN — proceed with binding corrections
+[2026-07-09T05:08:32+00:00] [projcore callback] impl B08S-2 STATUS: WORKING — implementing WAV encoder + receive-side recorder + call-driver integration
+[2026-07-09T05:10:45+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 5d7f652 evidence spine 2/2: WAV + transcript adapter
+  wav-encoder.ts: minimal PCM float32 → WAV (RIFF 16-bit/mono/48kHz); WavEncoder.encode(samples) → Buffer
+  receive-side-recorder.ts: captureReceiveSideAudio() MediaRecorder hook + generateScriptTranscript() speaker-filtered utterances labeled scriptExpected + recordReceiveSideCall() orchestrator
+  call-driver.ts: CallDriverConfig.recordReceiveSide + receiverPageIndex; CallResult.receiveSideWavPath + transcriptPath + transcriptContent; joinDualBrowserCall() calls recordReceiveSideCall() when enabled
+  index.ts: exports WavEncoder + receive-side-recorder functions
+  Tests: call-driver.test.ts +120L, 5 new B08S-2 tests (WAV encoder RIFF, transcript filtering, RecordingArbiter round-trip)
+  Acceptance: valid WAV parseable by RecordingArbiter.analyzeRecording() with voiced segments + loudness extraction; transcript contains script-sourced utterance text
+  ✓ npm test -w e2e: 100 passed | 2 skipped (harness/__tests__/call-driver.test.ts all green, no regressions)
+  Closes no AC (evidence pipe only); unblocks B08A-3, B04-real, B08, B08R (live ACs need receive-side recording/transcript proof)
+  Ledger: no registerCreatedID for wav/transcript (ledger type remains room|session); paths only on CallResult
+  Validation: validation/b08s2-changes.md (scope, acceptance, binding corrections applied, test results)
