@@ -147,6 +147,21 @@ export class LoudnessAnalyzer {
 // Recording arbiter: orchestrates recording analysis, transcript extraction, and verdict
 export class RecordingArbiter {
   private analyzer = new LoudnessAnalyzer();
+  private baseDir: string;
+
+  constructor(baseDir?: string) {
+    this.baseDir = baseDir || process.cwd();
+  }
+
+  // Validate that resolvedPath stays within baseDir (path traversal guard)
+  private validatePath(inputPath: string): string {
+    const resolved = path.resolve(inputPath);
+    const base = path.resolve(this.baseDir);
+    if (!resolved.startsWith(base + path.sep) && resolved !== base) {
+      throw new Error(`Path traversal attempt: ${inputPath} resolves outside allowed base ${this.baseDir}`);
+    }
+    return resolved;
+  }
 
   // Parse WAV file header and return metadata
   private parseWavHeader(buffer: Buffer): WavHeader {
@@ -215,7 +230,8 @@ export class RecordingArbiter {
 
   // Analyze recording: read WAV, measure loudness, extract segments
   async analyzeRecording(recordingPath: string): Promise<RecordingAnalysis> {
-    const buffer = fs.readFileSync(recordingPath);
+    const validatedPath = this.validatePath(recordingPath);
+    const buffer = fs.readFileSync(validatedPath);
     const header = this.parseWavHeader(buffer);
 
     // For now, mix to mono if multi-channel (simple average)
@@ -278,7 +294,8 @@ export class RecordingArbiter {
 
   // Write verdict to a sidecar file
   async writeVerdict(recordingPath: string, verdict: 'PASS' | 'FAIL' | 'INVALID', reason?: string): Promise<void> {
-    const verdictPath = recordingPath + '.verdict.json';
+    const validatedPath = this.validatePath(recordingPath);
+    const verdictPath = validatedPath + '.verdict.json';
     const verdictData = {
       recordingPath,
       verdict,
@@ -291,7 +308,8 @@ export class RecordingArbiter {
   // Determine verdict based on analysis and stimulus verification
   // Rules:
   // - Stats never decide PASS alone
-  // - INVALID when stimulus verification is missing
+  // - INVALID when stimulus verification is missing (can't verify)
+  // - FAIL when stimulus verification ran but gain is out of tolerance
   // - PASS only when stimulus verification confirms expected gain (within tolerance)
   determineVerdict(
     analysis: RecordingAnalysis,
@@ -305,16 +323,16 @@ export class RecordingArbiter {
       };
     }
 
-    // Stimulus verification missing or failed = INVALID
+    // Stimulus verification ran but failed = FAIL
     if (!stimulusVerification.withinTolerance) {
       return {
-        verdict: 'INVALID',
+        verdict: 'FAIL',
         reason: `Stimulus verification failed: measured gain ${stimulusVerification.measuredGain.toFixed(3)} outside tolerance of intended ${stimulusVerification.intendedGain.toFixed(3)}`,
       };
     }
 
     // Stats logged but never decide PASS alone
-    // For now, if stimulus verification passes, verdict is PASS
+    // If stimulus verification passes, verdict is PASS
     return {
       verdict: 'PASS',
       reason: 'Stimulus verification passed; loudness recorded for reference',

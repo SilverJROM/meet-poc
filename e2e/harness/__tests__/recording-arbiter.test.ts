@@ -123,8 +123,8 @@ describe('RecordingArbiter', () => {
   let tempDir: string;
 
   beforeEach(() => {
-    arbiter = new RecordingArbiter();
     tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'recording-arbiter-test-'));
+    arbiter = new RecordingArbiter(tempDir);
   });
 
   afterEach(() => {
@@ -241,7 +241,7 @@ describe('RecordingArbiter', () => {
     expect(verdict.reason).toContain('Stimulus verification passed');
   });
 
-  it('should create an INVALID verdict when stimulus verification is out of tolerance', async () => {
+  it('should create a FAIL verdict when stimulus verification is out of tolerance', async () => {
     const wavPath = path.join(tempDir, 'test.wav');
     createTestWav(wavPath, 0.4, 1000);
 
@@ -256,7 +256,7 @@ describe('RecordingArbiter', () => {
 
     const verdict = arbiter.determineVerdict(analysis, stimulusVerification);
 
-    expect(verdict.verdict).toBe('INVALID');
+    expect(verdict.verdict).toBe('FAIL');
     expect(verdict.reason).toContain('Stimulus verification failed');
   });
 
