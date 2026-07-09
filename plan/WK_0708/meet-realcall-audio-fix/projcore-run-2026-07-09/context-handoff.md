@@ -1,19 +1,12 @@
-# Context Handoff — projcore-run-2026-07-09
+# Context Handoff — post B00F VERIFIED
 
-## Mode
-SUB-MODE (briefing packet + handoff-from-north.md)
+## Banked
+- B01–B07, B08A-1 (0ca6670), B08A-2 (51d0d18), B00F (7ec6151)
+- 0/18 ACs, 0/25 burn, OVM 136
 
-## Run
-- run_dir: /home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09
-- OVM: workflow 136, session lkvcgrok
-- branch: batch-01-diagnosis-2026-07-08
-- prior run: projcore-run-2026-07-08 STOPPED — do not resume
+## Next critical path
+**B08S-1** dual-browser call driver → **B08S-2** receive-side WAV+transcript → live ACs (B08A-3, B04-real, B08…)
+B08X archaeology still parallel/non-blocking.
 
-## Topology
-- co_planners: opus + codex55
-- impl L1 alternate spark/grokcompose (start spark), L2 haiku, L3 sonnet
-- val L1/L2 codex55 (fallback sonnet), L3 opus
-- planning_criticality: high
-
-## Status
-Planning phase starting. Co-planners launching.
+## D29
+R1 blind; B13W before B13; diagnostics 4-field emit; no DTX empirical finding

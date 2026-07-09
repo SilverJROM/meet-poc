@@ -71,10 +71,15 @@ routing_notes:
 
   # ---- Fail-open fallbacks (the run must degrade, never stall — JROM: "dont hold out on completion") ----
   validator_backup: |
-    codex55 is at ~4% weekly. When the codex bucket is exhausted (or codex55 errors on quota), validator
-    L1/L2 fall open to SONNET (JROM-authorized backup) and the run CONTINUES. Log every fallback to
-    progress.md + decisions/. Validator L3 (opus) is unaffected. Cross-provider independence is lost on
+    JROM 2026-07-09: "use codex55 until <1%". The floor is ONE PERCENT weekly headroom, not 2% and not 5%.
+    DO NOT trust `rungs.codex55.depleted` from agent-usage.sh — it trips around 5% and caused a premature
+    fallback on 2026-07-09 (same class of bug as `rungs.spark`). Read `raw.codex.shared_weekly` and compute
+    headroom = 100 - shared_weekly. Use codex55 while headroom >= 1%.
+    Only when headroom < 1% (or codex55 hard-errors on quota) do validator L1/L2 fall open to SONNET, and
+    the run CONTINUES. Log every fallback to progress.md + decisions/. Validator L3 (opus) is unaffected,
+    so spending codex55 on L1/L2 never jeopardises the final gate. Cross-provider independence is lost on
     fallback — say so explicitly in the validation report; never claim it silently.
+    Also note: codex `shared_5h` was 0% used at 04:40 — the 5h window is wide open; only weekly is tight.
   impl_L1_alternation: |
     Strict A/B per L1 task, starting with spark(A) → grokcompose(B) → spark(A) … If spark's bucket is
     exhausted, fall to grokcompose for the remainder and NOTE that the A/B comparison is truncated

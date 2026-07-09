@@ -1,7 +1,8 @@
 # B00F Harness-Integrity Fixes — Changes
 
 **Role:** Implementer L2 (haiku)  
-**Date:** 2026-07-09
+**Date:** 2026-07-09  
+**Commit:** 7ec6151
 
 ## Summary
 

@@ -169,23 +169,28 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
       // by simulating the browser context sampling logic
 
       const mockSessionId = 'sess-12345-mock';
-      const mockStats = [
-        {
-          type: 'outbound-rtp',
-          mediaType: 'audio',
-          bytesSent: 5000,
+      // Mock as Map-like RTCStatsReport with real app's `kind: 'audio'` shape
+      const mockStats = {
+        forEach(callback: (stat: any) => void) {
+          [
+            {
+              type: 'outbound-rtp',
+              kind: 'audio',
+              bytesSent: 5000,
+            },
+            {
+              type: 'outbound-rtp',
+              kind: 'audio',
+              bytesSent: 3000,
+            },
+            {
+              type: 'inbound-rtp', // Should be ignored
+              kind: 'audio',
+              bytesSent: 1000,
+            },
+          ].forEach(callback);
         },
-        {
-          type: 'outbound-rtp',
-          mediaType: 'audio',
-          bytesSent: 3000,
-        },
-        {
-          type: 'inbound-rtp', // Should be ignored
-          mediaType: 'audio',
-          bytesSent: 1000,
-        },
-      ];
+      };
 
       // Test 1: sessionId is correctly extracted from __meetDebug
       const contextWithSession = {
@@ -201,10 +206,12 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
       // Test 2: bytesSent is correctly accumulated from outbound-rtp audio stats
       let totalBytes = 0;
       if (contextWithSession.__meetDebug?.sfuGetStats) {
-        for (const stat of mockStats) {
-          if (stat.type === 'outbound-rtp' && stat.mediaType === 'audio') {
-            totalBytes += stat.bytesSent || 0;
-          }
+        if (typeof mockStats.forEach === 'function') {
+          mockStats.forEach((stat: any) => {
+            if (stat.type === 'outbound-rtp' && (stat.kind ?? stat.mediaType) === 'audio') {
+              totalBytes += stat.bytesSent || 0;
+            }
+          });
         }
       }
       expect(totalBytes).toBe(8000); // 5000 + 3000
@@ -219,10 +226,12 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
 
       let noStatsBytes = 0;
       if (contextWithoutStats.__meetDebug?.sfuGetStats) {
-        for (const stat of mockStats) {
-          if (stat.type === 'outbound-rtp' && stat.mediaType === 'audio') {
-            noStatsBytes += stat.bytesSent || 0;
-          }
+        if (typeof mockStats.forEach === 'function') {
+          mockStats.forEach((stat: any) => {
+            if (stat.type === 'outbound-rtp' && (stat.kind ?? stat.mediaType) === 'audio') {
+              noStatsBytes += stat.bytesSent || 0;
+            }
+          });
         }
       }
       expect(noStatsBytes).toBe(0);
@@ -232,10 +241,12 @@ describe('B08S-1 call driver — dual-browser room join + publish validation', (
 
       let noDebugBytes = 0;
       if ((contextNoDebug as any).__meetDebug?.sfuGetStats) {
-        for (const stat of mockStats) {
-          if (stat.type === 'outbound-rtp' && stat.mediaType === 'audio') {
-            noDebugBytes += stat.bytesSent || 0;
-          }
+        if (typeof mockStats.forEach === 'function') {
+          mockStats.forEach((stat: any) => {
+            if (stat.type === 'outbound-rtp' && (stat.kind ?? stat.mediaType) === 'audio') {
+              noDebugBytes += stat.bytesSent || 0;
+            }
+          });
         }
       }
       expect(noDebugBytes).toBe(0);

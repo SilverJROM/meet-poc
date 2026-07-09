@@ -132,12 +132,20 @@ corroborate but may **never** be the sole evidence — they are the layer that l
     renegotiate / ICE restart. **R1's mic re-acquisition fixes nothing here.**
   - "Detected" is **no longer sufficient** to close AC4. `856104f` may be treating the wrong subsystem.
 
-- **AC15 — Sender-liveness invariant (the T1 discriminator, D28).** During speech that the far end
+- **AC15 — Sender-liveness invariant (the T1 discriminator, D28 + D29).** During speech that the far end
   verifiably transcribes, assert that **both** advance: `totalAudioEnergy` + `totalSamplesDuration`
   (capture side) **and** `packetsSent` + `bytesSent` (sender side). Then inject each failure
   independently — (i) capture-dead, (ii) sender-dead-with-capture-alive — and prove the harness **tells
   them apart**. A frozen `outboundAudioLevel` is consistent with *both*; only this invariant separates
   them. No prior run examined these stats.
+  - **D29 diagnostics binding (app change, not harness-only):** the app's diagnostics payload MUST emit
+    `totalAudioEnergy`, `totalSamplesDuration`, `packetsSent`, `bytesSent` **per outbound audio track**.
+    The 07-08 call only recorded `outboundAudioLevel` + `micSilent`, so we cannot say which mode hit
+    Acctg. Without this, the **next** real call is as undiagnosable as the last. Folded into AC15; B08A-1
+    is the product-code home for the reader + payload emission.
+  - **D29 R1 blindness:** on sender-dead/capture-alive, `classifyMicCapture` early-returns `'working'`
+    when capture energy advances (`mic-energy.ts:174-176`) — R1 **never fires**. Sender recovery needs an
+    independent watchdog (B13W) before remedy (B13); never hang sender remedy off R1.
 
 - **AC16 — Relay / ICE evidence.** The client **gathers a `relay` candidate** (the real 07-08 call never
   did, across 4 rejoins), and a forced `iceTransportPolicy: 'relay'` call carries audio end-to-end

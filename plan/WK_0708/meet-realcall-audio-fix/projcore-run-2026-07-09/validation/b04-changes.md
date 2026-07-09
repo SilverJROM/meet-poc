@@ -1,3 +1,5 @@
+<!-- VOIDED by D27 2026-07-09 — T_gap=3400ms invalid evidence class -->
+
 # B04 Validation Report: Baseline Two-Call T_gap Derivation
 
 **Batch:** B04 · Implementer L2 haiku  

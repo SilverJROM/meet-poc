@@ -84,3 +84,9 @@ Both are hypotheses handed to the co-planners. Neither is a conclusion.
    tagged `owner: JROM`; `deferral=OFF` binds only agent-ownable ACs; a run exits on "all agent-ownable
    ACs closed → notify ready-to-test → **stop**," never "queue empty."
 2. **Audio assertions are made on recorded audio, never on WebRTC stats alone.**
+
+## 2026-07-09 — D29 addendum (north consult answers)
+
+- R1 is **BLIND** to sender-dead/capture-alive (`mic-energy.ts:174-176` early return on capture energy). B13W before B13 APPROVED. Watchdog independent of `classifyMicCapture`; remedy never mic re-acquire for sender-dead.
+- B08S-1/B08S-2 evidence spine APPROVED; required before any live AC (north's prior hole).
+- AC15 gains diagnostics payload binding: app must emit totalAudioEnergy, totalSamplesDuration, packetsSent, bytesSent per outbound audio track.

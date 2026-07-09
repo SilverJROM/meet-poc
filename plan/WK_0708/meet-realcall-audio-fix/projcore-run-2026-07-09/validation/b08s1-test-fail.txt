@@ -1,0 +1,80 @@
+     → Cannot find module '../call-ledger.js'
+Require stack:
+- /home/agjrom/websites/meet-poc/e2e/harness/__tests__/call-driver.test.ts
+   × B08S-1 call driver — dual-browser room join + publish validation > config validation: missing baseUrl or room details are caught 3ms
+     → expected 'Failed to parse URL from /api/rooms' to contain 'Failed to create room'
+   × B08S-1 call driver — dual-browser room join + publish validation > dry-run exports its function and accepts optional ConversationScript 1ms
+     → expected 'async function dryRunDualBrowserCall(…' to contain 'CallDriverConfig'
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  e2e/harness/__tests__/call-driver.test.ts > B08S-1 call driver — dual-browser room join + publish validation > ledger integration: registerCreatedID tracks room and prevents deletion of protected IDs
+Error: Cannot find module '../call-ledger.js'
+Require stack:
+- /home/agjrom/websites/meet-poc/e2e/harness/__tests__/call-driver.test.ts
+ ❯ e2e/harness/__tests__/call-driver.test.ts:71:58
+     69| 
+     70|       // Import fresh modules to get isolated ledger state
+     71|       const { registerCreatedID, canDelete, getState } = require('../c…
+       |                                                          ^
+     72| 
+     73|       // Register a new room
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  e2e/harness/__tests__/call-driver.test.ts > B08S-1 call driver — dual-browser room join + publish validation > call burn tracking: incrementCallBurn respects budget cap and persists state
+Error: Cannot find module '../call-ledger.js'
+Require stack:
+- /home/agjrom/websites/meet-poc/e2e/harness/__tests__/call-driver.test.ts
+ ❯ e2e/harness/__tests__/call-driver.test.ts:98:79
+     96|       resetLedger();
+     97| 
+     98|       const { initLedger, incrementCallBurn, isCallBurnExceeded, getSt…
+       |                                                                               ^
+     99| 
+    100|       initLedger(TEMP_DIR);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  e2e/harness/__tests__/call-driver.test.ts > B08S-1 call driver — dual-browser room join + publish validation > config validation: missing baseUrl or room details are caught
+AssertionError: expected 'Failed to parse URL from /api/rooms' to contain 'Failed to create room'
+
+Expected: "Failed to create room"
+Received: "Failed to parse URL from /api/rooms"
+
+ ❯ e2e/harness/__tests__/call-driver.test.ts:138:40
+    136|         expect.fail('Expected error on empty baseUrl');
+    137|       } catch (err) {
+    138|         expect((err as Error).message).toContain('Failed to create roo…
+       |                                        ^
+    139|       }
+    140|     },
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  e2e/harness/__tests__/call-driver.test.ts > B08S-1 call driver — dual-browser room join + publish validation > dry-run exports its function and accepts optional ConversationScript
+AssertionError: expected 'async function dryRunDualBrowserCall(…' to contain 'CallDriverConfig'
+
+- Expected
++ Received
+
+- CallDriverConfig
++ async function dryRunDualBrowserCall(config) {
++   return joinDualBrowserCall(config, void 0);
++ }
+
+ ❯ e2e/harness/__tests__/call-driver.test.ts:153:22
+    151|       // (and just calls it without a script)
+    152|       const dryRun = dryRunDualBrowserCall.toString();
+    153|       expect(dryRun).toContain('CallDriverConfig');
+       |                      ^
+    154|     },
+    155|   );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 2 skipped (6)
+   Start at  04:51:34
+   Duration  474ms (transform 57ms, setup 0ms, collect 251ms, tests 8ms, environment 0ms, prepare 65ms)
+

@@ -112,9 +112,19 @@ async function joinBrowser(
         const stats = await (window as any).__meetDebug?.sfuGetStats?.();
         if (!stats) return 0;
         let totalBytes = 0;
-        for (const stat of stats) {
-          if (stat.type === 'outbound-rtp' && stat.mediaType === 'audio') {
-            totalBytes += stat.bytesSent || 0;
+        // RTCStatsReport is Map-like; use forEach for compatibility
+        if (typeof stats.forEach === 'function') {
+          stats.forEach((stat: any) => {
+            if (stat.type === 'outbound-rtp' && (stat.kind ?? stat.mediaType) === 'audio') {
+              totalBytes += stat.bytesSent || 0;
+            }
+          });
+        } else {
+          // Fallback for array-like stats
+          for (const stat of stats) {
+            if (stat.type === 'outbound-rtp' && (stat.kind ?? stat.mediaType) === 'audio') {
+              totalBytes += stat.bytesSent || 0;
+            }
           }
         }
         return totalBytes;

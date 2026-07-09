@@ -138,3 +138,10 @@
   Closes no AC. Unblocks every live AC needing receive-side recording/transcript (B08S-2 → B04-real, B08, B08A-3, etc.).
   No B08S-2 scope: WAV capture, transcription.
   Per APPROVED-PLAN: ✓ Playwright/vitest dual-browser, ✓ registerCreatedID() registry, ✓ CallLedger API binding, ✓ ConversationScheduler optional, ✓ dry-run first, ✓ protected IDs enforce via canDelete().
+[2026-07-09T04:51:33+00:00] [projcore callback] coord B08S-1 STATUS: SENDBACK — tests red
+[2026-07-09T04:52:22+00:00] [projcore callback] coord STATUS: WORKING — routing fix applied; resume B08S-1 sendback + codex55 L2 gate
+[2026-07-09T04:59:53+00:00] [projcore callback] validator B08S-1 STATUS: REVISE — FAIL — vitest target green, protected IDs safe, no WAV/transcript scope creep, closes no AC; blocking defects: call-driver samples nonexistent window.__MEET_DIAGNOSTICS instead of app's window.__meetDebug/sfuGetStats so live publish validation returns 0, and captured session IDs are never registered via registerCreatedID('session', ...) for B21 cleanup.
+[2026-07-09T05:00:22+00:00] [projcore callback] validator B08S-1 STATUS: DONE — FAIL — F1 wrong diagnostics global + F2 session ledger (codex55)
+[2026-07-09T05:01:59+00:00] [projcore callback] impl B08S-1 STATUS: DONE — 54ee377 fix F1+F2 diagnostics+session ledger
+[2026-07-09T05:02:58+00:00] [projcore callback] validator B08S-1 STATUS: DONE — FAIL — R2 after 54ee377: test target green and session registration fixed, but live publish sampling still filters mediaType instead of RTCStatsReport kind, so __meetDebug.sfuGetStats audio bytes remain 0 against the app's actual stats shape
+[2026-07-09T05:03:31+00:00] [projcore callback] validator B08S-1 STATUS: DONE — FAIL R2 — mediaType vs kind filter (codex55)
