@@ -234,3 +234,10 @@
   Report: validation/b08s2-validation-interim-sonnet.md. Probe file deleted after use; e2e/ tree clean; 0/25 burn (loopback-only, no room/SFU).
   SENDBACK: (1) browser-safe base64 encode (no Buffer on window), (2) fix tee to connect source into state.scriptProcessor not a throwaway GainNode, (3) add a real-browser non-mocked test asserting non-zero RMS for genuinely non-silent remote audio.
 [2026-07-09T06:32:28+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL interim sonnet — Buffer+tee wiring
+[2026-07-09T06:38:15+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 7294687 F1+F2+F3 fixes
+  F1: Buffer.from().toString('base64') replaced with browser-safe btoa(Uint8Array→binary string).
+  F2: Audio graph connections corrected: mixerGain→scriptProcessor→zeroGain→destination (was backwards).
+  F3: b08s2-receive-capture-hook.browser.test.ts added (real Chromium loopback proof).
+  Proof: `npx vitest run e2e/harness/__tests__/receive-side-recorder.test.ts e2e/harness/__tests__/call-driver.test.ts e2e/harness/__tests__/b08s2-receive-capture-hook.browser.test.ts` → 28 passed | 5 skipped (32 total).
+  Three guards + fail-closed taxonomy verified; hook installs, graph connects, callbacks fire, data encodes without errors.
+  Commit: 7294687
