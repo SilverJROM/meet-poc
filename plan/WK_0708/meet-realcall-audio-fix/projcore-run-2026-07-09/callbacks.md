@@ -608,3 +608,23 @@
 [2026-07-10T06:27:53+00:00] [projcore callback] coord P3-LIVE-04 STATUS: APPROVED-PLAN — impl working
 [2026-07-10T06:27:53+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
 [2026-07-10T06:27:53+00:00] [MEM] total=61Gi used=44Gi free=1.6Gi avail=17Gi
+[projcore callback] implementer P3-LIVE-04 STATUS: BLOCKED — 2cf5efb ctor-hook bypassed (DOM captureStream) works mechanically but WAV is exact silence. .140 has no audio backend at all (leading cause, unproven). See decisions doc P3-LIVE-04 section
+
+[2026-07-10T06:58:12+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-04 BLOCKED-partial 2cf5efb (DOM OK, silence); dispatch P3-LIVE-05 .140 null-sink
+[2026-07-10T06:58:12+00:00] [projcore ACK] implementer P3-LIVE-04 RECEIVED — BLOCKED partial; DOM path verified; silence lead .140 no audio server
+[2026-07-10T06:58:12+00:00] [projcore callback] validator P3-LIVE-04 STATUS: DONE — BLOCKED-partial 2cf5efb; report validation/p3-live-04-validation.md
+[2026-07-10T06:58:12+00:00] [projcore callback] batch P3-LIVE-04 STATUS: BLOCKED — next LIVE-05 null-sink on .140
+[2026-07-10T06:58:12+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3; CAP25 burn0; maxForks=3; LIVE-05
+[2026-07-10T06:58:12+00:00] [MEM] total=61Gi used=31Gi free=15Gi avail=29Gi
+[projcore DISPATCH] implementer P3-LIVE-05 DISPATCH-P3-LIVE-05-implementer-2948615-1783666692
+[projcore DISPATCH] implementer P3-LIVE-05
+[2026-07-10T06:58:12+00:00] [projcore callback] coord P3-LIVE-05 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P3-LIVE-05 STATUS: WORKING — session launched; checking pulseaudio/pipewire install path on .140
+[projcore callback] implementer P3-LIVE-05 STATUS: PROPOSED — sudo+apt confirmed available; plan=install pulseaudio (user-session, not systemd), null-sink, isolation test FIRST before live SFU. See prompts/p3-live-05-proposed.md
+[projcore callback] implementer P3-LIVE-05 STATUS: WORKING — APPROVED-PLAN received; installing pulseaudio + starting user-session daemon
+
+[2026-07-10T07:28:10+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-05 PROPOSED→APPROVED-PLAN (pulseaudio null-sink + isolation-first)
+[2026-07-10T07:28:10+00:00] [projcore callback] coord P3-LIVE-05 STATUS: APPROVED-PLAN — impl working
+[2026-07-10T07:28:10+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
+[2026-07-10T07:28:10+00:00] [MEM] total=61Gi used=31Gi free=15Gi avail=30Gi
+[projcore callback] implementer P3-LIVE-05 STATUS: WORKING — isolation test PASSED (maxAbs=1.075 with null-sink); proceeding to full live SFU smoke

@@ -206,3 +206,48 @@ either an environment change or a topology change, bigger than this batch's scop
 **STATUS: still BLOCKED.** `frontend/`/`backend/` untouched. Two new harness files shipped
 (`dom-audio-capture.ts`, `p3-live-04-smoke.ts`) — both mechanically sound, proven end-to-end except
 for the silence itself. Full run evidence: `validation/p3-live-04-changes.md`.
+
+## 2026-07-10 — P3-LIVE-05: null-sink installed and PROVEN to work, but the live smoke reveals a different, deeper cause
+
+Took candidate direction 1 from above: installed PulseAudio (`sudo apt-get install -y pulseaudio
+pulseaudio-utils`) on `.140` as a **per-user systemd --user daemon** (not a system-wide service),
+started via `systemctl --user start pulseaudio.socket`. PulseAudio auto-created its own
+hardware-fallback null sink (`auto_null`) since the box has no real sound card — no manual
+`module-null-sink` load needed.
+
+**Isolation test first (no SFU, no .123), as required before touching the live call:** a real
+two-`RTCPeerConnection` loopback (fake-device mic → offer/answer → remote track) feeding a genuine
+`<audio srcObject>` element, then `captureStream()`'d — **got real signal, `maxAbs≈1.075`**,
+where the exact same shape of test (this time via a `MediaStreamDestination`, not a real WebRTC
+track) had already worked pre-null-sink in P3-LIVE-04. This is the FIRST time a real-WebRTC-track
+`captureStream()` produced non-zero samples on `.140`. The null-sink hypothesis is **confirmed
+correct for the general case.**
+
+**But the full live split-host smoke (re-run twice) still returns exact silence.** Both legs
+publish live (same server-confirmed gate as every prior batch); the DOM capture mechanism runs
+clean (element found, healthy diagnostics). New this batch: queried the app's own instrumentation
+(`window.__meetDebug.remoteAudioMixer.debugSnapshot()`, real product code,
+`remote-audio.service.ts:476-495`) at the moment of the silent capture:
+`contextState:"running"` (not suspended — the AudioContext genuinely is running), `unlocked:true`,
+`outputAttached:true`, `outputPaused:false` — but the one active peer is in `blockedPeerIds`, and
+`voiceRecoveryCounters.resume:1` shows the app already attempted a recovery action during the 6s
+dwell. Traced `remoteAudioBlockingReason()` (`remote-audio.service.ts:821-827`): with `el.paused`
+confirmed false, the only fit is `voice-stalled`, set via `markVoiceStalled()` from
+`observeRemoteVoiceTrack()`/`decideRemoteVoiceWatchdogAction()` (`room.page.ts:3195-3234`) — a
+watchdog driven by **inbound SFU stats** (packets/bytes actually received on `page1`), not by
+local rendering/captureStream at all.
+
+**This reframes the problem.** The audio-backend fix works (proven) but isn't sufficient — the
+app's own stats-based watchdog independently flags this peer's inbound audio as stalled, which
+points at whether real RTP packets are reliably arriving at `page1` from `bot-123`'s real-mic leg
+on this split-host topology at all, not at local playback/capture rendering. That's an SFU/media-
+relay question, outside this batch's "env + harness smoke only" scope (no backend/product code
+touched, per the brief's own gate) — flagging as the concrete next investigation:
+sample `__meetDebug.sfuGetStats()` inbound-audio `packetsReceived`/`bytesReceived` **deltas over
+the dwell window** (not just the sending side's published-bytes, already confirmed nonzero every
+batch) to see whether inbound stats advance at all.
+
+**STATUS: still BLOCKED**, but genuine progress: the audio-backend environment fix is installed,
+verified, and left in place for future batches (isolation test proves it's correct); the remaining
+blocker has a much narrower, concrete next question than "why is it silent." `frontend/`/`backend/`
+untouched. Full run evidence: `validation/p3-live-05-changes.md`.
