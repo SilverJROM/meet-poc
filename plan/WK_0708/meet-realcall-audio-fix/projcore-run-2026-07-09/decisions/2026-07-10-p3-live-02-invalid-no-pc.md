@@ -152,3 +152,57 @@ Not proven — a hypothesis for whoever picks this up next, requiring CDP-level 
 **STATUS: still BLOCKED.** No mechanism-level fix found or shipped this batch; nothing in
 `receive-side-recorder.ts` was changed (the `defineProperty` experiment was reverted after
 disproving itself). Full run evidence: `validation/p3-live-03-changes.md`.
+
+## 2026-07-10 — P3-LIVE-04: ctor-hook bypassed entirely (DOM captureStream); still silent
+
+Took the "different mechanism" fork instead of chasing the ctor-hook mystery further: built
+`e2e/harness/dom-audio-capture.ts`, which never touches `window.RTCPeerConnection` at all. The app
+itself (first-party, `remote-audio.service.ts:559-564`) creates
+`<audio data-remote-audio="<id>">` per remote publisher and sets its `srcObject` to the live remote
+`MediaStream` — that's a stable selector into real product code, not a harness assumption.
+`HTMLMediaElement.captureStream()` re-taps whatever's actually flowing through that element,
+independent of when/how the underlying `RTCPeerConnection` was constructed.
+
+**Result: mechanically this works, but the audio is silent.** Both call legs published live
+(server-confirmed, same gate as every prior P3-LIVE batch). The DOM element was found, `.srcObject`
+was live, `captureStream()` succeeded, the Web Audio graph ran (64 `onaudioprocess` callbacks,
+262144 samples, `audioContextState:"running"`) — and every single sample was exact zero (verified
+by parsing the WAV's raw PCM directly, not by trusting the reported `rms`). Element/track
+diagnostics all read healthy at capture time: `muted:false, volume:1, paused:false,
+readyState:4, trackReadyState:"live", trackEnabled:true, trackMuted:false`. The pipeline runs; it
+just carries no energy.
+
+**Isolated the variable, cheaply, with no SFU/no .123 involved:** a local-only micro-test (real
+oscillator → `MediaStreamDestination` → `<audio srcObject>` → `captureStream()`) got real signal
+(`maxAbs≈1.0`) under **both headless and Xvfb+non-headless** Chrome on `.140` — ruling out
+"headless can't captureStream" (the P3-LIVE-02 Xvfb finding, but for the output/rendering side
+this time, not audioinput). The difference from the real, silent case: the real element's
+`srcObject` is backed by an actual remote WebRTC track, not a `MediaStreamDestination` node.
+
+**Leading hypothesis (not proven):** `.140` — where the local/receiving browser always launches;
+`call-driver.ts`'s `chromium.launch()` for what becomes `page1` is hardcoded to the local host,
+independent of the remote leg's headless-ness — has **no audio backend installed at all**:
+`pactl`/`pipewire`/`pulseaudio` absent entirely, only client libraries (`libpulse0`,
+`libpipewire-0.3-0`) present. A genuine `<audio>` element's Chromium render pipeline may need *some*
+functioning OS audio sink to actually pull/render samples, unlike a pure in-graph
+`MediaStreamDestination` (which never touches the OS audio backend and is exactly why the synthetic
+test above didn't reproduce the silence). Circumstantial, not instrumented — flagging as the next
+lead, not a conclusion.
+
+Found and fixed one real bug along the way (shipped, in `dom-audio-capture.ts`): the first live
+run crashed with `RangeError: Maximum call stack size exceeded` from
+`btoa(String.fromCharCode(...bytes))` — spreading ~262k array elements as individual function
+arguments blows the JS engine's argument-count limit. Fixed with chunked
+`String.fromCharCode.apply` (8192-byte chunks); confirmed fixed on the second run (no crash).
+
+**Two candidate next directions**, neither attempted (each needs its own PROPOSED+APPROVED —
+either an environment change or a topology change, bigger than this batch's scope):
+1. Install a minimal PulseAudio/PipeWire null-sink on `.140` so Chrome has something to render
+   `<audio>` playback to; verify with a real two-PC loopback micro-test (not the synthetic
+   `MediaStreamDestination` one) before touching the live smoke again.
+2. Move the receiving/capturing browser to run via CDP on `.123` (confirmed-working real PipeWire
+   audio) instead of always-local-on-`.140` — a bigger split-host topology restructure.
+
+**STATUS: still BLOCKED.** `frontend/`/`backend/` untouched. Two new harness files shipped
+(`dom-audio-capture.ts`, `p3-live-04-smoke.ts`) — both mechanically sound, proven end-to-end except
+for the silence itself. Full run evidence: `validation/p3-live-04-changes.md`.

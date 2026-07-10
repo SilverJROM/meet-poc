@@ -589,3 +589,22 @@
 [projcore DISPATCH] implementer P3-LIVE-03
 [2026-07-10T05:28:11+00:00] [projcore callback] coord P3-LIVE-03 STATUS: PROCESSING — sonnet dispatched
 [projcore callback] implementer P3-LIVE-03 STATUS: WORKING — session launched; investigating zone.js RTCPeerConnection clobber for receive-side capture fix
+[projcore callback] implementer P3-LIVE-03 STATUS: BLOCKED — 1e0b928 zone.js lead DISPROVEN; defineProperty-lock also fails; reload/crash/iframe ruled out. Real cause unknown, needs raw-CDP instrumentation. See decisions doc P3-LIVE-03 section
+
+[2026-07-10T05:58:24+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-03 BLOCKED 1e0b928 (zone+defineProperty disproven); dispatch P3-LIVE-04 alternate receive capture
+[2026-07-10T05:58:24+00:00] [projcore ACK] implementer P3-LIVE-03 RECEIVED — BLOCKED; findings accepted; no false-green
+[2026-07-10T05:58:24+00:00] [projcore callback] validator P3-LIVE-03 STATUS: DONE — BLOCKED 1e0b928; report validation/p3-live-03-validation.md
+[2026-07-10T05:58:24+00:00] [projcore callback] batch P3-LIVE-03 STATUS: BLOCKED — next LIVE-04 DOM/media capture bypass
+[2026-07-10T05:58:24+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3; CAP25 burn0; maxForks=3; LIVE-04
+[2026-07-10T05:58:24+00:00] [MEM] total=61Gi used=33Gi free=12Gi avail=28Gi
+[projcore DISPATCH] implementer P3-LIVE-04 DISPATCH-P3-LIVE-04-implementer-2458275-1783663104
+[projcore DISPATCH] implementer P3-LIVE-04
+[2026-07-10T05:58:24+00:00] [projcore callback] coord P3-LIVE-04 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P3-LIVE-04 STATUS: WORKING — session launched; investigating DOM audio-element capture as ctor-hook bypass
+[projcore callback] implementer P3-LIVE-04 STATUS: PROPOSED — DOM audio-element captureStream bypasses ctor hook entirely. New dom-audio-capture.ts + p3-live-04-smoke.ts. See prompts/p3-live-04-proposed.md
+[projcore callback] implementer P3-LIVE-04 STATUS: WORKING — APPROVED-PLAN received; running p3-live-04-smoke live against .123
+
+[2026-07-10T06:27:53+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-04 PROPOSED→APPROVED-PLAN (DOM captureStream bypass); mem avail=17Gi (tighter but >2Gi floor)
+[2026-07-10T06:27:53+00:00] [projcore callback] coord P3-LIVE-04 STATUS: APPROVED-PLAN — impl working
+[2026-07-10T06:27:53+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
+[2026-07-10T06:27:53+00:00] [MEM] total=61Gi used=44Gi free=1.6Gi avail=17Gi

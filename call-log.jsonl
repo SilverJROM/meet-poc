@@ -10,3 +10,6 @@
 {"timestamp":1783661482531,"purpose":"smoke","durationMs":15141,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
 {"timestamp":1783661537950,"purpose":"smoke","durationMs":14577,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
 {"timestamp":1783661641415,"purpose":"smoke","durationMs":15232,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783664902157,"purpose":"smoke","durationMs":15139,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783664971386,"purpose":"smoke","durationMs":15133,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783665108850,"purpose":"smoke","durationMs":14313,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
