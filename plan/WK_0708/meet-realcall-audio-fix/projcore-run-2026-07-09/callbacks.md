@@ -577,3 +577,15 @@
 [2026-07-10T04:58:03+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
 [2026-07-10T04:58:03+00:00] [MEM] total=61Gi used=31Gi free=13Gi avail=29Gi
 [projcore callback] implementer P3-LIVE-02 STATUS: WORKING — APPROVED-PLAN received; implementing remap-source wiring + p3-live-02-smoke.ts
+[projcore callback] implementer P3-LIVE-02 STATUS: BLOCKED — 2966e05 audioinput SOLVED (remap-source, both ways); both legs join+publish live; NEW blocker INVALID_NO_PC downstream. See decisions/2026-07-10-p3-live-02-invalid-no-pc.md
+
+[2026-07-10T05:28:11+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-02 BLOCKED-partial 2966e05 (audioinput OK; INVALID_NO_PC); dispatching P3-LIVE-03
+[2026-07-10T05:28:11+00:00] [projcore ACK] implementer P3-LIVE-02 RECEIVED — BLOCKED partial; audioinput VERIFIED; follow-on INVALID_NO_PC
+[2026-07-10T05:28:11+00:00] [projcore callback] validator P3-LIVE-02 STATUS: DONE — BLOCKED-partial 2966e05; report validation/p3-live-02-validation.md
+[2026-07-10T05:28:11+00:00] [projcore callback] batch P3-LIVE-02 STATUS: BLOCKED — audioinput met; receive energy not; next LIVE-03
+[2026-07-10T05:28:11+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3; LIVE-03 dispatch
+[2026-07-10T05:28:11+00:00] [MEM] total=61Gi used=32Gi free=14Gi avail=29Gi
+[projcore DISPATCH] implementer P3-LIVE-03 DISPATCH-P3-LIVE-03-implementer-2457371-1783661291
+[projcore DISPATCH] implementer P3-LIVE-03
+[2026-07-10T05:28:11+00:00] [projcore callback] coord P3-LIVE-03 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P3-LIVE-03 STATUS: WORKING — session launched; investigating zone.js RTCPeerConnection clobber for receive-side capture fix

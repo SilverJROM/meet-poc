@@ -85,7 +85,7 @@ delete, `TEST_ROOM01`/`652c1475` untouched. Not fixed here — `createRoom`/the 
 shared `call-driver.ts` surface used by every other batch; changing its error-path contract is out
 of this batch's harness/env-only scope and needs its own review.
 
-## Recommendation
+## Recommendation (as of P3-LIVE-02)
 
 A follow-on batch is needed to either (a) find and neutralize whatever restores
 `window.RTCPeerConnection` to native mid-call (zone.js patch ordering is the lead), or (b) move the
@@ -94,3 +94,61 @@ level instead of reassigning the global constructor, since prototype-level patch
 constructor-reference swap). Until then, P3-LIVE-02's second acceptance clause ("receive energy")
 cannot pass — reporting BLOCKED, not DONE, per this run's real-call-acceptance standard (no
 false-green).
+
+## 2026-07-10 — P3-LIVE-03 follow-up: the zone.js lead is DISPROVEN; still unresolved
+
+Tested two mechanism-level fixes live against .123, both failed to change the outcome —
+`pcCount` stayed `0` in every run:
+
+1. **zone.js's own RTC patch is not even loaded.** Read
+   `node_modules/zone.js/fesm2015/webapis-rtc-peer-connection.js` directly: it only patches
+   `RTCPeerConnection.prototype.addEventListener`/`removeEventListener` for zone-aware event
+   dispatch — it never reassigns `global['RTCPeerConnection']` at all, so even if it ran it
+   couldn't produce what we observed (the *constructor itself* reverting to native). Confirmed via
+   `frontend/src/main.ts`/`angular.json` that only the bare `zone.js` polyfill is imported — this
+   plugin file isn't referenced anywhere in first-party source. No `webrtc-adapter` or similar
+   dependency exists either (`grep` for both across `frontend/`: no hits). **The zone.js hypothesis
+   from the P3-LIVE-02 writeup above is dropped.**
+2. **`Object.defineProperty(window, 'RTCPeerConnection', {value, writable:false,
+   configurable:false})`** in `installCaptureHook` (tested live, reverted after — not shipped since
+   it didn't work): still ended up with `pcCount:0` and, more tellingly, re-reading the property
+   descriptor mid-call showed `{writable:true, configurable:true}` again — i.e. not just the *value*
+   but the **descriptor itself** was back to pristine native defaults. A plain script-level
+   reassignment against a `configurable:false` property either throws (strict mode) or silently
+   no-ops (sloppy mode) — neither can change `writable`/`configurable` back to `true`. Only a fresh
+   application of the native binding to that property name can produce this, in JS-legal terms.
+
+Ruled out by direct instrumentation on the same runs (`getDocumentLoadCount` from
+`receive-side-recorder.ts`, `page.on('crash')`, `page.frames()`):
+- **Not a reload**: `documentLoadCount` stayed `1` throughout (confirmed again this batch).
+- **Not a renderer crash**: `page.on('crash')` never fired.
+- **Not an iframe/extra frame**: `page.frames().length === 1`, same room URL, every time.
+
+Found the actual `new RTCPeerConnection(...)` call sites in the **shipped, built** bundle
+(`frontend/dist/meet-poc-frontend/browser/`, not source — grepped the dist output directly since
+that's what the browser actually runs): `chunk-UALHZ66O.js` has the real SFU client's
+`this.pc = new RTCPeerConnection(...)` (matches `sfu-client.service.ts:2186`), and
+**`chunk-TUJLC4SH.js` has a second, earlier one** — a TURN-relay reachability prober
+(`typeof RTCPeerConnection>"u"` feature-detect, then `new RTCPeerConnection({iceServers:s,
+iceTransportPolicy:"relay"})` to time a relay-candidate probe) that runs during ICE-server setup,
+**before** the SFU client's own PC. Neither call site incremented `pcCount` in any run — meaning
+whatever reverts the global has already happened by the time even this early TURN prober runs, i.e.
+very early in the app's bootstrap, not at some later "second participant joined" moment.
+
+**Still unresolved.** Every explanation that fits "some script reassigns the property" is either
+ruled out (zone.js, iframe, reload, crash) or contradicted (defineProperty-lock doesn't survive,
+which a simple reassignment could never defeat). The remaining candidate is something outside
+normal single-realm JS semantics — e.g. a Chromium renderer-process swap that resets the V8 isolate
+(and therefore both our closure state and the property descriptor) without firing a Playwright/CDP
+navigation event, possibly triggered by the real getUserMedia permission grant on a CDP-attached
+target. This would also explain why `__b08s2ReceiveCapture` intermittently *does* still read as
+`{pcCount:0}` (a **fresh** copy from `addInitScript` re-running on the new isolate, since CDP's
+`Page.addScriptToEvaluateOnNewDocument` is specifically documented to survive exactly this kind of
+per-target JS-context recreation) rather than `undefined` (which a lost registration would give).
+Not proven — a hypothesis for whoever picks this up next, requiring CDP-level instrumentation
+(`Target.attachedToTarget`, `Runtime.executionContextCreated` counts) that's beyond what
+`page.evaluate`/Playwright's own event surface can observe.
+
+**STATUS: still BLOCKED.** No mechanism-level fix found or shipped this batch; nothing in
+`receive-side-recorder.ts` was changed (the `defineProperty` experiment was reverted after
+disproving itself). Full run evidence: `validation/p3-live-03-changes.md`.

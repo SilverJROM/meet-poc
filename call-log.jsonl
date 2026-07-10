@@ -6,3 +6,7 @@
 {"timestamp":1783659881539,"purpose":"smoke","durationMs":15196,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
 {"timestamp":1783660040740,"purpose":"smoke","durationMs":15408,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
 {"timestamp":1783660120734,"purpose":"smoke","durationMs":14572,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783661429279,"purpose":"smoke","durationMs":15932,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783661482531,"purpose":"smoke","durationMs":15141,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783661537950,"purpose":"smoke","durationMs":14577,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783661641415,"purpose":"smoke","durationMs":15232,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
