@@ -113,6 +113,34 @@ export function setRemoteDefaultSource(config: RemoteHostConfig, sourceName: str
 }
 
 /**
+ * P3-LIVE-02: wraps a PipeWire monitor-of-sink source in `module-remap-source` so it stops
+ * reporting `device.class=monitor`. Chrome's PulseAudio input-device enumeration categorically
+ * excludes monitor-class sources from `getUserMedia`/`enumerateDevices` (by design, so a page
+ * can't silently capture system audio via the mic permission) — confirmed empirically on .123
+ * that this holds for BOTH headless and non-headless Chrome (P3-LIVE-01's "headless has 0
+ * audioinput" diagnosis was a red herring; the real filter is monitor-class, not headless-ness).
+ * The remap creates a *new* source (`device.class=filter`, `Monitor of Sink: n/a`) that Chrome
+ * does enumerate. Returns the loaded module's numeric ID for `unloadRemoteVirtualMic`.
+ */
+export function loadRemoteVirtualMic(config: RemoteHostConfig, monitorSourceName: string, virtualSourceName: string): string {
+  const cmd = `pactl load-module module-remap-source master=${monitorSourceName} source_name=${virtualSourceName} source_properties=device.description=VirtualMic`;
+  const result = ssh(config, cmd);
+  if (result.status !== 0) {
+    throw new Error(`loadRemoteVirtualMic failed (exit ${result.status}): ${result.stderr || result.stdout}`);
+  }
+  const moduleId = result.stdout.trim();
+  if (!/^\d+$/.test(moduleId)) {
+    throw new Error(`loadRemoteVirtualMic: could not parse module ID from output: ${JSON.stringify(result.stdout)}`);
+  }
+  return moduleId;
+}
+
+/** Unloads the `module-remap-source` instance created by `loadRemoteVirtualMic` (best-effort). */
+export function unloadRemoteVirtualMic(config: RemoteHostConfig, moduleId: string): void {
+  ssh(config, `pactl unload-module ${moduleId} 2>/dev/null; true`);
+}
+
+/**
  * Copies a local WAV to the remote host and starts a background loop that repeatedly plays it
  * through the given sink — this is the real, OS-routed "speech" the monitor-source virtual mic
  * captures (not a Chrome synthetic flag). Confirmed empirically (parecord on the monitor source):

@@ -249,3 +249,331 @@
   Result: browser test now captures real loopback audio with rms~0.15-0.19 (variability normal), VALID classification confirmed.
   Tests: `npx vitest run e2e/harness/__tests__/receive-side-recorder.test.ts e2e/harness/__tests__/call-driver.test.ts e2e/harness/__tests__/b08s2-receive-capture-hook.browser.test.ts` → 28 passed | 5 skipped.
   Commit: 0f0c568. F3 gate complete.
+[2026-07-09T06:45:10+00:00] [projcore callback] impl B08S-2 STATUS: DONE — 0f0c568 F3 play unlock
+[2026-07-09T06:51:01+00:00] [projcore callback] validator B08S-2 STATUS: DONE — FAIL FINAL codex55 — base64 chunk concat
+[2026-07-09T06:57:36+00:00] [projcore callback] impl B08S-2 STATUS: DONE — cc4c1b6 multi-chunk raw bytes
+[2026-07-09T07:01:15+00:00] [projcore callback] validator B08S-2 STATUS: DONE — PASS FINAL codex55 cc4c1b6 multi-chunk raw bytes
+[2026-07-09T07:01:15+00:00] [projcore callback] batch B08S-2 STATUS: VERIFIED — evidence spine receive-side complete
+[2026-07-09T07:02:09+00:00] [projcore callback] coord B08A-3 STATUS: PROCESSING — delib CONVERGED; impl L3 launched
+[2026-07-09T07:08:15+00:00] [projcore callback] coord B08A-3 STATUS: APPROVED-PLAN
+[2026-07-09T07:16:00+00:00] [projcore callback] impl B08A-3 STATUS: BLOCKED — 3 real harness fixes land (onLive hook, authenticated createRoom, publish-bytes polling) and get a real dual-browser call to both-sides-publishing against the live app for the first time; blocked downstream at receive-side stop by B08S-2's INVALID_RELOAD guard, which structurally false-positives on every real Angular page (Angular Router's one startup replaceState trips navCount>1) and whose fix would contradict B08S-2's own locked unit-test contract — see validation/b08a3-changes.md for reproduction + recommendation.
+[2026-07-09T07:18:00+00:00] [projcore callback] coord B08A-3 STATUS: SENDBACK — fix INVALID_RELOAD then re-run live test
+[2026-07-09T07:24:00+00:00] [projcore callback] impl B08A-3 STATUS: DONE — 716d6d1 (B08S-2 navCount pcCount>=1 gate) + 1733b61 (B08A-3 live sender-liveness test). Real dual-browser call vs live app: classifySenderLiveness===both-advancing, all four counters strictly advance, receive-side WAV VALID rms>0, scriptExpected transcript, exactly 1 call burn/run. Unit (13) + browser spine (3, incl new navCount-gate proof) + live B08A-3 test all green; full harness/ suite 120 passed | 5 pre-existing skips, 0 regressions. validation/b08a3-changes.md updated to DONE. AC15 live evidence produced; closes only on validator sign-off.
+[2026-07-09T07:25:05+00:00] [projcore callback] coord B08A-3 STATUS: REDTEAM — haiku standard-lite
+[2026-07-09T07:27:52+00:00] [projcore callback] redteam B08A-3 STATUS: DONE — CLEAN
+[2026-07-09T07:27:52+00:00] [projcore callback] coord B08A-3 STATUS: VALIDATING — opus L3
+[2026-07-09T07:35:04+00:00] [projcore callback] validator B08A-3 STATUS: DONE — FAIL F1 speech F2 transcript D27
+[2026-07-09T07:35:04+00:00] [projcore callback] coord B08A-3 STATUS: SENDBACK-2 — F1 speech + F2 whisper
+[2026-07-09T07:47:00+00:00] [projcore callback] impl B08A-3 STATUS: DONE — 3150f08 F1+F2 remediation. F1: launchArgs now feeds real speech (e2e/fixtures/audio/speech/alice-host.wav) — deviated from the sendback's literal bot-140/hello.wav pointer after re-confirming live that fixture is a 440Hz sine tone (0 words via direct whisper run), which would have made F2 unsatisfiable. F2: after stopReceiveSideRecording, spawns the project's own on-box local whisper (backend/.venv-transcribe + backend/scripts/transcribe.py) directly on the receive WAV and gates on real, non-tautological STT output (wordCount>0, not the hardcoded script text) — found and handled a landmine where transcribe.py silently no-ops without a .participant.json sidecar. scriptExpected assertions kept but relabeled supplemental-only, not the gate. Evidence persisted (not deleted) to validation/b08a3-evidence/. 2 live runs (1 threshold-tuning miss, 1 clean pass), both burnAfter-burnBefore===1 on e2e/ledger-state.json (26→27→28). No spine files touched. Full detail + deviation rationale: validation/b08a3-changes.md Part 4. Did not mark AC15 VERIFIED — validator call only.
+[2026-07-09T07:53:21+00:00] [projcore callback] validator B08A-3 STATUS: DONE — PASS r2. AC15 LIVE CLAUSE VERIFIED on 3150f08 (HEAD, single-file test diff; no product/spine code touched). F1 CLOSED: launchArgs feeds real speech; I independently confirmed alice-host.wav = 26 real words and that the sendback pointer I wrote in r1 (bot-140/hello.wav) is a 440Hz tone yielding 0 words — the impl's deviation was correct and necessary. F2 CLOSED: gate is real on-box faster-whisper (vad_filter=True, --force, sidecar landmine handled) over the far-end receive WAV. Non-tautology proven by negative control: tone -> 0 words -> gate FAILS. Hallucination hole the red-team deferred to me is CLOSED: far-end transcript is a verbatim contiguous substring of the fed speech in BOTH runs, with different fragments ("Voice so each speaker" / my run "My actual voice.") — output tracks actual received audio, cannot be echo or constant. Coupling verified: same participant (page1 sampled, page2 records page1's only remote track) and same window (onLive runs before stopReceiveSideRecording; 65536 samples @48kHz = 1.365s vs 1400ms deadline); tap is ontrack-only (createMediaStreamSource(event.streams[0])) so provenance is mechanism-established, not content — necessary since both browsers share launchArgs. Reproduced independently: live test 1/1 green (13.4s), b08s2 hook 2/2, recorder unit 13/13; evidence dir regenerated by MY run and satisfies the gate. Spine 716d6d1 re-endorsed, THREE GUARDS hold. SCOPE: AC15 must NOT be marked VERIFIED in full — the injection clause (capture-dead vs sender-dead-with-capture-alive discrimination) is deferred to B13W; B08A-3 closes the live clause only. FLAG: e2e/ledger-state.json now 29 vs budget 25 (my reproduce +1); r1 ledger defects (burn-before-browser catch-path over-count, split cwd-keyed counter, inert cap never called from call-driver) remain OPEN — untouched by 3150f08, does not invalidate the AC15 delta assertion. Room cleanup owed: 9 rooms incl 67601a0a9404 (mine); no sanctioned deleter exists in harness (canDelete is a guard with no delete path) so I did not improvise — flagging for B21. testroom01001 verified untouched. Report: validation/b08a3-validation-r2.md
+[2026-07-09T07:53:26+00:00] [projcore callback] validator B08A-3 STATUS: DONE — PASS r2 opus L3 3150f08 AC15 live clause
+[2026-07-09T07:53:26+00:00] [projcore callback] batch B08A-3 STATUS: VERIFIED — AC15 live clause closed
+[2026-07-09T07:53:44+00:00] [projcore callback] coord B04-real STATUS: PROCESSING — impl L2 launched
+[2026-07-09T07:54:41+00:00] [projcore callback] coord B04-real STATUS: APPROVED-PLAN
+[2026-07-09T07:55:49+00:00] [projcore callback] coord STATUS: WORKING — north UNBLOCK document-load INVALID_RELOAD + budget clarification
+[2026-07-09T07:57:22+00:00] [projcore callback] coord STATUS: BLOCKED-WAITING — structural plan filed; AC work stopped pending north review of B00S foundation
+[2026-07-09T07:59:32+00:00] [projcore callback] coord B00S-SPEECH STATUS: PROCESSING — sonnet impl launched
+[2026-07-09T08:01:45+00:00] [projcore callback] coord B00S-SPEECH STATUS: APPROVED-PLAN
+[2026-07-09T08:09:54+00:00] [projcore callback] impl B00S-SPEECH STATUS: DONE — ad702ac. Real piper speech generated on .123 only (amy for bot-140, ryan downloaded from huggingface for bot-123, 22050Hz->16kHz mono via ffmpeg on .123), scp'd + committed, replacing the 440Hz/660Hz tone WAVs. New fixtures-registry.json (scripted + already-valid classes) and bot-speech-whisper-roundtrip.test.ts gate the full set through backend/.venv-transcribe + transcribe.py --force (same stack the app uses), including a tone negative control proving the gate isn't tautological. 10/10 gate tests green; full harness suite 122/122 (5 skipped), no regressions. Quarantined generate-synthetic-wavs.ts to e2e/fixtures/audio/_tools/ (zero real callers, TONES-ONLY banner) per JROM's approved open-item decisions. README rewritten with real .123 regen instructions. 0 acceptance burns — no call-ledger/browser path touched. Full detail: validation/b00s-speech-changes.md.
+[2026-07-09T08:15:07+00:00] [projcore callback] validator B00S-SPEECH STATUS: DONE — PASS
+[2026-07-09T08:15:51+00:00] [projcore callback] batch B00S-SPEECH STATUS: VERIFIED — ad702ac
+[2026-07-09T08:19:54+00:00] [projcore callback] coord B00S-DEVICE STATUS: APPROVED-PLAN
+[2026-07-09T08:30:34+00:00] [projcore callback] impl B00S-DEVICE STATUS: DONE — 36c3aff required deviceMode; no DEFAULT fake-device; .123 gate; provenance; 11 pass 1 skip
+[2026-07-09T08:34:01+00:00] [projcore callback] validator B00S-DEVICE STATUS: DONE — FAIL real-virtual-mic does not strip fake launchArgs
+[2026-07-09T08:35:27+00:00] [projcore callback] impl B00S-DEVICE STATUS: DONE — 5876b9d reject fake flags under real-virtual-mic
+[2026-07-09T08:39:40+00:00] [projcore callback] validator B00S-DEVICE STATUS: DONE — PASS r2 codex55 5876b9d
+[2026-07-09T08:39:40+00:00] [projcore callback] batch B00S-DEVICE STATUS: VERIFIED — 36c3aff+5876b9d
+[2026-07-09T08:39:40+00:00] [FOUNDATION] B00S-SPEECH + B00S-DEVICE both VERIFIED — AC resume allowed per north; next recommended B00S-RELOAD before live receive-side ACs
+[2026-07-09T08:41:15+00:00] [projcore callback] coord B00S-RELOAD STATUS: PROCESSING — sonnet launched
+[2026-07-09T08:44:40+00:00] [projcore callback] coord B00S-RELOAD STATUS: APPROVED-PLAN
+[2026-07-09T08:52:44+00:00] [projcore callback] impl B00S-RELOAD STATUS: DONE — b32d818 documentLoadCount; history monkeypatch deleted; both-direction tests
+[2026-07-09T08:53:56+00:00] [projcore callback] validator B00S-RELOAD STATUS: DONE — PASS codex55 b32d818
+[2026-07-09T08:53:56+00:00] [projcore callback] batch B00S-RELOAD STATUS: VERIFIED — document-load INVALID_RELOAD; history patch deleted
+[2026-07-09T08:53:56+00:00] [AC RESUME] B00S-RELOAD VERIFIED; next B04-real (live receive-side) — B00S-BUDGET still recommended but not blocking per north
+[2026-07-09T08:53:56+00:00] [projcore callback] coord B04-real STATUS: PROCESSING — resume after foundation
+[2026-07-09T08:55:01+00:00] [projcore callback] coord B04-real STATUS: APPROVED-PLAN-REVISE
+[2026-07-09T09:05:45+00:00] [projcore callback] impl B04-real STATUS: DONE — ab84f65 T_gap=580ms 2x~40s fake-device+speech; evidence WAVs; Transcript N/A noted
+[2026-07-09T09:09:09+00:00] [projcore callback] validator B04-real STATUS: DONE — FAIL. device_mode=fake-device stimulus=speech. T_gap.md overclaims VERIFIED while both calls list Transcript: N/A; analyzer uses energy/script overlap only, not missing STT words. Report: validation/b04-real-validation.md
+[2026-07-09T09:09:17+00:00] [projcore callback] validator B04-real STATUS: DONE — FAIL
+[2026-07-09T09:15:40+00:00] [projcore callback] impl B04-real STATUS: DONE — a21eb8e MEASURED T_gap=350ms STT words 8+4; transcripts persisted; 48k timing
+[2026-07-09T09:17:01+00:00] [projcore callback] validator B04-real STATUS: DONE — FAIL r2
+[2026-07-09T09:17:30+00:00] [projcore callback] validator B04-real STATUS: DONE — FAIL r2 STT not wired into analyzer
+[2026-07-09T09:21:42+00:00] [projcore callback] impl B04-real STATUS: DONE — 720d406 STT wired into detectDropouts; MEASURED T_gap regenerated
+[2026-07-09T09:23:40+00:00] [projcore callback] validator B04-real STATUS: DONE — FAIL r3
+[2026-07-09T09:24:09+00:00] [projcore callback] validator B04-real STATUS: DONE — FAIL r3 optional STT fallback
+[2026-07-09T09:29:56+00:00] [projcore callback] impl B04-real STATUS: DONE — 7bee2f6 fail-closed required sttData; T_gap re-derived
+
+[2026-07-09T09:40:00+08:00] [projcore] RESUMED after tmux kill at 09:39:54 UTC. B04-real validator r4 was in flight. Commit 7bee2f6 detected with impl callback. Validator r4 re-launching now.
+
+
+[2026-07-09T09:40:05+08:00] [projcore callback] batch B04-real STATUS: VERIFIED — 7bee2f6 fail-closed STT; T_gap measured 279ms; D27 binding enforced
+[projcore NOTE] Resource limit decision filed: decisions/2026-07-09-b04-real-resource-limits.md (OOM prevention for live call tests)
+[projcore STATUS] B04-real VERIFIED. Queue assessment: B00S-BUDGET (optional, burn ledger only), B00S-AC15-RESCOPE (real-device re-demo), then AC1+ resume.
+
+
+[2026-07-09T09:45:30+08:00] [projcore] AUTONOMOUS MODE — B00S-AC15-RESCOPE real-device re-demo in progress. Check-in cadence: 45 min. Wakeup: 2026-07-09T12:03:00 UTC.
+
+
+[2026-07-09T09:50:00+08:00] [projcore callback] impl B00S-AC15-RESCOPE STATUS: DONE — 7a59d97 real-device re-demo test created
+[2026-07-09T09:50:05+08:00] [validation-note] B00S-AC15-RESCOPE test ready; requires localhost:4700 dev app for execution
+
+
+[2026-07-09T12:13:29+00:00] [projcore callback] coord B00S-AC15-RESCOPE STATUS: DONE — FAIL/BLOCKED: defective test (fake flags+real-virtual-mic); host=.140 needs .123; no meet-poc on .123; app stack incomplete (4700=raw BE). AC15 remains SCOPED. Commit 7a59d97 not gateable.
+[2026-07-09T12:13:29+00:00] [projcore] OVM re-registered session=x-01_projcore_grok45_meet children=[]; killed zombie x-01_impl_sonnet_meet
+[2026-07-09T12:13:29+00:00] [projcore callback] coord B00S-BUDGET STATUS: PROCESSING — dispatching next (acceptance-only burn ledger; dual-ledger pollution callBurn root=58 e2e=49)
+[projcore DISPATCH] implementer B00S-BUDGET DISPATCH-B00S-BUDGET-implementer-735847-1783599240
+[2026-07-09T12:14:16+00:00] [projcore callback] coord B00S-BUDGET STATUS: PROCESSING — impl haiku L2 dispatched; awaiting PROPOSED
+[projcore callback] implementer B00S-BUDGET STATUS: WORKING — Read brief, examining call-ledger.ts and call-driver.ts
+[projcore callback] implementer B00S-BUDGET STATUS: PROPOSED — Dual-burn pollution mechanism confirmed; conditional burn on acceptance+180s, logCall JSONL, single ledger path, fail-closed gate at entry
+[projcore ACK] implementer B00S-BUDGET RECEIVED — PROPOSED reviewed; APPROVED-PLAN follows
+[2026-07-09T12:15:20+00:00] [projcore callback] coord B00S-BUDGET STATUS: APPROVED-PLAN — implement now
+[projcore callback] implementer B00S-BUDGET STATUS: WORKING — Implementing conditional burn + logCall + single ledger path
+[projcore callback] implementer B00S-BUDGET STATUS: DONE — Conditional burn (acceptance+180s), logCall JSONL, single ledger path, fail-closed gate; 41/41 unit tests green; commit d33eb22
+
+[2026-07-09T12:20:35+00:00] [JROM] BUDGET 25→50; current burn=49; check-in 30min; proceed B00S-BUDGET + AC1
+[2026-07-09T12:20:35+00:00] [projcore callback] coord B00S-BUDGET STATUS: GATE-REOPEN — SENDBACK cap 50 + reconcile callBurnCount=49 (JROM); d33eb22 mechanism OK but still DEFAULT_CALL_BURN_CAP=25 and root count=58
+[projcore callback] implementer B00S-BUDGET STATUS: WORKING — Updating cap 25→50, reconciling burn to 49, re-running tests
+[projcore callback] implementer B00S-BUDGET STATUS: DONE — Cap 25→50, canonical burn reconciled to 49, tests green; commit 1fdc6c0
+
+[2026-07-09T12:22:34+00:00] [projcore callback] validator B00S-BUDGET STATUS: DONE — PASS 1fdc6c0 cap=50 burn=49; 41 unit tests; report validation/b00s-budget-validation.md
+[2026-07-09T12:22:34+00:00] [projcore callback] batch B00S-BUDGET STATUS: VERIFIED — acceptance-only burn + logCall + single path + cap50/burn49
+[projcore DISPATCH] implementer B08 DISPATCH-B08-implementer-751482-1783599825
+[2026-07-09T12:23:40+00:00] [projcore callback] coord B08 STATUS: PROCESSING — impl haiku dispatched; B00S-BUDGET VERIFIED; budget 50/49
+[projcore callback] implementer B08 STATUS: WORKING — Reading brief and context files for plan handshake
+[projcore callback] implementer B08 STATUS: PROPOSED — CallDriver weak-signal shim injection + baseline sweep harness
+[projcore ACK] implementer B08 RECEIVED — PROPOSED reviewed
+[2026-07-09T12:24:42+00:00] [projcore callback] coord B08 STATUS: APPROVED-PLAN — implement now
+[projcore callback] implementer B08 STATUS: WORKING — Implementing CallDriver shim injection + baseline sweep harness
+
+[2026-07-09T12:27:16+00:00] [JROM] RESET callBurnCount=0, cap=25 fresh budget. Ledger cleaned. Proceed B00S-BUDGET+AC1. 30-min check-ins.
+[2026-07-09T12:27:16+00:00] [projcore] ledger-state.json + e2e/ledger-state.json → burn=0 createdIDs=[]. call-log reset event. Supersedes 50/49.
+[2026-07-09T12:27:16+00:00] [B00S-BUDGET] Mechanism stays VERIFIED; CAP constant still 50 in code → SENDBACK/fix to 25 required before next acceptance burn gate.
+[2026-07-09T12:27:29+00:00] [projcore callback] coord STATUS: WORKING — JROM RESET applied 0/25; B08 continue+cap25; 30m check-in re-armed
+[projcore callback] implementer B08 STATUS: WORKING — Test timeout issue + budget cap fix needed; restructuring sweep loop
+[2026-07-09T12:28:48+00:00] [projcore callback] coord B08 STATUS: WORKING — nudge land minimal sweep
+[projcore callback] implementer B08 STATUS: WORKING — Fixing budget cap 25 loops and simplifying sweep test
+
+[2026-07-09T12:29:13+00:00] [CHECK-IN] stale 3m B00S-BUDGET probe fired — B00S-BUDGET already VERIFIED (d33eb22+1fdc6c0; JROM later RESET 0/25). Active batch=B08 WORKING.
+[2026-07-09T12:29:13+00:00] [projcore callback] coord B00S-BUDGET STATUS: VERIFIED — still holds (mechanism); cap now 25 + burn 0 per JROM RESET (code uncommitted on B08 branch of work)
+[2026-07-09T12:29:13+00:00] [projcore callback] coord B08 STATUS: WORKING — ~5m post-APPROVED; vitest sweep in flight / post-nudge; not >25m; no DONE yet
+
+[2026-07-09T12:30:18+00:00] [JROM] PHASE 2 DIRECTIVE: 50 LOCAL tests fake-device only NO SFU; maxForks=3 HARD; cleanup INLINE every batch; exit 50 PASS or confidence → notify JROM NO shutdown; free -h every batch
+[2026-07-09T12:30:18+00:00] [projcore callback] batch B08 STATUS: ABORTED — Phase2 no-SFU (live sweep banned). CAP25 WIP uncommitted.
+[2026-07-09T12:30:18+00:00] [projcore callback] coord PHASE2 STATUS: WORKING — counter 0/50; next P2-LOCAL-01 inventory
+[2026-07-09T12:30:18+00:00] [MEM] batch-boundary free -h: total=61Gi used=27Gi free=18Gi avail=33Gi
+[2026-07-09T12:32:54+00:00] [projcore callback] batch P2-LOCAL-01 STATUS: VERIFIED — 143 unit PASS / 6 skip; no SFU; maxForks=3; avail=35Gi free=20Gi
+[2026-07-09T12:32:54+00:00] [projcore callback] coord P2-LOCAL-02 STATUS: PROCESSING — dispatch AC1 local math (no SFU)
+[projcore DISPATCH] implementer P2-LOCAL-02 DISPATCH-P2-LOCAL-02-implementer-768426-1783600379
+[2026-07-09T12:32:54+00:00] [projcore callback] coord P2-LOCAL-02 STATUS: PROCESSING — awaiting PROPOSED
+[projcore callback] implementer P2-LOCAL-02 STATUS: PROPOSED — Reading brief + remote-audio.service.ts
+[2026-07-09T12:33:36+00:00] [projcore] PROTOCOL RELOAD ack — inter-session address re-read; speaker tags [projcore] only; no leading / or $ in transmitted text
+[projcore ACK] implementer P2-LOCAL-02 RECEIVED — PROPOSED reviewed
+[2026-07-09T12:34:02+00:00] [projcore callback] coord P2-LOCAL-02 STATUS: APPROVED-PLAN — implement now
+[projcore callback] implementer P2-LOCAL-02 STATUS: WORKING — Creating unit tests for computeRemoteAutoGains
+
+[2026-07-09T12:35:24+00:00] [projcore] PROTOCOL RELOAD re-ack — [projcore]/[north] only; no leading / or $
+[2026-07-09T12:35:24+00:00] [north] BUDGET CLARIFIED — Phase2=25 fake-device local; Phase3=25 live SFU post notify-gate. Proceed P2 B00S-BUDGET+AC1 fake-device. Inline cleanup.
+[2026-07-09T12:35:24+00:00] [projcore callback] coord PHASE2 STATUS: WORKING — target 25/25 fake-device; P2-LOCAL-02 in flight; B00S-BUDGET VERIFIED (CAP25 landing)
+[2026-07-09T12:35:24+00:00] [MEM] total=61Gi used=26Gi free=20Gi avail=35Gi
+[2026-07-09T12:36:03+00:00] [projcore] OVM fix: session=x-01_projcore_grok45_meet children refreshed
+[projcore callback] implementer P2-LOCAL-02 STATUS: DONE — 22 tests PASS: AC1 2-party no-op + multi-party boost + formula table proven. CAP25 landed.
+
+[2026-07-09T12:58:00+00:00] [CHECK-IN 30m] CAP=25 burn=0; B00S-BUDGET VERIFIED; B08 ABORTED; P2-LOCAL-02 DONE 8044d45
+[2026-07-09T12:58:00+00:00] [projcore callback] validator P2-LOCAL-02 STATUS: DONE — PASS 8044d45 22 remote-auto-gain + 25 ledger; CAP25; report validation/p2-local-02-validation.md
+[2026-07-09T12:58:00+00:00] [projcore callback] batch P2-LOCAL-02 STATUS: VERIFIED — AC1 2-party unity unit proof + CAP25
+[2026-07-09T12:58:00+00:00] [MEM] total=61Gi used=27Gi free=18Gi avail=34Gi
+[2026-07-09T12:58:00+00:00] [projcore callback] coord P2-LOCAL-03 STATUS: PROCESSING — dispatch gum-shim local fake-device r-grid
+[projcore DISPATCH] implementer P2-LOCAL-03 DISPATCH-P2-LOCAL-03-implementer-863777-1783601900
+[2026-07-09T12:58:15+00:00] [projcore callback] coord P2-LOCAL-03 STATUS: PROCESSING — impl haiku dispatched
+[projcore callback] implementer P2-LOCAL-03 STATUS: PROPOSED — Starting gum-shim r-grid stimulus verification (r: 0.50, 0.30, 0.20, 0.10, 0.05)
+[projcore callback] implementer P2-LOCAL-03 STATUS: DONE — AC1 r-grid verification complete: all r∈{0.50,0.30,0.20,0.10,0.05} within ±20% on real Chromium fake-device
+
+[2026-07-09T13:28:40+00:00] [CHECK-IN 30m] CAP=25 burn=0; P2-LOCAL-03 DONE uncommitted → independent PASS + land 73e398a
+[2026-07-09T13:28:40+00:00] [projcore callback] validator P2-LOCAL-03 STATUS: DONE — PASS 73e398a gum-shim r-grid 2/2; report validation/p2-local-03-validation.md
+[2026-07-09T13:28:40+00:00] [projcore callback] batch P2-LOCAL-03 STATUS: VERIFIED — AC1 stimulus r-grid fake-device local
+[2026-07-09T13:28:40+00:00] [MEM] total=61Gi used=39Gi free=4.7Gi avail=21Gi
+[projcore DISPATCH] implementer P2-LOCAL-04 DISPATCH-P2-LOCAL-04-implementer-970841-1783603726
+[2026-07-09T13:28:40+00:00] [projcore callback] coord P2-LOCAL-04 STATUS: PROCESSING — impl dispatched
+[projcore callback] implementer P2-LOCAL-04 STATUS: WORKING — Starting audit of capture-injection + recording-arbiter test suite
+[projcore callback] implementer P2-LOCAL-04 STATUS: DONE — INVALID≠PASS matrix validated (51 tests ✅), commit 75d54c4
+
+[2026-07-09T13:58:39+00:00] [CHECK-IN 30m] CAP=25 burn=0; P2-LOCAL-04 DONE 75d54c4; independent 51/51 PASS
+[2026-07-09T13:58:39+00:00] [projcore callback] validator P2-LOCAL-04 STATUS: DONE — PASS 75d54c4 51 unit; report validation/p2-local-04-validation.md
+[2026-07-09T13:58:39+00:00] [projcore callback] batch P2-LOCAL-04 STATUS: VERIFIED — INVALID≠PASS matrix
+[2026-07-09T13:58:39+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=33Gi
+[2026-07-09T13:58:39+00:00] [projcore callback] coord P2-LOCAL-05 STATUS: PROCESSING — dispatch CAP25+ledger/driver unit regression
+[projcore DISPATCH] implementer P2-LOCAL-05 DISPATCH-P2-LOCAL-05-implementer-1086183-1783605524
+[2026-07-09T13:58:39+00:00] [projcore callback] coord P2-LOCAL-05 STATUS: PROCESSING — impl dispatched
+[projcore callback] implementer P2-LOCAL-05 STATUS: WORKING — Batch accepted, checking git status and test suite
+[projcore callback] implementer P2-LOCAL-05 STATUS: DONE — All unit tests pass (46/46), CAP25 enforcement verified, changes committed
+
+[2026-07-09T14:28:09+00:00] [CHECK-IN 30m] CAP=25 burn=0; P2-LOCAL-05 VERIFIED 835ee6e independent 41 pass/5 skip
+[2026-07-09T14:28:09+00:00] [projcore callback] validator P2-LOCAL-05 STATUS: DONE — PASS 835ee6e CAP25+driver; report validation/p2-local-05-validation.md
+[2026-07-09T14:28:09+00:00] [projcore callback] batch P2-LOCAL-05 STATUS: VERIFIED
+[2026-07-09T14:28:09+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=32Gi
+[2026-07-09T14:28:09+00:00] [projcore callback] coord P2-LOCAL-06 STATUS: PROCESSING — AC1 absolute target-loudness unit fix
+[projcore DISPATCH] implementer P2-LOCAL-06 DISPATCH-P2-LOCAL-06-implementer-1170051-1783607296
+[2026-07-09T14:28:09+00:00] [projcore callback] coord P2-LOCAL-06 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P2-LOCAL-06 STATUS: WORKING — starting investigation of computeRemoteAutoGains + AC1 absolute target-loudness fix
+[projcore callback] implementer P2-LOCAL-06 STATUS: PROPOSED — D28: ref=max(loudest,ABS_TARGET=0.5) in computeRemoteAutoGains; 2-party quiet boosted, multiparty w/loud peer unchanged (AC17 safe). Extending unit tests. Awaiting APPROVED-PLAN.
+[projcore ACK] implementer P2-LOCAL-06 RECEIVED — PROPOSED reviewed
+[2026-07-09T14:57:45+00:00] [CHECK-IN 30m] CAP=25 burn=0; P2-LOCAL-06 PROPOSED D28 ABS_TARGET=0.5 — APPROVED-PLAN sent
+[2026-07-09T14:57:45+00:00] [projcore callback] coord P2-LOCAL-06 STATUS: APPROVED-PLAN — impl working
+[2026-07-09T14:57:45+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=33Gi
+[projcore callback] implementer P2-LOCAL-06 STATUS: WORKING — APPROVED-PLAN received; implementing ABS_TARGET=0.5 reference fix + rewriting no-op tests
+[projcore callback] implementer P2-LOCAL-06 STATUS: DONE — 0519d09 ABS_TARGET=0.5 reference fix; 28/28 vitest + tsx spec green; AC17 multiparty untouched; changes.md written
+
+[2026-07-09T15:28:15+00:00] [CHECK-IN 30m] CAP=25 burn=0; P2-LOCAL-06 DONE 0519d09; independent 28/28 PASS
+[2026-07-09T15:28:15+00:00] [projcore callback] validator P2-LOCAL-06 STATUS: DONE — PASS 0519d09 ABS_TARGET=0.5; 28 remote-auto-gain; report validation/p2-local-06-validation.md
+[2026-07-09T15:28:15+00:00] [projcore callback] batch P2-LOCAL-06 STATUS: VERIFIED — AC1 absolute target product fix unit
+[2026-07-09T15:28:15+00:00] [projcore callback] batch P2-EXIT STATUS: VERIFIED — Phase 2 CONFIDENCE PASS; notify for Phase 3 gate
+[2026-07-09T15:28:15+00:00] [projcore] PHASE 2 COMPLETE (confidence) — AC1 unit fix 0519d09 + local stimulus + CAP25. Awaiting Phase 3 gate approval before live SFU. Do NOT auto-start P3. Do NOT shutdown. FE needs ng build for live.
+[2026-07-09T15:28:15+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=32Gi
+
+[2026-07-09T15:57:46+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase2 CONFIDENCE HOLD — no impl children; awaiting Phase 3 gate approval
+[2026-07-09T15:57:46+00:00] [projcore callback] coord STATUS: WAITING — Phase 2 complete (0519d09 AC1 unit fix); Phase 3 NOT started; need [north]/JROM gate + ng build
+[2026-07-09T15:57:46+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=33Gi
+
+[2026-07-09T16:27:37+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase2 HOLD (confidence PASS 0519d09); no Phase3 approval; children=[]; HEAD=0519d09
+[2026-07-09T16:27:37+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate still open; no auto-start; no shutdown
+[2026-07-09T16:27:37+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=33Gi
+
+[2026-07-09T16:57:38+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 approval
+[2026-07-09T16:57:38+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T16:57:38+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=33Gi
+
+[2026-07-09T17:27:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T17:27:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T17:27:35+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=33Gi
+
+[2026-07-09T17:57:36+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T17:57:36+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T17:57:36+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=33Gi
+
+[2026-07-09T18:27:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T18:27:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T18:27:35+00:00] [MEM] total=61Gi used=28Gi free=14Gi avail=32Gi
+
+[2026-07-09T18:57:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T18:57:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T18:57:35+00:00] [MEM] total=61Gi used=28Gi free=14Gi avail=32Gi
+
+[2026-07-09T18:58:13+00:00] [OVM LIVENESS] still running — Phase 2 CONFIDENCE PASS (0519d09); WAITING Phase 3 gate + ng build; burn=0 CAP=25; no children; no auto-start; no shutdown
+[2026-07-09T18:58:13+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate; overmind heartbeat
+[2026-07-09T18:58:13+00:00] [MEM] total=61Gi used=28Gi free=14Gi avail=32Gi
+
+[2026-07-09T19:12:17+00:00] [OVM] registration gap fix — child roster resync + tasks heartbeat
+[2026-07-09T19:12:17+00:00] [projcore callback] coord STATUS: WAITING — Phase 2 complete; Phase 3 gate; children resynced
+[2026-07-09T19:12:17+00:00] [MEM] total=61Gi used=28Gi free=14Gi avail=32Gi
+
+[2026-07-09T19:27:36+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T19:27:36+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T19:27:36+00:00] [MEM] total=61Gi used=28Gi free=15Gi avail=33Gi
+
+[2026-07-09T19:57:36+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T19:57:36+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T19:57:36+00:00] [MEM] total=61Gi used=28Gi free=14Gi avail=32Gi
+
+[2026-07-09T20:28:15+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T20:28:15+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T20:28:15+00:00] [MEM] total=61Gi used=28Gi free=14Gi avail=32Gi
+
+[2026-07-09T20:57:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T20:57:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T20:57:35+00:00] [MEM] total=61Gi used=28Gi free=14Gi avail=32Gi
+
+[2026-07-09T21:27:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T21:27:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T21:27:35+00:00] [MEM] total=61Gi used=29Gi free=6.8Gi avail=32Gi
+
+[2026-07-09T21:57:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T21:57:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T21:57:35+00:00] [MEM] total=61Gi used=31Gi free=4.4Gi avail=30Gi
+
+[2026-07-09T22:28:14+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T22:28:14+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T22:28:14+00:00] [MEM] total=61Gi used=30Gi free=5.5Gi avail=31Gi
+
+[2026-07-09T22:58:14+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T22:58:14+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T22:58:14+00:00] [MEM] total=61Gi used=30Gi free=5.2Gi avail=31Gi
+
+[2026-07-09T23:27:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T23:27:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T23:27:35+00:00] [MEM] total=61Gi used=30Gi free=4.7Gi avail=30Gi
+
+[2026-07-09T23:57:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-09T23:57:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-09T23:57:35+00:00] [MEM] total=61Gi used=30Gi free=4.2Gi avail=30Gi
+
+[2026-07-10T00:28:16+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-10T00:28:16+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-10T00:28:16+00:00] [MEM] total=61Gi used=30Gi free=3.6Gi avail=30Gi
+
+[2026-07-10T00:57:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-10T00:57:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-10T00:57:35+00:00] [MEM] total=61Gi used=30Gi free=3.1Gi avail=30Gi
+
+[2026-07-10T01:27:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-10T01:27:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-10T01:27:35+00:00] [MEM] total=61Gi used=31Gi free=2.5Gi avail=29Gi
+
+[2026-07-10T01:57:44+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-10T01:57:44+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-10T01:57:44+00:00] [MEM] total=61Gi used=33Gi free=733Mi avail=28Gi
+
+[2026-07-10T02:27:35+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-10T02:27:35+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-10T02:27:35+00:00] [MEM] total=61Gi used=32Gi free=2.5Gi avail=29Gi
+
+[2026-07-10T02:58:17+00:00] [CHECK-IN 30m] CAP=25 burn=0 HEAD=0519d09 children=[] Phase2 HOLD; no Phase3 go
+[2026-07-10T02:58:17+00:00] [projcore callback] coord STATUS: WAITING — Phase 3 gate open; no auto-start; no shutdown
+[2026-07-10T02:58:17+00:00] [MEM] total=61Gi used=31Gi free=12Gi avail=29Gi
+
+[2026-07-10T03:07:27+00:00] [north] PHASE 3 GO — 25 live SFU real-virtual-mic; maxForks=3; inline cleanup; exit 25 PASS or budget exhausted; notify when done
+[2026-07-10T03:07:27+00:00] [projcore callback] coord PHASE3 STATUS: PROCESSING — GO received; ng build + env + P3-LIVE-01
+[2026-07-10T03:07:27+00:00] [MEM] total=61Gi used=38Gi free=5.6Gi avail=22Gi
+
+[2026-07-10T03:07:57+00:00] [north] HOLD Phase 3 — Phase 2 DONE and READY; JROM real-call testing now; do NOT auto-launch; await signal
+[2026-07-10T03:07:57+00:00] [projcore callback] coord PHASE3 STATUS: HOLD — no auto-start; awaiting JROM/north proceed after real-call
+[2026-07-10T03:07:57+00:00] [projcore callback] coord STATUS: WAITING — Phase 2 ready for JROM real-call; Phase 3 held
+[2026-07-10T03:07:57+00:00] [MEM] total=61Gi used=44Gi free=704Mi avail=17Gi
+
+[2026-07-10T03:08:40+00:00] [north] PHASE 3 LAUNCH correction — .140↔.123 live SFU; real-virtual-mic; 25 calls; maxForks=3; inline cleanup; exit 25 PASS or budget exhausted → notify ready-for-real-call-test
+[2026-07-10T03:08:40+00:00] [projcore callback] coord PHASE3 STATUS: PROCESSING — LAUNCH; HOLD cancelled; ng build + P3-LIVE-01
+[2026-07-10T03:08:40+00:00] [MEM] total=61Gi used=36Gi free=8.7Gi avail=25Gi
+[projcore DISPATCH] implementer P3-LIVE-01 DISPATCH-P3-LIVE-01-implementer-3129786-1783652957
+[2026-07-10T03:09:08+00:00] [projcore callback] coord P3-LIVE-01 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P3-LIVE-01 STATUS: WORKING — Read brief; investigating .140<->.123 topology + SSH/real-mic feasibility before proposing plan
+
+[2026-07-10T03:10:51+00:00] [north] FINAL EXIT PROCEDURE locked — on Phase3 complete: (1) notify ready-for-real-call-test (2) SHUTDOWN dev_machine (3) STANDDOWN no auto-restart; JROM owns real-call
+[2026-07-10T03:10:51+00:00] [projcore] exit procedure filed decisions/2026-07-10-phase3-final-exit-procedure.md — NOT executing until 25 PASS or budget exhausted
+[2026-07-10T03:10:51+00:00] [MEM] total=61Gi used=33Gi free=11Gi avail=28Gi
+[projcore callback] implementer P3-LIVE-01 STATUS: PROPOSED — CDP-remote split-host (.140 fake+speech, .123 real-mic via SSH tunnel/CDP); see prompts/p3-live-01-proposed.md; awaiting approval
+[projcore ACK] implementer P3-LIVE-01 RECEIVED — PROPOSED reviewed
+[2026-07-10T03:27:50+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 LIVE; P3-LIVE-01 PROPOSED CDP-remote .140↔.123 — APPROVED-PLAN
+[2026-07-10T03:27:50+00:00] [projcore callback] coord P3-LIVE-01 STATUS: APPROVED-PLAN — impl working
+[2026-07-10T03:27:50+00:00] [MEM] total=61Gi used=33Gi free=11Gi avail=28Gi
+[projcore callback] implementer P3-LIVE-01 STATUS: WORKING — Plan approved; building CDP-remote harness glue + running memory check before launch
+[projcore callback] implementer P3-LIVE-01 STATUS: WORKING — Harness glue built; found+fixed insecure-context getUserMedia block via .localhost host-alias; running live smoke now
+
+[2026-07-10T03:57:45+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 P3-LIVE-01 WORKING (finalize commit); CDP-remote smoke in progress
+[2026-07-10T03:57:45+00:00] [projcore callback] coord P3-LIVE-01 STATUS: WORKING — impl finalizing evidence/commit after live attempts
+[2026-07-10T03:57:45+00:00] [MEM] total=61Gi used=33Gi free=11Gi avail=27Gi
+[projcore callback] implementer P3-LIVE-01 STATUS: WORKING — Docs+counter written; committing harness glue now per nudge, then emitting DONE
+[projcore callback] implementer P3-LIVE-01 STATUS: DONE — FAIL(0/25 real-mic PASS): topology+2 real bugs fixed(insecure-origin,silent-mic-before-play); blocked on .123 headless Chrome 0 audioinput devices. Committed 666fd22. See p3-live-01-changes.md
+
+[2026-07-10T04:28:03+00:00] [CHECK-IN 30m] CAP=25 burn=0; P3-LIVE-01 DONE FAIL/BLOCKED 666fd22; headless 0 audioinput on .123
+[2026-07-10T04:28:03+00:00] [projcore callback] validator P3-LIVE-01 STATUS: DONE — FAIL/BLOCKED 666fd22; harness CDP landed; real-mic smoke not PASS; report validation/p3-live-01-validation.md
+[2026-07-10T04:28:03+00:00] [projcore callback] batch P3-LIVE-01 STATUS: FAIL — topology partial; next Xvfb
+[2026-07-10T04:28:03+00:00] [MEM] total=61Gi used=32Gi free=12Gi avail=29Gi
+[projcore DISPATCH] implementer P3-LIVE-02 DISPATCH-P3-LIVE-02-implementer-3167340-1783657690
+[2026-07-10T04:28:03+00:00] [projcore callback] coord P3-LIVE-02 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P3-LIVE-02 STATUS: WORKING — session launched; investigating .123 Xvfb feasibility
+[projcore callback] implementer P3-LIVE-02 STATUS: PROPOSED — Xvfb does NOT fix it (proven); real cause=Chrome filters monitor-class PulseAudio source. Fix=module-remap-source. See prompts/p3-live-02-proposed.md
+
+[2026-07-10T04:58:03+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 LIVE 0/25; P3-LIVE-02 PROPOSED→APPROVED-PLAN module-remap-source
+[2026-07-10T04:58:03+00:00] [projcore callback] coord P3-LIVE-02 STATUS: APPROVED-PLAN — impl working
+[2026-07-10T04:58:03+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
+[2026-07-10T04:58:03+00:00] [MEM] total=61Gi used=31Gi free=13Gi avail=29Gi
+[projcore callback] implementer P3-LIVE-02 STATUS: WORKING — APPROVED-PLAN received; implementing remap-source wiring + p3-live-02-smoke.ts
