@@ -343,3 +343,47 @@ difference between "isolation tests that worked" and "the live call that never h
 the 2 files above, +29/-5 lines, gated behind a query param absent on every real join URL —
 confirmed no other caller of the changed functions exists. Full run evidence:
 `validation/p3-live-07-changes.md`.
+
+## 2026-07-10 — P3-LIVE-08: RESOLVED — real bug was in our own harness capture code, not stereo
+
+The P3-LIVE-07 "channelCount:2" lead was investigated first, per the brief's own instruction, with
+a local-only isolation test (real fake-device mic → loopback `RTCPeerConnection` → the EXACT
+`createMediaStreamSource()`-directly-on-`pc.ontrack`-stream graph shape
+`startRawRemoteStreamCapture` uses). Result: `maxAbs: 0` for channelCount 1, channelCount 2, AND
+the plain `audio:true` baseline that P3-LIVE-05 had previously reported as working. **Stereo was
+never the cause** — the P3-LIVE-05 baseline itself no longer reproduced with signal when tested
+this way.
+
+That discrepancy was the real clue: P3-LIVE-05's isolation test attached the raw stream to a
+**playing** `<audio>` element before `captureStream()`; `startRawRemoteStreamCapture`
+(P3-LIVE-06) calls `createMediaStreamSource()` **directly** on the raw stream, no element ever
+plays it. That exact code path was never actually isolated before it shipped in P3-LIVE-06 — the
+"single-hop = proven pattern" reasoning silently elided the "and it went through a playing
+element" detail. Confirmed by adding the missing step back: attach the raw stream to a *new*,
+harness-owned (not the app's) `<audio>` element, `.play()` it, then `captureStream()` — mono and
+stereo both immediately got real signal (`maxAbs≈1.075`), identically. **Root cause: Chromium does
+not decode/render a remote WebRTC audio track — even one reporting `readyState:"live",
+enabled:true, muted:false` — unless something actively plays it.** `createMediaStreamSource()`
+alone is a silent no-op tap on an unplayed track.
+
+**Fixed** in `dom-audio-capture.ts`'s `startRawRemoteStreamCapture()`: it now creates its own
+dedicated playing element (deliberately not the app's `data-remote-audio` one, to keep the
+P3-LIVE-06 double-hop fix intact) as an intermediate step before the existing capture graph.
+
+**Re-ran the live split-host smoke with the fix: PASS.** `speaker1.publishedBytes=2414>0`,
+`speaker2.publishedBytes=361>0`, receive WAV `rms=0.087941`. Independently re-verified (not just
+the script's own number) by parsing the WAV's raw PCM directly: 180715/262144 samples nonzero, max
+amplitude 20594/32767 — real, substantial audio. **First PASS across the entire P3-LIVE chain**
+(P3-LIVE-01 through -08).
+
+**Full chain of what it took, for the record**: `.123` headless-Chrome-0-audioinput (real fix:
+`module-remap-source`, P3-LIVE-02) → receive-side ctor-hook silently broken on split-host
+(bypassed via DOM `captureStream`, P3-LIVE-04) → `.140` has no audio backend at all (real fix:
+PulseAudio null-sink, P3-LIVE-05) → double-AudioContext-hop silently zeroes `captureStream` on the
+app's own processed element (bypassed via raw `sfuRemoteStreams` tap, P3-LIVE-06) → Chrome's own
+AGC/NS/EC suspected and disproven by direct test (P3-LIVE-07) → the raw-stream tap itself never
+played the track so Chromium never decoded it (real fix, this batch). Every step was a genuine,
+independently-reproduced bug or environment gap — none were shortcuts or false-greens.
+
+**STATUS: DONE.** `frontend/`/`backend/` untouched this batch (product change already landed and
+verified in P3-LIVE-07). Full run evidence: `validation/p3-live-08-changes.md`.

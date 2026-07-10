@@ -666,3 +666,22 @@
 [2026-07-10T09:27:45+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
 [2026-07-10T09:27:45+00:00] [MEM] total=61Gi used=33Gi free=13Gi avail=27Gi
 [projcore callback] implementer P3-LIVE-07 STATUS: WORKING — APPROVED-PLAN received; implementing constraint override + speaker2ExtraQuery + ng build
+[projcore callback] implementer P3-LIVE-07 STATUS: BLOCKED — 47fe2d0 AGC/NS/EC override shipped+verified false via getSettings, STILL silent. Hypothesis ELIMINATED. Fresh lead: channelCount:2 stereo, untested. See decisions doc P3-LIVE-07
+
+[2026-07-10T09:58:13+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-07 BLOCKED-partial 47fe2d0 (AGC/NS/EC ELIMINATED; stereo channelCount=2 lead); dispatch P3-LIVE-08
+[2026-07-10T09:58:13+00:00] [projcore ACK] implementer P3-LIVE-07 RECEIVED — BLOCKED partial; override works; hypothesis disproven
+[2026-07-10T09:58:13+00:00] [projcore callback] validator P3-LIVE-07 STATUS: DONE — BLOCKED-partial 47fe2d0; report validation/p3-live-07-validation.md
+[2026-07-10T09:58:13+00:00] [projcore callback] batch P3-LIVE-07 STATUS: BLOCKED — next LIVE-08 stereo/mono
+[2026-07-10T09:58:13+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3; CAP25 burn0; maxForks=3; LIVE-08
+[2026-07-10T09:58:13+00:00] [MEM] total=61Gi used=32Gi free=13Gi avail=28Gi
+[projcore DISPATCH] implementer P3-LIVE-08 DISPATCH-P3-LIVE-08-implementer-2366890-1783677493
+[projcore DISPATCH] implementer P3-LIVE-08
+[2026-07-10T09:58:13+00:00] [projcore callback] coord P3-LIVE-08 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P3-LIVE-08 STATUS: WORKING — session launched; running local stereo-track isolation test before proposing
+[projcore callback] implementer P3-LIVE-08 STATUS: PROPOSED — stereo NOT the cause; found the REAL bug - our own raw-capture never attached track to a playing element. Isolation proves fix (maxAbs=1.075 mono+stereo). See prompts/p3-live-08-proposed.md
+
+[2026-07-10T10:27:46+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-08 PROPOSED→APPROVED-PLAN (raw capture must play element first; stereo NOT cause)
+[2026-07-10T10:27:46+00:00] [projcore callback] coord P3-LIVE-08 STATUS: APPROVED-PLAN — impl working
+[2026-07-10T10:27:46+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
+[2026-07-10T10:27:46+00:00] [MEM] total=61Gi used=33Gi free=12Gi avail=28Gi
+[projcore callback] implementer P3-LIVE-08 STATUS: WORKING — APPROVED-PLAN received; fixing startRawRemoteStreamCapture to attach a playing element before captureStream

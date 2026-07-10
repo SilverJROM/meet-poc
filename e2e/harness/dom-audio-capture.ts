@@ -141,11 +141,22 @@ export async function startDomRemoteAudioCapture(page: Page, outputDir: string, 
  *
  * This taps `window.__meetDebug.sfuRemoteStreams` (real product code, `sfu-client.service.ts:114`,
  * exposed via `room.page.ts` `sfuRemoteStreams: this.sfuClient.remoteStreams()`) directly — the
- * RAW remote WebRTC `MediaStream`, before the app's own processing graph — and feeds it into a
- * single capture AudioContext, matching the isolation tests' working shape exactly. Trade-off,
- * disclosed not hidden: this proves energy arrived and is decodable (the acceptance bar — "receive
+ * RAW remote WebRTC `MediaStream`, before the app's own processing graph. Trade-off, disclosed
+ * not hidden: this proves energy arrived and is decodable (the acceptance bar — "receive
  * energy"), but is pre-gain/compressor, not bit-identical to what a human ear hears through the
  * app's own processing.
+ *
+ * P3-LIVE-08 fix: the first version of this function fed the raw stream straight into
+ * `createMediaStreamSource()` with no element ever playing it — isolated (local-only, no SFU) to
+ * a SEPARATE bug from the P3-LIVE-06 double-hop one: Chromium does not decode/render a remote
+ * WebRTC audio track — even one reporting `readyState:"live", enabled:true, muted:false` — unless
+ * something actively plays it; `createMediaStreamSource()` alone is a silent no-op tap. Every
+ * P3-LIVE-04/05 isolation test that got real signal went through a *playing* `<audio>` element
+ * first. Fixed by attaching the raw stream to a dedicated, harness-owned `<audio>` element
+ * (deliberately NOT the app's `data-remote-audio` one — that would reintroduce the P3-LIVE-06
+ * double-AudioContext-hop bug) and `.play()`-ing it before `captureStream()`. Confirmed live
+ * (isolation, zero SFU): mono and stereo both get `maxAbs≈1.075` with this step present, `0`
+ * without it — channelCount was never the actual cause.
  */
 export async function startRawRemoteStreamCapture(page: Page, outputDir: string, timeoutMs = 15000): Promise<DomCaptureHandle> {
   const captureId = `raw-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -181,6 +192,21 @@ export async function startRawRemoteStreamCapture(page: Page, outputDir: string,
       const audioTracks = stream.getAudioTracks();
       const audioTrack = audioTracks[0];
 
+      // P3-LIVE-08: dedicated, harness-owned playing element — required for Chromium to
+      // actually decode the raw track; NOT the app's data-remote-audio element (would
+      // reintroduce the P3-LIVE-06 double-AudioContext-hop bug).
+      const rawEl = document.createElement('audio');
+      rawEl.srcObject = stream;
+      rawEl.muted = false;
+      rawEl.volume = 1;
+      rawEl.style.display = 'none';
+      document.body.appendChild(rawEl);
+      await rawEl.play().catch(() => {});
+      await new Promise((r) => setTimeout(r, 300));
+
+      const captureFn = (rawEl as any).captureStream || (rawEl as any).mozCaptureStream;
+      const tappedStream: MediaStream = typeof captureFn === 'function' ? captureFn.call(rawEl) : stream;
+
       const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
       const audioContext = new AudioContextCtor();
       await audioContext.resume().catch(() => {});
@@ -200,7 +226,7 @@ export async function startRawRemoteStreamCapture(page: Page, outputDir: string,
       };
       w.__p3l04Captures[captureId] = state;
 
-      const source = audioContext.createMediaStreamSource(stream);
+      const source = audioContext.createMediaStreamSource(tappedStream);
       const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
       const zeroGain = audioContext.createGain();
       zeroGain.gain.value = 0;
@@ -225,6 +251,8 @@ export async function startRawRemoteStreamCapture(page: Page, outputDir: string,
       w.__p3l04CaptureCleanup[captureId] = () => {
         try {
           scriptProcessor.disconnect();
+          rawEl.pause();
+          rawEl.remove();
         } catch {
           // already disconnected
         }
