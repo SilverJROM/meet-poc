@@ -24,3 +24,8 @@
 {"timestamp":1783682938565,"purpose":"smoke","durationMs":16137,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
 {"timestamp":1783682963112,"purpose":"smoke","durationMs":14306,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
 {"timestamp":1783682986817,"purpose":"smoke","durationMs":14268,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783686537558,"purpose":"smoke","durationMs":16295,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783686563813,"purpose":"smoke","durationMs":15209,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783686589188,"purpose":"smoke","durationMs":14631,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783686614873,"purpose":"smoke","durationMs":15567,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783686640480,"purpose":"smoke","durationMs":15547,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}

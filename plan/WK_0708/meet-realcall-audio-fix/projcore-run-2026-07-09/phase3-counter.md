@@ -11,5 +11,6 @@
 | 7 | P3-LIVE-07 | **BLOCKED** 47fe2d0 | 0/25 | 0 | | AGC/NS/EC eliminated |
 | 8 | P3-LIVE-08 | **PASS** 9f2b7be | **1/25** | 0 | avail~28Gi | play-before-capture; rms=0.087941 (smoke, no burn) |
 | 9 | P3-LIVE-09 | **PASS x3** (no code) | **4/25** | 0 | avail~27-28Gi | 3 sequential smokes, unchanged mechanism; rms 0.0886/0.0912/0.0905, all independently PCM-verified; 0 FAILs |
+| 10 | P3-LIVE-10 | **PASS x5** (no code) | **9/25** | 0 | avail~27Gi | 5 sequential smokes, unchanged mechanism; rms 0.0923/0.0885/0.0892/0.0883/0.0884, all independently PCM-verified; 0 FAILs |
 
 Exit: 25 PASS or budget exhausted → notify ready-for-real-call-test + SHUTDOWN + STANDDOWN
