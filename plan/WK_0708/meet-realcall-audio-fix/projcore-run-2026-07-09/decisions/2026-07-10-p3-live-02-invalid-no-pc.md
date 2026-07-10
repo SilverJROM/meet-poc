@@ -251,3 +251,56 @@ batch) to see whether inbound stats advance at all.
 verified, and left in place for future batches (isolation test proves it's correct); the remaining
 blocker has a much narrower, concrete next question than "why is it silent." `frontend/`/`backend/`
 untouched. Full run evidence: `validation/p3-live-05-changes.md`.
+
+## 2026-07-10 — P3-LIVE-06: inbound RTP proven to advance; traced to Chrome's own AGC/NS/EC on bot-123's capture
+
+Answered the exact question P3-LIVE-05 posed. Sampled `inbound-rtp` audio stats on page1 (t0/t1
+around the dwell, same `RTCStatsReport` shape `call-driver.ts`'s existing
+`sampleOutboundAudioBytes()` uses) and cross-sampled page2's outbound stats over the identical
+window, three live runs: **inbound `packetsReceived`/`bytesReceived` advance in near-1:1 lockstep
+with bot-123's outbound** (e.g. Δ303 packets in vs Δ304 out, Δ41160 bytes in vs Δ41320 out over
+~5.3s). **The SFU/media-relay is not the blocker** — real RTP audio is reliably delivered on this
+split-host topology.
+
+**Found and fixed a real, separate bug along the way** (isolated locally, zero SFU/`.123`
+involvement): the app's own `remote-audio.service.ts:730-751` feeds `<audio data-remote-audio>`
+elements from its **own** `AudioContext` (gain → compressor → `createMediaStreamDestination()`),
+not the raw stream — so `dom-audio-capture.ts`'s `captureStream()`-on-that-element taps one
+AudioContext's output from a **second**, independent AudioContext. A synthetic two-hop
+reproduction (loopback mic → app-shaped gain/compressor graph → element → `captureStream()` →
+second context) got `maxAbs: 0` with everything else (context states, element pause/mute, track
+`live`) reporting healthy — exactly the P3-LIVE-04/05 symptom, reproduced with zero network
+involvement. Every prior isolation test was single-hop (raw stream straight into one context) and
+worked; this is Chromium-specific fragility in double-hop `MediaStreamDestination` →
+`captureStream()` chaining. **Shipped the fix**: `startRawRemoteStreamCapture()` (new,
+`dom-audio-capture.ts`) taps `window.__meetDebug.sfuRemoteStreams` (real product code,
+`sfu-client.service.ts:114`) directly, bypassing the app's own graph and the double-hop entirely.
+
+**Still exact silence with the fix applied, live.** Went one layer further: verified real signal
+exists at the PipeWire source itself, ground-truth, with **zero Chrome/WebRTC involvement** —
+`scp`'d the speech WAV to `.123`, ran the harness's own `paplay` loop, and recorded straight off
+`virtual_mic` with `parecord`. Result: real signal (139710/196608 nonzero samples, max amplitude
+18564/32767). The signal genuinely exists before Chrome ever touches it.
+
+**Then checked what Chrome does to it on capture**: read `getSettings()`/`getConstraints()` on
+bot-123's actual captured `MediaStreamTrack` (`window.__meetDebug.localStream`, real product code,
+`room.page.ts:606`) during the same live run. Result:
+**`autoGainControl: true, echoCancellation: true, noiseSuppression: true`** — all three enabled,
+confirmed on the exact track for this exact call. Chrome's noise-suppression model is well known to
+aggressively gate audio that doesn't match its "voice" heuristics — audio replayed through a
+PipeWire monitor/remap loopback (rather than captured from a physical mic in a real room) is a
+plausible case for that. This is now the leading, well-evidenced, narrow candidate for the
+remaining silence: real signal → real transport → Chrome's own capture-side processing likely
+suppresses it before encoding.
+
+**Fixing this needs an app-level `getUserMedia` constraint override**
+(`echoCancellation`/`noiseSuppression`/`autoGainControl: false` on the real-virtual-mic path) —
+`media.service.ts` is untouched this batch; that's product code, out of "harness + diagnostics
+first; topology/env fixes ok" scope without its own PROPOSED+APPROVED.
+
+**STATUS: still BLOCKED**, but the search space is now very narrow: SFU delivery ✔ proven fine,
+PipeWire source signal ✔ proven real, double-hop capture bug ✔ found and fixed, and the one
+remaining candidate (Chrome's AGC/NS/EC on the capture side) is concrete and directly testable —
+whoever picks this up next just needs the constraint-override approved and can immediately verify
+with the already-shipped `startRawRemoteStreamCapture()`. `frontend/`/`backend/` untouched. Full
+run evidence: `validation/p3-live-06-changes.md`.

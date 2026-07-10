@@ -129,6 +129,114 @@ export async function startDomRemoteAudioCapture(page: Page, outputDir: string, 
 }
 
 /**
+ * P3-LIVE-06: alternate capture source, found necessary after `startDomRemoteAudioCapture`
+ * (captureStream() on the app's `<audio data-remote-audio>` element) proved to reproduce exact
+ * silence — isolated (local-only, no SFU) to a genuine Chromium double-AudioContext-hop bug:
+ * `el.srcObject` is the OUTPUT of the app's OWN internal gain+compressor graph
+ * (`createRemoteAudioGraph()`, `remote-audio.service.ts:730-751`, via `createMediaStreamDestination()`),
+ * and `captureStream()`-ing THAT element into a SECOND, independent AudioContext silently yields
+ * all-zero samples — reproduced with a synthetic two-hop test with zero network/SFU involvement.
+ * Single-hop captures (raw stream straight into one AudioContext, no intermediate element/context)
+ * worked fine in every isolation test (P3-LIVE-04/05).
+ *
+ * This taps `window.__meetDebug.sfuRemoteStreams` (real product code, `sfu-client.service.ts:114`,
+ * exposed via `room.page.ts` `sfuRemoteStreams: this.sfuClient.remoteStreams()`) directly — the
+ * RAW remote WebRTC `MediaStream`, before the app's own processing graph — and feeds it into a
+ * single capture AudioContext, matching the isolation tests' working shape exactly. Trade-off,
+ * disclosed not hidden: this proves energy arrived and is decodable (the acceptance bar — "receive
+ * energy"), but is pre-gain/compressor, not bit-identical to what a human ear hears through the
+ * app's own processing.
+ */
+export async function startRawRemoteStreamCapture(page: Page, outputDir: string, timeoutMs = 15000): Promise<DomCaptureHandle> {
+  const captureId = `raw-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  await page.evaluate(
+    async ({ captureId, timeoutMs }: { captureId: string; timeoutMs: number }) => {
+      const w = window as any;
+      w.__p3l04Captures = w.__p3l04Captures || {};
+
+      const deadline = Date.now() + timeoutMs;
+      let stream: MediaStream | null = null;
+      let peerId: string | null = null;
+      while (Date.now() < deadline) {
+        const streams: Map<string, MediaStream> | undefined = w.__meetDebug?.sfuRemoteStreams;
+        if (streams && typeof streams.entries === 'function') {
+          for (const [id, s] of streams.entries()) {
+            if (s.getAudioTracks().length > 0) {
+              stream = s;
+              peerId = id;
+              break;
+            }
+          }
+        }
+        if (stream) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+
+      if (!stream) {
+        w.__p3l04Captures[captureId] = { installed: false, reason: 'NO_REMOTE_WEBRTC_STREAM' };
+        return;
+      }
+
+      const audioTracks = stream.getAudioTracks();
+      const audioTrack = audioTracks[0];
+
+      const AudioContextCtor = (window as any).AudioContext || (window as any).webkitAudioContext;
+      const audioContext = new AudioContextCtor();
+      await audioContext.resume().catch(() => {});
+
+      const state = {
+        installed: true,
+        elementSelector: `sfuRemoteStreams["${peerId}"]`,
+        callbackCount: 0,
+        sampleCount: 0,
+        audioContextState: audioContext.state,
+        audioSamplesBytes: [] as Uint8Array[],
+        elDiag: {
+          trackReadyState: audioTrack.readyState,
+          trackEnabled: audioTrack.enabled,
+          trackMuted: (audioTrack as any).muted,
+        },
+      };
+      w.__p3l04Captures[captureId] = state;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
+      const zeroGain = audioContext.createGain();
+      zeroGain.gain.value = 0;
+
+      source.connect(scriptProcessor);
+      scriptProcessor.connect(zeroGain);
+      zeroGain.connect(audioContext.destination);
+
+      scriptProcessor.onaudioprocess = (e: AudioProcessingEvent) => {
+        state.callbackCount++;
+        state.audioContextState = audioContext.state;
+        const inputData = e.inputBuffer.getChannelData(0);
+        state.sampleCount += inputData.length;
+        const int16 = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          int16[i] = Math.max(-1, Math.min(1, inputData[i])) < 0 ? inputData[i] * 0x8000 : inputData[i] * 0x7fff;
+        }
+        state.audioSamplesBytes.push(new Uint8Array(int16.buffer));
+      };
+
+      w.__p3l04CaptureCleanup = w.__p3l04CaptureCleanup || {};
+      w.__p3l04CaptureCleanup[captureId] = () => {
+        try {
+          scriptProcessor.disconnect();
+        } catch {
+          // already disconnected
+        }
+      };
+    },
+    { captureId, timeoutMs },
+  );
+
+  return { captureId, page, outputDir };
+}
+
+/**
  * Stops the capture graph and encodes accumulated samples to WAV. Throws with a descriptive
  * reason (no silent fallback) if the element/track was never found, or if nothing audible was
  * captured — mirrors receive-side-recorder.ts's fail-closed contract without going through its
@@ -215,4 +323,63 @@ export async function stopDomRemoteAudioCapture(
   );
 
   return { wavPath, metaPath, durationMs, rms, elDiag: result.elDiag };
+}
+
+export interface RtpAudioStats {
+  packetsReceived?: number;
+  bytesReceived?: number;
+  packetsSent?: number;
+  bytesSent?: number;
+}
+
+/**
+ * P3-LIVE-06: samples inbound-rtp audio stats via the app's own `__meetDebug.sfuGetStats()` —
+ * same `RTCStatsReport` iteration shape `call-driver.ts`'s `sampleOutboundAudioBytes()` already
+ * uses (awaited, `.forEach` over the Map, `(kind ?? mediaType) === 'audio'` filter). Used to prove
+ * whether real RTP packets are actually arriving at this page from the far end, independent of
+ * local playout/rendering — see decisions/2026-07-10-p3-live-02-invalid-no-pc.md P3-LIVE-05.
+ */
+export async function sampleInboundAudioStats(page: Page): Promise<RtpAudioStats> {
+  return page
+    .evaluate(async () => {
+      try {
+        const stats = await (window as any).__meetDebug?.sfuGetStats?.();
+        if (!stats) return {};
+        let packetsReceived = 0;
+        let bytesReceived = 0;
+        stats.forEach((stat: any) => {
+          if (stat.type === 'inbound-rtp' && (stat.kind ?? stat.mediaType) === 'audio') {
+            packetsReceived += stat.packetsReceived || 0;
+            bytesReceived += stat.bytesReceived || 0;
+          }
+        });
+        return { packetsReceived, bytesReceived };
+      } catch {
+        return {};
+      }
+    })
+    .catch(() => ({}));
+}
+
+/** Same shape, outbound side — for cross-referencing the sender leg during the same window. */
+export async function sampleOutboundAudioStats(page: Page): Promise<RtpAudioStats> {
+  return page
+    .evaluate(async () => {
+      try {
+        const stats = await (window as any).__meetDebug?.sfuGetStats?.();
+        if (!stats) return {};
+        let packetsSent = 0;
+        let bytesSent = 0;
+        stats.forEach((stat: any) => {
+          if (stat.type === 'outbound-rtp' && (stat.kind ?? stat.mediaType) === 'audio') {
+            packetsSent += stat.packetsSent || 0;
+            bytesSent += stat.bytesSent || 0;
+          }
+        });
+        return { packetsSent, bytesSent };
+      } catch {
+        return {};
+      }
+    })
+    .catch(() => ({}));
 }

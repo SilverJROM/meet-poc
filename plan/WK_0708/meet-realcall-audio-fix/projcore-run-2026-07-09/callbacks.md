@@ -628,3 +628,22 @@
 [2026-07-10T07:28:10+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
 [2026-07-10T07:28:10+00:00] [MEM] total=61Gi used=31Gi free=15Gi avail=30Gi
 [projcore callback] implementer P3-LIVE-05 STATUS: WORKING — isolation test PASSED (maxAbs=1.075 with null-sink); proceeding to full live SFU smoke
+[projcore callback] implementer P3-LIVE-05 STATUS: BLOCKED — 8d55b05 null-sink installed+PROVEN (isolation maxAbs=1.075) but live smoke still silent. App's SFU-stats watchdog flags peer voice-stalled - RTP-delivery question now. See decisions doc P3-LIVE-05
+
+[2026-07-10T07:58:33+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-05 BLOCKED-partial 8d55b05 (null-sink proven; live voice-stalled); dispatch P3-LIVE-06 inbound RTP
+[2026-07-10T07:58:33+00:00] [projcore ACK] implementer P3-LIVE-05 RECEIVED — BLOCKED partial; isolation PASS; live FAIL reframe RTP
+[2026-07-10T07:58:33+00:00] [projcore callback] validator P3-LIVE-05 STATUS: DONE — BLOCKED-partial 8d55b05; report validation/p3-live-05-validation.md
+[2026-07-10T07:58:33+00:00] [projcore callback] batch P3-LIVE-05 STATUS: BLOCKED — next LIVE-06 inbound RTP deltas
+[2026-07-10T07:58:33+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3; CAP25 burn0; maxForks=3; LIVE-06
+[2026-07-10T07:58:33+00:00] [MEM] total=61Gi used=32Gi free=13Gi avail=29Gi
+[projcore DISPATCH] implementer P3-LIVE-06 DISPATCH-P3-LIVE-06-implementer-4180612-1783670313
+[projcore DISPATCH] implementer P3-LIVE-06
+[2026-07-10T07:58:33+00:00] [projcore callback] coord P3-LIVE-06 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P3-LIVE-06 STATUS: WORKING — session launched; instrumenting inbound RTP stats deltas on page1
+[projcore callback] implementer P3-LIVE-06 STATUS: PROPOSED — sample inbound-rtp audio stats t0/t1 on page1 (same pattern as call-driver's sampleOutboundAudioBytes); branch on delta==0 vs >0. See prompts/p3-live-06-proposed.md
+
+[2026-07-10T08:27:44+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-06 PROPOSED→APPROVED-PLAN (inbound RTP t0/t1 deltas + branch)
+[2026-07-10T08:27:44+00:00] [projcore callback] coord P3-LIVE-06 STATUS: APPROVED-PLAN — impl working
+[2026-07-10T08:27:44+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
+[2026-07-10T08:27:44+00:00] [MEM] total=61Gi used=32Gi free=13Gi avail=29Gi
+[projcore callback] implementer P3-LIVE-06 STATUS: WORKING — APPROVED-PLAN received; implementing inbound stats sampling + p3-live-06-smoke.ts

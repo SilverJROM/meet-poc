@@ -15,3 +15,7 @@
 {"timestamp":1783665108850,"purpose":"smoke","durationMs":14313,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
 {"timestamp":1783668712351,"purpose":"smoke","durationMs":15487,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
 {"timestamp":1783668809623,"purpose":"smoke","durationMs":14730,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783672169080,"purpose":"smoke","durationMs":14381,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783672238545,"purpose":"smoke","durationMs":14339,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783672441008,"purpose":"smoke","durationMs":14338,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783672604124,"purpose":"smoke","durationMs":15138,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
