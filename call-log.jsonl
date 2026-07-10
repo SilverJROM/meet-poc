@@ -19,3 +19,4 @@
 {"timestamp":1783672238545,"purpose":"smoke","durationMs":14339,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
 {"timestamp":1783672441008,"purpose":"smoke","durationMs":14338,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
 {"timestamp":1783672604124,"purpose":"smoke","durationMs":15138,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783675868598,"purpose":"smoke","durationMs":15324,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}

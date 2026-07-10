@@ -647,3 +647,22 @@
 [2026-07-10T08:27:44+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
 [2026-07-10T08:27:44+00:00] [MEM] total=61Gi used=32Gi free=13Gi avail=29Gi
 [projcore callback] implementer P3-LIVE-06 STATUS: WORKING — APPROVED-PLAN received; implementing inbound stats sampling + p3-live-06-smoke.ts
+[projcore callback] implementer P3-LIVE-06 STATUS: BLOCKED — 7256831 inbound RTP PROVEN 1:1 (not SFU); fixed double-hop capture bug; narrowed to Chrome AGC/NS/EC on capture (confirmed true). Needs app constraint override. See decisions doc P3-LIVE-06
+
+[2026-07-10T08:58:03+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-06 BLOCKED-partial 7256831 (RTP OK; AGC/NS/EC lead); dispatch P3-LIVE-07 product constraints; MEM avail=15Gi WATCH
+[2026-07-10T08:58:03+00:00] [projcore ACK] implementer P3-LIVE-06 RECEIVED — BLOCKED partial; RTP proven; next AGC/NS/EC override
+[2026-07-10T08:58:03+00:00] [projcore callback] validator P3-LIVE-06 STATUS: DONE — BLOCKED-partial 7256831; report validation/p3-live-06-validation.md
+[2026-07-10T08:58:03+00:00] [projcore callback] batch P3-LIVE-06 STATUS: BLOCKED — next LIVE-07 gUM constraints false
+[2026-07-10T08:58:03+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3; CAP25 burn0; maxForks=3; LIVE-07
+[2026-07-10T08:58:03+00:00] [MEM] total=61Gi used=46Gi free=1.3Gi avail=15Gi
+[projcore DISPATCH] implementer P3-LIVE-07 DISPATCH-P3-LIVE-07-implementer-3100403-1783673883
+[projcore DISPATCH] implementer P3-LIVE-07
+[2026-07-10T08:58:03+00:00] [projcore callback] coord P3-LIVE-07 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P3-LIVE-07 STATUS: WORKING — session launched; locating gUM constraint sites for real-virtual-mic AGC/NS/EC override
+[projcore callback] implementer P3-LIVE-07 STATUS: PROPOSED — query-param-gated AGC/NS/EC disable in mic-energy.ts+media.service.ts (default unchanged); speaker2ExtraQuery in call-driver.ts. See prompts/p3-live-07-proposed.md
+
+[2026-07-10T09:27:45+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 0/25; P3-LIVE-07 PROPOSED→APPROVED-PLAN (query-param AGC/NS/EC disable on speaker2 only)
+[2026-07-10T09:27:45+00:00] [projcore callback] coord P3-LIVE-07 STATUS: APPROVED-PLAN — impl working
+[2026-07-10T09:27:45+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
+[2026-07-10T09:27:45+00:00] [MEM] total=61Gi used=33Gi free=13Gi avail=27Gi
+[projcore callback] implementer P3-LIVE-07 STATUS: WORKING — APPROVED-PLAN received; implementing constraint override + speaker2ExtraQuery + ng build

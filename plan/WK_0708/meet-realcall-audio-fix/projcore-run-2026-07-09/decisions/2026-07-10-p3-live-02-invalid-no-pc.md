@@ -304,3 +304,42 @@ remaining candidate (Chrome's AGC/NS/EC on the capture side) is concrete and dir
 whoever picks this up next just needs the constraint-override approved and can immediately verify
 with the already-shipped `startRawRemoteStreamCapture()`. `frontend/`/`backend/` untouched. Full
 run evidence: `validation/p3-live-06-changes.md`.
+
+## 2026-07-10 — P3-LIVE-07: AGC/NS/EC override shipped and VERIFIED working — and eliminated as the cause
+
+Implemented the P3-LIVE-06 recommendation exactly: `mic-energy.ts`'s `audioCaptureConstraints()`
+gained a `disableProcessing` parameter (default `false`, zero change for any real user);
+`media.service.ts` gates it on `?e2eDisableAudioProcessing=1` (absent on every real join URL);
+`call-driver.ts` gained `speaker2ExtraQuery`, applied only to the split-host real-virtual-mic
+leg's join URL. Rebuilt the frontend (`ng build`), confirmed the dev server was serving the new
+bundle (hash-matched `main-*.js` between build output and a live `curl`) before testing.
+
+**The override genuinely works** — read `getSettings()` on bot-123's actual, live, in-call
+captured track: `autoGainControl:false, echoCancellation:false, noiseSuppression:false`, all three
+exactly as requested. Not assumed, not just "requested" — confirmed applied.
+
+**The capture is still exact digital silence.** Inbound RTP still advances normally
+(Δ308 packets / Δ38080 bytes, consistent with every prior batch). This **eliminates** Chrome's own
+capture-side audio processing as the cause — P3-LIVE-06's leading hypothesis is now disproven by
+direct test, not merely unconfirmed.
+
+Every layer this run's harness can inspect has now been checked and is either confirmed healthy or
+was a real bug that got fixed, with the core symptom unchanged throughout: PipeWire source signal
+(real, ground-truth), SFU/RTP delivery (1:1, proven twice), track health (`live`/`enabled`/
+`unmuted`, checked repeatedly), app AudioContext state (`running`), capture graph shape
+(single-hop, proven via local isolation), and now Chrome's AGC/NS/EC (all off, this batch,
+verified). None of these, individually or combined, account for the silence.
+
+**One fresh, genuinely uncontrolled variable surfaced in this run's own evidence, not chased
+further**: `getSettings()` shows `"channelCount": 2` (stereo) on bot-123's captured track. Every
+prior isolation test that DID get real signal (P3-LIVE-04's oscillator, P3-LIVE-05's fake-device
+loopback) used unconstrained `getUserMedia({audio: true})`, which typically yields mono on
+Chrome's default devices — meaning the single-hop capture graph
+(`createScriptProcessor(4096, 1, 1)`, forcing a 1-channel downmix) has never actually been proven
+against a genuinely stereo source in isolation. This is the narrowest remaining untested
+difference between "isolation tests that worked" and "the live call that never has."
+
+**STATUS: still BLOCKED.** No app-code regression risk: `git diff --stat frontend/` shows exactly
+the 2 files above, +29/-5 lines, gated behind a query param absent on every real join URL —
+confirmed no other caller of the changed functions exists. Full run evidence:
+`validation/p3-live-07-changes.md`.

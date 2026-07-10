@@ -43,13 +43,25 @@ export const MIC_SILENCE_LEVEL_THRESHOLD = 0.01;
  * device was chosen — never `{exact:undefined}`. `audio:false` short-circuits to
  * the boolean `false`. Deliberately does NOT constrain channelCount/sampleRate:
  * the post-publish energy gate is the safety net, not over-reaching constraints.
+ *
+ * `disableProcessing` (default false — no behavior change for any real user):
+ * P3-LIVE-06/07 found Chrome's own EC/NS/AGC gates a PipeWire-loopback capture
+ * (real-virtual-mic harness device) as non-voice, silencing an otherwise-real
+ * signal before it's ever encoded. When true, requests EC/NS/AGC hard-off
+ * (`false`, not `{ideal:false}`) so a harness-only test path can prove real
+ * audio round-trips end to end without the app's normal processing masking it.
  */
-export function audioCaptureConstraints(audio: boolean, deviceId?: string): boolean | MediaTrackConstraints {
+export function audioCaptureConstraints(
+  audio: boolean,
+  deviceId?: string,
+  disableProcessing = false,
+): boolean | MediaTrackConstraints {
   if (!audio) return false;
+  const processing = disableProcessing
+    ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false }
+    : { echoCancellation: { ideal: true }, noiseSuppression: { ideal: true }, autoGainControl: { ideal: true } };
   return {
-    echoCancellation: { ideal: true },
-    noiseSuppression: { ideal: true },
-    autoGainControl: { ideal: true },
+    ...processing,
     ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
   };
 }

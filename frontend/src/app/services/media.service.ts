@@ -560,7 +560,19 @@ export class MediaService {
   private audioConstraints(audio: boolean, deviceId?: string): boolean | MediaTrackConstraints {
     // Delegates to the framework-free pure builder (AC1): EC/NS/AGC are
     // applied-when-supported ({ideal:true}), deviceId:{exact} set only when chosen.
-    return audioCaptureConstraints(audio, deviceId);
+    return audioCaptureConstraints(audio, deviceId, this.shouldDisableAudioProcessing());
+  }
+
+  /**
+   * P3-LIVE-07: opt-in-only, harness-test path. Absent on every real join URL, so this
+   * returns false (and audioConstraints() is byte-for-byte unchanged) for every real user.
+   */
+  private shouldDisableAudioProcessing(): boolean {
+    try {
+      return new URLSearchParams(window.location.search).get('e2eDisableAudioProcessing') === '1';
+    } catch {
+      return false;
+    }
   }
 
   private videoConstraints(

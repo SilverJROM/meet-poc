@@ -58,6 +58,12 @@ export interface CallDriverConfig {
   weakSignalRatio?: number;
   /** B08: which page receives the weak-signal shim (0=speaker1, 1=speaker2, default 0). */
   weakSignalPageIndex?: 0 | 1;
+  /**
+   * P3-LIVE-07: appended as `?<value>` to ONLY speaker2's join URL (split-host real-virtual-mic
+   * leg) — e.g. `'e2eDisableAudioProcessing=1'`. speaker1's URL/behavior is always untouched.
+   * Undefined = no change from today.
+   */
+  speaker2ExtraQuery?: string;
 }
 
 export interface CallResult {
@@ -652,7 +658,8 @@ export async function joinDualBrowserCallSplitHost(
       page2 = await context2.newPage();
     }
     await injectWeakSignalShimIfConfigured(page2, 1, config);
-    const result2 = await joinBrowser(page2, roomUrl, config.speaker2Name);
+    const roomUrl2 = config.speaker2ExtraQuery ? `${roomUrl}?${config.speaker2ExtraQuery}` : roomUrl;
+    const result2 = await joinBrowser(page2, roomUrl2, config.speaker2Name);
     if (result2.sessionId) {
       registerCreatedID('session', result2.sessionId);
     }
