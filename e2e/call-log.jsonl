@@ -1,0 +1,26 @@
+{"event": "jrom-reset", "callBurnCount": 0, "cap": 25, "note": "fresh budget 0/25", "ts": 1783600036344}
+{"timestamp":1783600039020,"purpose":"smoke","durationMs":7124,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783600044868,"purpose":"smoke","durationMs":7971,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783600046910,"purpose":"smoke","durationMs":5012,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783600133217,"purpose":"smoke","durationMs":7978,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783600141600,"purpose":"smoke","durationMs":8348,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783600153753,"purpose":"smoke","durationMs":6,"deviceMode":"fake-device","result":"failed"}
+{"timestamp":1783600173272,"purpose":"smoke","durationMs":5,"deviceMode":"fake-device","result":"failed"}
+{"timestamp":1783600183707,"purpose":"smoke","durationMs":9880,"deviceMode":"fake-device","stimulus":"speech","result":"success"}
+{"timestamp":1783600204672,"purpose":"smoke","durationMs":2,"deviceMode":"fake-device","result":"failed"}
+{"timestamp":1783600207500,"purpose":"smoke","durationMs":8009,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783600211860,"purpose":"smoke","durationMs":7201,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783600213073,"purpose":"smoke","durationMs":39803,"deviceMode":"fake-device","stimulus":"speech","result":"success"}
+{"timestamp":1783600214665,"purpose":"smoke","durationMs":7131,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783600219078,"purpose":"smoke","durationMs":7187,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783600219919,"purpose":"smoke","durationMs":805,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783600220963,"purpose":"smoke","durationMs":6,"deviceMode":"fake-device","result":"failed"}
+{"timestamp":1783600258746,"purpose":"smoke","durationMs":41070,"deviceMode":"fake-device","stimulus":"speech","result":"success"}
+{"timestamp":1783607265207,"purpose":"smoke","durationMs":5,"deviceMode":"fake-device","result":"failed"}
+{"timestamp":1783654531355,"purpose":"smoke","durationMs":40416,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783654642965,"purpose":"smoke","durationMs":39918,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783654659153,"purpose":"smoke","durationMs":8188,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783654898825,"purpose":"smoke","durationMs":39856,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783655005334,"purpose":"smoke","durationMs":7805,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783655176979,"purpose":"smoke","durationMs":24664,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}
+{"timestamp":1783655339122,"purpose":"smoke","durationMs":24948,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"failed"}

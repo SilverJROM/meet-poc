@@ -308,7 +308,7 @@ async function injectWeakSignalShimIfConfigured(
  * and 401s against a real server; this closes that gap with the same credential
  * the rest of the e2e suite already uses, not a new/invented bypass.
  */
-async function authenticateHarness(baseUrl: string): Promise<string> {
+export async function authenticateHarness(baseUrl: string): Promise<string> {
   const { email, initialPassword } = await import('../fixtures/auth.js');
   const response = await fetch(`${baseUrl}/api/login`, {
     method: 'POST',
@@ -551,4 +551,195 @@ export async function joinDualBrowserCall(
 export async function dryRunDualBrowserCall(config: CallDriverConfig): Promise<CallResult> {
   // Identical to joinDualBrowserCall but without script execution
   return joinDualBrowserCall(config, undefined);
+}
+
+/**
+ * P3-LIVE-01: a Chrome process attached via connectOverCDP typically already has one
+ * default (non-incognito) BrowserContext — reuse it instead of creating an extra one, but
+ * always explicitly grant mic/camera, since `newContext({ permissions })`'s config-time grant
+ * doesn't apply to a context that already existed before we connected.
+ */
+async function getOrCreateRemoteContext(remoteBrowser: Browser, baseUrl: string): Promise<BrowserContext> {
+  const existing = remoteBrowser.contexts();
+  const context = existing[0] ?? (await remoteBrowser.newContext());
+  await context.grantPermissions(['microphone', 'camera'], { origin: baseUrl }).catch(() => {});
+  return context;
+}
+
+/**
+ * P3-LIVE-01: split-host variant of joinDualBrowserCall. speaker1 launches locally
+ * (this process's host — `.140` uses fake-device, no audio stack). speaker2 attaches
+ * via CDP to a Chrome process already running on a remote host (`.123`'s real-virtual-mic,
+ * launched + pactl-routed by the caller via remote-cdp-host.ts BEFORE this call, since the
+ * real-mic host assertion in buildLaunchArgs() only makes sense for a browser this process
+ * itself launches). Mirrors joinDualBrowserCall's room/ledger/recording flow exactly; only
+ * the origin of browser2 differs. Does not close the remote browser process — CDP-connected
+ * `Browser.close()` disconnects the session only; the caller kills the remote Chrome PID.
+ */
+export async function joinDualBrowserCallSplitHost(
+  config: CallDriverConfig & { speaker2CdpEndpoint: string; speaker2DeviceMode: DeviceMode },
+  script?: ConversationScript,
+): Promise<CallResult> {
+  if (!config.deviceMode) {
+    throw new Error(
+      "CallDriverConfig.deviceMode is required ('fake-device' | 'real-virtual-mic') — no default.",
+    );
+  }
+
+  initLedger(config.ledgerBasePath);
+
+  if (config.acceptanceAttempt && isCallBurnExceeded()) {
+    throw new Error(
+      `B00S-BUDGET: acceptance attempt refused — callBurnCount exceeds 25-cap. ` +
+        `No more acceptance calls allowed in this run. Smoke/short joins still permitted.`,
+    );
+  }
+
+  const launchArgs = buildLaunchArgs(config); // governs speaker1 (local) only
+  const startTime = Date.now();
+
+  let browser: Browser | undefined;
+  let browser2: Browser | undefined;
+  let context1: BrowserContext | undefined;
+  let context2: BrowserContext | undefined;
+  let page1: Page | undefined;
+  let page2: Page | undefined;
+
+  try {
+    let roomId = config.roomId;
+    if (!roomId) {
+      roomId = await createRoom(config.baseUrl, `harness-${Date.now()}`, config.autoAdmitRoom !== false);
+      registerCreatedID('room', roomId);
+    } else {
+      registerCreatedID('room', roomId);
+    }
+
+    const roomUrl = `${config.baseUrl}/room/${roomId}`;
+
+    browser = await chromium.launch({ headless: true, args: launchArgs });
+    browser2 = await chromium.connectOverCDP(config.speaker2CdpEndpoint);
+
+    let captureHandle: CaptureHandle | undefined;
+    if (config.recordReceiveSide) {
+      const receiverPageIndex = config.receiverPageIndex ?? 1;
+      if (receiverPageIndex === 0) {
+        context1 = await browser.newContext({ permissions: ['microphone', 'camera'] });
+        page1 = await context1.newPage();
+        captureHandle = await startReceiveSideRecording(page1, config.ledgerBasePath || process.cwd());
+      } else {
+        context2 = await getOrCreateRemoteContext(browser2, config.baseUrl);
+        page2 = await context2.newPage();
+        captureHandle = await startReceiveSideRecording(page2, config.ledgerBasePath || process.cwd());
+      }
+    }
+
+    if (!context1) {
+      context1 = await browser.newContext({ permissions: ['microphone', 'camera'] });
+    }
+    if (!page1) {
+      page1 = await context1.newPage();
+    }
+    await injectWeakSignalShimIfConfigured(page1, 0, config);
+    const result1 = await joinBrowser(page1, roomUrl, config.speaker1Name);
+    if (result1.sessionId) {
+      registerCreatedID('session', result1.sessionId);
+    }
+
+    if (!context2) {
+      context2 = await getOrCreateRemoteContext(browser2, config.baseUrl);
+    }
+    if (!page2) {
+      page2 = await context2.newPage();
+    }
+    await injectWeakSignalShimIfConfigured(page2, 1, config);
+    const result2 = await joinBrowser(page2, roomUrl, config.speaker2Name);
+    if (result2.sessionId) {
+      registerCreatedID('session', result2.sessionId);
+    }
+
+    if (script && page1 && page2) {
+      const scheduler = new ConversationScheduler();
+      const playback = async () => {};
+      await scheduler.schedule(script, playback);
+    }
+
+    const bytesAreGood = result1.publishedBytes > 0 && result2.publishedBytes > 0;
+    if (!bytesAreGood) {
+      throw new Error(
+        `Publishing validation failed: speaker1=${result1.publishedBytes} bytes, speaker2=${result2.publishedBytes} bytes`,
+      );
+    }
+
+    if (config.onLive && page1 && page2) {
+      await config.onLive({ page1, page2, roomId });
+    }
+
+    let receiveSideResult: Awaited<ReturnType<typeof stopReceiveSideRecording>> | undefined;
+    if (captureHandle) {
+      const receiverPageIndex = config.receiverPageIndex ?? 1;
+      const farEndSpeaker = receiverPageIndex === 0 ? config.speaker2Name : config.speaker1Name;
+      const farEndSpeakerId = (farEndSpeaker === 'bot-140' ? 'bot-140' : 'bot-123') as
+        | 'bot-140'
+        | 'bot-123';
+
+      receiveSideResult = await stopReceiveSideRecording(captureHandle, script, farEndSpeakerId);
+    }
+
+    const duration = Date.now() - startTime;
+
+    logCall({
+      timestamp: Date.now(),
+      purpose: config.acceptanceAttempt ? 'acceptance' : 'smoke',
+      durationMs: duration,
+      deviceMode: config.deviceMode,
+      stimulus: config.stimulus,
+      burned: Boolean(config.acceptanceAttempt) && duration >= 180_000,
+      result: 'success',
+    });
+
+    incrementCallBurn({
+      acceptanceAttempt: config.acceptanceAttempt ?? false,
+      durationMs: duration,
+    });
+
+    const ledgerState = getState();
+
+    return {
+      roomId,
+      sessionId: result1.sessionId || result2.sessionId,
+      duration,
+      speaker1: { name: config.speaker1Name, publishedBytes: result1.publishedBytes },
+      speaker2: { name: config.speaker2Name, publishedBytes: result2.publishedBytes },
+      ledgerState,
+      success: true,
+      receiveSideWavPath: receiveSideResult?.wavPath,
+      transcriptPath: receiveSideResult?.transcriptPath,
+      transcriptContent: receiveSideResult?.transcriptContent,
+      provenance: { deviceMode: config.deviceMode, stimulus: config.stimulus },
+    };
+  } catch (err) {
+    const duration = Date.now() - startTime;
+    logCall({
+      timestamp: Date.now(),
+      purpose: config.acceptanceAttempt ? 'acceptance' : 'smoke',
+      durationMs: duration,
+      deviceMode: config.deviceMode,
+      stimulus: config.stimulus,
+      burned: Boolean(config.acceptanceAttempt) && duration >= 180_000,
+      result: 'failed',
+    });
+    incrementCallBurn({
+      acceptanceAttempt: config.acceptanceAttempt ?? false,
+      durationMs: duration,
+    });
+    throw err;
+  } finally {
+    await page1?.close().catch(() => {});
+    await page2?.close().catch(() => {});
+    await context1?.close().catch(() => {});
+    // context2 lives in the remote (CDP-connected) browser — do not close it independently;
+    // browser2.close() below just ends the CDP session, it does not kill the remote process.
+    await browser?.close().catch(() => {});
+    await browser2?.close().catch(() => {});
+  }
 }

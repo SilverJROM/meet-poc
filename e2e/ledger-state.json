@@ -1,5 +1,41 @@
 {
-  "createdIDs": [],
-  "callBurnCount": 12,
+  "createdIDs": [
+    {
+      "type": "room",
+      "id": "ee697d2b6e54",
+      "timestamp": 1783654491058
+    },
+    {
+      "type": "room",
+      "id": "48403eb98423",
+      "timestamp": 1783654603186
+    },
+    {
+      "type": "room",
+      "id": "ee4e1122a73a",
+      "timestamp": 1783654651071
+    },
+    {
+      "type": "room",
+      "id": "a497dcd95e1e",
+      "timestamp": 1783654859067
+    },
+    {
+      "type": "room",
+      "id": "a49b39a7a39f",
+      "timestamp": 1783654997606
+    },
+    {
+      "type": "room",
+      "id": "2457b09e372d",
+      "timestamp": 1783655152396
+    },
+    {
+      "type": "room",
+      "id": "8f5a81819296",
+      "timestamp": 1783655314250
+    }
+  ],
+  "callBurnCount": 0,
   "gateCheckCount": 0
 }
