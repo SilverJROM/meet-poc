@@ -685,3 +685,22 @@
 [2026-07-10T10:27:46+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 live SFU; CAP25 burn0; maxForks=3
 [2026-07-10T10:27:46+00:00] [MEM] total=61Gi used=33Gi free=12Gi avail=28Gi
 [projcore callback] implementer P3-LIVE-08 STATUS: WORKING — APPROVED-PLAN received; fixing startRawRemoteStreamCapture to attach a playing element before captureStream
+[projcore callback] implementer P3-LIVE-08 STATUS: DONE — 9f2b7be PASS! Real bug=unplayed-track capture (not stereo). Both publish + rms=0.0879 (verified: 180715/262144 nonzero). First PASS in P3-LIVE chain
+
+[2026-07-10T10:58:17+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 **1/25 PASS** (P3-LIVE-08 9f2b7be smoke rms=0.087941 PCM re-verified); dispatch P3-LIVE-09 stack+3; NO final exit yet
+[2026-07-10T10:58:17+00:00] [projcore ACK] implementer P3-LIVE-08 RECEIVED — DONE PASS first energy
+[2026-07-10T10:58:17+00:00] [projcore callback] validator P3-LIVE-08 STATUS: DONE — PASS 9f2b7be; report validation/p3-live-08-validation.md
+[2026-07-10T10:58:17+00:00] [projcore callback] batch P3-LIVE-08 STATUS: PASS — 1/25 smoke; next stack toward 25
+[2026-07-10T10:58:17+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 1/25; CAP25 burn0; maxForks=3; LIVE-09
+[2026-07-10T10:58:17+00:00] [MEM] total=61Gi used=32Gi free=13Gi avail=29Gi
+[projcore DISPATCH] implementer P3-LIVE-09 DISPATCH-P3-LIVE-09-implementer-1778799-1783681097
+[projcore DISPATCH] implementer P3-LIVE-09
+[2026-07-10T10:58:17+00:00] [projcore callback] coord P3-LIVE-09 STATUS: PROCESSING — sonnet dispatched
+[projcore callback] implementer P3-LIVE-09 STATUS: WORKING — session launched; preparing 3x sequential smoke plan reusing P3-LIVE-08's proven mechanism
+[projcore callback] implementer P3-LIVE-09 STATUS: PROPOSED — copy p3-live-08-smoke unchanged, run 3x sequential w/ free-h+cleanup each; stop+BLOCKED on any FAIL. See prompts/p3-live-09-proposed.md
+
+[2026-07-10T11:27:43+00:00] [CHECK-IN 30m] CAP=25 burn=0; Phase3 1/25; P3-LIVE-09 PROPOSED→APPROVED-PLAN (3 sequential energy smokes)
+[2026-07-10T11:27:43+00:00] [projcore callback] coord P3-LIVE-09 STATUS: APPROVED-PLAN — impl working
+[2026-07-10T11:27:43+00:00] [projcore callback] coord STATUS: PROCESSING — Phase3 1/25; CAP25 burn0; maxForks=3
+[2026-07-10T11:27:43+00:00] [MEM] total=61Gi used=33Gi free=12Gi avail=27Gi
+[projcore callback] implementer P3-LIVE-09 STATUS: WORKING — APPROVED-PLAN received; creating p3-live-09-smoke.ts and running 3 sequential smokes

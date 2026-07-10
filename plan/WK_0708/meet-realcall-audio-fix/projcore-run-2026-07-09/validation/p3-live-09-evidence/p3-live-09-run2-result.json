@@ -1,0 +1,151 @@
+{
+  "roomId": "9437ce965517",
+  "sessionId": null,
+  "duration": 14306,
+  "speaker1": {
+    "name": "bot-140",
+    "publishedBytes": 646
+  },
+  "speaker2": {
+    "name": "bot-123",
+    "publishedBytes": 3303
+  },
+  "ledgerState": {
+    "createdIDs": [
+      {
+        "type": "room",
+        "id": "f9c4b6a2517b",
+        "timestamp": 1783659562249
+      },
+      {
+        "type": "room",
+        "id": "0543c4da1119",
+        "timestamp": 1783659719040
+      },
+      {
+        "type": "room",
+        "id": "373f20cc9097",
+        "timestamp": 1783659866427
+      },
+      {
+        "type": "room",
+        "id": "255b17eaee2e",
+        "timestamp": 1783660025442
+      },
+      {
+        "type": "room",
+        "id": "17d7fe90d40f",
+        "timestamp": 1783660106264
+      },
+      {
+        "type": "room",
+        "id": "f447a5df3c60",
+        "timestamp": 1783661413450
+      },
+      {
+        "type": "room",
+        "id": "8802dd635541",
+        "timestamp": 1783661467502
+      },
+      {
+        "type": "room",
+        "id": "e3e3171b4240",
+        "timestamp": 1783661523444
+      },
+      {
+        "type": "room",
+        "id": "e21404ec345c",
+        "timestamp": 1783661626247
+      },
+      {
+        "type": "room",
+        "id": "a12a8b5a92d7",
+        "timestamp": 1783664887109
+      },
+      {
+        "type": "room",
+        "id": "5699574b9ef7",
+        "timestamp": 1783664956352
+      },
+      {
+        "type": "room",
+        "id": "a7a300c974bd",
+        "timestamp": 1783665094617
+      },
+      {
+        "type": "room",
+        "id": "28bcc64a1014",
+        "timestamp": 1783668696930
+      },
+      {
+        "type": "room",
+        "id": "0affd695873e",
+        "timestamp": 1783668794960
+      },
+      {
+        "type": "room",
+        "id": "33a76a8acacd",
+        "timestamp": 1783672154763
+      },
+      {
+        "type": "room",
+        "id": "2b42d6052013",
+        "timestamp": 1783672224267
+      },
+      {
+        "type": "room",
+        "id": "759932d8849b",
+        "timestamp": 1783672426733
+      },
+      {
+        "type": "room",
+        "id": "865c2d93161e",
+        "timestamp": 1783672589052
+      },
+      {
+        "type": "room",
+        "id": "d4060a835ff1",
+        "timestamp": 1783675853336
+      },
+      {
+        "type": "room",
+        "id": "86969f1d5e8b",
+        "timestamp": 1783679408796
+      },
+      {
+        "type": "room",
+        "id": "8fce8d7ce7dd",
+        "timestamp": 1783682922516
+      },
+      {
+        "type": "room",
+        "id": "9437ce965517",
+        "timestamp": 1783682948868
+      }
+    ],
+    "callBurnCount": 0,
+    "gateCheckCount": 0
+  },
+  "success": true,
+  "provenance": {
+    "deviceMode": "fake-device",
+    "stimulus": "speech"
+  },
+  "domWavPath": "/home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/validation/p3-live-09-evidence/p3l04-dom-receive-1783682963090-d09oncx.wav",
+  "domRms": 0.09119218068846414,
+  "senderSettingsResult": {
+    "trackFound": true,
+    "settings": {
+      "autoGainControl": false,
+      "channelCount": 2,
+      "deviceId": "default",
+      "echoCancellation": false,
+      "groupId": "98d77d3326d605085315dc66ac945aa259b91510a72e50cc21776cb277c4cf2f",
+      "latency": 0.021333,
+      "noiseSuppression": false,
+      "sampleRate": 48000,
+      "sampleSize": 16,
+      "voiceIsolation": false
+    }
+  }
+}

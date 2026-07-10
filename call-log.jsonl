@@ -21,3 +21,6 @@
 {"timestamp":1783672604124,"purpose":"smoke","durationMs":15138,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
 {"timestamp":1783675868598,"purpose":"smoke","durationMs":15324,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
 {"timestamp":1783679424554,"purpose":"smoke","durationMs":15828,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783682938565,"purpose":"smoke","durationMs":16137,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783682963112,"purpose":"smoke","durationMs":14306,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
+{"timestamp":1783682986817,"purpose":"smoke","durationMs":14268,"deviceMode":"fake-device","stimulus":"speech","burned":false,"result":"success"}
