@@ -1,0 +1,3 @@
+# Receive-side transcript (script-sourced, labeled scriptExpected)
+
+[0.00s] Hello, how are you?

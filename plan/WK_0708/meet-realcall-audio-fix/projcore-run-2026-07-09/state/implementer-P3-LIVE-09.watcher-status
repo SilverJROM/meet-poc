@@ -1,0 +1,6 @@
+role=implementer
+batch=P3-LIVE-09
+status=APPROVED-PLAN
+source=coord-checkin
+line_no=0
+note=APPROVED 3 sequential smokes; stop on first FAIL

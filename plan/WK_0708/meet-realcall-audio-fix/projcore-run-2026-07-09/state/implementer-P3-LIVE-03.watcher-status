@@ -1,0 +1,6 @@
+role=implementer
+batch=P3-LIVE-03
+status=BLOCKED
+source=callback
+line_no=592
+note=1e0b928 zone.js lead DISPROVEN; defineProperty-lock also fails; reload/crash/iframe ruled out. Real cause unknown, needs raw-CDP instrumentation. See decisions doc P3-LIVE-03 section

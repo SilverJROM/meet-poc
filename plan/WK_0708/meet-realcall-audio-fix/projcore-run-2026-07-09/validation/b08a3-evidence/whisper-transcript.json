@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "transcribedAtIso": "2026-07-09T09:13:10.999383Z",
+  "audioFile": "b08s2-receive-1783588386905-sq6721k.wav",
+  "provider": "local",
+  "language": "en",
+  "languageProbability": 0.9761,
+  "model": "small",
+  "lines": [
+    {
+      "startMs": 0,
+      "endMs": 1500,
+      "clientId": "bot-140",
+      "name": "bot-140",
+      "text": "My actual voice so...",
+      "confidence": 0.7589
+    }
+  ],
+  "words": [
+    {
+      "startMs": 0,
+      "endMs": 400,
+      "text": "My",
+      "confidence": 0.5938,
+      "clientId": "bot-140",
+      "name": "bot-140"
+    },
+    {
+      "startMs": 400,
+      "endMs": 740,
+      "text": "actual",
+      "confidence": 0.9737,
+      "clientId": "bot-140",
+      "name": "bot-140"
+    },
+    {
+      "startMs": 740,
+      "endMs": 1140,
+      "text": "voice",
+      "confidence": 0.9948,
+      "clientId": "bot-140",
+      "name": "bot-140"
+    },
+    {
+      "startMs": 1140,
+      "endMs": 1500,
+      "text": "so...",
+      "confidence": 0.4733,
+      "clientId": "bot-140",
+      "name": "bot-140"
+    }
+  ]
+}

@@ -1,0 +1,6 @@
+role=implementer
+batch=P2-LOCAL-06
+status=PROPOSED
+source=callback
+line_no=418
+note=D28: ref=max(loudest,ABS_TARGET=0.5) in computeRemoteAutoGains; 2-party quiet boosted, multiparty w/loud peer unchanged (AC17 safe). Extending unit tests. Awaiting APPROVED-PLAN.

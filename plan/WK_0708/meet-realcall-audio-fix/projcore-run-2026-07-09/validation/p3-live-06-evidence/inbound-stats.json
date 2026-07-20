@@ -1,0 +1,28 @@
+{
+  "inboundStats": {
+    "t0": {
+      "packetsReceived": 16,
+      "bytesReceived": 285
+    },
+    "t1": {
+      "packetsReceived": 319,
+      "bytesReceived": 41445
+    },
+    "deltaPackets": 303,
+    "deltaBytes": 41160
+  },
+  "outboundStats": {
+    "t0": {
+      "packetsSent": 117,
+      "bytesSent": 1894
+    },
+    "t1": {
+      "packetsSent": 421,
+      "bytesSent": 43214
+    },
+    "deltaPackets": 304,
+    "deltaBytes": 41320
+  },
+  "domRms": 0,
+  "domWavPath": "/home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/validation/p3-live-06-evidence/p3l04-dom-receive-1783672604102-b3h6919.wav"
+}

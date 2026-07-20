@@ -1,0 +1,6 @@
+role=implementer
+batch=P3-LIVE-05
+status=APPROVED-PLAN
+source=coord-checkin
+line_no=0
+note=APPROVED pulseaudio null-sink isolation-first then live smoke

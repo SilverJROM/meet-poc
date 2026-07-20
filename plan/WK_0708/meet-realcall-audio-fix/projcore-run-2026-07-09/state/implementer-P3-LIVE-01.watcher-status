@@ -1,0 +1,6 @@
+role=implementer
+batch=P3-LIVE-01
+status=PROPOSED
+source=callback
+line_no=552
+note=CDP-remote split-host (.140 fake+speech, .123 real-mic via SSH tunnel/CDP); see prompts/p3-live-01-proposed.md; awaiting approval

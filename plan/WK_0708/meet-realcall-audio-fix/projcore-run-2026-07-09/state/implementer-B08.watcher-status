@@ -1,0 +1,6 @@
+role=implementer
+batch=B08
+status=DISARMED
+source=sigterm
+line_no=0
+note=projcore SIGTERM after ACK

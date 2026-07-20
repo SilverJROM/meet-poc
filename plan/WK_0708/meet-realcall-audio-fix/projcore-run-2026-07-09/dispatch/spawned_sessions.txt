@@ -9,17 +9,24 @@ x-01_panel_haiku_meet # redteam # B02
 x-01_validator_codex55_meet # validator # B02
 x-01_impl_haiku_meet # impl # B03
 x-01_impl_haiku_meet # impl # B04
-x-01_impl_sonnet_meet # impl # B05
 x-01_impl_haiku_meet # impl # B04-r2
 x-01_coplanner_opus_meet # coplanner # D28-replan
 x-01_coplanner_codex55_meet # coplanner # D28-replan
-x-01_impl_sonnet_meet # impl # B08A-1
 x-01_panel_haiku_meet # redteam # B08A-1
 x-01_validator_opus_meet # validator # B08A-1
-x-01_impl_sonnet_meet # impl # B08A-2
 x-01_impl_haiku_meet # impl # B00F
 x-01_impl_haiku_meet # impl # B08S-1
 x-01_impl_haiku_meet # impl # B08S-1-fix2
 x-01_coplanner_opus_meet # coplanner # B08S-2 design
 x-01_coplanner_codex55_meet # coplanner # B08S-2 design
 x-01_impl_haiku_meet # impl # B08S-2 design-locked
+x-01_panel_haiku_meet # redteam # B08A-3
+x-01_validator_opus_meet # validator # B08A-3
+x-01_impl_haiku_meet # impl # B04-real
+x-01_impl_haiku_meet # impl # B04-real-resume
+x-01_impl_haiku_meet # impl # B00S-BUDGET
+x-01_impl_haiku_meet # impl # B08
+x-01_impl_haiku_meet # impl # P2-LOCAL-02
+x-01_impl_haiku_meet # impl # P2-LOCAL-03
+x-01_impl_haiku_meet # impl # P2-LOCAL-04
+x-01_impl_haiku_meet # impl # P2-LOCAL-05

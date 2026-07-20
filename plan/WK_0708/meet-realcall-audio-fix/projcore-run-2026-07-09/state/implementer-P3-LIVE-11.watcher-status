@@ -1,0 +1,6 @@
+role=implementer
+batch=P3-LIVE-11
+status=PROPOSED
+source=callback
+line_no=738
+note=copy p3-live-10-smoke pattern, 8x sequential, free-h+cleanup each, stop on first FAIL, target 17/25. See prompts/p3-live-11-proposed.md

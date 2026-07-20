@@ -194,11 +194,17 @@ corroborate but may **never** be the sole evidence — they are the layer that l
 
 ## 5. Budget and exit (bounded — no infinite loop)
 
-- **25 calls** of 3–5 minutes. Each attempt **burns one**, including harness-caused aborts.
-- **10-minute final gates do NOT burn**, but are capped at **5** so they cannot be used as an escape hatch.
-- **Exit:** (AC8 ∧ AC9) **or** budget exhausted → **STOP**, write the report, notify, shut down
-  dev_machine. **No gate waits on JROM.**
-- Completion wording is **"ready for JROM's real-call test"**, never a bare "fixed."
+### Phase 2 (CURRENT — [north] 2026-07-09 budget clarify)
+- **25 fake-device tests** (local). Proceed B00S-BUDGET + AC1 on fake-device.
+- **maxForks: 3 HARD.** Inline cleanup every batch.
+- **Exit Phase 2:** 25 PASS or confidence → **notify for Phase 3 gate** (do not auto-start P3; do not shutdown).
+
+### Phase 3 (AFTER GATE)
+- **25 live SFU tests** — only after Phase 2 PASS + notify/approval for Phase 3 gate.
+
+### Legacy (superseded for this phase)
+- Prior 25 SFU-call burn framing and auto-shutdown-on-exit are **paused** under Phase 2.
+- Completion wording remains **"ready for JROM's real-call test"** when the phase exits, never a bare "fixed."
 
 ## 6. Hard constraints
 
@@ -224,3 +230,11 @@ corroborate but may **never** be the sole evidence — they are the layer that l
 - **Long-haul leg:** unavailable. SG is 37 ms (near-region); Peer2's US box is offline.
 - **T1 (why the Android capture froze):** remains **OPEN**. This run proves detection and recovery of the
   *symptom*; it cannot pin the *cause*.
+
+
+### Phase 3 final exit ([north] 2026-07-10)
+On Phase 3 complete (25 PASS or budget exhausted):
+1. Notify JROM **ready-for-real-call-test**
+2. SHUTDOWN dev_machine
+3. STANDDOWN all operations — no auto-restart
+4. JROM does own real-call test

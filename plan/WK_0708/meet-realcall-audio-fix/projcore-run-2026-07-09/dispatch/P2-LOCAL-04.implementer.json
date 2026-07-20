@@ -1,0 +1,22 @@
+{
+  "schema_version": 4,
+  "dispatch_status": "ready",
+  "batch_id": "P2-LOCAL-04",
+  "role": "implementer",
+  "run_dir": "/home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09",
+  "session": "x-01_impl_haiku_meet",
+  "brief": "/home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/prompts/p2-local-04-impl-brief.md",
+  "prebaked_brief": "/home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/dispatch/P2-LOCAL-04.implementer.brief.md",
+  "callbacks_file": "/home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/callbacks.md",
+  "dispatched_at": "2026-07-09T13:28:46Z",
+  "estimate_min": 20,
+  "bucket": "SHORT",
+  "wakeup_delay_sec": 2400,
+  "wakeup_marker_path": "/home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/dispatch/P2-LOCAL-04.wakeup-required",
+  "watcher_pid": 970939,
+  "watcher_pid_file": "/home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/dispatch/P2-LOCAL-04.watcher-implementer.pid",
+  "watcher_log": "/home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/dispatch/watcher-P2-LOCAL-04-implementer.log",
+  "dispatch_marker": "DISPATCH-P2-LOCAL-04-implementer-970841-1783603726",
+  "wakeup_acked_at": null,
+  "wakeup_acked_by": null
+}

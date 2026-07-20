@@ -32,3 +32,19 @@ persistent-host.out
 *.sqlite-shm
 *.sqlite-wal
 peer2.md
+
+# e2e test artifacts (audio, transcripts, metadata)
+e2e/b08s2-*.wav
+e2e/b08s2-*.txt
+e2e/b08s2-*.meta.json
+e2e/b08s2-*.participant.json
+e2e/b08s2-*.transcript.*.json
+e2e/validation/
+e2e/*.wav
+e2e/*.json
+e2e/*.txt
+
+# plan run output artifacts (findings from past runs)
+plan/WK_*/*/findings/
+plan/WK_*/*/escalations/
+plan/WK_*/*/state/

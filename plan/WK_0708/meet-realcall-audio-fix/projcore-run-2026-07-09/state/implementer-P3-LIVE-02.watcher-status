@@ -1,0 +1,6 @@
+role=implementer
+batch=P3-LIVE-02
+status=APPROVED-PLAN
+source=coord-checkin
+line_no=0
+note=APPROVED-PLAN module-remap-source; headless stay; smoke acceptanceAttempt:false

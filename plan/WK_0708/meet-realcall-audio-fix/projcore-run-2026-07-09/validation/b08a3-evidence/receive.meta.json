@@ -1,0 +1,11 @@
+{
+  "reason": "VALID",
+  "pcCount": 1,
+  "trackCount": 1,
+  "callbackCount": 18,
+  "sampleCount": 73728,
+  "audioContextState": "running",
+  "byteChunksCount": 18,
+  "decodedSampleCount": 73728,
+  "rms": 0.17736776485433606
+}

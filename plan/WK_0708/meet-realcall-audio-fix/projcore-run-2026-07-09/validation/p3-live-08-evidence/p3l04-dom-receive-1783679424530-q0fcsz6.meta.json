@@ -1,0 +1,14 @@
+{
+  "mechanism": "dom-audio-element-captureStream",
+  "elementSelector": "sfuRemoteStreams[\"8e9921c08da73eea\"]",
+  "sampleCount": 262144,
+  "callbackCount": 64,
+  "audioContextState": "running",
+  "elDiag": {
+    "trackReadyState": "live",
+    "trackEnabled": true,
+    "trackMuted": false
+  },
+  "durationMs": 5461.333333333333,
+  "rms": 0.08794146951222308
+}

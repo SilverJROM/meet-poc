@@ -1,0 +1,9 @@
+{
+  "mechanism": "dom-audio-element-captureStream",
+  "elementSelector": "audio[data-remote-audio=\"e289001d0d59b73f\"]",
+  "sampleCount": 262144,
+  "callbackCount": 64,
+  "audioContextState": "running",
+  "durationMs": 5461.333333333333,
+  "rms": 0
+}

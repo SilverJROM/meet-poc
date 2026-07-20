@@ -1,0 +1,6 @@
+role=implementer
+batch=B00S-BUDGET
+status=PROPOSED
+source=callback
+line_no=327
+note=Dual-burn pollution mechanism confirmed; conditional burn on acceptance+180s, logCall JSONL, single ledger path, fail-closed gate at entry

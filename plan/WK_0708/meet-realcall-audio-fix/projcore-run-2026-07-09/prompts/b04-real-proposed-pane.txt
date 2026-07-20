@@ -1,0 +1,85 @@
+ ▐▛███▜▌   Claude Code v2.1.205
+▝▜█████▛▘  Haiku 4.5 · Claude Max
+  ▘▘ ▝▝    ~/websites/meet-poc
+
+ ⚠ 3 MCP servers need authentication · run /mcp
+
+❯ You are implementer L2 (haiku) for B04-real. Read:
+  /home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/prompts/b04-real-impl-brie
+  f.md
+  /home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/decisions/T_gap_provisiona
+  l.md
+  /home/agjrom/websites/meet-poc/plan/WK_0708/meet-realcall-audio-fix/projcore-run-2026-07-09/plan.md (B04-real row)
+  e2e/harness/call-driver.ts + conversation-scheduler + receive-side-recorder
+  B08A-3 evidence pattern in e2e/harness/__tests__/b08a3-live-sender-liveness.browser.test.ts
+
+  First output PROPOSED only, then stop for APPROVED-PLAN. Branch batch-01-diagnosis-2026-07-08. No skills. Start now.
+
+● I'll read the implementation brief and related context to understand B04-real scope.
+
+  Searched for 1 pattern, read 8 files (ctrl+o to expand)
+
+● Now I'll read the existing test structure to understand the framework better before proposing.
+
+  Read 1 file (ctrl+o to expand)
+
+● PROPOSED: B04-real Implementation
+
+  Task: Real dual-browser T_gap derivation — measure audible-dropout distribution from 2 live calls on B08S spine.
+
+  Mechanism:
+  1. Test file (e2e/harness/__tests__/b04-real-tgap.browser.test.ts):
+    - Run 2 dual-browser calls via joinDualBrowserCall() with B08S-2 receive-side recording enabled
+    - Use ConversationScript with fixed 3-5min (or 60-90s minimum) turn-taking speech
+    - Feed real speech fixture (e2e/fixtures/audio/speech/alice-host.wav) via --use-file-for-fake-audio-capture
+    - Capture receive-side WAV + script-sourced transcript per call
+  2. Dropout detection (new helper e2e/harness/dropout-analyzer.ts):
+    - Align receive-side WAV silence spans with script-known speaker boundaries
+    - A dropout = silence at far end during peer's scripted turn + missing STT words (D27)
+    - Never treat inter-utterance pauses as dropouts
+    - Collect observed dropout durations (ms) across both calls
+    - Compute distribution: min, max, median, p95, p99
+    - Build histogram (50ms bins)
+  3. Local whisper STT (reuse B08A-3 F2 pattern):
+    - Run backend/scripts/transcribe.py on receive WAV
+    - Verify far-end audio transcribes to real words (non-tautological gate)
+    - Compare STT words against script-expected utterances
+  4. Decision output (decisions/T_gap.md):
+    - Measured T_gap value (derived from p95 + safety margin, or observed max if lower)
+    - Dropout histogram (min/max/p95/p99)
+    - Evidence paths: 2 receive WAVs, 2 STT transcripts, script transcripts
+    - Burn accounting: legitimate 2/25 per plan
+    - Rationale: why this value (e.g., "p95=350ms covers all observed dropouts with margin")
+
+  Files:
+  - Create: e2e/harness/__tests__/b04-real-tgap.browser.test.ts (~150–200 lines, composition-only)
+  - Create: e2e/harness/dropout-analyzer.ts (~100–150 lines, dropout detection + statistics)
+  - Create: decisions/T_gap.md (run artifact, written by test, not committed initially)
+  - Update: call-ledger.ts — no changes needed (ledger already tracks burn via joinDualBrowserCall())
+
+  Scope:
+  - Uses existing B08S-1/B08S-2 spine (call-driver, receive-side-recorder)
+  - Uses existing B08A-3 patterns (real speech, local whisper, auth via e2e/fixtures/auth.ts)
+  - No product code changes
+  - No AC closes — B14/B15/B16 re-verify later
+
+  Risks & Mitigations:
+  - Real call may drop: ledger + burn accounting handles it (counts as 1/25 regardless)
+  - Whisper fails to recognize speech: WAV validation (meta.rms > threshold) catches it early
+  - Short utterance = few dropouts: accept minimum 60–90s scripted conversation (budget note: plan says 3–5 min
+  preferred, shorter OK if justified)
+
+  Estimate: 25 min (L2, no redteam draft phase; redteam post-APPROVED if needed)
+
+  Branch: batch-01-diagnosis-2026-07-08 (no merge to main)
+
+  ---
+  Next step: STOP — wait for APPROVED-PLAN before implementation.
+
+✻ Crunched for 48s
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+

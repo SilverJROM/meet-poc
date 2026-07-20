@@ -1,0 +1,6 @@
+role=implementer
+batch=P2-LOCAL-04
+status=DONE
+source=callback
+line_no=398
+note=INVALID≠PASS matrix validated (51 tests ✅), commit 75d54c4

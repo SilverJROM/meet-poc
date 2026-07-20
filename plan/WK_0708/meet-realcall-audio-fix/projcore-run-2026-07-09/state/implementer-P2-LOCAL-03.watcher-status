@@ -1,0 +1,6 @@
+role=implementer
+batch=P2-LOCAL-03
+status=PROPOSED
+source=callback
+line_no=388
+note=Starting gum-shim r-grid stimulus verification (r: 0.50, 0.30, 0.20, 0.10, 0.05)

@@ -1,0 +1,6 @@
+role=implementer
+batch=P3-LIVE-04
+status=APPROVED-PLAN
+source=coord-checkin
+line_no=0
+note=DOM captureStream APPROVED; awaiting live smoke DONE

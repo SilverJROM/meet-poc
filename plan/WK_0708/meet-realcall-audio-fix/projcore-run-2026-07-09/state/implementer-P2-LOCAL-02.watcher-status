@@ -1,0 +1,6 @@
+role=implementer
+batch=P2-LOCAL-02
+status=PROPOSED
+source=callback
+line_no=368
+note=Reading brief + remote-audio.service.ts

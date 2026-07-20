@@ -1,16 +1,14 @@
-# Phase 3 counter — live SFU .140↔.123 (target **25** PASS, burn CAP=25)
+# Phase 3 counter — live SFU .140↔.123
 
-| # | Batch | Result | P3 PASS | burns | free-h | Notes |
-|---|-------|--------|---------|-------|--------|-------|
-| 1 | P3-LIVE-01 | **FAIL/BLOCKED** 666fd22 | 0/25 | 0 | avail~29Gi | CDP harness; 0 audioinput |
-| 2 | P3-LIVE-02 | **BLOCKED-partial** 2966e05 | 0/25 | 0 | | remap-source audioinput fix |
-| 3 | P3-LIVE-03 | **BLOCKED** 1e0b928 | 0/25 | 0 | | zone.js/defineProperty disproven |
-| 4 | P3-LIVE-04 | **BLOCKED** 2cf5efb | 0/25 | 0 | | DOM captureStream; silence |
-| 5 | P3-LIVE-05 | **BLOCKED** 8d55b05 | 0/25 | 0 | | null-sink proven; live silent |
-| 6 | P3-LIVE-06 | **BLOCKED** 7256831 | 0/25 | 0 | | RTP proven; AGC lead |
-| 7 | P3-LIVE-07 | **BLOCKED** 47fe2d0 | 0/25 | 0 | | AGC/NS/EC eliminated |
-| 8 | P3-LIVE-08 | **PASS** 9f2b7be | **1/25** | 0 | avail~28Gi | play-before-capture; rms=0.087941 (smoke, no burn) |
-| 9 | P3-LIVE-09 | **PASS x3** (no code) | **4/25** | 0 | avail~27-28Gi | 3 sequential smokes, unchanged mechanism; rms 0.0886/0.0912/0.0905, all independently PCM-verified; 0 FAILs |
-| 10 | P3-LIVE-10 | **PASS x5** (no code) | **9/25** | 0 | avail~27Gi | 5 sequential smokes, unchanged mechanism; rms 0.0923/0.0885/0.0892/0.0883/0.0884, all independently PCM-verified; 0 FAILs |
+**Exit gate ([north] 2026-07-10): 3 consecutive PASS = DONE** (supersedes 25 PASS stack).
 
-Exit: 25 PASS or budget exhausted → notify ready-for-real-call-test + SHUTDOWN + STANDDOWN
+| # | Batch | Result | P3 PASS | burns | Notes |
+|---|-------|--------|---------|-------|-------|
+| 1–7 | P3-LIVE-01…07 | FAIL/BLOCKED chain | 0 | 0 | infra unlock path |
+| 8 | P3-LIVE-08 | **PASS** 9f2b7be | 1 | 0 | first energy; play-before-capture |
+| 9 | P3-LIVE-09 | **PASS x3** d9eeb85 | 4 | 0 | 3 consecutive |
+| 10 | P3-LIVE-10 | **PASS x5** 3e03e1d | **9** | 0 | 5 more consecutive; zero errors |
+| 11 | P3-LIVE-11 | **CANCELLED** | 9 | 0 | halt — exit gate MET |
+
+**GATE MET:** ≥3 consecutive energy PASSes (LIVE-08…10), zero errors, burn=0.
+**EXIT COMPLETE** — ready-for-real-call-test notified; .123 SHUTDOWN; STANDDOWN. JROM owns real-call.
